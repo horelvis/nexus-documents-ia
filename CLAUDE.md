@@ -4,938 +4,175 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Development Commands
 
-### Backend Development
-- **Start development environment (RECOMMENDED)**: `cd backend/docker && ./start-dev.sh`
-- **Start production environment**: `cd backend/docker && ./start-prod.sh`
-- **Start development environment (manual)**: `cd backend/docker && docker compose up -d`
-- **Start production environment (manual)**: `cd backend/docker && docker compose -f docker-compose.prod.yml up -d`
-- **API server (local without Docker)**: `cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
-- **Initialize database**: `cd backend && python -m scripts.init_db`
-- **Database migrations**: `cd backend && alembic upgrade head`
-- **Run tests**: `cd backend/tests && ./run_tests.sh`
-- **Run tests (with real GCS)**: `cd backend/docker && docker compose -f docker-compose.test.yml up`
-- **Clean rebuild**: `./clean_and_rebuild.sh` (from project root)
+### Docker Compose (IMPORTANT)
+- The **active compose** for on-premise is `docker-compose.onpremise.yml`, which **overrides** `docker-compose.yml`
+- Both files are loaded together: `docker compose` auto-detects them via `docker-compose.yml` + `docker-compose.onpremise.yml`
+- **Always edit `docker-compose.onpremise.yml`** for on-premise changes (vLLM config, services, etc.)
+- `docker-compose.yml` is the base; `docker-compose.onpremise.yml` overrides/extends it
+- vLLM config (model, quantization, GPU settings) lives in `docker-compose.onpremise.yml`
 
-### Frontend Development
-- **Node version**: Use Node.js 18+ (required for Next.js 15)
-  - `nvm use 18` or `nvm use 20` (if using nvm)
-- **Start development**: `cd frontend && npm run dev` (uses Turbopack)
+### Backend
+- **Start dev (RECOMMENDED)**: `cd backend/docker && ./start-dev.sh`
+- **Start prod**: `cd backend/docker && ./start-prod.sh`
+- **Local API (no Docker)**: `cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+- **Init database**: `cd backend && python -m scripts.init_db`
+- **Migrations**: `cd backend && alembic upgrade head`
+- **Run tests**: `cd backend/tests && ./run_tests.sh`
+- **Tests (real GCS)**: `cd backend/docker && docker compose -f docker-compose.test.yml up`
+- **Clean rebuild**: `./clean_and_rebuild.sh`
+
+### Frontend
+- **Requires**: Node.js 18+ (`nvm use 18` or `nvm use 20`)
+- **Dev**: `cd frontend && npm run dev` (Turbopack, port 3000)
 - **Build**: `cd frontend && npm run build`
 - **Lint**: `cd frontend && npm run lint`
-- **Install dependencies**: `cd frontend && npm install`
+- **Install**: `cd frontend && npm install`
 
-### Full Stack Development
-- **Backend services**: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
-- **Frontend**: `cd frontend && npm run dev` (runs on port 3000)
-- **API Documentation**: Available at `http://localhost:8000/docs` when backend is running
-
-### Docker Development Modes
-
-#### Development Mode (Default - Recommended for development)
-```bash
-cd backend/docker && ./start-dev.sh
-# OR manually:
-cd backend/docker && docker compose up -d
-```
-**Features:**
-- **Live code reloading**: Python files are mounted as volumes, changes reflect immediately
-- **No rebuilds needed**: Only rebuilds when `requirements.txt` or `Dockerfile` changes
-- **Auto-reload enabled**: uvicorn starts with `--reload` flag
-- **Faster iteration**: Ideal for active development
-
-**What's mounted:**
-- `backend/` → Container's `/app` (main API)
-- `microservices/storage-service/app` → Container's `/app/app`
-- `microservices/weaviate-service/app` → Container's `/app/app`
-- `microservices/elasticsearch-service/app` → Container's `/app/app`
-
-#### Production Mode
-```bash
-cd backend/docker && ./start-prod.sh
-# OR manually:
-cd backend/docker && docker compose -f docker-compose.prod.yml up -d
-```
-**Features:**
-- **Optimized images**: Multi-stage builds for smaller image sizes
-- **No volume mounting**: Code is copied into containers during build
-- **Production settings**: Optimized for performance and security
-- **Full rebuilds**: Rebuilds entire images when code changes
-
-#### Test Mode
-```bash
-cd backend/docker && docker compose -f docker-compose.test.yml up
-```
-**Features:**
-- **Isolated testing**: Separate database and services for tests
-- **Real GCS integration**: Uses actual Google Cloud Storage for realistic testing
-- **Coverage reports**: Generates test coverage in `backend/tests/coverage_report/`
-- **Automatic cleanup**: Services stop after tests complete
+### Full Stack
+- Backend services: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
+- Frontend: `cd frontend && npm run dev`
+- API docs: `http://localhost:8000/docs`
 
 ## Architecture Overview
 
-### System Design
-**NouxCubeIA** is a **multi-tenant intelligent document management system** with a microservices architecture that provides a 360-degree view of organizational documents:
+**NouxCubeIA** is a **multi-tenant intelligent document management system** with microservices architecture.
 
-**Backend**: FastAPI with Python 3.9+, using async/await patterns throughout
-**Frontend**: Next.js 15 with App Router, TypeScript, and OIDC/SAML authentication
-**Database**: PostgreSQL for relational data, Weaviate for vector embeddings, Elasticsearch for full-text search
-**Storage**: Google Cloud Storage for files
-**AI/ML**: vLLM (GPU inference) + LangGraph multi-agent orchestration (Emma AI)
+- **Backend**: FastAPI (Python 3.9+), async/await throughout
+- **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
+- **Database**: PostgreSQL + Weaviate (vectors) + Elasticsearch (full-text)
+- **Storage**: Google Cloud Storage
+- **AI/ML**: vLLM (Qwen3-4B GPU inference) + LangGraph multi-agent orchestration
 
-### Key Architectural Patterns
+### Microservices
 
-#### Multi-Tenant Architecture
-- Complete tenant isolation at database and storage levels
-- Tenant-specific settings and quotas in models
-- Tenant context passed through dependency injection in FastAPI endpoints
-- Authentication via OIDC/SAML providers (KeyCloak, Azure AD, Okta)
+| Service | Port | Purpose |
+|---------|------|---------|
+| Main API | 8000 | Core business logic, auth, document management |
+| Emma Agent Service | 8009 | LangGraph multi-agent RAG, Verified Generation |
+| Weaviate Service | 8007 | Vector search, RAG pipeline, embedding (BGE-M3) |
+| Knowledge Tree Service | 8011 | Apache AGE graph queries for entity expansion |
+| Elasticsearch Service | 8008 | Full-text search, hybrid search |
+| Background Worker | 8100 | Celery async task processing |
+| vLLM Server | internal | GPU inference (OpenAI-compatible API) |
 
-#### Authentication Architecture (On-Premise OIDC/SAML)
+### Modular Architecture (SaaS vs On-Premise)
 
-**Authentication Flow (JIT Provisioning Supported):**
-```
-┌─────────────────────────────────────────────────────────────┐
-│  LOGIN FLOW (OIDC/SAML)                                     │
-├─────────────────────────────────────────────────────────────┤
-│  1. User → Login page → Redirect to IdP                      │
-│  2. IdP authenticates → JWT/SAML assertion                   │
-│  3. Frontend → POST /api/v1/auth/callback (token)            │
-│  4. Backend:                                                 │
-│     ├── Validates token against IdP JWKS/metadata            │
-│     ├── Extracts user info (email, groups, attributes)       │
-│     ├── JIT: Creates user if not exists (from IdP groups)    │
-│     ├── Maps IdP groups → Application roles                  │
-│     └── Returns session with permissions                     │
-│  5. Backend → { user, permissions, tenant_id }               │
-│  6. Frontend stores state, redirects to dashboard            │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Key Endpoints:**
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/auth/login` | POST | Initiates OIDC/SAML flow |
-| `/api/v1/auth/callback` | POST | Handles IdP callback, creates session |
-| `/api/v1/auth/logout` | POST | Logs event, clears session |
-| `/api/v1/auth/me` | GET | Returns current user data |
-
-**Configuration:**
-```bash
-# OIDC Configuration (.env)
-AUTH_PROVIDER=oidc
-OIDC_ISSUER_URL=https://keycloak.company.com/realms/nexusdocs
-OIDC_CLIENT_ID=nexusdocs-client
-OIDC_CLIENT_SECRET=your-client-secret
-OIDC_SCOPES=openid,profile,email,groups
-
-# Group to Role Mapping
-OIDC_ADMIN_GROUP=NouxCubeIA-Admins
-OIDC_USER_GROUP=NouxCubeIA-Users
-```
-
-**Important:**
-- **JIT Provisioning**: Users created automatically on first login from IdP groups.
-- **Group Mapping**: IdP groups map to application roles (Admin, User, Viewer).
-- **No External Dependencies**: Authentication handled by your organization's IdP.
-- **SSO Ready**: Integrates with existing enterprise identity infrastructure.
-
-#### Microservices Design
-- **Main API** (port 8000): Core business logic, authentication, document management
-- **Emma Agent Service** (port 8009): LangGraph multi-agent RAG orchestration, Verified Generation, Intent Router, RLM Processor
-- **Weaviate Service** (port 8007): Vector search, RAG pipeline, embedding (BGE-M3)
-- **Knowledge Tree Service** (port 8011): Apache AGE graph queries for sector-aware entity expansion
-- **vLLM Server** (internal): High-throughput GPU inference with OpenAI-compatible API (Qwen3-4B)
-- **Elasticsearch Service** (port 8008): Full-text search, document indexing, hybrid search
-- **MCP Storage** (port 8000): Google Cloud Storage operations (MCP-based, replaces legacy storage-service)
-- **Background Worker** (port 8100): Async task processing with Celery
-- **LangExtract Service** (port 8009): Structured document extraction with LLM providers
-- **Langfuse** (port 3000): Observability and tracing dashboard
-- **TextExtract Service** (internal): Tika wrapper for document text extraction
-
-#### Modular Architecture (SaaS vs On-Premise)
-
-> **📖 Full Documentation**: [`docs/architecture/MODULAR_ARCHITECTURE.md`](docs/architecture/MODULAR_ARCHITECTURE.md)
-
-The codebase supports different deployment modes through a modular architecture:
-
-```
-backend/
-├── core/                    # Shared core (always loaded)
-│   └── acl/                 # ACL abstraction (ACLProvider, ACLProviderFactory)
-│
-├── modules/
-│   ├── on_premise/          # On-Premise module (DEPLOYMENT_MODE=on_premise)
-│   │   ├── acl/provider.py  # JSONBACLProvider (uses IndexedDocument JSONB)
-│   │   └── module.py        # Module registration
-│   │
-│   └── saas/                # SaaS module (DEPLOYMENT_MODE=saas)
-│       ├── acl/provider.py  # TableACLProvider (uses DocumentACL table)
-│       └── module.py        # Module registration
-│
-└── app/main.py              # Loads module based on DEPLOYMENT_MODE
-```
-
-**Key Differences:**
+> **Full docs**: [`docs/architecture/MODULAR_ARCHITECTURE.md`](docs/architecture/MODULAR_ARCHITECTURE.md)
 
 | Feature | SaaS | On-Premise |
 |---------|------|------------|
 | Auth | Clerk | OIDC/SAML |
 | ACL | DocumentACL table | JSONB in IndexedDocument |
 | Documents | `documents` table | `indexed_documents` table |
-| Billing | Stripe | None |
-| Features | Signatures, Site Portal | Connectors (Alfresco, SharePoint) |
+| Config | `DEPLOYMENT_MODE=saas` | `DEPLOYMENT_MODE=on_premise` |
 
-**Configuration:**
-```bash
-# Set deployment mode in .env
-DEPLOYMENT_MODE=on_premise  # or: saas, custom
-```
+### Multi-Pipeline RAG Sectors
 
-#### Database Schema Highlights
-- **Multi-tenant models**: All core entities have tenant_id foreign keys
-- **Audit trails**: Comprehensive tracking for compliance (document views, role assignments)
-- **RBAC system**: Role-based access control with fine-grained permissions
-- **Agent system**: AI agents with conversation history and execution tracking
-- **ACL JSONB**: Fine-grained access control stored in IndexedDocument
+One sector active per deployment via `ACTIVE_SECTOR` env var. Changing sector requires data re-ingestion.
 
-#### Multi-Pipeline RAG Sectors
-
-The system supports sector-based RAG pipeline configuration via `ACTIVE_SECTOR` environment variable. One sector is active per deployment, tuning the entire RAG pipeline (retrieval parameters, agent filtering, graph schema, chunking strategy) for a specific domain.
-
-**Available Sectors:**
 | Sector | Agents | hybrid_alpha | top_k | Chunk Strategy |
 |--------|--------|-------------|-------|----------------|
 | `legal` | legal, labor, fiscal, contract, compliance, privacy | 0.7 | 12 | legal_sections (1500/200) |
 | `medical` | general | 0.6 | 15 | paragraph (1200/150) |
 | `documental` | general, education, realestate | 0.5 | 10 | semantic (1000/100) |
 
-**Pipeline Flow with Active Sector:**
-```
-User Query
-    │
-    ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Coordinator (intent_router) → Context Tree → Retrieve      │
-│  (sector alpha/top_k) → Graph Expand (AGE + sector entities)│
-│       ┌──────────┴──────────┐                                │
-│       ▼                     ▼                                │
-│  RLM Pipeline          Plan (filtered agents)                │
-│  (plan→map→reduce)     → Specialist Agents                   │
-│       └──────────┬──────────┘                                │
-│                  ▼                                            │
-│             Synthesize → END                                 │
-└──────────────────────────────────────────────────────────────┘
-```
+**Key files**: `emma-agent-service/app/agents/langgraph/sectors/` (config.py, registry.py, entity_extractor.py, graph_expander.py)
 
-**Key Components:**
-- `emma-agent-service/app/agents/langgraph/sectors/` - Sector configuration
-  - `config.py` - `SectorConfig` dataclass + `Sector` enum
-  - `registry.py` - Sector registry + `get_active_sector_config()` singleton
-  - `entity_extractor.py` - Regex-based entity extraction per sector
-  - `graph_expander.py` - Apache AGE graph expansion per sector
-- `emma-agent-service/app/agents/langgraph/nodes/graph_expand.py` - LangGraph graph expansion node
-- `emma-agent-service/config/graphs/*.cypher` - AGE graph schemas per sector
+### Emma Agent Service (LangGraph)
 
-**Configuration:**
-```bash
-# Sector (set before ingestion — changing sector requires data re-ingestion)
-ACTIVE_SECTOR=legal  # legal | medical | documental | (empty = generic mode)
-```
+**Flow**: `coordinator → context_tree → retrieve → graph_expand → [rlm/plan] → [agents] → synthesize → END`
 
-**Deployment:**
-```bash
-# 1. Set sector in .env
-# 2. Initialize graph: python scripts/init_sector_graphs.py
-# 3. Start services and ingest data
-# To change sector: python scripts/change_sector.py --sector=medical
-```
+**Structure**:
+- `agents/langgraph/graph.py` — StateGraph definition
+- `agents/langgraph/nodes/` — All pipeline nodes (coordinator, retrieve, intent_router, rlm_processor, plan, synthesize, specialists/)
+- `agents/langgraph/sectors/` — Sector configuration
+- `services/verified_generation/` — Claim-by-claim verification with SSE
+- `config/prompts/emma_prompts.yaml` — All prompts
 
-#### Intent Router (Hybrid Classification)
+**Key features**:
+- **Intent Router**: FastEmbed semantic (~3ms) → LLM fallback (~200ms) → default document_query
+- **RLM Processor**: Recursive pipeline for large docs (>16K tokens), Redis cached
+- **Verified Generation**: Claim-by-claim verification with SSE streaming
+- **LLM Providers**: vLLM (primary), OpenAI, Anthropic, Google (fallbacks)
 
-The coordinator node uses a 3-tier intent classification to route queries efficiently:
+### Multi-Tier RAG Caching
 
-| Tier | Method | Latency | Routes |
-|------|--------|---------|--------|
-| 1 | FastEmbed semantic (all-MiniLM-L6-v2 ONNX) | ~1-3ms | conversational, identity |
-| 2 | LLM fallback | ~200ms | CONVERSATIONAL, IDENTITY, DOCUMENT_QUERY |
-| 3 | Default | 0ms | document_query |
+> **Full docs**: [`docs/architecture/RAG_CACHING.md`](docs/architecture/RAG_CACHING.md)
 
-**Key file:** `emma-agent-service/app/agents/langgraph/nodes/intent_router.py`
+Tier 1 (Retrieval, 5min TTL) → Tier 2 (Context Assembly, 30min) → Tier 3 (Semantic, 1hr). Key files in `weaviate-service/app/services/rag/cache/`.
 
-#### RLM Processor (Recursive Language Models)
+## File Structure Conventions
 
-For documents exceeding the context window, the RLM processor splits, maps, and reduces recursively:
+### Backend (`/backend/app/`)
+- `api/v1/`: Versioned REST endpoints, one file per domain
+- `core/`: Configuration, security, logging
+- `db/`: SQLAlchemy models and database config
+- `schemas/`: Pydantic request/response models
+- `services/`: Business logic, one service per domain
 
-```
-rlm_plan → rlm_map (parallel chunks) → rlm_reduce (recursive aggregation)
-```
-
-**Configuration:**
-```bash
-RLM_ENABLED=false              # Feature flag (off by default)
-RLM_TOKEN_THRESHOLD=16000      # Trigger RLM when tokens exceed this
-RLM_CHUNK_SIZE=6000            # Tokens per chunk
-RLM_CHUNK_OVERLAP=500          # Overlap between chunks
-RLM_MAX_DEPTH=3                # Max recursive reduce depth
-RLM_MAX_CHUNKS=20              # Max chunks per document
-```
-
-**Key file:** `emma-agent-service/app/agents/langgraph/nodes/rlm_processor.py`
-
-#### Verified Generation
-
-Claim-by-claim document verification with SSE streaming. Moved from weaviate-service to emma-agent-service.
-
-**Key files:**
-- `emma-agent-service/app/services/verified_generation/service.py` - Core verification logic
-- `emma-agent-service/app/services/verified_generation/verified_cache.py` - Redis caching
-- `emma-agent-service/app/services/verified_generation/writer_agent.py` - Claim verification agent
-- `emma-agent-service/app/api/verified_generation.py` - SSE streaming endpoint
-
-**Frontend components:**
-- `frontend/apps/on-premise/src/components/emma-chat/VerifiedDocumentResult.tsx`
-- `frontend/apps/on-premise/src/components/emma-chat/VerifiedGenerationDialog.tsx`
-- `frontend/apps/on-premise/src/components/emma-chat/VerifiedGenerationProgress.tsx`
-
-#### Multi-Tier RAG Caching System
-
-> **📖 Full Documentation**: [`docs/architecture/RAG_CACHING.md`](docs/architecture/RAG_CACHING.md)
-
-The RAG pipeline implements a multi-tier caching architecture that combines RAG (Retrieval-Augmented Generation) with CAG (Cache-Augmented Generation) patterns for optimal performance:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    MULTI-TIER CACHING ARCHITECTURE                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  User Query                                                                  │
-│       │                                                                      │
-│       ▼                                                                      │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  TIER 1: Retrieval Cache (TTL: 5min)                                │    │
-│  │  • Caches: doc_ids + scores from vector search                      │    │
-│  │  • Key: hash(query_embedding + tenant_id + user_id + filters)       │    │
-│  │  • Hit rate: 40-60% for repetitive workloads                        │    │
-│  │  • Benefit: Skip embedding + vector search (~200-500ms saved)       │    │
-│  └────────────────────────────────┬────────────────────────────────────┘    │
-│                                   │ miss                                    │
-│                                   ▼                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  TIER 2: Context Assembly Cache (TTL: 30min)                        │    │
-│  │  • Caches: assembled context string ready for LLM                   │    │
-│  │  • Key: hash(sorted_doc_ids + chunk_version + index_version)        │    │
-│  │  • Insight: Different queries → same docs → same context            │    │
-│  │  • Benefit: Skip doc fetching + token counting (~50-200ms saved)    │    │
-│  └────────────────────────────────┬────────────────────────────────────┘    │
-│                                   │ miss                                    │
-│                                   ▼                                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  TIER 3: Semantic Cache (TTL: 1hr) - Existing                       │    │
-│  │  • Caches: final LLM responses                                      │    │
-│  │  • Key: semantic similarity of query                                │    │
-│  │  • Benefit: Skip entire RAG + LLM (~3-10s saved)                    │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-│  Version Manager: Coordinates invalidation across all tiers                 │
-│  • Tracks: embedding_model, chunk_strategy, index_version                  │
-│  • On change: Cascading invalidation via registered callbacks              │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Key Components:**
-- `weaviate-service/app/services/rag/cache/` - Cache modules
-  - `retrieval_cache.py` - Vector search results cache (user-isolated for ACL)
-  - `context_cache.py` - Assembled context string cache
-  - `version_manager.py` - Version tracking and invalidation coordination
-- `weaviate-service/app/services/rag/rag_pipeline.py` - Integration point
-
-**Configuration:**
-```bash
-# Retrieval Cache (Tier 1)
-RETRIEVAL_CACHE_ENABLED=true
-RETRIEVAL_CACHE_TTL_SECONDS=300        # 5 minutes
-RETRIEVAL_CACHE_MAX_ENTRIES=500
-
-# Context Assembly Cache (Tier 2)
-CONTEXT_CACHE_ENABLED=true
-CONTEXT_CACHE_TTL_SECONDS=1800         # 30 minutes
-CONTEXT_CACHE_MAX_SIZE_MB=100
-
-# Semantic Cache (Tier 3) - Existing
-RAG_CACHE_ENABLED=true
-RAG_CACHE_TTL_SECONDS=3600             # 1 hour
-```
-
-**Cache Invalidation Events:**
-| Event | Affected Caches | Trigger |
-|-------|-----------------|---------|
-| Document update/delete | Retrieval + Context | `mark_documents_updated()` |
-| Index rebuild | All caches for tenant | `bump_index_version()` |
-| Chunking strategy change | Context + Semantic | `set_chunk_strategy()` |
-| Embedding model change | All caches | `set_embedding_model()` |
-
-### File Structure Conventions
-
-#### Backend (`/backend/app/`)
-- `api/v1/`: Versioned REST endpoints, each file handles one domain
-- `core/`: Configuration, security, logging - shared infrastructure
-- `db/`: SQLAlchemy models and database configuration
-- `schemas/`: Pydantic models for request/response validation
-- `services/`: Business logic layer, one service per domain
-
-#### Frontend (`/frontend/src/`)
-- `app/`: Next.js App Router structure with nested layouts
-- `components/`: Reusable UI components, organized by domain
-- `lib/`: Utilities, API client, types, and service layers
-- `contexts/`: React Context for global state management
-
-### Technology Stack Details
-
-#### Backend Technologies
-- **FastAPI**: High-performance async web framework
-- **SQLAlchemy 2.0**: Modern ORM with async support
-- **Alembic**: Database migration management
-- **OIDC/SAML**: Authentication via KeyCloak, Azure AD, Okta
-- **Weaviate**: Vector database for semantic search
-- **Apache AGE**: PostgreSQL graph extension for sector-aware entity expansion via Cypher
-- **LangGraph**: Multi-agent orchestration with StateGraph, 9 specialist agents, sector-based pipelines
-- **vLLM**: High-throughput GPU inference server (Qwen3-4B, OpenAI-compatible API)
-- **Elasticsearch**: Full-text search and document indexing
-- **Redis**: Caching and session storage (RLM cache, semantic cache, sessions)
-- **Celery**: Distributed task queue for async processing
-
-#### Frontend Technologies
-- **Next.js 15**: React framework with App Router
-- **OIDC/SAML Integration**: Supports KeyCloak, Azure AD, Okta
-- **shadcn/ui**: UI component library based on Radix UI
-- **Tailwind CSS**: Utility-first styling
-- **Zod**: Schema validation
-- **React Hook Form**: Form management
-
-## Environment Setup
-
-### Node Version Management (NVM)
-This project uses NVM (Node Version Manager) for managing Node.js versions:
-- **Frontend requires**: Node.js 18.18.0+ or 20.0.0+ (for Next.js 15)
-- **Switch Node version**: `nvm use 18` or `nvm use 20`
-- **Install if needed**: `nvm install 18` or `nvm install 20`
-- **Set default**: `nvm alias default 18`
-
-Common NVM commands:
-- `nvm list` - Show installed versions
-- `nvm current` - Show current version
-- `nvm use <version>` - Switch to specific version
+### Frontend (`/frontend/src/`)
+- `app/`: Next.js App Router with nested layouts
+- `components/`: UI components organized by domain
+- `lib/`: Utilities, API client, types, services
+- `contexts/`: React Context for global state
 
 ## Development Guidelines
 
 ### Database Operations
-- Always use tenant isolation in queries: `filter(Model.tenant_id == current_tenant.id)`
-- Use async database sessions: `async with get_async_db() as db:`
-- Create migrations for schema changes: `alembic revision --autogenerate -m "description"`
+- Always use tenant isolation: `filter(Model.tenant_id == current_tenant.id)`
+- Use async sessions: `async with get_async_db() as db:`
+- Create migrations safely: `cd backend && python scripts/create_migration.py -m "description" --autogenerate`
+- Fix multiple heads: `python scripts/create_migration.py --fix-heads`
+- Safe migration with conflict detection: `python scripts/alembic_safe_migrate.py`
 
 ### API Development
 - Follow REST conventions in `/api/v1/` endpoints
-- Use dependency injection for database sessions and authentication
-- Implement proper error handling with custom exception classes
-- Include comprehensive request/response schema validation
+- Use dependency injection for DB sessions and auth
+- Proper error handling with custom exception classes
+- Comprehensive Pydantic schema validation
 
-### Security Requirements
-- All API endpoints require authentication except public ones
-- Implement tenant-based authorization for data access
-- Never log sensitive information (API keys, tokens, passwords)
-- Use environment variables for all secrets and configuration
+### Security
+- All endpoints require auth except public ones
+- Tenant-based authorization for data access
+- Never log secrets (API keys, tokens, passwords)
+- Environment variables for all secrets
 
-### Testing Approach
-- Tests use isolated PostgreSQL database via Docker Compose
-- Run full test suite with `./tests/run_tests.sh` from backend/tests directory
-- Tests include API integration tests and service unit tests
-- Coverage reports generated in `backend/tests/coverage_report/`
-- **Test environment uses real GCS** (not mocks) for realistic testing
-- GCS credentials must be mounted at `./credentials:/app/credentials:ro` for tests
-
-### Storage Configuration
-- **All environments use real GCS** (no mocks for realistic testing)
-- **Multi-tenant architecture**: One bucket per tenant (team/organization)
-- **Multiple users per tenant**: Users share the same bucket within their organization
-- **Development mode**: Uses real GCS with credentials mounted from `./credentials` directory
-- **Test mode**: Uses real GCS with credentials mounted from `./credentials` directory  
-- **Production mode**: Uses real GCS with service account credentials
-- Place GCS service account JSON file in `/credentials/nexus-document-ia-04252dae0146.json`
-
-#### Bucket Naming Convention
-- **Per-tenant buckets**: `{org-name}-{hash}` (e.g., `org-john-doe-abc12345`)
-- **Test buckets**: Same name + `-test` suffix for testing isolation
-- **Automatic creation**: Buckets created when new user registers (creates new org)
-- **File organization**: Within bucket, files are organized by user paths for access control
-
-#### User Registration Flow
-- **New user signup**: Creates new tenant (organization) + bucket automatically
-- **Invited user**: TODO - Should join existing tenant when invited by admin
-- **Multi-user tenants**: Multiple users can belong to same tenant/bucket
-
-### Code Quality Standards
-- Use async/await patterns consistently in backend
-- Follow TypeScript strict mode in frontend
-- Implement comprehensive error handling
-- Use structured logging with request correlation IDs
+### Testing
+- Isolated PostgreSQL via Docker Compose
+- Run: `cd backend/tests && ./run_tests.sh`
+- Coverage in `backend/tests/coverage_report/`
+- Test environment uses **real GCS** (credentials at `./credentials`)
 
 ## Troubleshooting
 
-### Next.js Build/Module Errors
-If you encounter module resolution errors like "Export default doesn't exist":
-1. **Clear Next.js cache**: `rm -rf frontend/.next`
-2. **Check Node version**: `cd frontend && nvm current` (should be 18+)
-3. **Switch if needed**: `nvm use 18` or `nvm use 20`
-4. **Reinstall dependencies**: `rm -rf node_modules && npm install`
-5. **Restart dev server**: `npm run dev`
+### Next.js Errors
+1. Clear cache: `rm -rf frontend/.next`
+2. Check Node: `nvm current` (must be 18+)
+3. Reinstall: `rm -rf node_modules && npm install`
+4. Restart: `npm run dev`
 
 ### Docker Issues
-- **Permission denied**: Add user to docker group: `sudo usermod -aG docker $USER`
-- **Port already in use**: Check with `docker ps` and stop conflicting containers
-- **Out of space**: Clean up with `docker system prune -a`
-
-### Common Frontend Errors
-- **Module not found**: Usually a cache issue, follow Next.js troubleshooting steps above
-- **Type errors**: Run `npm run lint` to check for TypeScript issues
-- **Tailwind not working**: Ensure `npm run dev` is running (it compiles Tailwind)
-
-## Common Development Workflows
-
-### Adding New API Endpoint
-1. Create Pydantic schemas in `schemas/`
-2. Add route in appropriate `api/v1/` file
-3. Implement business logic in `services/`
-4. Add database models if needed with migration
-5. Write tests in `tests/test_api/`
-
-### Adding New Microservice Feature
-1. Identify appropriate microservice (Emma Agent Service, Weaviate Service, Elasticsearch Service)
-2. Implement endpoint in microservice's `api/` directory
-3. Update main API to call microservice
-4. Add necessary environment variables
-5. Update docker-compose configuration
-
-### Working with Emma Agent Service (LangGraph)
-The Emma Agent Service is a standalone microservice (port 8009) that orchestrates multi-agent RAG using LangGraph StateGraph:
-
-**Architecture:**
-```
-┌─────────────────────────────────────────────────────────────┐
-│               Emma Agent Service (port 8009)                │
-│       LangGraph StateGraph + Multi-Pipeline RAG             │
-└────────────────────────┬────────────────────────────────────┘
-                         │
-    ┌────────────────────▼────────────────────────────────────┐
-    │                 LangGraph Flow                           │
-    │                                                          │
-    │  START → coordinator → context_tree → retrieve           │
-    │            → graph_expand → [rlm_plan/plan]              │
-    │            → [rlm_map/agents] → [rlm_reduce/synthesize]  │
-    │            → END                                         │
-    └────────────────────┬────────────────────────────────────┘
-                         │
-    ┌────────────────────▼────────────────────────────────────┐
-    │          9 Specialist Agents                             │
-    │  general, legal, labor, fiscal, contract,                │
-    │  compliance, privacy, realestate, education              │
-    └────────────────────┬────────────────────────────────────┘
-                         │
-    ┌────────────────────▼────────────────────────────────────┐
-    │        LLM Client (Multi-Provider)                      │
-    │  • vLLM (primary) → Qwen3-4B                            │
-    │  • OpenAI / Anthropic / Google (fallback)               │
-    └────────────────────┬────────────────────────────────────┘
-                         │
-    ┌────────────────────▼────────────────────────────────────┐
-    │  External Dependencies                                   │
-    │  • Weaviate Service → vector search                     │
-    │  • Knowledge Tree Service → Apache AGE graphs           │
-    │  • Redis → caching (RLM, semantic)                      │
-    │  • vLLM → GPU inference                                 │
-    └─────────────────────────────────────────────────────────┘
-```
-
-**Structure:**
-```
-emma-agent-service/app/
-├── agents/langgraph/
-│   ├── graph.py              # StateGraph definition (9 agents + RLM)
-│   ├── state.py              # RAGState TypedDict (46+ fields)
-│   ├── api.py                # LangGraph API entry point
-│   ├── sectors/              # Multi-Pipeline sector configuration
-│   │   ├── config.py         # SectorConfig dataclass + Sector enum
-│   │   ├── registry.py       # Sector registry singleton
-│   │   ├── entity_extractor.py  # Regex-based entity extraction per sector
-│   │   └── graph_expander.py    # Apache AGE graph expansion per sector
-│   └── nodes/
-│       ├── coordinator.py    # Entry: intent detection + context setup
-│       ├── context_tree.py   # Structural context building
-│       ├── retrieve.py       # Vector search (sector-tuned alpha/top_k)
-│       ├── graph_expand.py   # AGE graph expansion node
-│       ├── intent_router.py  # Hybrid semantic/LLM intent classification
-│       ├── rlm_processor.py  # 3-node recursive language model pipeline
-│       ├── plan.py           # Domain routing + agent selection
-│       ├── synthesize.py     # Final answer generation
-│       └── specialists/      # 9 domain agents (general, legal, labor, etc.)
-├── services/
-│   ├── verified_generation/  # Claim-by-claim verification with SSE
-│   ├── web_search.py         # Web search integration
-│   ├── pdf_renderer.py       # PDF rendering service
-│   └── upload_context_service.py  # Document upload context
-├── api/
-│   ├── emma.py               # /emma endpoints (query, stream)
-│   └── verified_generation.py # /verified endpoints
-└── config/
-    ├── prompts/emma_prompts.yaml  # All agent + RLM prompts
-    └── graphs/*.cypher            # AGE graph schemas per sector
-```
-
-**Key Features:**
-- **Intent Router**: Hybrid classification — FastEmbed semantic (~3ms) → LLM fallback (~200ms) → default document_query
-- **RLM Processor**: Recursive pipeline for large documents (>16K tokens) — chunk → map parallel → reduce recursive (max depth 3, Redis cached)
-- **Verified Generation**: Claim-by-claim verification with SSE streaming to frontend
-- **Sector-Aware**: All retrieval/agents/graph expansion tuned by active sector
-
-**Supported LLM Providers:**
-- `LLM_PROVIDER=vllm` - **Primary** - High-throughput GPU inference (Qwen3-4B)
-- `LLM_PROVIDER=openai` - Fallback to GPT-4o, GPT-4o-mini
-- `LLM_PROVIDER=anthropic` - Fallback to Claude 3.5 Sonnet, Claude 3 Opus
-- `LLM_PROVIDER=google` - Fallback to Gemini 1.5 Flash, Gemini 1.5 Pro
-
-#### Recommended Model Configuration (RTX 4090 24GB)
-
-**Text-Only RAG Configuration (RECOMMENDED):**
-```
-┌─────────────────────────────────────────────────────────────┐
-│  RECOMMENDED: Text-Only RAG with BGE-M3 Embeddings          │
-├─────────────────────────────────────────────────────────────┤
-│  LLM: Qwen/Qwen3-4B                                         │
-│    • VRAM: ~8GB (35% allocation)                            │
-│    • Context: 16K tokens (configurable up to 32K)           │
-│    • Features: Stable text generation for RAG               │
-│    • Docs: https://huggingface.co/Qwen/Qwen3-4B             │
-├─────────────────────────────────────────────────────────────┤
-│  Embedding: BAAI/bge-m3                                     │
-│    • VRAM: ~2GB (10% allocation)                            │
-│    • Dimensions: 1024                                       │
-│    • Features: Multilingual (100+ languages)                │
-│    • Excellent for Spanish/English document retrieval       │
-│    • Docs: https://huggingface.co/BAAI/bge-m3               │
-├─────────────────────────────────────────────────────────────┤
-│  Total VRAM: ~10GB (45% of 24GB)                            │
-│  Buffer: ~14GB for batching and concurrent requests         │
-└─────────────────────────────────────────────────────────────┘
-
-PDF Processing Pipeline:
-  ✅ Text extraction → Chunking → Text embedding
-  ✅ Multilingual support (Spanish/English)
-  ✅ High-quality semantic search
-```
-
-**Alternative: Extended Context Configuration:**
-```
-┌─────────────────────────────────────────────────────────────┐
-│  ALTERNATIVE: Maximum Context (larger LLM)                  │
-├─────────────────────────────────────────────────────────────┤
-│  LLM: Qwen/Qwen3-8B                                         │
-│    • VRAM: ~16GB (65% allocation)                           │
-│    • Context: 32K tokens                                    │
-├─────────────────────────────────────────────────────────────┤
-│  Embedding: BAAI/bge-m3                                     │
-│    • VRAM: ~2GB                                             │
-│    • Dimensions: 1024                                       │
-├─────────────────────────────────────────────────────────────┤
-│  Set: VLLM_MODEL=Qwen/Qwen3-8B                              │
-│  Set: VLLM_MAX_MODEL_LEN=32768                              │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**vLLM Configuration:**
-```bash
-# Environment variables for vLLM (docker-compose.yml)
-VLLM_ENABLED=true
-VLLM_BASE_URL=http://vllm:8000/v1
-VLLM_MODEL=Qwen/Qwen3-4B
-VLLM_MAX_MODEL_LEN=16384  # 16K default, up to 32K available
-HF_TOKEN=your_huggingface_token  # Required for Qwen3
-
-# Text Embedding (BGE-M3 - Local Sentence Transformers)
-EMBEDDING_PROVIDER=sentence-transformers
-EMBEDDING_MODEL=BAAI/bge-m3
-EMBEDDING_DIMENSIONS=1024
-EMBEDDING_DEVICE=cuda  # or cpu for non-GPU
-
-# NOTE: Embeddings are loaded directly in weaviate-service
-# No external embedding service needed - simpler and more reliable
-# Hardware: RTX 4090 (24GB VRAM)
-# Total VRAM: LLM(50%) + Local Embedding(~2GB) = ~14GB
-```
-
-**vLLM Server API Endpoints:**
-The vLLM server exposes multiple APIs beyond the OpenAI-compatible interface:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/v1/chat/completions` | POST | OpenAI-compatible chat completions |
-| `/v1/completions` | POST | OpenAI-compatible text completions |
-| `/v1/models` | GET | List available models |
-| `/v1/embeddings` | POST | Generate text embeddings |
-| `/v1/score` | POST | Score/classify text |
-| `/v1/rerank` | POST | Rerank documents |
-| `/v2/rerank` | POST | Rerank v2 API |
-| `/health` | GET | Health check |
-| `/metrics` | GET | Prometheus metrics |
-| `/ping` | GET/POST | Liveness probe |
-| `/pooling` | POST | Pooling operations |
-| `/classify` | POST | Text classification |
-| `/inference/v1/generate` | POST | Direct inference generation |
-
-**Testing vLLM:**
-```bash
-# Check available models
-curl http://localhost:8000/v1/models | jq
-
-# Test chat completion
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen3-4B",
-    "messages": [{"role": "user", "content": "Explain step by step: What is 25 * 4?"}],
-    "max_tokens": 1000,
-    "temperature": 0.7
-  }'
-
-# Test BGE-M3 embedding (embedding-service runs on internal port)
-# From inside Docker network:
-curl http://embedding-service:8000/v1/embeddings \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "BAAI/bge-m3",
-    "input": ["This is a test document about contracts"]
-  }'
-
-# Check metrics
-curl http://localhost:8000/metrics
-```
-
-### Database Schema Changes
-1. Modify models in `db/models.py`
-2. Generate migration: `alembic revision --autogenerate -m "description"`
-3. Review and edit migration file if needed
-4. Apply migration: `alembic upgrade head`
-5. Update corresponding Pydantic schemas
-
-#### Migration Management (IMPORTANT)
-To prevent multiple heads in Alembic migrations, use the provided tools:
-
-**Check for problems:**
-```bash
-cd backend
-python scripts/alembic_utils.py check
-# or
-python scripts/create_migration.py --check
-```
-
-**Create new migration safely:**
-```bash
-cd backend
-# Manual migration
-python scripts/create_migration.py -m "your migration message"
-
-# Auto-generate from model changes
-python scripts/create_migration.py -m "your migration message" --autogenerate
-```
-
-**Fix multiple heads if they exist:**
-```bash
-cd backend
-python scripts/create_migration.py --fix-heads
-# or manually
-python scripts/alembic_utils.py fix
-```
-
-**Visualize migration chain:**
-```bash
-cd backend
-python scripts/alembic_utils.py visualize
-```
-
-**Common issues and solutions:**
-- **Multiple heads error**: Run `python scripts/create_migration.py --fix-heads`
-- **Missing dependencies**: Check with `python scripts/alembic_utils.py check`
-- **Circular dependencies**: Use `visualize` command to identify and manually fix
-- **Duplicate table/column errors**: Use safe migration tools (see below)
-
-**Best practices:**
-- Always use `create_migration.py` instead of `alembic revision` directly
-- Check for problems before creating new migrations
-- Never manually set `down_revision = None` unless creating the initial migration
-- Use descriptive migration messages for better tracking
-
-#### Safe Migration Management (Prevents Duplicate Errors)
-To prevent errors when migrations try to create tables/columns that already exist:
-
-**Check for conflicts before migrating:**
-```bash
-cd backend
-python scripts/alembic_safe_migrate.py --check
-```
-
-**Run migrations safely with conflict detection:**
-```bash
-cd backend
-# Default: upgrade to head with safety checks
-python scripts/alembic_safe_migrate.py
-
-# Upgrade to specific revision
-python scripts/alembic_safe_migrate.py --target abc123
-
-# Dry run to see what would happen
-python scripts/alembic_safe_migrate.py --dry-run
-```
-
-**Fix duplicate table/column issues:**
-```bash
-cd backend
-# Generate SQL script to fix conflicts
-python scripts/alembic_safe_migrate.py --fix-script
-
-# Mark a migration as already applied (when database already has the changes)
-python scripts/alembic_safe_migrate.py --mark-applied revision_id
-
-# Sync alembic version with actual database state
-python scripts/alembic_safe_migrate.py --sync
-```
-
-**Recovery from failed migrations:**
-1. If migration fails with "table already exists" or "column already exists":
-   ```bash
-   # Check what conflicts exist
-   python scripts/alembic_safe_migrate.py --check
-   
-   # Option 1: Generate fix SQL to remove duplicates
-   python scripts/alembic_safe_migrate.py --fix-script > fix.sql
-   # Review and run the SQL manually if needed
-   
-   # Option 2: Mark the migration as already applied
-   python scripts/alembic_safe_migrate.py --mark-applied failed_revision_id
-   
-   # Option 3: Sync to match current database state
-   python scripts/alembic_safe_migrate.py --sync
-   ```
-
-2. Always backup your database before running fix scripts
-
-3. Use `--dry-run` flag to preview changes before applying them
-
-### Frontend Component Development
-1. Use existing patterns from `components/` directory
-2. Follow shadcn/ui component structure
-3. Implement proper TypeScript typing
-4. Use React Context for state that crosses component boundaries
-5. Integrate with API using the configured client in `lib/api-client.ts`
+- **Permission denied**: `sudo usermod -aG docker $USER`
+- **Port in use**: `docker ps` and stop conflicts
+- **Out of space**: `docker system prune -a`
 
 ## Simple UI Pattern (MANDATORY)
 
-**ALWAYS follow this simple pattern for any data loading in React components:**
+**ALWAYS follow this pattern for data loading in React components:**
 
-### The Simple Pattern
 ```typescript
-// 1. SHOW LOADER
 setIsLoading(true)
 setError(null)
-
 try {
-  // 2. CALL BACKEND
   const response = await service.getData(params)
-  
-  // 3. AWAIT RESPONSE
-  if (response.error) {
-    setError(response.error)
-  } else {
-    setData(response.data)
-  }
+  if (response.error) { setError(response.error) } else { setData(response.data) }
 } catch (err) {
   setError(err.message)
 } finally {
-  // 4. HIDE LOADER (always)
   setIsLoading(false)
 }
 ```
 
-### What NOT to do
-❌ **NEVER use these patterns:**
-- `useCallback` for data loading functions
-- `useMemo` for simple data transformations
-- Complex dependency arrays in `useEffect`
-- Debounce for automatic search
-- Multiple simultaneous API calls
-- Intervals or timers for progress simulation
-- Complex state management for simple operations
-
-### What TO do
-✅ **ALWAYS use these patterns:**
-- Simple async functions
-- `useEffect(() => { loadData() }, [])` for mount
-- `useEffect(() => { loadData() }, [filter])` for filter changes
-- Manual search with button click or Enter key
-- One operation at a time
-- Clear error handling with try/catch/finally
-- Explicit user actions (no automatic behaviors)
-
-### Example Implementation
-```typescript
-export function MyComponent() {
-  const [data, setData] = useState([])
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const service = useService()
-
-  // Simple data loading function
-  const loadData = async () => {
-    setIsLoading(true)
-    setError(null)
-    
-    try {
-      const response = await service.getData()
-      if (response.error) {
-        setError(response.error)
-      } else {
-        setData(response.data)
-      }
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  // Load on mount
-  useEffect(() => {
-    loadData()
-  }, [])
-
-  // Load when filter changes
-  useEffect(() => {
-    loadData()
-  }, [filter])
-
-  return (
-    <div>
-      {isLoading && <Loader />}
-      {error && <ErrorMessage error={error} retry={loadData} />}
-      {!isLoading && !error && <DataDisplay data={data} />}
-    </div>
-  )
-}
-```
-
-### Key Principles
-1. **One source of truth**: Single loading state per component
-2. **Explicit actions**: User controls when data loads
-3. **Simple dependencies**: Minimal useEffect dependencies
-4. **Clear error handling**: Always handle errors explicitly
-5. **Predictable behavior**: No background processes or automatic updates
-
+### Rules
+✅ Simple async functions, `useEffect(() => { loadData() }, [dep])`, manual search (button/Enter), try/catch/finally
+❌ **NEVER**: `useCallback` for loaders, `useMemo` for simple transforms, complex `useEffect` deps, debounce auto-search, intervals/timers, multiple simultaneous API calls

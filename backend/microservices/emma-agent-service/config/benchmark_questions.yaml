@@ -1,0 +1,398 @@
+# Benchmark Questions for Legal LLM Evaluation
+# Used by scripts/benchmark_model.py
+#
+# Schema:
+#   id: unique identifier
+#   question: natural language query (Spanish)
+#   domain: legal subdomain (labor, fiscal, civil, contract, compliance, privacy)
+#   difficulty: easy | medium | hard
+#   expected_keywords: groups with type any_of (synonyms, match ≥1) or all_of (must match all)
+#   expected_laws: list of laws/articles that should be cited
+#   reference_answer: gold-standard answer for LLM-as-judge comparison
+
+questions:
+  # =========================================================================
+  # LABORAL
+  # =========================================================================
+  - id: despido_disciplinario_causas
+    question: "¿Cuáles son las causas de despido disciplinario según el Estatuto de los Trabajadores?"
+    domain: labor
+    difficulty: easy
+    expected_keywords:
+      - type: all_of
+        values: ["incumplimiento", "trabajador"]
+      - type: any_of
+        values: ["art. 54", "artículo 54", "Art 54"]
+      - type: any_of
+        values: ["faltas de asistencia", "ausencias", "inasistencia"]
+      - type: any_of
+        values: ["indisciplina", "desobediencia"]
+      - type: any_of
+        values: ["buena fe", "confianza"]
+      - type: any_of
+        values: ["embriaguez", "toxicomanía"]
+    expected_laws:
+      - "Estatuto de los Trabajadores Art. 54"
+    reference_answer: >
+      Las causas de despido disciplinario están recogidas en el artículo 54.2 del Estatuto de los Trabajadores
+      (Real Decreto Legislativo 2/2015). Se consideran incumplimientos contractuales graves y culpables:
+      a) Las faltas repetidas e injustificadas de asistencia o puntualidad al trabajo.
+      b) La indisciplina o desobediencia en el trabajo.
+      c) Las ofensas verbales o físicas al empresario o a las personas que trabajan en la empresa.
+      d) La transgresión de la buena fe contractual y el abuso de confianza.
+      e) La disminución continuada y voluntaria en el rendimiento de trabajo.
+      f) La embriaguez habitual o toxicomanía si repercuten negativamente en el trabajo.
+      g) El acoso por razón de origen racial, religión, discapacidad, edad, orientación sexual,
+      y el acoso sexual o por razón de sexo.
+
+  - id: indemnizacion_despido_improcedente
+    question: "¿Cuánto es la indemnización por despido improcedente?"
+    domain: labor
+    difficulty: easy
+    expected_keywords:
+      - type: any_of
+        values: ["33 días", "33 dias"]
+      - type: any_of
+        values: ["año trabajado", "año de servicio", "por año"]
+      - type: any_of
+        values: ["24 mensualidades", "24 meses"]
+    expected_laws:
+      - "Estatuto de los Trabajadores Art. 56"
+    reference_answer: >
+      La indemnización por despido improcedente es de 33 días de salario por año de servicio,
+      con un máximo de 24 mensualidades, según el artículo 56.1 del Estatuto de los Trabajadores.
+      Para contratos anteriores al 12 de febrero de 2012, el tramo previo a esa fecha se calcula
+      a 45 días por año con máximo de 42 mensualidades.
+
+  - id: periodo_prueba_limites
+    question: "¿Cuál es la duración máxima del periodo de prueba en un contrato laboral?"
+    domain: labor
+    difficulty: medium
+    expected_keywords:
+      - type: any_of
+        values: ["6 meses", "seis meses"]
+      - type: any_of
+        values: ["técnicos titulados", "titulados"]
+      - type: any_of
+        values: ["2 meses", "dos meses"]
+      - type: any_of
+        values: ["convenio colectivo", "convenio"]
+    expected_laws:
+      - "Estatuto de los Trabajadores Art. 14"
+    reference_answer: >
+      Según el artículo 14 del Estatuto de los Trabajadores, la duración del periodo de prueba
+      se fija en convenio colectivo. En defecto de pacto en convenio, no puede exceder de
+      6 meses para técnicos titulados ni de 2 meses para los demás trabajadores.
+      En empresas de menos de 25 trabajadores, el periodo de prueba no podrá exceder de
+      3 meses para trabajadores que no sean técnicos titulados.
+
+  - id: ere_requisitos
+    question: "¿Qué requisitos debe cumplir un despido colectivo (ERE)?"
+    domain: labor
+    difficulty: hard
+    expected_keywords:
+      - type: any_of
+        values: ["periodo de consultas", "negociación"]
+      - type: any_of
+        values: ["autoridad laboral", "autoridad"]
+      - type: any_of
+        values: ["económicas", "técnicas", "organizativas", "producción"]
+      - type: any_of
+        values: ["10 trabajadores", "umbrales"]
+    expected_laws:
+      - "Estatuto de los Trabajadores Art. 51"
+    reference_answer: >
+      El despido colectivo (ERE) regulado en el artículo 51 del Estatuto de los Trabajadores requiere:
+      1) Que afecte en un periodo de 90 días a al menos 10 trabajadores en empresas de menos de 100,
+      el 10% en empresas de 100-300, o 30 trabajadores en empresas de más de 300.
+      2) Causas económicas, técnicas, organizativas o de producción debidamente acreditadas.
+      3) Apertura de un periodo de consultas con los representantes de los trabajadores (máximo 30 días,
+      15 en empresas de menos de 50 trabajadores).
+      4) Comunicación a la autoridad laboral y entrega de documentación acreditativa.
+      5) Negociación de buena fe durante el periodo de consultas.
+
+  # =========================================================================
+  # FISCAL
+  # =========================================================================
+  - id: irpf_tramos
+    question: "¿Cuáles son los tramos del IRPF en España?"
+    domain: fiscal
+    difficulty: medium
+    expected_keywords:
+      - type: any_of
+        values: ["19%", "0,19"]
+      - type: any_of
+        values: ["24%", "0,24"]
+      - type: any_of
+        values: ["30%", "0,30"]
+      - type: any_of
+        values: ["37%", "0,37"]
+      - type: any_of
+        values: ["45%", "47%", "0,45", "0,47"]
+      - type: any_of
+        values: ["12.450", "12450"]
+    expected_laws:
+      - "Ley 35/2006 del IRPF"
+    reference_answer: >
+      Los tramos estatales del IRPF (base liquidable general) según la Ley 35/2006 son:
+      - De 0 a 12.450€: 19%
+      - De 12.450€ a 20.200€: 24%
+      - De 20.200€ a 35.200€: 30%
+      - De 35.200€ a 60.000€: 37%
+      - De 60.000€ a 300.000€: 45%
+      - Más de 300.000€: 47%
+      A estos tramos estatales se suman los tramos autonómicos, que varían por comunidad.
+
+  - id: iva_tipos
+    question: "¿Cuáles son los tipos de IVA vigentes en España?"
+    domain: fiscal
+    difficulty: easy
+    expected_keywords:
+      - type: any_of
+        values: ["21%", "21 por ciento"]
+      - type: any_of
+        values: ["10%", "10 por ciento"]
+      - type: any_of
+        values: ["4%", "4 por ciento"]
+      - type: all_of
+        values: ["general", "reducido", "superreducido"]
+    expected_laws:
+      - "Ley 37/1992 del IVA"
+    reference_answer: >
+      Los tipos de IVA vigentes en España según la Ley 37/1992 son:
+      - Tipo general: 21% (aplicable a la mayoría de bienes y servicios).
+      - Tipo reducido: 10% (alimentos, transporte de viajeros, hostelería, vivienda nueva, etc.).
+      - Tipo superreducido: 4% (productos de primera necesidad: pan, leche, frutas, verduras,
+      libros, medicamentos, viviendas de protección oficial).
+
+  - id: impuesto_sociedades_tipo
+    question: "¿Cuál es el tipo general del Impuesto sobre Sociedades en España?"
+    domain: fiscal
+    difficulty: easy
+    expected_keywords:
+      - type: any_of
+        values: ["25%", "25 por ciento"]
+      - type: any_of
+        values: ["Ley 27/2014", "IS"]
+      - type: any_of
+        values: ["15%", "empresa nueva", "nueva creación"]
+    expected_laws:
+      - "Ley 27/2014 del Impuesto sobre Sociedades"
+    reference_answer: >
+      El tipo general del Impuesto sobre Sociedades es del 25% según la Ley 27/2014.
+      Existen tipos reducidos: 15% para entidades de nueva creación en el primer periodo
+      impositivo con base imponible positiva y el siguiente, 10% para entidades sin
+      ánimo de lucro, y tipos especiales para cooperativas y entidades de la Zona Especial Canaria.
+
+  # =========================================================================
+  # CIVIL / CONTRATOS
+  # =========================================================================
+  - id: contrato_arrendamiento_duracion
+    question: "¿Cuál es la duración mínima de un contrato de alquiler de vivienda?"
+    domain: contract
+    difficulty: medium
+    expected_keywords:
+      - type: any_of
+        values: ["5 años", "cinco años"]
+      - type: any_of
+        values: ["7 años", "siete años"]
+      - type: any_of
+        values: ["persona jurídica", "empresa"]
+      - type: any_of
+        values: ["LAU", "Ley de Arrendamientos Urbanos", "Ley 29/1994"]
+    expected_laws:
+      - "Ley 29/1994 de Arrendamientos Urbanos Art. 9"
+    reference_answer: >
+      Según el artículo 9 de la LAU (Ley 29/1994, modificada por RDL 7/2019), la duración mínima
+      del contrato de alquiler de vivienda habitual es de 5 años si el arrendador es persona física,
+      y de 7 años si es persona jurídica. Si se pacta una duración inferior, se prorroga
+      obligatoriamente por anualidades hasta alcanzar esos plazos mínimos.
+
+  - id: fianza_alquiler
+    question: "¿Cuánto es la fianza legal en un contrato de alquiler de vivienda?"
+    domain: contract
+    difficulty: easy
+    expected_keywords:
+      - type: any_of
+        values: ["una mensualidad", "1 mensualidad", "un mes", "1 mes"]
+      - type: any_of
+        values: ["dos mensualidades", "2 mensualidades", "dos meses", "2 meses"]
+      - type: any_of
+        values: ["vivienda", "uso distinto"]
+    expected_laws:
+      - "Ley 29/1994 de Arrendamientos Urbanos Art. 36"
+    reference_answer: >
+      Según el artículo 36 de la LAU, la fianza legal obligatoria es de una mensualidad de renta
+      para arrendamientos de vivienda, y de dos mensualidades para arrendamientos de uso distinto
+      de vivienda (locales comerciales). Adicionalmente, pueden pactarse garantías adicionales
+      hasta un máximo de dos mensualidades (en contratos de hasta 5/7 años de duración).
+
+  # =========================================================================
+  # COMPLIANCE / PROTECCIÓN DE DATOS
+  # =========================================================================
+  - id: rgpd_derechos
+    question: "¿Cuáles son los derechos de los ciudadanos según el RGPD?"
+    domain: privacy
+    difficulty: medium
+    expected_keywords:
+      - type: all_of
+        values: ["acceso", "rectificación", "supresión"]
+      - type: any_of
+        values: ["portabilidad", "portabilidad de datos"]
+      - type: any_of
+        values: ["oposición", "oponerse"]
+      - type: any_of
+        values: ["limitación", "limitar"]
+    expected_laws:
+      - "Reglamento (UE) 2016/679 (RGPD)"
+      - "LOPDGDD Ley Orgánica 3/2018"
+    reference_answer: >
+      Los derechos de los interesados según el RGPD (Reglamento UE 2016/679) son:
+      1) Derecho de acceso (art. 15): conocer si se tratan datos personales y obtener copia.
+      2) Derecho de rectificación (art. 16): corregir datos inexactos.
+      3) Derecho de supresión / olvido (art. 17): eliminar datos cuando ya no son necesarios.
+      4) Derecho a la limitación del tratamiento (art. 18).
+      5) Derecho a la portabilidad de datos (art. 20): recibir datos en formato estructurado.
+      6) Derecho de oposición (art. 21): oponerse al tratamiento en ciertos supuestos.
+      7) Derecho a no ser objeto de decisiones automatizadas (art. 22).
+
+  - id: delegado_proteccion_datos
+    question: "¿Cuándo es obligatorio designar un Delegado de Protección de Datos?"
+    domain: privacy
+    difficulty: hard
+    expected_keywords:
+      - type: any_of
+        values: ["DPD", "DPO", "Delegado de Protección de Datos"]
+      - type: any_of
+        values: ["autoridad pública", "organismo público"]
+      - type: any_of
+        values: ["gran escala", "a gran escala"]
+      - type: any_of
+        values: ["observación habitual", "monitorización", "seguimiento"]
+      - type: any_of
+        values: ["categorías especiales", "datos sensibles"]
+    expected_laws:
+      - "Reglamento (UE) 2016/679 Art. 37"
+      - "LOPDGDD Art. 34"
+    reference_answer: >
+      La designación de un DPD es obligatoria según el art. 37 del RGPD cuando:
+      a) El tratamiento lo lleve a cabo una autoridad u organismo público.
+      b) Las actividades principales consistan en operaciones de tratamiento que requieran
+      una observación habitual y sistemática de interesados a gran escala.
+      c) Las actividades principales consistan en el tratamiento a gran escala de categorías
+      especiales de datos o datos relativos a condenas e infracciones penales.
+      La LOPDGDD (art. 34) amplía los supuestos obligatorios: centros docentes, entidades
+      financieras, aseguradoras, empresas de seguridad privada, entre otros.
+
+  # =========================================================================
+  # COMPLIANCE EMPRESARIAL
+  # =========================================================================
+  - id: compliance_penal_requisitos
+    question: "¿Qué requisitos debe cumplir un programa de compliance penal para eximir de responsabilidad?"
+    domain: compliance
+    difficulty: hard
+    expected_keywords:
+      - type: any_of
+        values: ["órgano de cumplimiento", "compliance officer", "órgano de vigilancia"]
+      - type: any_of
+        values: ["mapa de riesgos", "identificación de riesgos", "análisis de riesgos"]
+      - type: any_of
+        values: ["canal de denuncias", "canal de comunicación"]
+      - type: any_of
+        values: ["formación", "difusión"]
+      - type: any_of
+        values: ["art. 31 bis", "artículo 31 bis"]
+    expected_laws:
+      - "Código Penal Art. 31 bis"
+    reference_answer: >
+      Según el artículo 31 bis del Código Penal, un programa de compliance debe incluir:
+      1) Identificación de actividades donde pueden cometerse delitos (mapa de riesgos).
+      2) Establecimiento de protocolos para la toma de decisiones y ejecución.
+      3) Modelos de gestión de recursos financieros adecuados para impedir la comisión de delitos.
+      4) Imposición de la obligación de informar de posibles riesgos e incumplimientos
+      al órgano de vigilancia (canal de denuncias).
+      5) Establecimiento de un sistema disciplinario.
+      6) Verificación periódica del modelo y modificación ante infracciones o cambios relevantes.
+      El órgano de cumplimiento debe tener poderes autónomos de iniciativa y control.
+
+  # =========================================================================
+  # PROCESAL
+  # =========================================================================
+  - id: plazos_recurso_contencioso
+    question: "¿Cuál es el plazo para interponer un recurso contencioso-administrativo?"
+    domain: civil
+    difficulty: medium
+    expected_keywords:
+      - type: any_of
+        values: ["2 meses", "dos meses"]
+      - type: any_of
+        values: ["acto expreso", "resolución expresa"]
+      - type: any_of
+        values: ["6 meses", "seis meses"]
+      - type: any_of
+        values: ["silencio administrativo", "acto presunto"]
+    expected_laws:
+      - "Ley 29/1998 de la Jurisdicción Contencioso-Administrativa Art. 46"
+    reference_answer: >
+      Según el artículo 46 de la LJCA (Ley 29/1998), el plazo para interponer recurso
+      contencioso-administrativo es de 2 meses desde la notificación del acto expreso.
+      Si se trata de silencio administrativo (acto presunto), el plazo es de 6 meses
+      desde el día siguiente a aquel en que se produzca el acto presunto.
+
+  - id: prescripcion_delitos
+    question: "¿Cuáles son los plazos de prescripción de los delitos en España?"
+    domain: civil
+    difficulty: hard
+    expected_keywords:
+      - type: any_of
+        values: ["20 años", "veinte años"]
+      - type: any_of
+        values: ["15 años", "quince años"]
+      - type: any_of
+        values: ["10 años", "diez años"]
+      - type: any_of
+        values: ["5 años", "cinco años"]
+      - type: any_of
+        values: ["no prescriben", "imprescriptibles"]
+    expected_laws:
+      - "Código Penal Art. 131"
+    reference_answer: >
+      Según el artículo 131 del Código Penal, los plazos de prescripción son:
+      - 20 años: delitos con pena de prisión de 15 o más años.
+      - 15 años: delitos con pena de inhabilitación superior a 10 años o prisión de 10-15 años.
+      - 10 años: delitos con pena de prisión de 5-10 años.
+      - 5 años: delitos con pena de prisión de 3-5 años.
+      - 3 años: los restantes delitos menos graves.
+      - 1 año: delitos leves e injurias.
+      Los delitos de lesa humanidad, genocidio y terrorismo con resultado de muerte no prescriben.
+
+  # =========================================================================
+  # MERCANTIL
+  # =========================================================================
+  - id: constitucion_sl
+    question: "¿Cuáles son los requisitos para constituir una Sociedad Limitada (SL)?"
+    domain: contract
+    difficulty: medium
+    expected_keywords:
+      - type: any_of
+        values: ["3.000", "3000", "tres mil", "3.000€", "3000€"]
+      - type: any_of
+        values: ["euros", "€"]
+      - type: any_of
+        values: ["escritura pública", "notario"]
+      - type: any_of
+        values: ["Registro Mercantil", "inscripción"]
+      - type: any_of
+        values: ["estatutos", "estatutos sociales"]
+    expected_laws:
+      - "Real Decreto Legislativo 1/2010 (LSC)"
+    reference_answer: >
+      Los requisitos para constituir una SL según la Ley de Sociedades de Capital (RDL 1/2010):
+      1) Capital social mínimo de 3.000€, íntegramente suscrito y desembolsado.
+      2) Otorgamiento de escritura pública ante notario con: identidad de socios,
+      voluntad de constituir la sociedad, aportaciones de cada socio, estatutos sociales,
+      y sistema de administración.
+      3) Inscripción en el Registro Mercantil provincial.
+      4) Obtención de CIF provisional, alta en Hacienda y Seguridad Social.
+      5) Los estatutos deben incluir: denominación, objeto social, domicilio, capital social,
+      participaciones, sistema de administración y modo de deliberar.

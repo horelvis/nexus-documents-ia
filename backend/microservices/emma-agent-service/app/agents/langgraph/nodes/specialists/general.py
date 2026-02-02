@@ -771,9 +771,14 @@ async def general_node(state: RAGState) -> Dict[str, Any]:
                 },
             }
 
+    # =====================================================================
+    # Knowledge queries: NO tools — the model answers with its parametric
+    # knowledge + retrieved docs context. Tools confuse small models (7B)
+    # which emit <tool_call> text instead of answering directly.
+    # =====================================================================
     return await create_specialist_node(
         agent_name="general_agent",
         system_prompt=GENERAL_SYSTEM_PROMPT,
-        tools=general_tools,
+        tools=[],
         state=state,
     )
