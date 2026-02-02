@@ -98,6 +98,52 @@ def _summarize_tool_result(result: str, max_length: int = 150) -> str:
     return result[:max_length] + "..."
 
 
+def _truncate_repetitions(content: str, max_repeats: int = 2) -> str:
+    """
+    Detect and truncate repetitive content from small LLM generation loops.
+
+    Splits content into sentences and removes sequences where the same
+    sentence appears more than max_repeats times consecutively.
+    """
+    if not content or len(content) < 200:
+        return content
+
+    # Split into sentences (preserve numbered list items as units)
+    sentences = re.split(r'(?<=[.!?\n])\s+(?=\S)', content)
+    if len(sentences) < 4:
+        return content
+
+    result = []
+    repeat_count = 0
+    prev_normalized = ""
+
+    for sentence in sentences:
+        # Normalize for comparison (strip numbers, whitespace)
+        normalized = re.sub(r'^\d+[\.\)]\s*', '', sentence.strip()).lower().strip()
+        if not normalized:
+            result.append(sentence)
+            continue
+
+        if normalized == prev_normalized:
+            repeat_count += 1
+            if repeat_count >= max_repeats:
+                # Stop: we hit a loop
+                logger.warning(
+                    f"🔁 Repetition detected after {len(result)} sentences, truncating"
+                )
+                break
+        else:
+            repeat_count = 0
+
+        prev_normalized = normalized
+        result.append(sentence)
+
+    truncated = " ".join(result)
+    if len(truncated) < len(content):
+        truncated = truncated.rstrip() + "\n\n*[Respuesta truncada por repetición]*"
+    return truncated
+
+
 async def create_specialist_node(
     agent_name: str,
     system_prompt: str,
@@ -173,15 +219,17 @@ async def create_specialist_node(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"""Query: {query}
 
-Context from retrieved documents:
+Context from retrieved documents (use as support and verification, not as exclusive source):
 {context}
 
-Please analyze and respond using your specialized knowledge and tools."""},
+Analyze and respond using your specialized legal knowledge. The retrieved documents may be partial or tangentially related — complement them with your own knowledge of applicable legislation, citing specific laws and articles even if they don't appear in the documents above."""},
         ]
 
-        # Get LLM client
+        # Get LLM client and config
         from app.agents.llm_client import get_llm_client
+        from app.core.config import Settings
 
+        settings = Settings()
         llm_client = await get_llm_client()
 
         # Convert tools to OpenAI format
@@ -203,8 +251,8 @@ Please analyze and respond using your specialized knowledge and tools."""},
                 response = await llm_client.chat(
                     messages=messages,
                     tools=tool_schemas,
-                    temperature=0.3,
-                    max_tokens=2048,
+                    temperature=settings.agent_temperature,
+                    max_tokens=settings.agent_max_tokens,
                 )
 
                 # =========================================================
@@ -305,10 +353,15 @@ Please analyze and respond using your specialized knowledge and tools."""},
         latency_ms = (time.time() - start_time) * 1000
 
         # Build result dict with reasoning steps
+        # Truncate repetitive content from small LLM generation loops
+        final_output = response.content if response else ""
+        if final_output:
+            final_output = _truncate_repetitions(final_output)
+
         # Note: AgentResult is a TypedDict, access as dict not object
         result_dict = {
             "agent": agent_name,
-            "output": response.content if response else "",
+            "output": final_output,
             "tools_used": list(set(tools_used)),
             "sources": _extract_sources(retrieved_docs),
             "error": None,
@@ -356,15 +409,37 @@ Please analyze and respond using your specialized knowledge and tools."""},
         }
 
 
+MIN_RELEVANCE_SCORE = 0.45
+
+
 def _build_context(docs: List[Dict], max_chars: int = 8000) -> str:
-    """Build context string from retrieved documents."""
+    """Build context string from retrieved documents, filtering low-relevance chunks."""
     if not docs:
         return "No documents retrieved."
+
+    # Filter out low-relevance documents that add noise
+    filtered_docs = []
+    skipped = 0
+    for doc in docs:
+        score = doc.get("score", 0.0)
+        if score >= MIN_RELEVANCE_SCORE:
+            filtered_docs.append(doc)
+        else:
+            skipped += 1
+
+    if skipped:
+        logger.info(
+            f"📊 Context filter: {skipped} docs below {MIN_RELEVANCE_SCORE} threshold "
+            f"({len(filtered_docs)} retained)"
+        )
+
+    if not filtered_docs:
+        return "No documents with sufficient relevance found."
 
     context_parts = []
     total_chars = 0
 
-    for i, doc in enumerate(docs):
+    for i, doc in enumerate(filtered_docs):
         title = doc.get("title", "Untitled")
         content = doc.get("content", "")
         score = doc.get("score", 0.0)
@@ -386,13 +461,20 @@ def _build_context(docs: List[Dict], max_chars: int = 8000) -> str:
 
 
 def _extract_sources(docs: List[Dict]) -> List[str]:
-    """Extract source references from documents."""
+    """Extract source references from documents, deduplicated by title."""
     sources = []
-    for doc in docs[:5]:  # Max 5 sources
-        doc_id = doc.get("id", "")
+    seen_titles = set()
+    for doc in docs:
         title = doc.get("title", "")
-        if doc_id or title:
-            sources.append(f"{title} ({doc_id[:8]}...)" if doc_id else title)
+        doc_id = doc.get("id", "")
+        if not title and not doc_id:
+            continue
+        if title in seen_titles:
+            continue
+        seen_titles.add(title)
+        sources.append(f"{title} ({doc_id[:8]}...)" if doc_id else title)
+        if len(sources) >= 5:
+            break
     return sources
 
 

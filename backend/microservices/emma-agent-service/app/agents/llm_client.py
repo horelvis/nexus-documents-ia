@@ -321,6 +321,8 @@ class LLMClient:
             body["chat_template_kwargs"] = {
                 "enable_thinking": enable_thinking,
             }
+            # Penalize repetition to avoid generation loops in small models (7B)
+            body["repetition_penalty"] = kwargs.get("repetition_penalty", 1.15)
 
         return body
 
