@@ -1790,6 +1790,18 @@ class WeaviateService:
             # Ensure client is initialized
             await self.initialize()
 
+            # Return empty results if collection doesn't exist (new tenant, no docs)
+            if not self.client.collections.exists(collection_name):
+                logger.info(f"📭 Collection {collection_name} does not exist, returning empty results")
+                return SearchResponse(
+                    query=search_request.query,
+                    results=[],
+                    total_results=0,
+                    search_time_ms=0,
+                    search_type=search_request.search_type or "hybrid",
+                    tenant_id=search_request.tenant_id,
+                )
+
             # Get collection for search using v4 API
             collection = self.client.collections.get(collection_name)
             
