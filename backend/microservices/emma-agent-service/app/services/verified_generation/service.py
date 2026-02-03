@@ -1003,7 +1003,18 @@ class VerifiedDocumentService:
         from pathlib import Path
         from jinja2 import Environment, FileSystemLoader
 
-        template_dir = Path(__file__).parent.parent.parent.parent / "config" / "templates"
+        # In Docker: /app/services/verified_generation/service.py -> /app/config/templates
+        # On host: emma-agent-service/app/services/... -> emma-agent-service/config/templates
+        service_root = Path(__file__).parent.parent.parent  # -> /app or emma-agent-service/app
+        template_dir = service_root.parent / "config" / "templates"
+
+        # Fallback: if running from /app directly, templates are at /app/config/templates
+        if not template_dir.exists():
+            template_dir = service_root / "config" / "templates"
+        if not template_dir.exists():
+            # Last resort: look relative to __file__
+            template_dir = Path(__file__).resolve().parent.parent.parent.parent / "config" / "templates"
+
         env = Environment(loader=FileSystemLoader(str(template_dir)))
         template = env.get_template("verified_document.md")
 

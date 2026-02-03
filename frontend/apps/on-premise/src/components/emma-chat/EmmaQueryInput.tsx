@@ -85,7 +85,12 @@ export function EmmaQueryInput({
     if (queryToSend.startsWith('/verificar ') && onVerifiedGeneration) {
       const topic = queryToSend.slice('/verificar '.length).trim()
       if (topic) {
-        Promise.resolve(onVerifiedGeneration(topic, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
+        if (attachmentsToSend.length === 0) {
+          setUploadError('Debes adjuntar al menos un documento para verificar')
+          setQuery(queryToSend) // Restore query
+          return
+        }
+        Promise.resolve(onVerifiedGeneration(topic, attachmentsToSend)).catch((err) => {
           console.error('[EmmaQueryInput] Verified generation error:', err)
         })
         return
@@ -96,7 +101,12 @@ export function EmmaQueryInput({
     if (queryToSend.startsWith('/predecir ') && onPredictiveAnalysis) {
       const caseDesc = queryToSend.slice('/predecir '.length).trim()
       if (caseDesc) {
-        Promise.resolve(onPredictiveAnalysis(caseDesc, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
+        if (attachmentsToSend.length === 0) {
+          setUploadError('Debes adjuntar al menos un documento para analizar')
+          setQuery(queryToSend) // Restore query
+          return
+        }
+        Promise.resolve(onPredictiveAnalysis(caseDesc, attachmentsToSend)).catch((err) => {
           console.error('[EmmaQueryInput] Predictive analysis error:', err)
         })
         return
@@ -108,28 +118,40 @@ export function EmmaQueryInput({
 
   const handleVerifiedClick = () => {
     if (isLoading || disabled || !onVerifiedGeneration) return
+    // Require at least one attachment for verification
+    if (attachments.length === 0) {
+      setUploadError('Debes adjuntar al menos un documento para verificar')
+      return
+    }
     const topic = query.trim() || 'Genera un documento verificado basado en los documentos adjuntos'
     const attachmentsToSend = [...attachments]
     setQuery('')
     setAttachments([])
+    setUploadError(null)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
-    Promise.resolve(onVerifiedGeneration(topic, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
+    Promise.resolve(onVerifiedGeneration(topic, attachmentsToSend)).catch((err) => {
       console.error('[EmmaQueryInput] Verified generation error:', err)
     })
   }
 
   const handlePredictiveClick = () => {
     if (isLoading || disabled || !onPredictiveAnalysis) return
+    // Require at least one attachment for predictive analysis
+    if (attachments.length === 0) {
+      setUploadError('Debes adjuntar al menos un documento para analizar')
+      return
+    }
     const caseDesc = query.trim() || 'Analiza los documentos adjuntos y genera una predicción'
     const attachmentsToSend = [...attachments]
     setQuery('')
     setAttachments([])
+    setUploadError(null)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
-    Promise.resolve(onPredictiveAnalysis(caseDesc, attachmentsToSend.length > 0 ? attachmentsToSend : undefined)).catch((err) => {
+    Promise.resolve(onPredictiveAnalysis(caseDesc, attachmentsToSend)).catch((err) => {
       console.error('[EmmaQueryInput] Predictive analysis error:', err)
     })
   }
