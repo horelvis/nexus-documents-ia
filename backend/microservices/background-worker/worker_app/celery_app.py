@@ -15,6 +15,7 @@ celery_app = Celery(
         "worker_app.tasks.channel_tasks",
         "worker_app.tasks.connector_tasks",
         "worker_app.tasks.verification_tasks",
+        "worker_app.tasks.emma_tasks",
     ],
 )
 
@@ -27,6 +28,7 @@ celery_app.conf.update(
         "channels.*": {"queue": "channels"},
         "connectors.*": {"queue": "connectors"},
         "verification.*": {"queue": "verification"},
+        "emma.*": {"queue": "emma_reactive"},
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
@@ -55,6 +57,20 @@ celery_app.conf.update(
         "connectors-scheduled-sync": {
             "task": "connectors.sync_scheduled",
             "schedule": crontab(minute="*/15"),  # Every 15 minutes
+        },
+        # Emma Reactive schedules
+        "emma-daily-summaries": {
+            "task": "emma.daily_summary",
+            "schedule": crontab(hour=8, minute=0),  # 8 AM daily
+        },
+        # Heartbeat schedules (Phase 6: Proactive Intelligence)
+        "emma-heartbeat-periodic": {
+            "task": "emma.heartbeat_check",
+            "schedule": crontab(minute="*/30"),  # Every 30 minutes
+        },
+        "emma-heartbeat-digest": {
+            "task": "emma.heartbeat_digest",
+            "schedule": crontab(hour=9, minute=0),  # 9 AM daily
         },
     },
 )

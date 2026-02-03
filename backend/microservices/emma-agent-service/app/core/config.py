@@ -170,6 +170,12 @@ class Settings(BaseSettings):
     web_search_max_results: int = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
     web_search_region: str = os.getenv("WEB_SEARCH_REGION", "es-es")
 
+    # ==========================================================================
+    # Emma Reactive Configuration
+    # ==========================================================================
+    event_bus_enabled: bool = os.getenv("EVENT_BUS_ENABLED", "true").lower() == "true"
+    credentials_encryption_key: str = os.getenv("CREDENTIALS_ENCRYPTION_KEY", "")
+
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     request_logging_enabled: bool = os.getenv(

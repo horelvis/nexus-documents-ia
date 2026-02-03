@@ -53,6 +53,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Knowledge Tree Service | 8011 | Apache AGE graph queries for entity expansion |
 | Elasticsearch Service | 8008 | Full-text search, hybrid search |
 | Background Worker | 8100 | Celery async task processing |
+| Emma Reactive Worker | — | Event listener + trigger engine (Redis Streams consumer) |
 | vLLM Server | internal | GPU inference (OpenAI-compatible API) |
 
 ### Modular Architecture (SaaS vs On-Premise)
@@ -80,7 +81,9 @@ One sector active per deployment via `ACTIVE_SECTOR` env var. Changing sector re
 
 ### Emma Agent Service (LangGraph)
 
-**Flow**: `coordinator → context_tree → retrieve → graph_expand → [rlm/plan] → [agents] → synthesize → END`
+**Flow**: `coordinator → [context_tree || graph_expand] → retrieve → [rlm/plan] → [agents] → synthesize → END`
+
+Note: `context_tree` and `graph_expand` run in **parallel**. `graph_expand` populates `expanded_boe_ids` (from QA matches and Apache AGE graph) that `retrieve` uses to filter PublicKnowledge searches.
 
 **Structure**:
 - `agents/langgraph/graph.py` — StateGraph definition
@@ -94,12 +97,172 @@ One sector active per deployment via `ACTIVE_SECTOR` env var. Changing sector re
 - **RLM Processor**: Recursive pipeline for large docs (>16K tokens), Redis cached
 - **Verified Generation**: Claim-by-claim verification with SSE streaming
 - **LLM Providers**: vLLM (primary), OpenAI, Anthropic, Google (fallbacks)
+- **Emma Reactive**: Event-driven proactive system (see below)
+
+### Emma Reactive System
+
+> **Full docs**: [`docs/architecture/EMMA_REACTIVE.md`](docs/architecture/EMMA_REACTIVE.md)
+
+Emma Reactive transforms Emma from request-response to an **event-driven, proactive, multi-channel** assistant.
+
+**Architecture**:
+```
+Events (Redis Streams) → Event Listener → Trigger Engine → Emma Background Service → Notifications / Channels
+                                              ↑
+                        Celery Beat → Heartbeat Service → Proactive Insights
+```
+
+**Phases**:
+| Phase | Feature | Key Component |
+|-------|---------|---------------|
+| 1 | Event Bus | Redis Streams pub/sub |
+| 2 | Background Tasks | Celery + LangGraph |
+| 3 | Triggers | Event → Action rules |
+| 4 | Notifications | WebSocket + email |
+| 5 | Multi-Channel | Telegram, WhatsApp, Slack |
+| 6 | **Heartbeat** | Proactive intelligence |
+
+**Components**:
+- **Event Bus** (`services/event_bus.py`): Redis Streams publish/subscribe between microservices
+- **Event Listener** (`workers/event_listener.py`): Standalone async consumer process
+- **Trigger Engine** (`services/trigger_engine.py`): Rules engine matching events → actions
+- **Background Service** (`services/emma_background_service.py`): LangGraph execution without HTTP
+- **Notification Service** (`services/notification_service.py`): In-app (WebSocket) + email + webhook
+- **Channel Router** (`services/channel_router.py`): Multi-channel inbound→Emma→outbound
+- **Pairing Service** (`services/pairing_service.py`): Links external users (Telegram, WhatsApp) to KeyCloak
+- **Heartbeat Service** (`services/heartbeat/`): Proactive context evaluation + insight generation
+
+**Heartbeat System** (Phase 6):
+- **Context Gatherer**: Collects tenant data (documents, contracts, activity)
+- **Insight Evaluator**: LLM-based analysis to generate insights
+- **Priority Scorer**: Multi-factor scoring (type × urgency × confidence)
+- **Delivery Manager**: Rate limiting (5/day, 2/hour) + quiet hours (22:00-08:00)
+- **Insight Types**: `contract_expiration`, `compliance_alert`, `risk_alert`, `anomaly_detected`, `task_reminder`
+
+**Events**: `document.indexed`, `document.updated`, `connector.synced`, `knowledge.graph_updated`, `analysis.completed`
+
+**Channels**: Telegram, WhatsApp (Twilio), Slack, Email — all via `channels/` package with `BaseChannel` ABC
+
+**Key files**:
+- `emma-agent-service/app/schemas/events.py` — EmmaEvent model
+- `emma-agent-service/app/schemas/triggers.py` — Trigger schemas
+- `emma-agent-service/app/schemas/heartbeat.py` — Heartbeat schemas
+- `emma-agent-service/app/api/triggers.py` — Triggers CRUD
+- `emma-agent-service/app/api/notifications.py` — Notifications API
+- `emma-agent-service/app/api/channels_emma.py` — Channels CRUD + webhooks
+- `emma-agent-service/app/api/heartbeat.py` — Heartbeat API (run, status, insights)
+- `emma-agent-service/app/channels/` — Channel implementations
+- `emma-agent-service/app/services/heartbeat/` — Heartbeat system (5 modules)
+- `backend/app/db/emma_reactive_models.py` — DB models (8 tables)
+- `backend/alembic/versions/a1b2c3d4e5f6_add_emma_reactive_tables.py` — Migration Phases 3-5
+- `backend/alembic/versions/b2c3d4e5f6g7_add_emma_heartbeat_tables.py` — Migration Phase 6
+
+**Docker**: `emma-reactive-worker` service in `docker-compose.onpremise.yml`
+
+**Celery**: `emma_reactive` queue with tasks in `background-worker/worker_app/tasks/emma_tasks.py`
+- `emma.analyze_new_document` — Triggered by document.indexed
+- `emma.daily_summary` — Celery Beat at 8 AM daily
+- `emma.proactive_analysis` — Custom analysis via triggers
+- `emma.heartbeat_check` — Celery Beat every 30 min
+- `emma.heartbeat_digest` — Celery Beat at 9 AM daily
+
+**Environment variables**:
+- `EVENT_BUS_ENABLED` — Enable/disable event bus (default: true)
+- `EVENT_CONSUMER_GROUP` — Redis consumer group name
+- `CREDENTIALS_ENCRYPTION_KEY` — Fernet key for channel credential encryption
 
 ### Multi-Tier RAG Caching
 
 > **Full docs**: [`docs/architecture/RAG_CACHING.md`](docs/architecture/RAG_CACHING.md)
 
 Tier 1 (Retrieval, 5min TTL) → Tier 2 (Context Assembly, 30min) → Tier 3 (Semantic, 1hr). Key files in `weaviate-service/app/services/rag/cache/`.
+
+### Public Knowledge & BOE Legislation
+
+> **Full docs**: [`docs/architecture/PUBLIC_KNOWLEDGE.md`](docs/architecture/PUBLIC_KNOWLEDGE.md)
+
+The **PublicKnowledge** system provides shared Spanish legislation across all tenants. It consists of:
+
+1. **Weaviate Collection** (`PublicKnowledge`): Chunked legislation with embeddings for RAG retrieval
+2. **Legal Knowledge Graph** (Apache AGE `knowledge_graph_public`): Law nodes + relationship edges (MODIFIES, REFERENCES, DEROGATES)
+3. **BOE Download API**: Endpoints to download and index legislation from BOE
+
+**Architecture**:
+```
+BOE API → Download & Parse → IndexingPipeline (chunks) → PublicKnowledge (Weaviate)
+                                    ↓
+                          LegalGraphService → Apache AGE graph
+```
+
+**API Endpoints** (`weaviate-service:8007/boe/`):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/boe/presets` | GET | List available preset categories (13 domains) |
+| `/boe/download/preset` | POST | Download all laws in a preset |
+| `/boe/download` | POST | Download single law by BOE ID |
+| `/boe/all-legislation-ids` | GET | Get all unique BOE IDs (47 laws) |
+| `/boe/sync/{boe_id}` | POST | Sync law and detect article-level changes |
+
+**Presets disponibles** (13 categorías, ~47 leyes):
+- `laboral` (7): ET, LTD, LPRL, LISOS, LOI, LETA, LGSS
+- `fiscal` (5): LGT, LIRPF, LIS, LIVA, Reglamento Facturación
+- `mercantil` (3): LSC, CCom, LSP
+- `civil` (2): CC, LEC
+- `administrativo` (3): LPACAP, LRJSP, LCSP
+- `compliance` (5): LPBC, CP, LC, LSE, Auditoría
+- `propiedad_intelectual` (3): LPI, LM, LP
+- `comercio_consumidores` (5): LGDCU, LCD, LOCM, LGUM, LSSI
+- `emprendimiento` (3): LE, LCC, LS
+- `inmobiliario` (5): LAU, LPH, LH, Crédito Inmobiliario
+- `contabilidad` (2): PGC, PGC Pymes
+- `educacion` (3): LOMLOE, LOE, LOU
+- `proteccion_datos` (1): LOPDGDD
+
+**Client Onboarding** — Download all legislation:
+```bash
+API_KEY=$(grep MICROSERVICES_API_KEY backend/docker/.env | cut -d= -f2)
+
+# Option 1: Download all presets (recommended for full onboarding)
+for preset in laboral fiscal mercantil civil administrativo compliance \
+              propiedad_intelectual comercio_consumidores emprendimiento \
+              inmobiliario contabilidad educacion proteccion_datos; do
+  curl -X POST "http://localhost:8007/boe/download/preset" \
+    -H "Content-Type: application/json" \
+    -H "X-API-Key: $API_KEY" \
+    -d "{\"preset\": \"$preset\", \"index_to_weaviate\": true}"
+done
+
+# Option 2: Download single preset
+curl -X POST "http://localhost:8007/boe/download/preset" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{"preset": "laboral", "index_to_weaviate": true}'
+```
+
+**Legal Graph Management**:
+```bash
+# View graph stats
+curl "http://localhost:8007/legal/stats" -H "X-API-Key: $API_KEY"
+
+# Get graph structure (nodes + edges for D3 visualization)
+curl "http://localhost:8007/legal/graph/structure" -H "X-API-Key: $API_KEY"
+
+# Connect orphan laws (if any exist without connections)
+docker compose exec weaviate-service bash -c \
+  'cd /app && PYTHONPATH=/app python scripts/connect_orphan_laws.py'
+```
+
+**Key files**:
+- `weaviate-service/app/api/boe_legislation.py` — BOE download endpoints
+- `weaviate-service/app/api/legal_graph.py` — Legal graph CRUD
+- `weaviate-service/app/services/sil/legal_graph_service.py` — Apache AGE graph operations
+- `weaviate-service/app/services/public_knowledge_service.py` — Weaviate PublicKnowledge CRUD
+- `weaviate-service/scripts/seed_legal_graph.py` — Initial graph population
+- `weaviate-service/scripts/connect_orphan_laws.py` — Connect orphan laws to hub laws
+- `weaviate-service/scripts/populate_legal_edges.py` — Create REFERENCES/MODIFIES edges from BOE analysis
+
+**Note**: 5 laws (LSP, LC, LP, LS, LAU Reform) aren't available in BOE's `/legislacion-consolidada` API and require manual seeding or alternative download methods.
 
 ## File Structure Conventions
 

@@ -43,7 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 
 from app.core.config import settings
-from app.api import emma_router, learning_router, uploads_router, verified_router, predictive_router, training_router
+from app.api import emma_router, learning_router, uploads_router, verified_router, predictive_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router
 from app.clients import get_weaviate_client
 
 # Configure logging
@@ -98,6 +98,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Service initialization failed: {e}")
 
+    # Initialize Event Bus (Emma Reactive)
+    if settings.event_bus_enabled:
+        try:
+            from app.services.event_bus import event_bus
+            health = await event_bus.health_check()
+            logger.info(f"Event Bus: {health.get('status', 'unknown')}")
+        except Exception as e:
+            logger.warning(f"Event Bus initialization skipped: {e}")
+
     yield
 
     # Cleanup
@@ -110,6 +119,19 @@ async def lifespan(app: FastAPI):
         await close_weaviate_client()
         await close_text_extraction_client()
         logger.info("HTTP clients closed")
+    except Exception:
+        pass
+
+    # Close reactive services
+    try:
+        from app.services.event_bus import event_bus
+        from app.services.trigger_engine import trigger_engine
+        from app.services.notification_service import notification_service
+        from app.services.heartbeat import heartbeat_service
+        await event_bus.close()
+        await trigger_engine.close()
+        await notification_service.close()
+        await heartbeat_service.close()
     except Exception:
         pass
 
@@ -161,6 +183,11 @@ app.include_router(uploads_router, prefix="/emma", tags=["uploads"])
 app.include_router(verified_router, tags=["verified-generation"])
 app.include_router(predictive_router, tags=["predictive-analysis"])
 app.include_router(training_router, tags=["training"])
+app.include_router(background_router, prefix="/emma", tags=["background"])
+app.include_router(triggers_router, tags=["triggers"])
+app.include_router(notifications_router, tags=["notifications"])
+app.include_router(channels_router, tags=["channels"])
+app.include_router(heartbeat_router, prefix="/emma", tags=["heartbeat"])
 
 
 # Health check

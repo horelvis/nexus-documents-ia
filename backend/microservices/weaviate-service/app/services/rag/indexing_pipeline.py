@@ -526,6 +526,9 @@ class IndexingPipeline:
 
         result.total_time_ms = (time.time() - start_time) * 1000
 
+        # Emit document.indexed event to the reactive event bus
+        await self._emit_document_indexed(document_id, tenant_id, metadata, result)
+
         return result
 
     async def process_text(
@@ -575,6 +578,9 @@ class IndexingPipeline:
         result.extracted_text = text
         result.extraction_characters = len(text)
         result.total_time_ms = (time.time() - start_time) * 1000
+
+        # Emit document.indexed event to the reactive event bus
+        await self._emit_document_indexed(document_id, tenant_id, metadata, result)
 
         return result
 
@@ -1268,6 +1274,31 @@ class IndexingPipeline:
             errors=errors,
             warnings=warnings,
         )
+
+    async def _emit_document_indexed(
+        self,
+        document_id: str,
+        tenant_id: str,
+        metadata: Dict[str, Any],
+        result: "IndexingResult",
+    ):
+        """Emit a document.indexed event to the reactive event bus (fire-and-forget)."""
+        try:
+            from app.services.event_publisher import publish_event
+            await publish_event(
+                event_type="document.indexed",
+                tenant_id=tenant_id,
+                payload={
+                    "doc_id": document_id,
+                    "collection": metadata.get("_collection_name", ""),
+                    "title": metadata.get("title", ""),
+                    "filename": metadata.get("filename", ""),
+                    "chunks_count": result.chunks_count,
+                    "tags": metadata.get("tags", []),
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to emit document.indexed event: {e}")
 
     async def _extract_visuals(
         self,
