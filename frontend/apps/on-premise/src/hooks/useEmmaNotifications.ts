@@ -80,13 +80,25 @@ export function useEmmaNotifications(options: UseEmmaNotificationsOptions = {}) 
 
         ws.onmessage = (event) => {
           try {
-            const notification: EmmaNotification = JSON.parse(event.data);
+            const data = JSON.parse(event.data);
+
+            // Ignore ping/pong messages and messages without required fields
+            if (data.type === "ping" || data.type === "pong") {
+              return;
+            }
+
+            // Validate it's a real notification with required fields
+            if (!data.id || !data.title) {
+              return;
+            }
+
+            const notification = data as EmmaNotification;
             setNotifications((prev) => [notification, ...prev].slice(0, 100));
             if (!notification.is_read) {
               setUnreadCount((prev) => prev + 1);
             }
           } catch (err) {
-            console.warn("Failed to parse notification:", err);
+            // Silently ignore parse errors (keepalive messages, etc.)
           }
         };
 

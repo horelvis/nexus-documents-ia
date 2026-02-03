@@ -54,16 +54,18 @@ export function NotificationBell() {
             <p className="text-sm">No hay notificaciones</p>
           </div>
         ) : (
-          <ScrollArea className="max-h-[400px]">
-            <ul className="divide-y divide-border">
-              {notifications.map((notif) => (
-                <NotificationItem
-                  key={notif.id}
-                  notification={notif}
-                  onMarkRead={() => markAsRead(notif.id)}
-                />
-              ))}
-            </ul>
+          <ScrollArea className="h-[400px]">
+            <div className="divide-y divide-border">
+              {notifications
+                .filter((n) => n.id && n.title) // Filter out invalid notifications
+                .map((notif) => (
+                  <NotificationItem
+                    key={notif.id}
+                    notification={notif}
+                    onMarkRead={() => markAsRead(notif.id)}
+                  />
+                ))}
+            </div>
           </ScrollArea>
         )}
       </PopoverContent>
