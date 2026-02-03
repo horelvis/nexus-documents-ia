@@ -241,6 +241,116 @@ Layer 6: Semantic Cache ◄── Redis (~90% latency reduction)
 
 ---
 
+## Verified Generation (Generación Verificada)
+
+Emma puede generar documentos verificados donde cada afirmación se valida contra fuentes documentales.
+
+### Flow
+
+```
+User → "Verificar: [topic]" + attachments →
+  EmmaChat.handleVerifiedGeneration() →
+    POST /api/v1/emma/verified/generate/stream (SSE) →
+      Claim Extraction → Evidence Search → Verification → Synthesis
+```
+
+### Frontend Commands
+
+| Trigger | Action |
+|---------|--------|
+| `/verificar [topic]` | Slash command in chat input |
+| Button "Verificar" | Action toolbar (requires attachments) |
+
+### SSE Events
+
+| Event | Description |
+|-------|-------------|
+| `claim_extracted` | New claim identified from source |
+| `verification_started` | Searching evidence for claim |
+| `claim_verified` | Claim confirmed with evidence |
+| `claim_corrected` | Claim modified based on evidence |
+| `claim_rejected` | Claim rejected (insufficient evidence) |
+| `synthesis_started` | Generating final document |
+| `synthesis_complete` | Final verified document ready |
+
+### Export Formats
+
+- **PDF**: `GET /api/v1/emma/verified/session/{id}/pdf`
+- **DOCX**: `GET /api/v1/emma/verified/session/{id}/docx`
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `emma-agent-service/app/services/verified_generation/service.py` | Main service |
+| `emma-agent-service/app/services/verified_generation/claim_extractor.py` | Extract claims |
+| `emma-agent-service/app/services/verified_generation/claim_verifier.py` | Verify claims |
+| `emma-agent-service/app/api/verified_generation.py` | REST endpoints |
+| `frontend/.../components/emma-chat/VerifiedDocumentResult.tsx` | UI component |
+
+---
+
+## Predictive Analysis (Análisis Predictivo)
+
+Emma analiza factores jurídicos y predice probabilidades de resultados legales.
+
+### Flow
+
+```
+User → "Predecir: [case]" + attachments →
+  EmmaChat.handlePredictiveAnalysis() →
+    POST /api/v1/emma/predictive/analyze/stream (SSE) →
+      Factor Extraction → Evidence Weighting → Outcome Synthesis
+```
+
+### Frontend Commands
+
+| Trigger | Action |
+|---------|--------|
+| `/predecir [case]` | Slash command in chat input |
+| Button "Predecir" (⚖️) | Action toolbar (requires attachments) |
+
+### SSE Events
+
+| Event | Description |
+|-------|-------------|
+| `factor_extracted` | New legal factor identified |
+| `factor_verification_started` | Searching evidence |
+| `factor_weighted` | Factor weighted with evidence |
+| `factor_rejected` | Factor rejected (insufficient evidence) |
+| `synthesis_started` | Aggregating prediction |
+| `prediction_complete` | Final prediction ready |
+
+### Prediction Output
+
+```python
+PredictionResult:
+    probability: float          # 0.0-1.0
+    primary_outcome: str        # "favorable" | "unfavorable" | "mixed"
+    outcome_probabilities: Dict # {favorable: 0.7, unfavorable: 0.3}
+    factors: List[WeightedFactor]
+    recommendation: str         # Natural language recommendation (Spanish)
+    disclaimer: str
+```
+
+### Export Formats
+
+- **PDF**: `GET /api/v1/emma/predictive/analysis/{session_id}/pdf`
+- **DOCX**: `GET /api/v1/emma/predictive/analysis/{session_id}/docx`
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `emma-agent-service/app/services/predictive_analysis/service.py` | Main service |
+| `emma-agent-service/app/services/predictive_analysis/factor_extractor.py` | Extract factors |
+| `emma-agent-service/app/services/predictive_analysis/prediction_synthesizer.py` | Synthesis |
+| `emma-agent-service/app/api/predictive_analysis.py` | REST endpoints |
+| `emma-agent-service/config/prompts/predictive_prompts.yaml` | LLM prompts |
+| `frontend/.../components/emma-chat/PredictionResult.tsx` | UI component |
+
+---
+
 ## vLLM Configuration
 
 ### Environment Variables

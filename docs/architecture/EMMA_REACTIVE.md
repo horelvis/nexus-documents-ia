@@ -331,12 +331,42 @@ class BaseChannel(ABC):
     async def health_check() -> Dict
 ```
 
-| Channel | Implementation | Provider |
-|---------|---------------|----------|
-| **Telegram** | `TelegramChannel` | Telegram Bot API |
-| **WhatsApp** | `WhatsAppChannel` | Twilio API |
-| **Slack** | `SlackChannel` | Slack Web API |
-| **Email** | `EmailChannel` | SMTP via aiosmtplib |
+| Channel | Implementation | Provider | Status |
+|---------|---------------|----------|--------|
+| **Telegram** | `TelegramChannel` | Telegram Bot API | ✅ Ready |
+| **WhatsApp** | `WhatsAppChannel` | Twilio API | ✅ Ready |
+| **Slack** | `SlackChannel` | Slack Web API | ✅ **Active** |
+| **Email** | `EmailChannel` | SMTP via aiosmtplib | ✅ Ready |
+
+### Slack Integration (Recommended for Notifications)
+
+Slack is the recommended channel for automatic notifications due to its team-friendly design.
+
+**Setup:**
+1. Create a Slack App at https://api.slack.com/apps
+2. Add Bot Token Scopes: `chat:write`, `channels:read`
+3. Install to workspace → Copy Bot Token (`xoxb-...`)
+4. Create channel `#emma-alerts` (or custom name)
+5. Invite bot to channel: `/invite @YourBotName`
+
+**Register as notification channel:**
+```bash
+curl -X POST http://localhost:8009/channels \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: $API_KEY" \
+  -d '{
+    "tenant_id": "YOUR_TENANT_ID",
+    "channel_type": "slack",
+    "channel_name": "emma-alerts",
+    "config": {
+      "bot_token": "xoxb-...",
+      "default_channel": "#emma-alerts"
+    },
+    "is_notification_channel": true
+  }'
+```
+
+**Heartbeat delivers to Slack** automatically when configured as notification channel.
 
 ### Inbound Message Flow
 

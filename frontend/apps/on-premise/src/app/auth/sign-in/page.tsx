@@ -16,9 +16,9 @@ import {
   IconCpu,
   IconBrain,
   IconScale,
-  IconRoute,
-  IconPlugConnected,
-  IconSearch
+  IconFileCheck,
+  IconBell,
+  IconBrandSlack
 } from '@tabler/icons-react'
 import { Button } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
@@ -58,12 +58,12 @@ export default function SignInPage() {
   }
 
   const features = [
-    { icon: IconCpu, label: 'vLLM + Qwen3', desc: 'GPU local, sin APIs externas' },
+    { icon: IconCpu, label: 'vLLM Local', desc: 'Qwen 7B, GPU privada' },
     { icon: IconBrain, label: 'Emma AI', desc: '12 agentes especializados' },
-    { icon: IconRoute, label: 'SLM Router', desc: 'Query planning con TOON' },
-    { icon: IconSearch, label: 'RAG 7 Capas', desc: 'Búsqueda híbrida + reranking' },
-    { icon: IconScale, label: 'BOE Legal', desc: '47+ leyes españolas indexadas' },
-    { icon: IconPlugConnected, label: 'Conectores', desc: 'Alfresco, SharePoint, DB' },
+    { icon: IconFileCheck, label: 'Verificar', desc: 'Claims verificados con fuentes' },
+    { icon: IconScale, label: 'Predecir', desc: 'Análisis predictivo legal' },
+    { icon: IconBell, label: 'Heartbeat', desc: 'Insights proactivos 24/7' },
+    { icon: IconBrandSlack, label: 'Multi-Canal', desc: 'Slack, Telegram, Email' },
   ]
 
   return (
