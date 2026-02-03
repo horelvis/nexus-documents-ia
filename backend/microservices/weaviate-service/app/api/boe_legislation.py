@@ -450,17 +450,22 @@ class BOEDownloaderService:
                         doc_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"boe:{boe_id}"))  # Deterministic UUID from boe_id
                         now = datetime.now()
 
+                        # Extract short name (LOE, ET, RGPD, etc.) to include in title and keywords
+                        short_name = extract_law_short_name(title, boe_id)
+                        # Include short_name in title for better LLM comprehension
+                        title_with_short = f"{title} ({short_name})" if short_name and short_name not in title else title
+
                         document = PublicDocumentCreate(
                             id=doc_id,
-                            title=title,
+                            title=title_with_short,
                             content=content[:100000],  # Parent doc summary
-                            summary=title[:500],
+                            summary=title_with_short[:500],
                             category=category,
                             jurisdiction=Jurisdiction.SPAIN,
                             legal_reference=boe_id,
                             source_url=get_text(metadatos, 'url_html_consolidada') or get_text(metadatos, 'url_eli'),
                             source_name="BOE",
-                            keywords=materias[:10] + title.split()[:5],
+                            keywords=[short_name] + materias[:10] if short_name else materias[:10],
                             topics=materias[:5],
                             verified=True,
                             version="1.0",
@@ -637,8 +642,10 @@ LAW_SHORT_NAMES = {
     "BOE-A-1960-10906": "LPH",       # Ley de Propiedad Horizontal
     "BOE-A-1946-2453": "LH",         # Ley Hipotecaria
     "BOE-A-2007-19884": "PGC",       # Plan General de Contabilidad
-    "BOE-A-2020-17264": "LOMLOE",    # Ley de Educación
+    "BOE-A-2006-7899": "LOE",        # Ley Orgánica de Educación (2006)
+    "BOE-A-2020-17264": "LOMLOE",    # Modificación LOE (2020)
     "BOE-A-2001-24515": "LOU",       # Ley Orgánica de Universidades
+    "BOE-A-1985-12978": "LODE",      # Ley Orgánica del Derecho a la Educación
 }
 
 

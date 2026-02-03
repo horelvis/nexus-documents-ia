@@ -10,7 +10,7 @@
 export interface GraphNode {
   id: string
   label: string
-  node_type: "folder" | "document"
+  node_type: "folder" | "document" | "law"
   // folder-specific
   folder_type?: string
   doc_count?: number
@@ -18,12 +18,17 @@ export interface GraphNode {
   // document-specific
   semantic_type?: string
   file_path?: string
+  // law-specific (legal graph)
+  domain?: string
+  status?: string
+  title?: string
 }
 
 export interface GraphEdge {
   id: string
   source: string
   target: string
+  label?: string
 }
 
 export interface GraphStructure {
@@ -37,3 +42,5 @@ export interface TreeStats {
   types_breakdown: Record<string, number>
   domains_breakdown: Record<string, number>
 }
+
+export type GraphViewMode = "structural" | "legal"

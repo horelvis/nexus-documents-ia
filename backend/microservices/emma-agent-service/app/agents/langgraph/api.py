@@ -148,6 +148,7 @@ async def execute_langgraph_query(
     thread_id: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
     config: Optional[ExecutionConfig] = None,
+    conversation_history: Optional[List[Dict[str, Any]]] = None,
 ) -> LangGraphQueryResponse:
     """
     Execute a RAG query using LangGraph.

@@ -113,11 +113,32 @@ class SlackChannel(BaseChannel):
 
         logger.debug(f"Slack text cleaned: '{raw_text}' -> '{clean_text}'")
 
+        # Detect if this is a direct message or group/channel
+        channel_type_raw = event.get("channel_type", "")
+        is_dm = channel_type_raw == "im"
+        is_group = not is_dm  # channel or group
+
+        # Check if bot was mentioned in the original text
+        is_mentioned = False
+        if self._bot_user_id:
+            is_mentioned = f"<@{self._bot_user_id}>" in raw_text
+
+        # Also check for Emma name mentions (conversational)
+        emma_mentioned = any(
+            pattern in raw_text.lower()
+            for pattern in ["emma", "oye emma", "hey emma"]
+        )
+        is_mentioned = is_mentioned or emma_mentioned
+
         return {
             "sender_id": sender_id,
             "content": clean_text,
             "message_id": message_id,
             "channel_id": event.get("channel", ""),
+            "chat_type": "dm" if is_dm else "channel",
+            "is_group": is_group,
+            "group_name": "",  # Would need API call to get channel name
+            "is_mentioned": is_mentioned,
             "raw": webhook_data,
         }
 

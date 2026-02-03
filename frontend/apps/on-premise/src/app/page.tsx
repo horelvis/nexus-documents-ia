@@ -13,11 +13,11 @@ import { IconBrain, IconLoader2 } from '@tabler/icons-react'
 import {
   SidebarProvider,
   SidebarInset,
-  SidebarTrigger,
 } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { EmmaChat } from '@/components/emma-chat'
 import { AppSidebar } from '@/components/layout/app-sidebar'
+import { PageHeader } from '@/components/layout/page-header'
 import { ConversationSidebar } from '@/components/conversation-sidebar'
 import { conversationService } from '@/lib/services/conversation.service'
 import { EmmaMessage } from '@/lib/types/emma'
@@ -133,16 +133,12 @@ export default function EmmaPage() {
       {/* Main Content */}
       <SidebarInset>
         {/* Header */}
-        <header className="h-14 border-b flex items-center px-4 shrink-0">
+        <PageHeader>
           <div className="flex items-center gap-2">
-            <SidebarTrigger className="-ml-1" />
-            <div className="h-4 w-px bg-border" />
-            <div className="flex items-center gap-2">
-              <IconBrain className="h-5 w-5 text-primary" />
-              <span className="font-semibold">Emma</span>
-            </div>
+            <IconBrain className="h-5 w-5 text-primary" />
+            <span className="font-semibold">Emma</span>
           </div>
-        </header>
+        </PageHeader>
 
         {/* Main Content Area - Emma Chat */}
         <main className="flex-1 min-h-0 overflow-hidden">

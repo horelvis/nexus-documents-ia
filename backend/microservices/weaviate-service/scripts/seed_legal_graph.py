@@ -291,6 +291,64 @@ SPANISH_LAWS = [
         keywords=["patentes", "invenciones", "propiedad industrial"],
     ),
 
+    # EDUCACIÓN
+    LegalLaw(
+        boe_id="BOE-A-2006-7899",
+        title="Ley Orgánica 2/2006, de 3 de mayo, de Educación",
+        short_name="LOE",
+        domain=LegalDomain.EDUCATION,
+        publication_date="2006-05-04",
+        keywords=["educación", "enseñanza", "escolar", "centros educativos", "profesorado", "alumnado"],
+    ),
+    LegalLaw(
+        boe_id="BOE-A-2020-17264",
+        title="Ley Orgánica 3/2020, de 29 de diciembre, por la que se modifica la Ley Orgánica 2/2006, de 3 de mayo, de Educación",
+        short_name="LOMLOE",
+        domain=LegalDomain.EDUCATION,
+        publication_date="2020-12-30",
+        keywords=["educación", "LOMLOE", "reforma educativa", "currículo", "evaluación"],
+    ),
+    LegalLaw(
+        boe_id="BOE-A-2023-7500",
+        title="Ley Orgánica 2/2023, de 22 de marzo, del Sistema Universitario",
+        short_name="LOSU",
+        domain=LegalDomain.EDUCATION,
+        publication_date="2023-03-23",
+        keywords=["universidad", "universitario", "grado", "máster", "doctorado", "investigación"],
+    ),
+    LegalLaw(
+        boe_id="BOE-A-2022-5139",
+        title="Real Decreto 243/2022, de 5 de abril, por el que se establecen la ordenación y las enseñanzas mínimas del Bachillerato",
+        short_name="RD Bachillerato",
+        domain=LegalDomain.EDUCATION,
+        publication_date="2022-04-06",
+        keywords=["bachillerato", "enseñanza secundaria", "currículo", "materias"],
+    ),
+    LegalLaw(
+        boe_id="BOE-A-2022-4975",
+        title="Real Decreto 217/2022, de 29 de marzo, por el que se establece la ordenación y las enseñanzas mínimas de la Educación Secundaria Obligatoria",
+        short_name="RD ESO",
+        domain=LegalDomain.EDUCATION,
+        publication_date="2022-03-30",
+        keywords=["ESO", "secundaria obligatoria", "currículo", "competencias", "evaluación"],
+    ),
+    LegalLaw(
+        boe_id="BOE-A-1985-12978",
+        title="Ley Orgánica 8/1985, de 3 de julio, reguladora del Derecho a la Educación",
+        short_name="LODE",
+        domain=LegalDomain.EDUCATION,
+        publication_date="1985-07-04",
+        keywords=["derecho educación", "libertad enseñanza", "centros concertados", "participación"],
+    ),
+    LegalLaw(
+        boe_id="BOE-A-2022-2296",
+        title="Real Decreto 95/2022, de 1 de febrero, por el que se establece la ordenación y las enseñanzas mínimas de la Educación Infantil",
+        short_name="RD Infantil",
+        domain=LegalDomain.EDUCATION,
+        publication_date="2022-02-02",
+        keywords=["educación infantil", "preescolar", "primer ciclo", "segundo ciclo"],
+    ),
+
     # COMERCIO Y CONSUMIDORES
     LegalLaw(
         boe_id="BOE-A-2007-20555",
@@ -388,33 +446,17 @@ async def seed_laws(domain: str = None, force: bool = False) -> None:
         except ValueError:
             logger.warning(f"Unknown domain: {domain}, seeding all laws")
 
-    # Seed laws
+    # Seed laws (always upsert via MERGE — safe to re-run)
     success_count = 0
     for law in laws_to_seed:
-        # Check if exists
-        existing = await legal_graph.get_law(law.boe_id)
-        if existing and not force:
-            logger.info(f"⏭️ Skipping existing law: {law.short_name}")
-            continue
-
         success = await legal_graph.add_law(law)
         if success:
             success_count += 1
 
-            # Add key articles if available
-            if law.boe_id in KEY_ARTICLES:
-                for article_num, title, summary in KEY_ARTICLES[law.boe_id]:
-                    await legal_graph.add_article(
-                        law_boe_id=law.boe_id,
-                        article_number=article_num,
-                        title=title,
-                        summary=summary,
-                    )
-
     logger.info(f"✅ Seeded {success_count}/{len(laws_to_seed)} laws")
 
     # Print stats
-    stats = await legal_graph.get_stats()
+    stats = await legal_graph.get_graph_stats()
     logger.info(f"📊 Graph stats: {stats}")
 
 

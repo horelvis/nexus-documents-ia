@@ -439,6 +439,154 @@ async def suggest_applicable_laws(
     }
 
 
+@router.get("/graph/structure")
+async def get_legal_graph_structure():
+    """Get full legal graph structure (nodes + edges) for D3 visualization."""
+    from app.services.sil.legal_graph_service import legal_graph
+
+    try:
+        await legal_graph.initialize()
+        structure = await legal_graph.get_graph_structure()
+        return structure
+    except Exception as e:
+        logger.error(f"Failed to get legal graph structure: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/graph/enriched")
+async def get_enriched_legal_graph():
+    """
+    Get enriched legal graph with domain clusters, topics, and metrics.
+
+    Returns:
+    - nodes: Law nodes + Domain cluster nodes + Topic nodes
+    - edges: Law relationships + Domain membership + Topic coverage
+    - stats: Graph statistics (hub laws, edge types, domain counts)
+
+    Node types:
+    - law: Actual legislation (BOE documents)
+    - domain: Cluster nodes grouping laws by legal domain
+    - topic: Shared topics/keywords connecting multiple laws
+
+    Edge types:
+    - MODIFIES, REFERENCES, DEROGATES: Law-to-law relationships
+    - CONTAINS: Domain-to-law membership
+    - COVERS: Topic-to-law coverage
+    """
+    from app.services.sil.legal_graph_service import legal_graph
+
+    try:
+        await legal_graph.initialize()
+        structure = await legal_graph.get_enriched_graph_structure()
+        return structure
+    except Exception as e:
+        logger.error(f"Failed to get enriched legal graph: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/graph/search")
+async def search_legal_graph(
+    q: Optional[str] = Query(None, description="Search query (matches title, short_name, boe_id)"),
+    domain: Optional[str] = Query(None, description="Filter by domain (labor, fiscal, civil, etc.)"),
+    boe_id: Optional[str] = Query(None, description="Get specific law and its neighbors"),
+    include_neighbors: bool = Query(True, description="Include connected laws in results"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum results"),
+):
+    """
+    Search the legal graph for laws matching criteria.
+
+    Use cases:
+    - Search by keyword: ?q=despido
+    - Filter by domain: ?domain=labor
+    - Get law and neighbors: ?boe_id=BOE-A-2015-11430
+    - Combined: ?q=contrato&domain=civil
+
+    Returns filtered graph structure with matching nodes and their connections.
+    """
+    from app.services.sil.legal_graph_service import legal_graph
+
+    try:
+        await legal_graph.initialize()
+        structure = await legal_graph.get_graph_structure()
+        nodes = structure.get("nodes", [])
+        edges = structure.get("edges", [])
+
+        if not nodes:
+            return {"nodes": [], "edges": [], "query": {"q": q, "domain": domain, "boe_id": boe_id}}
+
+        matched_ids = set()
+
+        # Filter by specific BOE ID
+        if boe_id:
+            for node in nodes:
+                if node.get("id") == boe_id:
+                    matched_ids.add(boe_id)
+                    break
+
+        # Filter by domain
+        if domain:
+            domain_lower = domain.lower()
+            for node in nodes:
+                if node.get("domain", "").lower() == domain_lower:
+                    matched_ids.add(node.get("id"))
+
+        # Filter by search query
+        if q:
+            q_lower = q.lower()
+            for node in nodes:
+                node_id = node.get("id", "").lower()
+                label = node.get("label", "").lower()
+                title = node.get("title", "").lower()
+
+                if q_lower in node_id or q_lower in label or q_lower in title:
+                    matched_ids.add(node.get("id"))
+
+        # If no filters, return all (limited)
+        if not q and not domain and not boe_id:
+            matched_ids = {n.get("id") for n in nodes[:limit]}
+
+        # Include neighbors if requested
+        if include_neighbors and matched_ids:
+            neighbor_ids = set()
+            for edge in edges:
+                src = edge.get("source")
+                tgt = edge.get("target")
+                if src in matched_ids:
+                    neighbor_ids.add(tgt)
+                if tgt in matched_ids:
+                    neighbor_ids.add(src)
+            matched_ids.update(neighbor_ids)
+
+        # Limit results
+        matched_ids = set(list(matched_ids)[:limit])
+
+        # Filter nodes and edges
+        filtered_nodes = [n for n in nodes if n.get("id") in matched_ids]
+        filtered_edges = [
+            e for e in edges
+            if e.get("source") in matched_ids and e.get("target") in matched_ids
+        ]
+
+        # Generate deep link URL for frontend
+        focus_boe = boe_id or (list(matched_ids)[0] if matched_ids else None)
+
+        return {
+            "nodes": filtered_nodes,
+            "edges": filtered_edges,
+            "query": {
+                "q": q,
+                "domain": domain,
+                "boe_id": boe_id,
+                "matched_count": len(filtered_nodes),
+            },
+            "deep_link": f"/admin/knowledge-tree?focus={focus_boe}" if focus_boe else None,
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to search legal graph: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/stats", response_model=LegalGraphStats)
 async def get_legal_graph_stats():
     """Get statistics about the legal knowledge graph."""

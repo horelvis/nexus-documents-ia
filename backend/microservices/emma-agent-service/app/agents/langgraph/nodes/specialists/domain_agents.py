@@ -114,25 +114,23 @@ def _make_boe_tool(domain_filter: str) -> StructuredTool:
 
     async def _boe_search(query: str, limit: int = 5) -> str:
         try:
-            from app.services.public_knowledge_service import public_knowledge_service
+            from app.clients.weaviate_client import get_weaviate_client
 
-            if not public_knowledge_service._initialized:
-                await public_knowledge_service.initialize()
-
-            results = await public_knowledge_service.search(
+            client = get_weaviate_client()
+            results = await client.search_public_knowledge(
                 query=query,
                 limit=limit,
-                filters={"domain": domain_filter},
+                domain=domain_filter,
             )
 
             if not results:
                 return f"No se encontraron resultados legislativos ({domain_filter}) para: '{query}'"
 
             formatted = [f"**Resultados BOE ({domain_filter})**: '{query}'\n"]
-            for i, doc in enumerate(results, 1):
-                title = doc.get("title", "Sin título")
-                boe_id = doc.get("boe_id", "")
-                content = doc.get("content", "")[:200]
+            for i, result in enumerate(results, 1):
+                title = result.metadata.get("title", "Sin título")
+                boe_id = result.metadata.get("boe_id", "")
+                content = result.content[:200]
                 ref = f" ({boe_id})" if boe_id else ""
                 formatted.append(f"{i}. **{title}**{ref}\n   {content}...\n")
 

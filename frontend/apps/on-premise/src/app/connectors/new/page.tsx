@@ -25,7 +25,6 @@ import {
 import {
   SidebarProvider,
   SidebarInset,
-  SidebarTrigger,
   Card,
   CardContent,
   CardDescription,
@@ -44,6 +43,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth-context'
 import { AppSidebar } from '@/components/layout/app-sidebar'
+import { PageHeader } from '@/components/layout/page-header'
 import {
   connectorService,
   connectorNames,
@@ -184,9 +184,7 @@ export default function NewConnectorPage() {
 
       <SidebarInset>
         {/* Header */}
-        <header className="h-14 border-b flex items-center gap-2 px-4 shrink-0">
-          <SidebarTrigger className="-ml-1" />
-          <div className="h-4 w-px bg-border" />
+        <PageHeader>
           <Link href="/connectors" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
             <IconChevronLeft className="h-4 w-4" />
             <IconPlug className="h-4 w-4" />
@@ -225,7 +223,7 @@ export default function NewConnectorPage() {
               </>
             )}
           </div>
-        </header>
+        </PageHeader>
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-6">

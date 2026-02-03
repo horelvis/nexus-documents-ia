@@ -423,6 +423,69 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # Emma Reactive Worker - Event listener for reactive AI
+  # =============================================================================
+  # Listens to Redis Streams events and dispatches triggers/actions
+  emma-reactive-worker:
+    build:
+      context: ../microservices/emma-agent-service
+      dockerfile: Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+      emma-agent-service:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - EVENT_CONSUMER_GROUP=emma_reactive
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
+      - VLLM_ENABLED=${VLLM_ENABLED:-true}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      - SINGLE_TENANT_MODE=true
+      - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
+      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CREDENTIALS_ENCRYPTION_KEY=${CREDENTIALS_ENCRYPTION_KEY:-}
+    volumes:
+      - ../microservices/emma-agent-service/app:/app/app:ro
+      - ../microservices/emma-agent-service/config:/app/config:ro
+    command: ["python", "-m", "app.workers.event_listener"]
+    restart: unless-stopped
+
+  # =============================================================================
+  # ngrok - Tunnel for webhooks (Slack, Telegram, WhatsApp)
+  # =============================================================================
+  # Exposes emma-agent-service to the internet for channel webhook callbacks.
+  # Requires NGROK_AUTHTOKEN from https://dashboard.ngrok.com/get-started/your-authtoken
+  # After startup, check logs: docker compose logs ngrok | grep "url="
+  ngrok:
+    image: ngrok/ngrok:latest
+    command: ["http", "emma-agent-service:8009", "--log=stdout"]
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - backend-network
+    ports:
+      - "4040:4040"  # ngrok web UI (inspect requests)
+    restart: unless-stopped
+    profiles:
+      - webhooks  # Only starts with: docker compose --profile webhooks up
+
+  # =============================================================================
   # MCP Alfresco Server - Alfresco sync, indexing & MCP tools
   # =============================================================================
   mcp-alfresco:

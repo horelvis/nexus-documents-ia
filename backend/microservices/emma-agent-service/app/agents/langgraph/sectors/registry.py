@@ -63,7 +63,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
                 r"(?:[Ee]xpediente\s+(?:n[úu]m\.?\s*)?[\w/-]+)",
             ],
         },
-        graph_name="legal_graph",
+        graph_name="knowledge_graph_public",
         graph_schema="config/graphs/legal_graph_schema.cypher",
         system_prompt_key="sectors.legal",
         men_domain="legal",

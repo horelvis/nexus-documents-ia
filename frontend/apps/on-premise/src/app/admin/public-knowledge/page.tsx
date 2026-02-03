@@ -26,7 +26,6 @@ import {
 import {
   SidebarProvider,
   SidebarInset,
-  SidebarTrigger,
   Table,
   TableBody,
   TableCell,
@@ -50,6 +49,7 @@ import {
 import { useApiClient } from "@/lib/api-client"
 import { useAuth } from "@/contexts/auth-context"
 import { AppSidebar } from "@/components/layout/app-sidebar"
+import { PageHeader } from '@/components/layout/page-header'
 
 interface PublicKnowledgeStats {
   total_documents: number
@@ -281,9 +281,7 @@ export default function PublicKnowledgePage() {
 
       <SidebarInset>
         {/* Header */}
-        <header className="h-14 border-b flex items-center gap-2 px-4 shrink-0">
-          <SidebarTrigger className="-ml-1" />
-          <div className="h-4 w-px bg-border" />
+        <PageHeader>
           <Link href="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
             <IconChevronLeft className="h-4 w-4" />
             <IconBrain className="h-5 w-5 text-primary" />
@@ -292,7 +290,7 @@ export default function PublicKnowledgePage() {
           <div className="h-4 w-px bg-border" />
           <IconDatabase className="h-4 w-4 text-muted-foreground" />
           <span className="text-muted-foreground">Base de Conocimiento</span>
-        </header>
+        </PageHeader>
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-6">

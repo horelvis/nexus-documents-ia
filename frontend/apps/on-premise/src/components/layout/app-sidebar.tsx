@@ -21,6 +21,7 @@ import {
   IconDatabase,
   IconDashboard,
   IconBinaryTree,
+  IconMessageCircle,
 } from '@tabler/icons-react'
 import {
   Sidebar,
@@ -102,6 +103,11 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       title: 'Knowledge Tree',
       href: '/admin/knowledge-tree',
       icon: IconBinaryTree,
+    },
+    {
+      title: 'Canales',
+      href: '/emma/channels',
+      icon: IconMessageCircle,
     },
   ]
 

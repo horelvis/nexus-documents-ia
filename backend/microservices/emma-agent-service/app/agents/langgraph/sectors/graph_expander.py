@@ -97,11 +97,14 @@ def _build_cypher_query(graph_name: str, entity_type: str, value: str) -> Option
     # Escape single quotes in value
     safe_value = value.replace("'", "\\'")
 
-    # Generic pattern: find node matching the entity and its neighbors
+    # Search actual LegalLaw/LegalArticle node properties indexed by legal_graph_service
     return (
         f"SELECT * FROM cypher('{graph_name}', $$ "
         f"MATCH (n)-[r]-(m) "
-        f"WHERE n.name =~ '(?i).*{safe_value}.*' OR n.reference =~ '(?i).*{safe_value}.*' "
+        f"WHERE n.title =~ '(?i).*{safe_value}.*' "
+        f"OR n.short_name =~ '(?i).*{safe_value}.*' "
+        f"OR n.boe_id =~ '(?i).*{safe_value}.*' "
+        f"OR n.domain =~ '(?i).*{safe_value}.*' "
         f"RETURN n, type(r) as rel, m LIMIT 10 "
         f"$$) AS (n agtype, rel agtype, m agtype)"
     )

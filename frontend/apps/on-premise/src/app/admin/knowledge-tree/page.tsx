@@ -31,6 +31,7 @@ import {
   IconZoomIn,
   IconZoomOut,
   IconFocusCentered,
+  IconScale,
 } from "@tabler/icons-react"
 import {
   SidebarProvider,
@@ -43,7 +44,7 @@ import {
 import { useApiClient } from "@/lib/api-client"
 import { useAuth } from "@/contexts/auth-context"
 import { AppSidebar } from "@/components/layout/app-sidebar"
-import type { GraphStructure, TreeStats } from "@/lib/services/knowledge-tree.service"
+import type { GraphStructure, TreeStats, GraphViewMode } from "@/lib/services/knowledge-tree.service"
 
 // ============================================================================
 // Types
@@ -52,40 +53,63 @@ import type { GraphStructure, TreeStats } from "@/lib/services/knowledge-tree.se
 interface GraphNode extends SimulationNodeDatum {
   id: string
   label: string
-  nodeType: "folder" | "document"
+  nodeType: "folder" | "document" | "law"
   folderType?: string
   semanticType?: string
   docCount?: number
+  // Legal graph fields
+  domain?: string
+  status?: string
+  title?: string
 }
 
 interface GraphLink extends SimulationLinkDatum<GraphNode> {
   id: string
+  label?: string
 }
 
 // ============================================================================
-// Color palette (Logseq-inspired)
+// Color palettes
 // ============================================================================
 
 const FOLDER_COLORS: Record<string, string> = {
-  expedientes: "#6366f1",    // indigo
-  "exp.conf": "#8b5cf6",    // violet
-  registros: "#06b6d4",     // cyan
-  virtual: "#64748b",       // slate
-  unknown: "#94a3b8",       // gray
+  expedientes: "#6366f1",
+  "exp.conf": "#8b5cf6",
+  registros: "#06b6d4",
+  virtual: "#64748b",
+  unknown: "#94a3b8",
 }
 
 const DOC_COLORS: Record<string, string> = {
-  adjuntos: "#3b82f6",      // blue
-  escrituras: "#f59e0b",    // amber
-  contratos: "#a855f7",     // purple
-  facturas: "#22c55e",      // green
-  nominas: "#ec4899",       // pink
-  plantillas: "#14b8a6",    // teal
-  generados: "#f97316",     // orange
-  unknown: "#6b7280",       // gray
+  adjuntos: "#3b82f6",
+  escrituras: "#f59e0b",
+  contratos: "#a855f7",
+  facturas: "#22c55e",
+  nominas: "#ec4899",
+  plantillas: "#14b8a6",
+  generados: "#f97316",
+  unknown: "#6b7280",
+}
+
+const LAW_DOMAIN_COLORS: Record<string, string> = {
+  labor: "#ef4444",
+  fiscal: "#f59e0b",
+  privacy: "#8b5cf6",
+  mercantile: "#06b6d4",
+  civil: "#3b82f6",
+  administrative: "#64748b",
+  compliance: "#f97316",
+  ip: "#ec4899",
+  commerce: "#22c55e",
+  real_estate: "#14b8a6",
+  education: "#a855f7",
+  general: "#94a3b8",
 }
 
 function getNodeColor(node: GraphNode): string {
+  if (node.nodeType === "law") {
+    return LAW_DOMAIN_COLORS[node.domain || "general"] || LAW_DOMAIN_COLORS.general
+  }
   if (node.nodeType === "folder") {
     return FOLDER_COLORS[node.folderType || "unknown"] || FOLDER_COLORS.unknown
   }
@@ -93,6 +117,7 @@ function getNodeColor(node: GraphNode): string {
 }
 
 function getNodeRadius(node: GraphNode): number {
+  if (node.nodeType === "law") return 14
   if (node.nodeType === "folder") {
     const count = node.docCount || 0
     return Math.max(8, Math.min(22, 8 + Math.sqrt(count) * 2.5))
@@ -107,9 +132,11 @@ function getNodeRadius(node: GraphNode): number {
 function ForceGraph({
   nodes,
   links,
+  viewMode,
 }: {
   nodes: GraphNode[]
   links: GraphLink[]
+  viewMode: GraphViewMode
 }) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -140,7 +167,6 @@ function ForceGraph({
     svg.call(zoomBehavior)
     svg.call(zoomBehavior.transform, zoomIdentity.translate(width / 2, height / 2).scale(0.6))
 
-    // Store zoom for controls
     ;(svgRef.current as any).__zoomBehavior = zoomBehavior
 
     // Links
@@ -150,9 +176,29 @@ function ForceGraph({
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", "#334155")
-      .attr("stroke-opacity", 0.15)
-      .attr("stroke-width", 0.5)
+      .attr("stroke", (d: any) => d.label ? "#475569" : "#334155")
+      .attr("stroke-opacity", (d: any) => d.label ? 0.4 : 0.15)
+      .attr("stroke-width", (d: any) => d.label ? 1.5 : 0.5)
+      .attr("stroke-dasharray", (d: any) => {
+        if (d.label === "DEROGATES") return "4 2"
+        if (d.label === "MODIFIES") return "2 2"
+        return "none"
+      })
+
+    // Edge labels (only for legal graph)
+    if (viewMode === "legal") {
+      g.append("g")
+        .attr("class", "edge-labels")
+        .selectAll("text")
+        .data(links.filter((l) => l.label))
+        .join("text")
+        .text((d) => d.label || "")
+        .attr("font-size", 7)
+        .attr("fill", "#64748b")
+        .attr("text-anchor", "middle")
+        .attr("pointer-events", "none")
+        .attr("font-family", "system-ui, sans-serif")
+    }
 
     // Nodes
     const nodeGroup = g
@@ -163,16 +209,15 @@ function ForceGraph({
       .join("circle")
       .attr("r", (d) => getNodeRadius(d))
       .attr("fill", (d) => getNodeColor(d))
-      .attr("stroke", (d) => d.nodeType === "folder" ? "rgba(255,255,255,0.3)" : "none")
-      .attr("stroke-width", (d) => d.nodeType === "folder" ? 1.5 : 0)
+      .attr("stroke", (d) => d.nodeType === "document" ? "none" : "rgba(255,255,255,0.3)")
+      .attr("stroke-width", (d) => d.nodeType === "document" ? 0 : 1.5)
       .attr("cursor", "pointer")
-      .attr("opacity", (d) => d.nodeType === "folder" ? 0.9 : 0.7)
+      .attr("opacity", (d) => d.nodeType === "document" ? 0.7 : 0.9)
       .on("mouseenter", function (event, d) {
         select(this)
           .attr("opacity", 1)
           .attr("stroke", "#ffffff")
           .attr("stroke-width", 2)
-        // Highlight connected
         linkGroup
           .attr("stroke-opacity", (l: any) =>
             l.source.id === d.id || l.target.id === d.id ? 0.6 : 0.05
@@ -199,25 +244,27 @@ function ForceGraph({
         setTooltipPos({ x: event.clientX, y: event.clientY })
       })
       .on("mouseleave", function () {
-        nodeGroup.attr("opacity", (d: any) => d.nodeType === "folder" ? 0.9 : 0.7)
-          .attr("stroke", (d: any) => d.nodeType === "folder" ? "rgba(255,255,255,0.3)" : "none")
-          .attr("stroke-width", (d: any) => d.nodeType === "folder" ? 1.5 : 0)
+        nodeGroup.attr("opacity", (d: any) => d.nodeType === "document" ? 0.7 : 0.9)
+          .attr("stroke", (d: any) => d.nodeType === "document" ? "none" : "rgba(255,255,255,0.3)")
+          .attr("stroke-width", (d: any) => d.nodeType === "document" ? 0 : 1.5)
         linkGroup
-          .attr("stroke-opacity", 0.15)
-          .attr("stroke-width", 0.5)
-          .attr("stroke", "#334155")
+          .attr("stroke-opacity", (d: any) => d.label ? 0.4 : 0.15)
+          .attr("stroke-width", (d: any) => d.label ? 1.5 : 0.5)
+          .attr("stroke", (d: any) => d.label ? "#475569" : "#334155")
         setHoveredNode(null)
       })
 
-    // Labels only for folders
+    // Labels
+    const labelNodes = viewMode === "legal" ? nodes : nodes.filter((n) => n.nodeType === "folder")
     const labelGroup = g
       .append("g")
       .attr("class", "labels")
       .selectAll("text")
-      .data(nodes.filter((n) => n.nodeType === "folder"))
+      .data(labelNodes)
       .join("text")
       .text((d) => d.label)
       .attr("font-size", (d) => {
+        if (d.nodeType === "law") return 9
         const r = getNodeRadius(d)
         return Math.max(6, Math.min(11, r * 0.8))
       })
@@ -226,6 +273,7 @@ function ForceGraph({
       .attr("dy", (d) => getNodeRadius(d) + 12)
       .attr("pointer-events", "none")
       .attr("font-family", "system-ui, sans-serif")
+      .attr("font-weight", (d) => d.nodeType === "law" ? "600" : "400")
 
     // Drag
     function dragstarted(event: any, d: any) {
@@ -251,20 +299,23 @@ function ForceGraph({
     )
 
     // Simulation
+    const chargeStrength = viewMode === "legal" ? -300 : ((d: any) => d.nodeType === "folder" ? -200 : -30)
+    const linkDistance = viewMode === "legal" ? 100 : ((l: any) => {
+      const src = l.source as GraphNode
+      const tgt = l.target as GraphNode
+      if (src.nodeType === "folder" && tgt.nodeType === "folder") return 60
+      return 30
+    })
+
     const simulation = forceSimulation<GraphNode>(nodes)
       .force(
         "link",
         forceLink<GraphNode, GraphLink>(links)
           .id((d) => d.id)
-          .distance((l: any) => {
-            const src = l.source as GraphNode
-            const tgt = l.target as GraphNode
-            if (src.nodeType === "folder" && tgt.nodeType === "folder") return 60
-            return 30
-          })
+          .distance(linkDistance as any)
           .strength(0.8)
       )
-      .force("charge", forceManyBody().strength((d: any) => d.nodeType === "folder" ? -200 : -30))
+      .force("charge", forceManyBody().strength(chargeStrength as any))
       .force("center", forceCenter(0, 0))
       .force("collision", forceCollide<GraphNode>().radius((d) => getNodeRadius(d) + 3))
       .force("x", forceX(0).strength(0.03))
@@ -277,8 +328,14 @@ function ForceGraph({
           .attr("y2", (d: any) => d.target.y)
 
         nodeGroup.attr("cx", (d: any) => d.x).attr("cy", (d: any) => d.y)
-
         labelGroup.attr("x", (d: any) => d.x).attr("y", (d: any) => d.y)
+
+        // Update edge labels position
+        if (viewMode === "legal") {
+          g.selectAll(".edge-labels text")
+            .attr("x", (d: any) => ((d.source.x || 0) + (d.target.x || 0)) / 2)
+            .attr("y", (d: any) => ((d.source.y || 0) + (d.target.y || 0)) / 2)
+        }
       })
 
     simulationRef.current = simulation
@@ -286,7 +343,7 @@ function ForceGraph({
     return () => {
       simulation.stop()
     }
-  }, [nodes, links])
+  }, [nodes, links, viewMode])
 
   const handleZoomIn = useCallback(() => {
     if (!svgRef.current) return
@@ -316,6 +373,8 @@ function ForceGraph({
     }
   }, [])
 
+  const legendColors = viewMode === "legal" ? LAW_DOMAIN_COLORS : null
+
   return (
     <div ref={containerRef} className="relative w-full h-full bg-[#0f1117]">
       <svg
@@ -338,32 +397,48 @@ function ForceGraph({
       </div>
 
       {/* Legend */}
-      <div className="absolute top-4 left-4 bg-gray-900/90 rounded-lg p-3 text-xs space-y-2 border border-gray-800">
-        <div className="text-gray-400 font-medium mb-1">Carpetas</div>
-        {Object.entries(FOLDER_COLORS).filter(([k]) => k !== "unknown").map(([key, color]) => (
-          <div key={key} className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-            <span className="text-gray-300 capitalize">{key}</span>
-          </div>
-        ))}
-        <div className="border-t border-gray-700 my-1" />
-        <div className="text-gray-400 font-medium mb-1">Documentos</div>
-        {Object.entries(DOC_COLORS).filter(([k]) => k !== "unknown").map(([key, color]) => (
-          <div key={key} className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-            <span className="text-gray-300 capitalize">{key}</span>
-          </div>
-        ))}
+      <div className="absolute top-4 left-4 bg-gray-900/90 rounded-lg p-3 text-xs space-y-2 border border-gray-800 max-h-[60vh] overflow-y-auto">
+        {viewMode === "legal" ? (
+          <>
+            <div className="text-gray-400 font-medium mb-1">Dominios legales</div>
+            {Object.entries(LAW_DOMAIN_COLORS).filter(([k]) => k !== "general").map(([key, color]) => (
+              <div key={key} className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                <span className="text-gray-300 capitalize">{key.replace("_", " ")}</span>
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="text-gray-400 font-medium mb-1">Carpetas</div>
+            {Object.entries(FOLDER_COLORS).filter(([k]) => k !== "unknown").map(([key, color]) => (
+              <div key={key} className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+                <span className="text-gray-300 capitalize">{key}</span>
+              </div>
+            ))}
+            <div className="border-t border-gray-700 my-1" />
+            <div className="text-gray-400 font-medium mb-1">Documentos</div>
+            {Object.entries(DOC_COLORS).filter(([k]) => k !== "unknown").map(([key, color]) => (
+              <div key={key} className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                <span className="text-gray-300 capitalize">{key}</span>
+              </div>
+            ))}
+          </>
+        )}
       </div>
 
       {/* Tooltip */}
       {hoveredNode && (
         <div
-          className="fixed z-50 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 pointer-events-none shadow-xl"
+          className="fixed z-50 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 pointer-events-none shadow-xl max-w-sm"
           style={{ left: tooltipPos.x + 12, top: tooltipPos.y - 10 }}
         >
           <div className="flex items-center gap-2 mb-1">
-            {hoveredNode.nodeType === "folder" ? (
+            {hoveredNode.nodeType === "law" ? (
+              <IconScale className="h-4 w-4 text-amber-500" />
+            ) : hoveredNode.nodeType === "folder" ? (
               <IconFolder className="h-4 w-4 text-amber-500" />
             ) : (
               <IconFile className="h-4 w-4 text-blue-400" />
@@ -371,7 +446,14 @@ function ForceGraph({
             <span className="text-sm font-medium text-gray-100">{hoveredNode.label}</span>
           </div>
           <div className="text-xs text-gray-400">
-            {hoveredNode.nodeType === "folder" ? (
+            {hoveredNode.nodeType === "law" ? (
+              <>
+                <div className="capitalize">{hoveredNode.domain} · {hoveredNode.status}</div>
+                {hoveredNode.title && (
+                  <div className="mt-1 text-gray-500 line-clamp-2">{hoveredNode.title}</div>
+                )}
+              </>
+            ) : hoveredNode.nodeType === "folder" ? (
               <>
                 <span className="capitalize">{hoveredNode.folderType}</span>
                 {hoveredNode.docCount ? ` · ${hoveredNode.docCount} docs` : ""}
@@ -395,9 +477,11 @@ export default function KnowledgeTreePage() {
   const router = useRouter()
   const apiClient = useApiClient()
 
+  const [viewMode, setViewMode] = useState<GraphViewMode>("structural")
   const [graphNodes, setGraphNodes] = useState<GraphNode[]>([])
   const [graphLinks, setGraphLinks] = useState<GraphLink[]>([])
   const [stats, setStats] = useState<TreeStats | null>(null)
+  const [legalNodeCount, setLegalNodeCount] = useState<number | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -405,7 +489,7 @@ export default function KnowledgeTreePage() {
     if (isLoaded && isAuthenticated) {
       loadData()
     }
-  }, [isLoaded, isAuthenticated])
+  }, [isLoaded, isAuthenticated, viewMode])
 
   useEffect(() => {
     if (isLoaded && !isAuthenticated) {
@@ -418,42 +502,81 @@ export default function KnowledgeTreePage() {
     setError(null)
 
     try {
-      const [structureRes, statsRes] = await Promise.all([
-        apiClient.get<GraphStructure>("/weaviate/tree/graph/structure"),
-        apiClient.get<TreeStats>("/weaviate/tree/stats"),
-      ])
+      if (viewMode === "structural") {
+        const [structureRes, statsRes] = await Promise.all([
+          apiClient.get<GraphStructure>("/weaviate/tree/graph/structure"),
+          apiClient.get<TreeStats>("/weaviate/tree/stats"),
+        ])
 
-      if (statsRes.data) setStats(statsRes.data)
+        if (statsRes.data) setStats(statsRes.data)
 
-      if (structureRes.error) {
-        setError(structureRes.error)
-        return
+        if (structureRes.error) {
+          setError(structureRes.error)
+          return
+        }
+
+        const data = structureRes.data
+        if (!data || data.nodes.length === 0) {
+          setGraphNodes([])
+          setGraphLinks([])
+          return
+        }
+
+        const nodes: GraphNode[] = data.nodes.map((n) => ({
+          id: n.id,
+          label: n.label,
+          nodeType: n.node_type as "folder" | "document",
+          folderType: n.folder_type,
+          semanticType: n.semantic_type,
+          docCount: n.doc_count,
+        }))
+
+        const links: GraphLink[] = data.edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+        }))
+
+        setGraphNodes(nodes)
+        setGraphLinks(links)
+      } else {
+        // Legal graph
+        const structureRes = await apiClient.get<GraphStructure>("/weaviate/legal/graph/structure")
+
+        if (structureRes.error) {
+          setError(structureRes.error)
+          return
+        }
+
+        const data = structureRes.data
+        if (!data || data.nodes.length === 0) {
+          setGraphNodes([])
+          setGraphLinks([])
+          setLegalNodeCount(0)
+          return
+        }
+
+        setLegalNodeCount(data.nodes.length)
+
+        const nodes: GraphNode[] = data.nodes.map((n) => ({
+          id: n.id,
+          label: n.label,
+          nodeType: "law" as const,
+          domain: n.domain,
+          status: n.status,
+          title: n.title,
+        }))
+
+        const links: GraphLink[] = data.edges.map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          label: e.label,
+        }))
+
+        setGraphNodes(nodes)
+        setGraphLinks(links)
       }
-
-      const data = structureRes.data
-      if (!data || data.nodes.length === 0) {
-        setGraphNodes([])
-        setGraphLinks([])
-        return
-      }
-
-      const nodes: GraphNode[] = data.nodes.map((n) => ({
-        id: n.id,
-        label: n.label,
-        nodeType: n.node_type,
-        folderType: n.folder_type,
-        semanticType: n.semantic_type,
-        docCount: n.doc_count,
-      }))
-
-      const links: GraphLink[] = data.edges.map((e) => ({
-        id: e.id,
-        source: e.source,
-        target: e.target,
-      }))
-
-      setGraphNodes(nodes)
-      setGraphLinks(links)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar el grafo")
     } finally {
@@ -491,24 +614,61 @@ export default function KnowledgeTreePage() {
           <IconBinaryTree className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-xs font-semibold text-foreground">Knowledge Tree</span>
 
+          {/* Graph selector */}
+          <div className="ml-3 flex items-center rounded-md border border-border overflow-hidden">
+            <button
+              onClick={() => setViewMode("structural")}
+              className={`px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                viewMode === "structural"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              <IconBinaryTree className="h-3 w-3 inline mr-1" />
+              Structural
+            </button>
+            <button
+              onClick={() => setViewMode("legal")}
+              className={`px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                viewMode === "legal"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              <IconScale className="h-3 w-3 inline mr-1" />
+              Legal
+            </button>
+          </div>
+
           {/* Inline stats */}
           <div className="ml-3 flex items-center gap-1.5">
-            <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-500">
-              <IconFolder className="h-3 w-3" />
-              {stats?.total_folders ?? "-"}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-500">
-              <IconFile className="h-3 w-3" />
-              {stats?.total_documents ?? "-"}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-1.5 py-0.5 text-[11px] text-purple-500">
-              <IconCategory className="h-3 w-3" />
-              {uniqueTypes}
-            </span>
-            <span className="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-500">
-              <IconBinaryTree className="h-3 w-3" />
-              {uniqueDomains}
-            </span>
+            {viewMode === "structural" ? (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-500">
+                  <IconFolder className="h-3 w-3" />
+                  {stats?.total_folders ?? "-"}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-1.5 py-0.5 text-[11px] text-blue-500">
+                  <IconFile className="h-3 w-3" />
+                  {stats?.total_documents ?? "-"}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-1.5 py-0.5 text-[11px] text-purple-500">
+                  <IconCategory className="h-3 w-3" />
+                  {uniqueTypes}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded-md bg-green-500/10 px-1.5 py-0.5 text-[11px] text-green-500">
+                  <IconBinaryTree className="h-3 w-3" />
+                  {uniqueDomains}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-500">
+                  <IconScale className="h-3 w-3" />
+                  {legalNodeCount ?? "-"} leyes
+                </span>
+              </>
+            )}
           </div>
 
           <div className="ml-auto">
@@ -541,11 +701,16 @@ export default function KnowledgeTreePage() {
               <div className="text-center text-gray-500">
                 <IconBinaryTree className="h-12 w-12 mx-auto mb-3 opacity-30" />
                 <p className="text-lg font-medium">No hay datos en el grafo</p>
-                <p className="text-sm">Indexa documentos para ver el Knowledge Tree</p>
+                <p className="text-sm">
+                  {viewMode === "structural"
+                    ? "Indexa documentos para ver el Knowledge Tree"
+                    : "Ejecuta el seed de legislación o indexa BOE para poblar el grafo legal"
+                  }
+                </p>
               </div>
             </div>
           ) : (
-            <ForceGraph nodes={graphNodes} links={graphLinks} />
+            <ForceGraph nodes={graphNodes} links={graphLinks} viewMode={viewMode} />
           )}
         </main>
       </SidebarInset>

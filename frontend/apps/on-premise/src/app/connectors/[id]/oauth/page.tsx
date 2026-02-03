@@ -12,10 +12,10 @@ import {
 import {
   SidebarProvider,
   SidebarInset,
-  SidebarTrigger,
 } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { AppSidebar } from '@/components/layout/app-sidebar'
+import { PageHeader } from '@/components/layout/page-header'
 import { GoogleDriveOAuthStep } from '@/components/connectors'
 import { connectorService, Connector } from '@/lib/services/connector.service'
 
@@ -69,9 +69,7 @@ export default function OAuthReconnectPage() {
       <AppSidebar variant="inset" />
 
       <SidebarInset>
-        <header className="h-14 border-b flex items-center gap-2 px-4 shrink-0">
-          <SidebarTrigger className="-ml-1" />
-          <div className="h-4 w-px bg-border" />
+        <PageHeader>
           <Link href="/connectors" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
             <IconChevronLeft className="h-4 w-4" />
             <IconPlug className="h-4 w-4 text-primary" />
@@ -79,7 +77,7 @@ export default function OAuthReconnectPage() {
           </Link>
           <div className="h-4 w-px bg-border" />
           <span className="text-muted-foreground">Reconectar</span>
-        </header>
+        </PageHeader>
 
         <main className="flex-1 overflow-auto p-6">
           <div className="max-w-xl mx-auto">

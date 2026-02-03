@@ -182,11 +182,10 @@ class LegalGraphService:
             weaviate_uuid = (law.weaviate_uuid or "").replace("'", "''")
 
             async with self._age_service._get_connection() as conn:
-                # MERGE: create or update
+                # MERGE + SET (Apache AGE doesn't support ON CREATE/ON MATCH)
                 cypher = f"""
                     MERGE (l:LegalLaw {{boe_id: '{boe_id}'}})
-                    ON CREATE SET
-                        l.title = '{title}',
+                    SET l.title = '{title}',
                         l.short_name = '{short_name}',
                         l.domain = '{law.domain.value}',
                         l.status = '{law.status.value}',
@@ -194,11 +193,6 @@ class LegalGraphService:
                         l.effective_date = '{law.effective_date}',
                         l.eli_uri = '{law.eli_uri}',
                         l.summary = '{summary}',
-                        l.weaviate_uuid = '{weaviate_uuid}'
-                    ON MATCH SET
-                        l.title = '{title}',
-                        l.short_name = '{short_name}',
-                        l.status = '{law.status.value}',
                         l.weaviate_uuid = '{weaviate_uuid}'
                     RETURN id(l)
                 """
@@ -246,13 +240,20 @@ class LegalGraphService:
             articles_str = str(articles).replace("'", '"')
 
             async with self._age_service._get_connection() as conn:
+                # Check if edge already exists to avoid duplicates
+                check_cypher = f"""
+                    MATCH (s:LegalLaw {{boe_id: '{src}'}})-[r:{rel}]->(t:LegalLaw {{boe_id: '{tgt}'}})
+                    RETURN count(r) AS cnt
+                """
+                existing = await self._execute_public_cypher(conn, check_cypher, [("cnt", "bigint")])
+                if existing and existing[0].get("cnt", 0) > 0:
+                    logger.debug(f"Edge already exists: {src} -{rel}-> {tgt}")
+                    return False
+
                 cypher = f"""
                     MATCH (s:LegalLaw {{boe_id: '{src}'}})
                     MATCH (t:LegalLaw {{boe_id: '{tgt}'}})
-                    MERGE (s)-[r:{rel}]->(t)
-                    ON CREATE SET
-                        r.context_snippet = '{snippet}',
-                        r.articles_affected = '{articles_str}'
+                    CREATE (s)-[r:{rel} {{context_snippet: '{snippet}', articles_affected: '{articles_str}'}}]->(t)
                     RETURN id(r)
                 """
 
@@ -420,6 +421,315 @@ class LegalGraphService:
         except Exception as e:
             logger.error(f"Failed to get public graph stats: {e}")
             return {"initialized": True, "error": str(e)}
+
+
+    # Alias for API compatibility
+    async def get_stats(self) -> Dict[str, Any]:
+        return await self.get_graph_stats()
+
+    async def get_all_laws(self) -> List[Dict[str, Any]]:
+        """Get all LegalLaw nodes from the public graph."""
+        if not self._age_service or not self._age_service._pool:
+            await self.initialize()
+        if not self._age_service or not self._age_service._pool:
+            return []
+
+        try:
+            async with self._age_service._get_connection() as conn:
+                results = await self._execute_public_cypher(
+                    conn,
+                    """
+                    MATCH (l:LegalLaw)
+                    RETURN l.boe_id AS boe_id, l.title AS title,
+                           l.short_name AS short_name, l.domain AS domain,
+                           l.status AS status, l.publication_date AS publication_date,
+                           l.weaviate_uuid AS weaviate_uuid
+                    """,
+                    [
+                        ("boe_id", "text"), ("title", "text"),
+                        ("short_name", "text"), ("domain", "text"),
+                        ("status", "text"), ("publication_date", "text"),
+                        ("weaviate_uuid", "text"),
+                    ],
+                )
+                # Clean agtype quoting
+                for r in results:
+                    for k, v in r.items():
+                        if isinstance(v, str) and v.startswith('"') and v.endswith('"'):
+                            r[k] = v.strip('"')
+                return results
+        except Exception as e:
+            logger.error(f"Failed to get all laws: {e}")
+            return []
+
+    async def get_laws_by_domain(self, domain) -> List[Dict[str, Any]]:
+        """Get laws filtered by domain."""
+        all_laws = await self.get_all_laws()
+        domain_val = domain.value if hasattr(domain, 'value') else str(domain)
+        return [l for l in all_laws if l.get("domain") == domain_val]
+
+    async def get_graph_structure(self) -> Dict[str, Any]:
+        """
+        Get full graph structure (nodes + edges) for D3 visualization.
+
+        Returns dict with 'nodes' and 'edges' arrays.
+        """
+        if not self._age_service or not self._age_service._pool:
+            await self.initialize()
+        if not self._age_service or not self._age_service._pool:
+            return {"nodes": [], "edges": []}
+
+        try:
+            async with self._age_service._get_connection() as conn:
+                # Get all law nodes
+                law_nodes = await self._execute_public_cypher(
+                    conn,
+                    """
+                    MATCH (l:LegalLaw)
+                    RETURN id(l) AS nid, l.boe_id AS boe_id,
+                           l.short_name AS short_name, l.title AS title,
+                           l.domain AS domain, l.status AS status
+                    """,
+                    [
+                        ("nid", "bigint"), ("boe_id", "text"),
+                        ("short_name", "text"), ("title", "text"),
+                        ("domain", "text"), ("status", "text"),
+                    ],
+                )
+
+                nodes = []
+                for n in law_nodes:
+                    boe_id = n.get("boe_id", "")
+                    if isinstance(boe_id, str) and boe_id.startswith('"'):
+                        boe_id = boe_id.strip('"')
+                    short_name = n.get("short_name", "")
+                    if isinstance(short_name, str) and short_name.startswith('"'):
+                        short_name = short_name.strip('"')
+                    domain = n.get("domain", "")
+                    if isinstance(domain, str) and domain.startswith('"'):
+                        domain = domain.strip('"')
+                    status = n.get("status", "")
+                    if isinstance(status, str) and status.startswith('"'):
+                        status = status.strip('"')
+                    title = n.get("title", "")
+                    if isinstance(title, str) and title.startswith('"'):
+                        title = title.strip('"')
+                    nodes.append({
+                        "id": boe_id,
+                        "label": short_name or boe_id,
+                        "node_type": "law",
+                        "domain": domain,
+                        "status": status,
+                        "title": title,
+                    })
+
+                # Get all edges (deduplicated)
+                edges = []
+                seen_edges = set()
+                try:
+                    edge_results = await self._execute_public_cypher(
+                        conn,
+                        """
+                        MATCH (s:LegalLaw)-[r]->(t:LegalLaw)
+                        RETURN DISTINCT s.boe_id AS source, t.boe_id AS target,
+                               type(r) AS rel_type
+                        """,
+                        [
+                            ("source", "text"), ("target", "text"),
+                            ("rel_type", "text"),
+                        ],
+                    )
+                    for e in edge_results:
+                        src = e.get("source", "")
+                        tgt = e.get("target", "")
+                        rel = e.get("rel_type", "")
+                        if isinstance(src, str) and src.startswith('"'):
+                            src = src.strip('"')
+                        if isinstance(tgt, str) and tgt.startswith('"'):
+                            tgt = tgt.strip('"')
+                        if isinstance(rel, str) and rel.startswith('"'):
+                            rel = rel.strip('"')
+                        key = (src, tgt, rel)
+                        if key in seen_edges:
+                            continue
+                        seen_edges.add(key)
+                        edges.append({
+                            "id": f"e{len(edges)}",
+                            "source": src,
+                            "target": tgt,
+                            "label": rel,
+                        })
+                except Exception as edge_err:
+                    logger.warning(f"Failed to get edges: {edge_err}")
+
+                return {"nodes": nodes, "edges": edges}
+
+        except Exception as e:
+            logger.error(f"Failed to get graph structure: {e}")
+            return {"nodes": [], "edges": []}
+
+    async def get_enriched_graph_structure(self) -> Dict[str, Any]:
+        """
+        Get enriched graph structure with domain clusters, topics, and metrics.
+
+        Returns dict with:
+        - nodes: Law nodes + Domain nodes + Topic nodes
+        - edges: Law relationships + Domain membership + Topic connections
+        - stats: Graph statistics and metrics
+        """
+        # Get base structure
+        base = await self.get_graph_structure()
+        nodes = base.get("nodes", [])
+        edges = base.get("edges", [])
+
+        if not nodes:
+            return {"nodes": [], "edges": [], "stats": {}}
+
+        # Calculate node degrees (connection counts)
+        degree_map: Dict[str, Dict[str, int]] = {}
+        for node in nodes:
+            degree_map[node["id"]] = {"in": 0, "out": 0, "total": 0}
+
+        for edge in edges:
+            src = edge.get("source")
+            tgt = edge.get("target")
+            if src in degree_map:
+                degree_map[src]["out"] += 1
+                degree_map[src]["total"] += 1
+            if tgt in degree_map:
+                degree_map[tgt]["in"] += 1
+                degree_map[tgt]["total"] += 1
+
+        # Enrich law nodes with degree info
+        for node in nodes:
+            node_id = node["id"]
+            deg = degree_map.get(node_id, {"in": 0, "out": 0, "total": 0})
+            node["degree_in"] = deg["in"]
+            node["degree_out"] = deg["out"]
+            node["degree_total"] = deg["total"]
+            # Hub score: nodes with many connections are hubs
+            node["is_hub"] = deg["total"] >= 5
+
+        # Create domain cluster nodes
+        domains_seen: Dict[str, List[str]] = {}
+        for node in nodes:
+            domain = node.get("domain", "general")
+            if domain not in domains_seen:
+                domains_seen[domain] = []
+            domains_seen[domain].append(node["id"])
+
+        domain_nodes = []
+        domain_edges = []
+        domain_labels = {
+            "labor": "Laboral",
+            "fiscal": "Fiscal",
+            "civil": "Civil",
+            "mercantile": "Mercantil",
+            "administrative": "Administrativo",
+            "compliance": "Compliance",
+            "privacy": "Privacidad",
+            "ip": "Propiedad Intelectual",
+            "commerce": "Comercio",
+            "real_estate": "Inmobiliario",
+            "education": "Educación",
+            "general": "General",
+        }
+
+        for domain, law_ids in domains_seen.items():
+            domain_node_id = f"domain_{domain}"
+            domain_nodes.append({
+                "id": domain_node_id,
+                "label": domain_labels.get(domain, domain.title()),
+                "node_type": "domain",
+                "domain": domain,
+                "law_count": len(law_ids),
+            })
+            # Create edges from domain to laws
+            for law_id in law_ids:
+                domain_edges.append({
+                    "id": f"d_{domain}_{law_id}",
+                    "source": domain_node_id,
+                    "target": law_id,
+                    "label": "CONTAINS",
+                    "edge_type": "domain_membership",
+                })
+
+        # Try to get topics/keywords from Weaviate for topic nodes
+        topic_nodes = []
+        topic_edges = []
+        try:
+            from app.services.weaviate_service import weaviate_service
+            await weaviate_service.initialize()
+
+            # Query unique keywords from PublicKnowledge
+            client = weaviate_service.client
+            result = client.query.get(
+                "PublicKnowledge",
+                ["boe_id", "keywords"]
+            ).with_limit(100).do()
+
+            docs = result.get("data", {}).get("Get", {}).get("PublicKnowledge", [])
+
+            # Build keyword -> laws mapping
+            keyword_laws: Dict[str, List[str]] = {}
+            for doc in docs:
+                boe_id = doc.get("boe_id", "")
+                keywords = doc.get("keywords", []) or []
+                for kw in keywords[:5]:  # Limit keywords per law
+                    if kw and len(kw) > 2:
+                        kw_lower = kw.lower()
+                        if kw_lower not in keyword_laws:
+                            keyword_laws[kw_lower] = []
+                        if boe_id not in keyword_laws[kw_lower]:
+                            keyword_laws[kw_lower].append(boe_id)
+
+            # Create topic nodes for keywords shared by multiple laws
+            for keyword, law_ids in keyword_laws.items():
+                if len(law_ids) >= 2:  # Only topics shared by 2+ laws
+                    topic_id = f"topic_{keyword.replace(' ', '_')}"
+                    topic_nodes.append({
+                        "id": topic_id,
+                        "label": keyword.title(),
+                        "node_type": "topic",
+                        "law_count": len(law_ids),
+                    })
+                    for law_id in law_ids[:10]:  # Limit edges per topic
+                        topic_edges.append({
+                            "id": f"t_{keyword[:10]}_{law_id}",
+                            "source": topic_id,
+                            "target": law_id,
+                            "label": "COVERS",
+                            "edge_type": "topic_coverage",
+                        })
+
+        except Exception as e:
+            logger.warning(f"Could not fetch topics from Weaviate: {e}")
+
+        # Combine all nodes and edges
+        all_nodes = nodes + domain_nodes + topic_nodes[:30]  # Limit topic nodes
+        all_edges = edges + domain_edges + topic_edges[:100]  # Limit topic edges
+
+        # Calculate statistics
+        stats = {
+            "total_laws": len(nodes),
+            "total_relationships": len(edges),
+            "total_domains": len(domain_nodes),
+            "total_topics": len(topic_nodes),
+            "hub_laws": [n["label"] for n in nodes if n.get("is_hub")],
+            "domains": {d: len(laws) for d, laws in domains_seen.items()},
+            "edge_types": {},
+        }
+
+        # Count edge types
+        for edge in edges:
+            rel = edge.get("label", "UNKNOWN")
+            stats["edge_types"][rel] = stats["edge_types"].get(rel, 0) + 1
+
+        return {
+            "nodes": all_nodes,
+            "edges": all_edges,
+            "stats": stats,
+        }
 
 
 # Global singleton

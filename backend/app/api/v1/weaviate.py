@@ -1361,6 +1361,7 @@ async def weaviate_service_health():
 # ============================================================================
 
 KNOWLEDGE_TREE_SERVICE_URL = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree-service:8011")
+WEAVIATE_SERVICE_URL = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
 
 
 @router.get("/tree/stats")
@@ -1408,6 +1409,52 @@ async def tree_graph_structure(
         raise
     except Exception as e:
         logger.error(f"Knowledge tree graph structure proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Legal Knowledge Graph (Public) — proxied to weaviate-service
+# =============================================================================
+
+@router.get("/legal/graph/structure")
+async def legal_graph_structure():
+    """Get full legal graph structure (nodes + edges) for visualization."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{WEAVIATE_SERVICE_URL}/legal/graph/structure",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Legal graph service timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Legal graph structure proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/legal/stats")
+async def legal_graph_stats():
+    """Get legal knowledge graph statistics."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{WEAVIATE_SERVICE_URL}/legal/stats",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Legal graph service timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Legal graph stats proxy error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

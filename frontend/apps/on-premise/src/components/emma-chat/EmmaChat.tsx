@@ -283,8 +283,8 @@ export function EmmaChat({
           // All indexed document IDs for multi-document queries
           attachmentContext.indexed_document_ids = indexedDocs.map((a) => a.documentId)
           // Retain for follow-up queries
-          sessionDocIdRef.current = attachmentContext.document_id
-          sessionIndexedDocIdsRef.current = attachmentContext.indexed_document_ids
+          sessionDocIdRef.current = attachmentContext.document_id as string | null
+          sessionIndexedDocIdsRef.current = attachmentContext.indexed_document_ids as string[]
         }
 
         // Uploaded files - prepare metadata (files stay in memory for now)
@@ -468,7 +468,7 @@ export function EmmaChat({
             if (event.event === 'slm_thinking') {
               // Check if this has inline thinking data (type at data level, no slmThinkingStep wrapper)
               // Backend sends: { step, type, content, slmIsThinking } without slmThinkingStep wrapper for some events
-              const inlineStepType = data.step_type || data.type
+              const inlineStepType = data.step_type || (data as any).type
               if (inlineStepType && !data.slmThinkingStep) {
                 // Normalize inline step into SLMThinkingStep
                 const newStep: SLMThinkingStep = {
@@ -587,11 +587,27 @@ export function EmmaChat({
 
               // Build documents array from attachments (with real names)
               // These are the documents the user attached for analysis
-              const documentSources = attachments?.map((a) => ({
+              const attachmentDocs = attachments?.map((a) => ({
                 name: a.name,
                 id: a.type === 'indexed' ? a.documentId : a.id,
                 fileType: a.fileType,
               })) || []
+
+              // Extract sources from API response (includes graph_link for BOE legislation)
+              const apiSources = ((data.final_result as any)?.sources || (data as any).sources || [])
+                .map((src: any) => ({
+                  name: src.title || src.name || src.id || 'Fuente',
+                  id: src.id,
+                  url: src.url,
+                  boe_id: src.boe_id,
+                  graph_link: src.graph_link,
+                  source_type: src.source_type || src.type,
+                  relevanceScore: src.score || src.relevance,
+                }))
+                .filter((s: any) => s.name && s.name !== 'Fuente')
+
+              // Combine: API sources first (more relevant), then attachments
+              const documentSources = [...apiSources, ...attachmentDocs]
 
               updateMessages((prev) =>
                 prev.map((msg) => {

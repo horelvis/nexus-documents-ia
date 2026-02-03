@@ -466,8 +466,44 @@ See `emma-agent-service/app/agents/langgraph/sectors/` for implementation.
 
 ---
 
+## Emma Reactive (Event-Driven Proactive AI)
+
+Emma Reactive extends Emma beyond request-response into a **proactive, event-driven, multi-channel** assistant. See **[EMMA_REACTIVE.md](./EMMA_REACTIVE.md)** for full documentation.
+
+### Quick Summary
+
+| Layer | Technology | Purpose |
+|-------|-----------|---------|
+| **Event Bus** | Redis Streams | Inter-service events (document.indexed, connector.synced) |
+| **Trigger Engine** | Python rules engine | Match events → dispatch actions per tenant |
+| **Background Service** | LangGraph + Celery | Proactive analysis without user HTTP request |
+| **Notifications** | Redis Pub/Sub + WebSocket | Real-time in-app, email, webhook |
+| **Multi-Channel** | Telegram, WhatsApp, Slack, Email | External messaging with user pairing |
+
+### Key Endpoints (emma-agent-service)
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /triggers` | Create reactive triggers |
+| `GET /notifications` | List user notifications |
+| `POST /channels` | Configure messaging channels |
+| `POST /channels/webhooks/{type}` | Inbound messages from external channels |
+| `POST /channels/pairing/confirm` | Link external user → KeyCloak identity |
+| `POST /emma/background/analyze_document` | Background document analysis |
+
+### Docker Service
+
+```yaml
+emma-reactive-worker:
+  command: ["python", "-m", "app.workers.event_listener"]
+  # Consumes Redis Streams → evaluates triggers → dispatches actions
+```
+
+---
+
 ## Related Documentation
 
+- [EMMA_REACTIVE.md](./EMMA_REACTIVE.md) - Emma Reactive event-driven system
 - [SIL.md](./SIL.md) - Structural Intelligence Layer (Legacy/Removed)
 - [SLM_ROUTER.md](./SLM_ROUTER.md) - SLM Router (Legacy/Removed)
 - [RAG_PIPELINE.md](./RAG_PIPELINE.md) - RAG Implementation Blueprint
@@ -475,4 +511,4 @@ See `emma-agent-service/app/agents/langgraph/sectors/` for implementation.
 
 ---
 
-*Architecture: EmmaCoordinator + LangGraph + vLLM (Qwen3) + Multi-Pipeline RAG Sectors*
+*Architecture: EmmaCoordinator + LangGraph + vLLM (Qwen3) + Multi-Pipeline RAG Sectors + Emma Reactive*

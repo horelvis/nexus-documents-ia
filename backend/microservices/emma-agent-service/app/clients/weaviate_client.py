@@ -234,6 +234,7 @@ class WeaviateClient(BaseHTTPClient):
         query: str,
         limit: int = 5,
         domain: str = "",
+        boe_ids: list[str] | None = None,
     ) -> list[SearchResult]:
         """
         Search public knowledge base (BOE, legislation).
@@ -246,6 +247,7 @@ class WeaviateClient(BaseHTTPClient):
             query: Search query text
             limit: Maximum results to return
             domain: Optional domain/topic filter (e.g., "labor", "fiscal")
+            boe_ids: Optional list of BOE identifiers to filter by (e.g., ["BOE-A-2006-7899"])
 
         Returns:
             List of SearchResult from public knowledge
@@ -256,7 +258,12 @@ class WeaviateClient(BaseHTTPClient):
             "search_type": "hybrid",
             "current_version_only": True,
         }
-        if domain:
+        # If specific BOE IDs are provided, add them as keywords to the query
+        # This ensures the search prioritizes documents with those identifiers
+        if boe_ids:
+            boe_keywords = " ".join(boe_ids)
+            payload["query"] = f"{query} {boe_keywords}"
+        elif domain:
             payload["topics"] = [domain]
 
         try:

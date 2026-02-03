@@ -136,26 +136,41 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
             filters=search_filters,
         )
 
-        # Check QA index for public knowledge search
+        # Get expanded_boe_ids from graph_expand (runs in parallel before retrieve)
+        expanded_boe_ids = state.get("expanded_boe_ids", [])
+
+        # Check QA index for additional concept matching (fallback if graph_expand didn't run)
         from ..sectors.qa_index import get_sector_qa_index
 
         sector_name = (sector_config or {}).get("sector", "")
         qa_index = get_sector_qa_index(sector_name) if sector_name else None
         qa_matches = qa_index.search(query, top_k=1, threshold=0.65) if qa_index else []
 
-        # If QA matched concepts with related_laws → also search public knowledge
-        public_results = []
+        # Merge BOE IDs: prefer expanded_boe_ids from graph_expand, add QA matches as supplement
+        boe_ids_for_search = list(set(expanded_boe_ids))  # Start with graph expansion
         if qa_matches and qa_matches[0].related_laws:
+            # Add any BOE IDs from QA that aren't already included
+            qa_boe_ids = [law for law in qa_matches[0].related_laws if law.startswith("BOE-")]
+            for boe_id in qa_boe_ids:
+                if boe_id not in boe_ids_for_search:
+                    boe_ids_for_search.append(boe_id)
+
+        # Search public knowledge if we have BOE IDs or QA domain context
+        public_results = []
+        if boe_ids_for_search or (qa_matches and qa_matches[0].domain):
             try:
+                domain = qa_matches[0].domain if qa_matches else ""
                 public_results = await weaviate_client.search_public_knowledge(
                     query=query,
                     limit=5,
-                    domain=qa_matches[0].domain,
+                    domain=domain,
+                    boe_ids=boe_ids_for_search if boe_ids_for_search else None,
                 )
                 if public_results:
                     logger.info(
                         f"📚 RETRIEVE: {len(public_results)} public knowledge docs "
-                        f"(concept={qa_matches[0].id}, score={qa_matches[0].score:.2f})"
+                        f"(boe_filter={boe_ids_for_search[:3] if boe_ids_for_search else 'none'}, "
+                        f"from_graph={len(expanded_boe_ids)}, from_qa={len(boe_ids_for_search) - len(expanded_boe_ids)})"
                     )
             except Exception as e:
                 logger.warning(f"⚠️ Public knowledge search failed: {e}")
@@ -215,6 +230,8 @@ async def retrieve_node(state: RAGState) -> Dict[str, Any]:
                 "retrieval_tenant_count": tenant_count,
                 "retrieval_public_count": public_count,
                 "qa_concept": qa_matches[0].id if qa_matches else None,
+                "boe_ids_used": boe_ids_for_search[:10] if boe_ids_for_search else [],
+                "boe_ids_from_graph": len(expanded_boe_ids),
             },
         }
 

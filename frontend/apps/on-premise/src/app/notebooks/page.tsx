@@ -47,10 +47,10 @@ import {
 import {
   SidebarProvider,
   SidebarInset,
-  SidebarTrigger,
 } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { AppSidebar } from '@/components/layout/app-sidebar'
+import { PageHeader } from '@/components/layout/page-header'
 import { notebookService, Notebook as NotebookType, NotebookStats } from '@/lib/services/notebook.service'
 
 // Emoji picker options
@@ -196,14 +196,12 @@ export default function NotebooksPage() {
 
       <SidebarInset>
         {/* Header */}
-        <header className="h-14 border-b flex items-center gap-2 px-4 shrink-0">
-          <SidebarTrigger className="-ml-1" />
-          <div className="h-4 w-px bg-border" />
+        <PageHeader>
           <div className="flex items-center gap-2">
             <IconNotebook className="h-5 w-5 text-primary" />
             <span className="font-semibold">NouxCube Podcast</span>
           </div>
-        </header>
+        </PageHeader>
 
         {/* Main Content */}
         <main className="flex-1 p-6 space-y-6 overflow-auto">

@@ -178,6 +178,39 @@ async def _llm_classify_intent(query: str) -> Optional[str]:
         return None
 
 
+def _is_definitional_query(query: str) -> bool:
+    """
+    Detect definitional queries that should ALWAYS be document_query.
+
+    Patterns like "qué es X", "what is X", "define X" are never greetings,
+    even if the semantic router matches them to "qué tal" / "qué pasa".
+    """
+    import re
+    query_lower = query.lower().strip()
+
+    # Spanish definitional patterns
+    # "qué es X", "qué son X", "qué significa X", "cuál es X"
+    if re.match(r"^¿?qu[ée]\s+(es|son|significa|era|eran)\s+\w", query_lower):
+        return True
+    if re.match(r"^¿?cu[aá]l\s+(es|son|era|eran)\s+\w", query_lower):
+        return True
+    # "explica X", "explícame X", "define X", "háblame de X"
+    if re.match(r"^(explica|expl[ií]came|define|h[aá]blame\s+de|dime\s+qu[ée])\s+\w", query_lower):
+        return True
+
+    # English definitional patterns
+    if re.match(r"^what\s+(is|are|does|was|were)\s+\w", query_lower):
+        return True
+    if re.match(r"^(define|explain|tell\s+me\s+about)\s+\w", query_lower):
+        return True
+
+    # Check for law/legal acronyms after "qué" (LOE, LOMLOE, RGPD, etc.)
+    if re.search(r"\b(loe|lomloe|lode|lou|losu|rgpd|lopdgdd|lprl|lisos|et|lgss)\b", query_lower):
+        return True
+
+    return False
+
+
 async def classify_intent(query: str) -> Tuple[str, float]:
     """
     Hybrid intent classification.
@@ -186,6 +219,12 @@ async def classify_intent(query: str) -> Tuple[str, float]:
         (intent_name, confidence) where intent is one of:
         "conversational", "identity", "document_query"
     """
+    # Tier 0: Rule-based pre-filter for definitional queries
+    # These are NEVER greetings, even if semantic router matches them
+    if _is_definitional_query(query):
+        logger.debug(f"IntentRouter rule-based: document_query (definitional) for '{query[:40]}'")
+        return "document_query", 0.95
+
     # Tier 1: Semantic Router (~1-3ms)
     router = _get_intent_router()
     semantic_result = router.classify(query)

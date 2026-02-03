@@ -179,34 +179,25 @@ async def synthesize_node(state: RAGState) -> Dict[str, Any]:
             "success": False,
         }
 
-    # Synthesize results
+    # Synthesize results - SIMPLIFIED: direct passthrough, no text modification
     try:
-        # Document generation: passthrough docgen_agent output without re-synthesis.
-        # Re-processing a generated legal document through the synthesis LLM would
-        # summarize/compress it, losing clauses, formatting, and legal references.
-        if "docgen_agent" in agent_results:
-            docgen_result = agent_results["docgen_agent"]
-            docgen_output = (
-                docgen_result.get("output", "")
-                if isinstance(docgen_result, dict)
-                else docgen_result.output
-            )
-            if docgen_output and len(docgen_output.strip()) > 100:
-                logger.info("📄 SYNTHESIZE: Passthrough docgen_agent output (no re-synthesis)")
-                final_answer = docgen_output
-            else:
-                # Docgen produced empty/short output — fall through to normal synthesis
-                final_answer = None
+        # Direct passthrough: return agent output as-is (no text modification)
+        # Sources are extracted separately and returned in the JSON response
+        if len(agent_results) == 1:
+            # Single agent - direct passthrough
+            agent_name, result = next(iter(agent_results.items()))
+            final_answer = result.get("output", "") if isinstance(result, dict) else result.output
+            logger.info(f"📄 SYNTHESIZE: Direct passthrough from {agent_name}")
         else:
-            final_answer = None
-
-        if final_answer is None:
-            if len(agent_results) == 1:
-                # Single agent - use directly with minor formatting
-                final_answer = _format_single_result(agent_results, retrieved_docs)
-            else:
-                # Multiple agents - concatenate with headers (no LLM re-synthesis)
-                final_answer = _concatenate_with_headers(agent_results, retrieved_docs)
+            # Multiple agents - simple concatenation with headers (no source text appended)
+            parts = []
+            for agent_name, result in agent_results.items():
+                output = result.get("output", "") if isinstance(result, dict) else result.output
+                if output:
+                    display_name = agent_name.replace("_agent", "").replace("_", " ").title()
+                    parts.append(f"## {display_name}\n\n{output}")
+            final_answer = "\n\n---\n\n".join(parts)
+            logger.info(f"📄 SYNTHESIZE: Concatenated {len(agent_results)} agent outputs")
 
         # Extract sources
         sources = _extract_sources(agent_results, retrieved_docs)
@@ -262,6 +253,19 @@ def _format_single_result(
 
     output = result.get("output", "") if isinstance(result, dict) else result.output
 
+    # Don't add sources if the response indicates no relevant documents were found
+    # This prevents showing irrelevant sources when the LLM correctly says "no docs found"
+    no_relevant_indicators = [
+        "no encontré documentos relevantes",
+        "no encontré información relevante",
+        "no hay documentos relevantes",
+        "no se encontraron documentos",
+        "los documentos disponibles tratan sobre otros temas",
+    ]
+    output_lower = output.lower()
+    if any(indicator in output_lower for indicator in no_relevant_indicators):
+        return output  # Skip adding sources
+
     # Add sources if available (deduplicated by title)
     sources = result.get("sources", []) if isinstance(result, dict) else result.sources
     if sources:
@@ -313,6 +317,18 @@ def _concatenate_with_headers(
         parts.append(f"## {display_name}\n\n{output}")
 
     combined = "\n\n---\n\n".join(parts)
+
+    # Don't add sources if any output indicates no relevant documents were found
+    no_relevant_indicators = [
+        "no encontré documentos relevantes",
+        "no encontré información relevante",
+        "no hay documentos relevantes",
+        "no se encontraron documentos",
+        "los documentos disponibles tratan sobre otros temas",
+    ]
+    combined_lower = combined.lower()
+    if any(indicator in combined_lower for indicator in no_relevant_indicators):
+        return combined  # Skip adding sources
 
     # Append deduplicated sources
     seen_titles: set[str] = set()
@@ -412,20 +428,41 @@ def _extract_sources(
     agent_results: Dict[str, AgentResult],
     retrieved_docs: List[Dict],
 ) -> List[Dict[str, Any]]:
-    """Extract and deduplicate sources from all agents."""
+    """Extract and deduplicate sources from all agents.
+
+    Includes deep links to the legal graph for BOE legislation sources.
+    """
+    import re
     sources = []
     seen_ids = set()
+
+    # BOE ID pattern for detecting legislation references
+    boe_pattern = re.compile(r"BOE-[A-Z]-\d{4}-\d+")
+
+    def _add_graph_link(source_dict: Dict, text: str) -> Dict:
+        """Add graph_link if source contains a BOE ID."""
+        boe_match = boe_pattern.search(text)
+        if boe_match:
+            boe_id = boe_match.group()
+            source_dict["boe_id"] = boe_id
+            source_dict["graph_link"] = f"/admin/knowledge-tree?focus={boe_id}"
+        return source_dict
 
     # From agent results
     for result in agent_results.values():
         agent_sources = result.get("sources", []) if isinstance(result, dict) else result.sources
         for source in agent_sources:
             if isinstance(source, str) and source not in seen_ids:
-                sources.append({"title": source, "type": "agent_citation"})
+                source_dict = {"title": source, "type": "agent_citation"}
+                source_dict = _add_graph_link(source_dict, source)
+                sources.append(source_dict)
                 seen_ids.add(source)
             elif isinstance(source, dict):
                 source_id = source.get("id", source.get("title", ""))
                 if source_id and source_id not in seen_ids:
+                    # Check for BOE ID in various fields
+                    text_to_search = f"{source.get('title', '')} {source.get('id', '')} {source.get('boe_id', '')}"
+                    source = _add_graph_link(dict(source), text_to_search)
                     sources.append(source)
                     seen_ids.add(source_id)
 
@@ -439,12 +476,27 @@ def _extract_sources(
             continue
         if doc_id in seen_ids:
             continue
-        sources.append({
+
+        # Extract BOE ID from metadata or title
+        metadata = doc.get("metadata", {})
+        boe_id = metadata.get("boe_id") or metadata.get("legal_reference", "")
+
+        source_dict = {
             "id": doc_id,
             "title": title,
             "type": "retrieved",
             "score": doc.get("score", 0.0),
-        })
+        }
+
+        # Check for BOE ID in title, id, or metadata
+        text_to_search = f"{title} {doc_id} {boe_id}"
+        source_dict = _add_graph_link(source_dict, text_to_search)
+
+        # Mark public knowledge sources
+        if metadata.get("source") == "public_knowledge":
+            source_dict["source_type"] = "public_knowledge"
+
+        sources.append(source_dict)
         seen_ids.add(doc_id)
         seen_titles.add(title)
 

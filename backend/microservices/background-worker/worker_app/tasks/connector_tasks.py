@@ -496,6 +496,25 @@ async def _sync_connector(
                     logger.warning(f"Failed to notify NexusRouter: {e}")
 
             stats["success"] = True
+
+            # Emit connector.synced event to the reactive event bus
+            try:
+                from worker_app.services.event_publisher import publish_event
+                publish_event(
+                    event_type="connector.synced",
+                    tenant_id=str(connector.tenant_id),
+                    payload={
+                        "connector_id": str(connector_id),
+                        "connector_type": connector.connector_type,
+                        "docs_new": stats["items_new"],
+                        "docs_updated": stats["items_updated"],
+                        "docs_failed": stats["items_failed"],
+                        "status": "healthy" if stats["items_failed"] == 0 else "degraded",
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to emit connector.synced event: {e}")
+
             return stats
 
     except Exception as exc:

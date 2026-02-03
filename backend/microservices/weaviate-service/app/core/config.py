@@ -146,6 +146,12 @@ class Settings(BaseSettings):
     rag_dense_weight: float = float(os.getenv("RAG_DENSE_WEIGHT", "1.0"))
     rag_sparse_weight: float = float(os.getenv("RAG_SPARSE_WEIGHT", "1.0"))
 
+    # RAG Pipeline - Minimum relevance threshold
+    # Documents with score below this are filtered out to prevent irrelevant context
+    # 0.0 = no filtering (accept all), 0.55 = moderate, 0.7 = strict
+    # CRITICAL: This prevents hallucinations when no relevant documents are found
+    rag_min_relevance_score: float = float(os.getenv("RAG_MIN_RELEVANCE_SCORE", "0.55"))
+
     # RAG Pipeline - Claim Validation settings
     rag_validation_semantic: bool = os.getenv("RAG_VALIDATION_SEMANTIC", "false").lower() == "true"
     rag_validation_threshold: float = float(os.getenv("RAG_VALIDATION_THRESHOLD", "0.7"))

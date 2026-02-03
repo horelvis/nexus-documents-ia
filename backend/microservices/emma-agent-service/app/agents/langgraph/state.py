@@ -42,6 +42,34 @@ except ImportError:
         return left + right
 
 
+# ─── Custom reducers for parallel node execution ─────────────────────────────
+def merge_dicts(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Merge two dictionaries, with right taking precedence.
+    Used for metadata field when parallel nodes both update it.
+    """
+    if left is None:
+        return right or {}
+    if right is None:
+        return left or {}
+    # Deep merge: right values override left, but nested dicts are merged
+    result = {**left}
+    for key, value in right.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = {**result[key], **value}
+        else:
+            result[key] = value
+    return result
+
+
+def merge_lists(left: List[Any], right: List[Any]) -> List[Any]:
+    """
+    Concatenate two lists.
+    Used for reasoning_steps when parallel nodes both add steps.
+    """
+    return (left or []) + (right or [])
+
+
 class DocumentResult(TypedDict, total=False):
     """Document returned from retrieval."""
     id: str
@@ -138,7 +166,8 @@ class RAGState(TypedDict, total=False):
     # =========================================================================
     # Dynamic reasoning steps from plan/agents for Emma chat visibility
     # Each step: {"type": str, "content": str, "confidence": float, "entities": [], ...}
-    reasoning_steps: List[Dict[str, Any]]
+    # Uses merge_lists reducer for parallel node execution (context_tree || graph_expand)
+    reasoning_steps: Annotated[List[Dict[str, Any]], merge_lists]
 
     # =========================================================================
     # Execution State
@@ -198,6 +227,13 @@ class RAGState(TypedDict, total=False):
     sector_config: Optional[Dict[str, Any]]
 
     # =========================================================================
+    # Graph Expansion (populated by graph_expand, used by retrieve)
+    # =========================================================================
+    # BOE IDs from graph expansion (QA matches + Cypher results)
+    # Used by retrieve to filter PublicKnowledge searches
+    expanded_boe_ids: List[str]
+
+    # =========================================================================
     # RLM (Recursive Language Models) State
     # =========================================================================
     # Whether RLM was activated for this query
@@ -225,7 +261,8 @@ class RAGState(TypedDict, total=False):
     # Metadata
     # =========================================================================
     # Additional metadata for tracing/debugging
-    metadata: Dict[str, Any]
+    # Uses merge_dicts reducer for parallel node execution (context_tree || graph_expand)
+    metadata: Annotated[Dict[str, Any], merge_dicts]
 
 
 def create_initial_state(
@@ -346,6 +383,9 @@ def create_initial_state(
         sector=sector_name,
         sector_config=sector_config_dict,
 
+        # Graph Expansion (populated by graph_expand node)
+        expanded_boe_ids=[],
+
         # RLM
         rlm_activated=False,
         rlm_total_tokens=0,
@@ -362,6 +402,10 @@ def create_initial_state(
             "attachment_summary": normalized_context.get("attachment_summary"),
             "uploaded_file_ids": normalized_context.get("uploaded_file_ids", []),
             "uploaded_texts": normalized_context.get("uploaded_texts", []),
+            # Social channel mode: enables web search for external queries
+            "social_channel_mode": normalized_context.get("social_channel_mode", False),
+            # Location context for social channels
+            "location": normalized_context.get("location"),
         },
     )
 

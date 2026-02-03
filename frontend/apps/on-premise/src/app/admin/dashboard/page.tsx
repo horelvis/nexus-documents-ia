@@ -46,7 +46,6 @@ import {
 import {
   SidebarProvider,
   SidebarInset,
-  SidebarTrigger,
   Alert,
   AlertDescription,
   Tabs,
@@ -70,6 +69,7 @@ import { Switch } from "@/components/ui/switch"
 import { useApiClient } from "@/lib/api-client"
 import { useAuth } from "@/contexts/auth-context"
 import { AppSidebar } from "@/components/layout/app-sidebar"
+import { PageHeader } from '@/components/layout/page-header'
 
 // ============================================================================
 // API Response Interfaces (matching real backend /admin/stats response)
@@ -687,9 +687,7 @@ const loadBoePresets = async () => {
 
       <SidebarInset>
         {/* Header */}
-        <header className="h-14 border-b flex items-center gap-2 px-4 shrink-0">
-          <SidebarTrigger className="-ml-1" />
-          <div className="h-4 w-px bg-border" />
+        <PageHeader>
           <Link href="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
             <IconChevronLeft className="h-4 w-4" />
             <IconBrain className="h-5 w-5 text-primary" />
@@ -698,7 +696,7 @@ const loadBoePresets = async () => {
           <div className="h-4 w-px bg-border" />
           <IconDashboard className="h-4 w-4 text-muted-foreground" />
           <span className="text-muted-foreground">Administración</span>
-        </header>
+        </PageHeader>
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-6">

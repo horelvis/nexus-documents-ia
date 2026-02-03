@@ -32,7 +32,6 @@ import {
 import {
   SidebarProvider,
   SidebarInset,
-  SidebarTrigger,
   Card,
   CardContent,
   CardDescription,
@@ -55,6 +54,7 @@ import {
 } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { AppSidebar } from '@/components/layout/app-sidebar'
+import { PageHeader } from '@/components/layout/page-header'
 import {
   connectorService,
   connectorNames,
@@ -212,9 +212,7 @@ export default function DataLearningPage() {
 
       <SidebarInset>
         {/* Header */}
-        <header className="h-14 border-b flex items-center gap-2 px-4 shrink-0">
-          <SidebarTrigger className="-ml-1" />
-          <div className="h-4 w-px bg-border" />
+        <PageHeader>
           <Link href="/" className="flex items-center gap-2 text-muted-foreground hover:text-foreground">
             <IconChevronLeft className="h-4 w-4" />
             <IconBrain className="h-5 w-5 text-primary" />
@@ -223,7 +221,7 @@ export default function DataLearningPage() {
           <div className="h-4 w-px bg-border" />
           <IconSchool className="h-4 w-4 text-muted-foreground" />
           <span className="text-muted-foreground">Data Learning</span>
-        </header>
+        </PageHeader>
 
         {/* Main Content */}
         <main className="flex-1 overflow-auto p-6">

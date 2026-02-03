@@ -62,10 +62,10 @@ import {
 import {
   SidebarProvider,
   SidebarInset,
-  SidebarTrigger,
 } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { AppSidebar } from '@/components/layout/app-sidebar'
+import { PageHeader } from '@/components/layout/page-header'
 import {
   notebookService,
   Notebook,
@@ -312,9 +312,7 @@ export default function NotebookDetailPage() {
 
       <SidebarInset>
         {/* Header */}
-        <header className="h-14 border-b flex items-center gap-2 px-4 shrink-0">
-          <SidebarTrigger className="-ml-1" />
-          <div className="h-4 w-px bg-border" />
+        <PageHeader>
           <Button variant="ghost" size="icon" onClick={() => router.push('/notebooks')}>
             <IconArrowLeft className="h-5 w-5" />
           </Button>
@@ -325,7 +323,7 @@ export default function NotebookDetailPage() {
           <Button variant="outline" size="sm" onClick={loadNotebook}>
             <IconRefresh className="h-4 w-4" />
           </Button>
-        </header>
+        </PageHeader>
 
         {/* Main Content */}
         <main className="flex-1 p-6 overflow-auto">

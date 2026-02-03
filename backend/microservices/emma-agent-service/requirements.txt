@@ -79,3 +79,8 @@ markdown>=3.5.0
 
 # DOCX report generation
 python-docx>=1.1.0
+
+# Emma Reactive — Multi-Channel dependencies
+cryptography>=42.0.0  # Fernet encryption for channel credentials
+aiosmtplib>=3.0.0  # Async SMTP for email channel
+pytz>=2024.1  # Timezone handling for location-aware social channels

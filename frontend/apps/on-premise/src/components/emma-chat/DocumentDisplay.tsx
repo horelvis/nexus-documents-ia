@@ -15,7 +15,10 @@ import {
   IconFileTypeTxt,
   IconFileTypeXls,
   IconPhoto,
+  IconScale,
+  IconTopologyRing,
 } from '@tabler/icons-react'
+import Link from 'next/link'
 import { cn } from '@/lib/utils'
 import { DocumentInfo, getFileTypeConfig } from '@/lib/types/emma'
 
@@ -81,15 +84,24 @@ export function DocumentDisplay({
     return doc.name || 'Documento'
   }
 
-  // Get border color based on file type
-  const getBorderColor = (fileType?: string) => {
-    const config = getFileTypeConfig(fileType, fileType)
+  // Get border color based on file type or source type
+  const getBorderColor = (doc: DocumentInfo) => {
+    // Legal/public knowledge sources get a special purple/gold border
+    if (doc.source_type === 'public_knowledge' || doc.boe_id || doc.graph_link) {
+      return 'border-l-amber-500'
+    }
+    const config = getFileTypeConfig(doc.fileType, doc.fileType)
     if (config.icon === 'pdf') return 'border-l-red-500'
     if (config.icon === 'doc' || config.icon === 'docx') return 'border-l-blue-500'
     if (config.icon === 'xls' || config.icon === 'xlsx') return 'border-l-emerald-500'
     if (config.icon === 'image') return 'border-l-green-500'
     if (config.icon === 'txt') return 'border-l-gray-500'
     return 'border-l-blue-500'
+  }
+
+  // Check if document is a legal/legislation source
+  const isLegalSource = (doc: DocumentInfo) => {
+    return doc.source_type === 'public_knowledge' || doc.boe_id || doc.graph_link
   }
 
   return (
@@ -104,22 +116,33 @@ export function DocumentDisplay({
           const displayName = getDisplayName(doc)
           const config = getFileTypeConfig(doc.fileType, doc.fileType)
 
+          const isLegal = isLegalSource(doc)
+
           return (
             <Card
               key={doc.id || doc.name || index}
               className={cn(
                 'p-3 hover:shadow-md transition-all duration-200 cursor-pointer',
                 'border-l-4',
-                getBorderColor(doc.fileType)
+                getBorderColor(doc)
               )}
               onClick={() => onDocumentClick?.(doc)}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    {getFileTypeIcon(doc.fileType)}
+                    {isLegal ? (
+                      <IconScale className="h-4 w-4 shrink-0 text-amber-500" />
+                    ) : (
+                      getFileTypeIcon(doc.fileType)
+                    )}
                     <span className="text-sm font-medium truncate">{displayName}</span>
-                    {doc.fileType && (
+                    {isLegal && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-amber-600 border-amber-300">
+                        BOE
+                      </Badge>
+                    )}
+                    {!isLegal && doc.fileType && (
                       <Badge variant="outline" className={cn('text-[10px] px-1.5 py-0', config.color)}>
                         {config.label}
                       </Badge>
@@ -131,7 +154,14 @@ export function DocumentDisplay({
                     )}
                   </div>
 
-                  {doc.collection && (
+                  {/* Show BOE ID for legal sources */}
+                  {doc.boe_id && (
+                    <div className="flex items-center gap-2 mt-1 text-xs text-amber-600">
+                      <span>{doc.boe_id}</span>
+                    </div>
+                  )}
+
+                  {doc.collection && !isLegal && (
                     <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
                       <span>{doc.collection}</span>
                     </div>
@@ -154,18 +184,33 @@ export function DocumentDisplay({
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onPreviewClick?.(doc)
-                    }}
-                    title="Vista previa"
-                  >
-                    <IconEye className="h-3.5 w-3.5" />
-                  </Button>
+                  {/* Legal Graph Link Button */}
+                  {doc.graph_link && (
+                    <Link href={doc.graph_link} onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                        title="Ver en Grafo Legal"
+                      >
+                        <IconTopologyRing className="h-3.5 w-3.5" />
+                      </Button>
+                    </Link>
+                  )}
+                  {!isLegal && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onPreviewClick?.(doc)
+                      }}
+                      title="Vista previa"
+                    >
+                      <IconEye className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   {doc.url && (
                     <Button
                       variant="ghost"

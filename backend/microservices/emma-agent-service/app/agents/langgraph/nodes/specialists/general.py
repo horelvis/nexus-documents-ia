@@ -775,6 +775,8 @@ async def general_node(state: RAGState) -> Dict[str, Any]:
     # Knowledge queries: NO tools — the model answers with its parametric
     # knowledge + retrieved docs context. Tools confuse small models (7B)
     # which emit <tool_call> text instead of answering directly.
+    #
+    # NOTE: Social channel queries now use dedicated social_agent (see plan.py)
     # =====================================================================
     return await create_specialist_node(
         agent_name="general_agent",

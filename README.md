@@ -28,6 +28,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Emma AI Assistant** | Intelligent assistant with multi-agent orchestration (Anthropic Skill Custom) |
+| **Emma Reactive** | Event-driven proactive AI — triggers, notifications, multi-channel (Telegram, WhatsApp, Slack, Email) |
 | **SLM Router** | Small Language Model query planning with TOON notation |
 | **Multimodal RAG Pipeline** | 7-layer retrieval with hybrid search, reranking, and validated generation |
 | **Cross-Modal Search** | Text queries find images, diagrams, and tables in documents |
@@ -112,6 +113,73 @@ Emma AI is built on **Anthropic Skill Custom** with **PlanningFlow** orchestrati
 | **PrivacyAgent** | Data Protection | LOPDGDD, GDPR compliance |
 | **LegalAgent** | General Legal | Cross-domain legal analysis |
 
+### Emma Reactive: Event-Driven Proactive AI
+
+Emma Reactive transforms Emma from a request-response chatbot into a **proactive, event-driven, multi-channel assistant**:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│              EVENT BUS (Redis Streams)                     │
+│  document.indexed | connector.synced | knowledge.updated  │
+└────────┬──────────────┬──────────────┬───────────────────┘
+         │              │              │
+   ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼──────┐
+   │ Event     │ │ Celery    │ │ Channel    │
+   │ Listener  │ │ Beat      │ │ Router     │
+   └─────┬─────┘ └─────┬─────┘ └─────┬──────┘
+         │              │              │
+   ┌─────▼──────────────▼──────────────▼──────┐
+   │           Trigger Engine                  │
+   │  (evaluate rules → dispatch actions)      │
+   └─────┬────────────────────────────────────┘
+         │
+   ┌─────▼──────────────────────────────────┐
+   │  Emma Background Service               │
+   │  (LangGraph proactive execution)       │
+   └─────┬──────────────────────────────────┘
+         │
+   ┌─────▼───┬────────┬────────┬──────────┐
+   │WhatsApp │Telegram│ Slack  │ WebSocket│
+   └─────────┴────────┴────────┴──────────┘
+```
+
+| Component | Description |
+|-----------|-------------|
+| **Event Bus** | Redis Streams for inter-service events (document.indexed, connector.synced, etc.) |
+| **Trigger Engine** | Configurable rules per tenant — match events to actions (analyze, notify, workflow) |
+| **Notifications** | In-app (WebSocket push), email, webhook |
+| **Multi-Channel** | Telegram Bot, WhatsApp (Twilio), Slack, Email — with user pairing |
+| **Background Service** | Proactive LangGraph execution (daily summaries, document analysis) |
+
+> **Full docs**: [docs/architecture/EMMA_REACTIVE.md](docs/architecture/EMMA_REACTIVE.md)
+
+### Multi-Channel Webhooks with ngrok
+
+For external messaging channels (Slack, Telegram, WhatsApp) to send messages to Emma, you need a public URL. The stack includes an optional **ngrok** service for development/testing:
+
+```bash
+# 1. Get your authtoken from https://dashboard.ngrok.com/get-started/your-authtoken
+# 2. Add to backend/docker/.env:
+NGROK_AUTHTOKEN=your_token_here
+
+# 3. Start ngrok alongside your services:
+cd backend/docker
+docker compose --profile webhooks up ngrok -d
+
+# 4. Get your public URL:
+docker compose logs ngrok | grep "url="
+# → https://abc123.ngrok-free.app
+
+# 5. Configure in your channel provider:
+# - Slack: Event Subscriptions → Request URL: https://abc123.ngrok-free.app/channels/webhooks/slack
+# - Telegram: setWebhook API → https://abc123.ngrok-free.app/channels/webhooks/telegram
+# - WhatsApp (Twilio): Webhook URL → https://abc123.ngrok-free.app/channels/webhooks/whatsapp
+```
+
+**ngrok Web UI**: Visit `http://localhost:4040` to inspect incoming webhook requests in real-time.
+
+> **Note**: ngrok is under the `webhooks` profile — it won't start with regular `docker compose up`. This avoids consuming tunnel bandwidth during normal development.
+
 ---
 
 ## Hardware Requirements
@@ -165,6 +233,7 @@ Emma AI is built on **Anthropic Skill Custom** with **PlanningFlow** orchestrati
 | [MODULAR_ARCHITECTURE.md](docs/architecture/MODULAR_ARCHITECTURE.md) | SaaS vs On-Premise modular design |
 | [SLM_ROUTER.md](docs/architecture/SLM_ROUTER.md) | SLM Router (Query Planning) |
 | [EMMA_AI.md](docs/architecture/EMMA_AI.md) | Emma AI agent system |
+| [EMMA_REACTIVE.md](docs/architecture/EMMA_REACTIVE.md) | Emma Reactive event-driven system |
 | [BOE_LEGAL_KNOWLEDGE.md](docs/architecture/BOE_LEGAL_KNOWLEDGE.md) | Spanish Legal Knowledge Base (BOE) |
 | [ACL_SYSTEM.md](docs/architecture/ACL_SYSTEM.md) | Access Control architecture |
 | [RAG_PIPELINE.md](docs/architecture/RAG_PIPELINE.md) | RAG implementation blueprint |

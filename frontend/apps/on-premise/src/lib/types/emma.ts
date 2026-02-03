@@ -36,6 +36,10 @@ export interface DocumentInfo {
   author?: string
   fileType?: string
   relevanceScore?: number
+  // Legal graph integration (for BOE legislation sources)
+  boe_id?: string           // BOE identifier (e.g., "BOE-A-2015-11430")
+  graph_link?: string       // Deep link to knowledge tree (e.g., "/admin/knowledge-tree?focus=BOE-A-2015-11430")
+  source_type?: string      // "public_knowledge" | "tenant" | etc.
 }
 
 export interface ClarificationOption {

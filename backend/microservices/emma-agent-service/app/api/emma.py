@@ -175,6 +175,10 @@ class EmmaQueryResponse(BaseModel):
     latency_ms: float = 0.0
     thread_id: str = ""
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    sources: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Sources cited in the response. May include graph_link for BOE legislation."
+    )
 
     class Config:
         json_schema_extra = {
@@ -188,6 +192,13 @@ class EmmaQueryResponse(BaseModel):
                 "tokens_saved": 2500,
                 "latency_ms": 45.2,
                 "thread_id": "thread-789",
+                "sources": [
+                    {
+                        "title": "Real Decreto Legislativo 2/2015 - ET",
+                        "boe_id": "BOE-A-2015-11430",
+                        "graph_link": "/admin/knowledge-tree?focus=BOE-A-2015-11430"
+                    }
+                ],
             }
         }
 
@@ -304,6 +315,7 @@ async def emma_query(
                     "domains": langgraph_result.domains,
                     **langgraph_result.metadata,
                 },
+                sources=langgraph_result.sources,
             )
         except Exception as e:
             logger.error(f"LangGraph query failed, falling back to Emma: {e}")

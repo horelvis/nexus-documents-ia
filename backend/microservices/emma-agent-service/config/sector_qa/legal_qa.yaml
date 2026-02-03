@@ -1125,3 +1125,51 @@ concepts:
       - garantía
       - desistimiento
       - reclamación
+
+  # =========================================================================
+  # EDUCACIÓN
+  # =========================================================================
+  - id: ley_organica_educacion
+    domain: education
+    description: "LOE: Ley Orgánica de Educación y sus modificaciones (LOMLOE, LOMCE)"
+    questions:
+      - "qué es la LOE"
+      - "qué dice la LOE"
+      - "ley orgánica de educación"
+      - "LOE educación"
+      - "artículos de la LOE"
+      - "estructura del sistema educativo español"
+      - "etapas educativas en España"
+      - "educación primaria secundaria bachillerato"
+      # LOMLOE (modificación 2020)
+      - "qué es la LOMLOE"
+      - "LOMLOE cambios"
+      - "ley de educación 2020"
+      - "reforma educativa LOMLOE"
+      # LOMCE (derogada pero consultada)
+      - "qué es la LOMCE"
+      - "diferencias LOE LOMCE LOMLOE"
+      # LODE (centros educativos)
+      - "qué es la LODE"
+      - "ley orgánica del derecho a la educación"
+      - "centros educativos públicos concertados"
+      # Universidades
+      - "qué es la LOU"
+      - "qué es la LOSU"
+      - "ley orgánica de universidades"
+      - "sistema universitario español"
+    related_laws:
+      - "BOE-A-2006-7899"
+      - "BOE-A-2020-17264"
+      - "BOE-A-2001-24515"
+      - "BOE-A-1985-12978"
+    graph_keywords:
+      - LOE
+      - LOMLOE
+      - LOMCE
+      - LODE
+      - LOU
+      - LOSU
+      - educación
+      - enseñanza
+      - sistema educativo

@@ -816,9 +816,14 @@ class MultiStageRetriever:
 
         Uses a cross-encoder model to compute query-document relevance
         more accurately than bi-encoder similarity.
+
+        Also applies minimum relevance threshold to filter out irrelevant docs.
         """
         if not candidates:
             return []
+
+        min_score = settings.rag_min_relevance_score
+        reranked = []
 
         # If cross-encoder is available, use it
         if self._reranker is not None:
@@ -840,6 +845,15 @@ class MultiStageRetriever:
 
                 # Sort by new combined score
                 reranked = sorted(candidates, key=lambda d: d.score, reverse=True)
+
+                # Filter by minimum relevance score
+                if min_score > 0:
+                    before_count = len(reranked)
+                    reranked = [doc for doc in reranked if doc.score >= min_score]
+                    filtered_count = before_count - len(reranked)
+                    if filtered_count > 0:
+                        logger.info(f"🔍 Filtered {filtered_count} docs below min_score={min_score}")
+
                 return reranked[:limit]
 
             except Exception as e:
@@ -847,7 +861,17 @@ class MultiStageRetriever:
                 # Fall through to embedding fallback
 
         # Fallback: Use embedding similarity for reranking
-        return await self._rerank_by_embedding(query, candidates, limit)
+        reranked = await self._rerank_by_embedding(query, candidates, limit)
+
+        # Apply minimum score filter to fallback results too
+        if min_score > 0 and reranked:
+            before_count = len(reranked)
+            reranked = [doc for doc in reranked if doc.score >= min_score]
+            filtered_count = before_count - len(reranked)
+            if filtered_count > 0:
+                logger.info(f"🔍 Filtered {filtered_count} docs below min_score={min_score} (fallback)")
+
+        return reranked
 
     async def _rerank_by_embedding(
         self,
