@@ -182,24 +182,24 @@ async def _generate_recommendation(
     primary_label = config.outcome_labels.get(primary_outcome, primary_outcome)
 
     system_prompt = (
-        "You are an expert analyst writing a concise recommendation based on predictive factors.\n"
-        "Write a 3-5 sentence recommendation in the same language as the case description.\n"
-        "Be balanced, noting both supporting and opposing factors.\n"
-        "DO NOT use <think> tags. Output the recommendation directly."
+        "Eres un analista experto redactando recomendaciones basadas en factores predictivos.\n"
+        "Escribe una recomendación concisa (3-5 frases) en ESPAÑOL.\n"
+        "Sé equilibrado, mencionando factores a favor y en contra.\n"
+        "NO uses etiquetas <think>. Responde directamente con la recomendación."
     )
 
-    user_prompt = f"""CASE DESCRIPTION:
+    user_prompt = f"""DESCRIPCIÓN DEL CASO:
 {case_description[:2000]}
 
-ANALYSIS FACTORS:
+FACTORES ANALIZADOS:
 {factors_summary}
 
-PREDICTED OUTCOMES:
+RESULTADOS PREDICHOS:
 {outcome_summary}
 
-PRIMARY PREDICTION: {primary_label} ({outcome_probs.get(primary_outcome, 0):.1%})
+PREDICCIÓN PRINCIPAL: {primary_label} ({outcome_probs.get(primary_outcome, 0):.1%})
 
-Write a concise recommendation (3-5 sentences). Be specific about key factors."""
+Escribe una recomendación concisa (3-5 frases). Sé específico sobre los factores clave."""
 
     try:
         from app.agents.llm_client import get_llm_client

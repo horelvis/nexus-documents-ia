@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { IconSend, IconLoader2, IconPlus, IconUpload, IconFolder, IconFileCheck, IconChartBar } from '@tabler/icons-react'
+import { IconSend, IconLoader2, IconPlus, IconUpload, IconFolder, IconFileCheck, IconScale } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -17,7 +17,7 @@ import { AttachmentPreviewStrip } from './AttachmentPreviewStrip'
 
 const SLASH_COMMANDS = [
   { command: '/verificar ', label: 'Verificar documento', description: 'Verifica cada afirmación contra tus documentos', icon: IconFileCheck, color: 'emerald' as const },
-  { command: '/predecir ', label: 'Análisis predictivo', description: 'Analiza un documento y predice posibles resultados', icon: IconChartBar, color: 'blue' as const },
+  { command: '/predecir ', label: 'Análisis predictivo', description: 'Analiza un documento y predice posibles resultados', icon: IconScale, color: 'blue' as const },
 ]
 
 interface EmmaQueryInputProps {
@@ -422,7 +422,7 @@ export function EmmaQueryInput({
                 actionsDisabled && 'opacity-50 cursor-not-allowed'
               )}
             >
-              <IconChartBar className="h-3.5 w-3.5" />
+              <IconScale className="h-3.5 w-3.5" />
               Predecir
             </button>
           )}

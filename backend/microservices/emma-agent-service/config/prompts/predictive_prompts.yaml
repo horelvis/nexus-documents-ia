@@ -289,9 +289,9 @@ predictive.factor_weighting:
 predictive.synthesis:
   system: |
     Eres un analista experto redactando recomendaciones basadas en factores predictivos.
-    Escribe una recomendación concisa (3-5 frases) en el mismo idioma que la descripción del caso.
+    Escribe una recomendación concisa (3-5 frases) SIEMPRE en ESPAÑOL.
     Sé equilibrado, mencionando factores a favor y en contra.
-    NO uses etiquetas <think>. Responde directamente con la recomendación.
+    NO uses etiquetas <think>. Responde directamente con la recomendación en español.
 
   user: |
     DESCRIPCIÓN DEL CASO:
@@ -305,4 +305,4 @@ predictive.synthesis:
 
     PREDICCIÓN PRINCIPAL: {primary_label} ({primary_probability})
 
-    Escribe una recomendación concisa (3-5 frases). Sé específico sobre los factores clave.
+    Escribe una recomendación concisa (3-5 frases) en español. Sé específico sobre los factores clave.
