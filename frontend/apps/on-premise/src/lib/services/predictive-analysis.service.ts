@@ -157,3 +157,23 @@ export async function downloadPredictivePdf(sessionId: string, tenantId: string)
 
   return response.blob()
 }
+
+/**
+ * Download prediction DOCX report.
+ */
+export async function downloadPredictiveDocx(sessionId: string, tenantId: string): Promise<Blob> {
+  const token = getAccessToken()
+  const url = `${STREAMING_API_URL}/emma/predictive/analysis/${sessionId}/docx?tenant_id=${encodeURIComponent(tenantId)}`
+
+  const response = await fetch(url, {
+    headers: {
+      'Authorization': `Bearer ${token || ''}`,
+    },
+  })
+
+  if (!response.ok) {
+    throw new Error(`DOCX download failed: ${response.status}`)
+  }
+
+  return response.blob()
+}

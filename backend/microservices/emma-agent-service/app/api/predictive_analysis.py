@@ -232,6 +232,78 @@ async def export_analysis_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get(
+    "/analysis/{session_id}/docx",
+    summary="Export prediction as DOCX",
+)
+async def export_analysis_docx(
+    session_id: str,
+    tenant_id: str,
+    _: None = Depends(verify_api_key),
+) -> Response:
+    """Export a prediction analysis as a downloadable Word document."""
+    logger.info(f"📄 Predictive DOCX export: session={session_id[:16]}...")
+
+    try:
+        cache = get_predictive_cache()
+        await cache.connect()
+
+        result = await cache.get_result(tenant_id, session_id)
+        if not result:
+            raise HTTPException(status_code=404, detail="Analysis not found or expired")
+
+        meta = await cache.get_session_metadata(tenant_id, session_id)
+
+        from app.services.docx_renderer import get_docx_renderer
+        renderer = get_docx_renderer()
+
+        # Build DOCX data using predictive report format
+        docx_data = {
+            "query": meta.get("case_description", "Análisis Predictivo"),
+            "session_id": session_id,
+            "created_at": meta.get("created_at", "N/A"),
+            "document_text": (
+                f"**Predicción:** {result.primary_outcome} ({result.probability:.0%})\n\n"
+                f"**Recomendación:** {result.recommendation}\n\n"
+                f"**Factores analizados:** {len(result.factors)}\n\n"
+                f"**Disclaimer:** {result.disclaimer}"
+            ),
+            "claims": [
+                {
+                    "text": f"[{f.factor_type}] {f.description}",
+                    "confidence": f.confidence,
+                    "status": "verified" if f.status == "weighted" else "rejected",
+                }
+                for f in result.factors
+            ],
+            "claims_verified": len([f for f in result.factors if f.status == "weighted"]),
+            "claims_corrected": 0,
+            "claims_rejected": len([f for f in result.factors if f.status == "rejected"]),
+            "average_confidence": (
+                sum(f.confidence for f in result.factors if f.confidence) / len(result.factors)
+                if result.factors else 0
+            ),
+            "execution_time_ms": result.execution_time_ms,
+            "sources": [],
+        }
+
+        docx_bytes = renderer.render_verified_report(docx_data)
+
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'attachment; filename="informe_predictivo_{session_id[:8]}.docx"'
+            },
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Predictive DOCX export failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete(
     "/analysis/{session_id}",
     summary="Clear analysis session",

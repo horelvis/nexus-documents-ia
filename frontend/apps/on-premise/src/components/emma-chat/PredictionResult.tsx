@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { PredictiveAnalysisMetadata, PredictiveFactorInfo } from '@/lib/types/emma'
-import { downloadPredictivePdf } from '@/lib/services/predictive-analysis.service'
+import { downloadPredictivePdf, downloadPredictiveDocx } from '@/lib/services/predictive-analysis.service'
 
 interface PredictionResultProps {
   metadata: PredictiveAnalysisMetadata
@@ -26,7 +26,8 @@ interface PredictionResultProps {
  * Prediction result with paper-sheet document viewer matching verified design.
  */
 export function PredictionResult({ metadata, className }: PredictionResultProps) {
-  const [downloading, setDownloading] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [downloadingDocx, setDownloadingDocx] = useState(false)
 
   const {
     probability,
@@ -44,19 +45,37 @@ export function PredictionResult({ metadata, className }: PredictionResultProps)
 
   const handleDownloadPdf = async () => {
     if (!session_id || !tenant_id) return
-    setDownloading(true)
+    setDownloadingPdf(true)
     try {
       const blob = await downloadPredictivePdf(session_id, tenant_id)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `predictive_report_${session_id.slice(0, 8)}.pdf`
+      a.download = `informe_predictivo_${session_id.slice(0, 8)}.pdf`
       a.click()
       URL.revokeObjectURL(url)
     } catch (err) {
       console.error('PDF download failed:', err)
     } finally {
-      setDownloading(false)
+      setDownloadingPdf(false)
+    }
+  }
+
+  const handleDownloadDocx = async () => {
+    if (!session_id || !tenant_id) return
+    setDownloadingDocx(true)
+    try {
+      const blob = await downloadPredictiveDocx(session_id, tenant_id)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `informe_predictivo_${session_id.slice(0, 8)}.docx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('DOCX download failed:', err)
+    } finally {
+      setDownloadingDocx(false)
     }
   }
 
@@ -102,19 +121,34 @@ export function PredictionResult({ metadata, className }: PredictionResultProps)
           </div>
         </div>
 
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleDownloadPdf}
-          disabled={downloading || !session_id}
-          className="gap-1.5"
-        >
-          {downloading
-            ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-            : <IconDownload className="h-3.5 w-3.5" />
-          }
-          PDF
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadPdf}
+            disabled={downloadingPdf || !session_id}
+            className="gap-1.5"
+          >
+            {downloadingPdf
+              ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+              : <IconDownload className="h-3.5 w-3.5" />
+            }
+            PDF
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadDocx}
+            disabled={downloadingDocx || !session_id}
+            className="gap-1.5"
+          >
+            {downloadingDocx
+              ? <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+              : <IconDownload className="h-3.5 w-3.5" />
+            }
+            DOCX
+          </Button>
+        </div>
       </div>
 
       {/* Probability Gauge */}
