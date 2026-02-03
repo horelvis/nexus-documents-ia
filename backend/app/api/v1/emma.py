@@ -328,6 +328,39 @@ async def emma_predictive_analysis_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/predictive/analysis/{session_id}/docx")
+async def emma_predictive_analysis_docx(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Export a predictive analysis session as DOCX. Proxies to Emma Agent Service.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/predictive/analysis/{session_id}/docx",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                logger.error(f"❌ Predictive DOCX error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+
+            from fastapi.responses import Response
+            return Response(
+                content=response.content,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers=dict(response.headers),
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Predictive DOCX proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/verified/session/{session_id}/claims")
 async def emma_verified_session_claims(
     session_id: str,
