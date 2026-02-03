@@ -197,18 +197,20 @@ class DeliveryManager:
         )
 
         # Deliver via channels in priority order
+        # Note: We deliver to ALL channels in priority list, not just the first one
         delivered = False
         for channel in config.channel_priority:
             try:
                 if channel == "in_app":
                     await self._deliver_in_app(delivered_insight, tenant_id)
                     delivered = True
-                    break
+                elif channel == "slack":
+                    await self._deliver_slack(delivered_insight, tenant_id)
+                    delivered = True
                 elif channel == "email":
                     await self._deliver_email(delivered_insight, tenant_id)
                     delivered = True
-                    break
-                # Add other channels as needed
+                # Continue to deliver to other channels (multi-channel delivery)
             except Exception as e:
                 logger.warning(f"Failed to deliver via {channel}: {e}")
                 continue
@@ -265,6 +267,36 @@ class DeliveryManager:
         # This would integrate with the email task in background-worker
         logger.info(f"Email delivery queued for insight {insight.id}")
         # TODO: Call background worker email task
+
+    async def _deliver_slack(
+        self,
+        insight: ProactiveInsight,
+        tenant_id: str,
+    ):
+        """Deliver insight to Slack notification channels."""
+        # Map urgency to priority string
+        urgency_value = insight.urgency if isinstance(insight.urgency, str) else insight.urgency.value
+        priority_map = {
+            "critical": "critical",
+            "high": "high",
+            "medium": "normal",
+            "low": "low",
+        }
+        priority = priority_map.get(urgency_value, "normal")
+
+        # Use notification service's Slack delivery
+        await notification_service.send_to_slack_channels(
+            tenant_id=tenant_id,
+            title=f"🔮 {insight.title}",
+            body=insight.summary or "",
+            priority=priority,
+            metadata={
+                "insight_id": insight.id,
+                "insight_type": insight.insight_type.value if hasattr(insight.insight_type, 'value') else str(insight.insight_type),
+                "urgency": urgency_value,
+            },
+        )
+        logger.info(f"Slack notification sent for insight {insight.id}")
 
     async def _store_insight(
         self,
