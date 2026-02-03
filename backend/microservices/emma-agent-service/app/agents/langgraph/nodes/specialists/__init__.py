@@ -23,6 +23,7 @@ Each agent:
 from .privacy import privacy_node
 from .legal import legal_node
 from .general import general_node
+from .social import social_node
 from .base import create_specialist_node
 from .domain_agents import (
     labor_node,
@@ -38,6 +39,7 @@ __all__ = [
     "privacy_node",
     "legal_node",
     "general_node",
+    "social_node",
     "create_specialist_node",
     "labor_node",
     "fiscal_node",

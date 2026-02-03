@@ -323,6 +323,47 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
         f"Analizando consulta: '{query[:50]}...'"
     )
 
+    # =========================================================================
+    # EARLY EXIT: Social channel mode → always use social_agent
+    # This MUST be checked BEFORE identity/conversational fast-paths because
+    # social_agent handles greetings with tools (web_search, quick_document_search)
+    # =========================================================================
+    metadata = state.get("metadata", {})
+    is_social_channel = metadata.get("social_channel_mode", False)
+
+    if is_social_channel:
+        latency_ms = (time.time() - start_time) * 1000
+        # Use "or {}" to handle None values (not just missing keys)
+        location = metadata.get("location") or {}
+        tracker.add_step(
+            StepType.ROUTING,
+            "Modo canal social detectado → social_agent",
+            confidence=1.0,
+            metadata={"route": "SOCIAL_CHANNEL", "location": location}
+        )
+
+        logger.info(
+            f"📱 PLAN: Social channel mode | routing=social_agent | "
+            f"location={location.get('city', 'default')} | "
+            f"latency={latency_ms:.1f}ms"
+        )
+
+        return {
+            "detected_domains": ["social"],
+            "execution_plan": ["social_agent"],
+            "plan_reasoning": "Canal social: usando social_agent con web_search + quick_document_search",
+            "reasoning_steps": tracker.get_steps(),
+            "fast_path_used": False,  # Not a fast-path, social_agent will execute
+            "fast_path_answer": None,
+            "current_agent_index": 0,
+            "metadata": {
+                **metadata,
+                "planning_latency_ms": latency_ms,
+                "is_social_channel": True,
+                "decision_path": ["plan", "social_channel", "social_agent"],
+            },
+        }
+
     # Handle user name memory (set or recall)
     declared_name = _extract_declared_name(query)
     if declared_name or _is_name_query(query):
@@ -614,19 +655,30 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
     execution_plan = [a for a in execution_plan if not (a in seen or seen.add(a))]
 
     # Filter agents by active sector (if configured)
-    sector_config = state.get("sector_config")
-    if sector_config:
-        allowed_agents = set(sector_config.get("agents", []))
-        filtered_plan = [a for a in execution_plan if a in allowed_agents]
-        if not filtered_plan:
-            # All planned agents were outside the sector — use sector default
-            filtered_plan = [sector_config.get("default_agent", "general_agent")]
-        if filtered_plan != execution_plan:
-            logger.info(
-                f"🏷️ PLAN: Sector '{sector_config.get('sector')}' filtered agents: "
-                f"{execution_plan} → {filtered_plan}"
-            )
-        execution_plan = filtered_plan
+    # EXCEPTION: In social_channel_mode, use dedicated social_agent
+    metadata = state.get("metadata", {})
+    is_social_channel = metadata.get("social_channel_mode", False)
+
+    if is_social_channel:
+        # Social channel mode: use dedicated social_agent
+        # It has web_search + quick_document_search + conversational prompts
+        execution_plan = ["social_agent"]
+        logger.info(f"📱 PLAN: Social channel mode - using social_agent")
+    else:
+        # Normal mode: filter by sector config
+        sector_config = state.get("sector_config")
+        if sector_config:
+            allowed_agents = set(sector_config.get("agents", []))
+            filtered_plan = [a for a in execution_plan if a in allowed_agents]
+            if not filtered_plan:
+                # All planned agents were outside the sector — use sector default
+                filtered_plan = [sector_config.get("default_agent", "general_agent")]
+            if filtered_plan != execution_plan:
+                logger.info(
+                    f"🏷️ PLAN: Sector '{sector_config.get('sector')}' filtered agents: "
+                    f"{execution_plan} → {filtered_plan}"
+                )
+            execution_plan = filtered_plan
 
     latency_ms = (time.time() - start_time) * 1000
 

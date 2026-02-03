@@ -355,12 +355,77 @@ INSTRUCCIONES CRÍTICAS PARA GENERACIÓN:
 6. Fundamenta cada cláusula con legislación vigente (artículos, leyes, BOE).
 7. Al final incluye sección CAMPOS PENDIENTES DE COMPLETAR."""
         else:
-            user_content = f"""Query: {query}
+            # Detect if we have NO relevant documents to avoid hallucination
+            # EXCEPTION: social_agent has web_search for external info, don't disable tool use
+            is_social_agent = agent_name == "social_agent"
+            no_relevant_docs = (
+                not context or
+                "No documents retrieved" in context or
+                "No documents with sufficient relevance" in context or
+                "No hay documentos" in context
+            )
 
-Context from retrieved documents (use as support and verification, not as exclusive source):
+            if is_social_agent:
+                # SOCIAL AGENT: Designed for conversational channels (Slack, Telegram, WhatsApp)
+                # Proactive web context may have been injected by social_node
+                location_info = metadata.get("location", {})
+                location_str = f"{location_info.get('city', 'España')}, {location_info.get('country', 'España')}" if location_info else "España"
+                proactive_context = metadata.get("proactive_web_context", "")
+
+                if proactive_context:
+                    # We have proactive web search results - use them!
+                    user_content = f"""Query: {query}
+
+CONTEXTO:
+- Ubicación del usuario: {location_str}
+- Canal: social (Slack/Telegram/WhatsApp)
+{proactive_context}
+
+INSTRUCCIONES:
+1. USA la información de web_search proporcionada arriba para responder
+2. Responde de forma BREVE y CONVERSACIONAL (2-3 oraciones máximo)
+3. Usa emojis con moderación (1-2 por mensaje)
+4. NO digas que no tienes acceso a información - ¡ya la tienes arriba!
+5. Si la información de búsqueda no es relevante, responde conversacionalmente"""
+                else:
+                    # No proactive context - normal flow (encourage tools)
+                    user_content = f"""Query: {query}
+
+CONTEXTO:
+- Ubicación del usuario: {location_str}
+- Canal: social (Slack/Telegram/WhatsApp)
+
+INSTRUCCIONES CRÍTICAS:
+1. Si la pregunta es sobre CLIMA, TIEMPO, NOTICIAS, EVENTOS, PRECIOS → USA `web_search` OBLIGATORIO
+2. Si la pregunta es sobre DOCUMENTOS del usuario → USA `quick_document_search`
+3. Responde de forma BREVE y CONVERSACIONAL (2-3 oraciones máximo)
+4. Usa emojis con moderación (1-2 por mensaje)
+5. NUNCA digas "no tengo acceso" si tienes una herramienta que puede ayudar
+
+RECUERDA: Tienes herramientas `web_search` y `quick_document_search`. ¡ÚSALAS!"""
+            elif no_relevant_docs:
+                # CRITICAL: Do NOT encourage LLM to use "its own knowledge" - this causes hallucinations
+                user_content = f"""Query: {query}
+
+IMPORTANTE: No se encontraron documentos relevantes en el repositorio del usuario para responder esta consulta.
+
+Tu respuesta DEBE:
+1. Indicar claramente que no encontraste información relevante en los documentos del usuario
+2. NO inventar leyes, artículos, BOE, normativas o información legal específica
+3. Sugerir al usuario que suba documentos relacionados o reformule su pregunta
+4. Si puedes dar información GENERAL sobre el tema (sin citar fuentes específicas), indicar claramente que es información general y NO verificada con sus documentos
+
+Responde de forma honesta sobre la falta de documentos relevantes."""
+            else:
+                user_content = f"""Query: {query}
+
+Context from retrieved documents:
 {context}
 
-Analyze and respond using your specialized legal knowledge. The retrieved documents may be partial or tangentially related — complement them with your own knowledge of applicable legislation, citing specific laws and articles even if they don't appear in the documents above."""
+INSTRUCCIONES:
+1. Responde basándote en los documentos proporcionados.
+2. NO inventes leyes, artículos o BOE que no aparezcan en los documentos.
+3. Si los documentos NO son relevantes para la consulta, indica que no encontraste información relevante."""
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -566,7 +631,9 @@ Analyze and respond using your specialized legal knowledge. The retrieved docume
         }
 
 
-MIN_RELEVANCE_SCORE = 0.45
+# Use environment variable for consistency with weaviate-service
+import os
+MIN_RELEVANCE_SCORE = float(os.getenv("RAG_MIN_RELEVANCE_SCORE", "0.55"))
 
 
 def _build_docgen_context(docs: List[Dict], max_chars: int = 6000) -> str:

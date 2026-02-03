@@ -97,7 +97,41 @@ Note: `context_tree` and `graph_expand` run in **parallel**. `graph_expand` popu
 - **RLM Processor**: Recursive pipeline for large docs (>16K tokens), Redis cached
 - **Verified Generation**: Claim-by-claim verification with SSE streaming
 - **LLM Providers**: vLLM (primary), OpenAI, Anthropic, Google (fallbacks)
+- **Social Agent**: Conversational agent for social channels (see below)
 - **Emma Reactive**: Event-driven proactive system (see below)
+
+### Social Agent (Slack, Telegram, WhatsApp)
+
+The `social_agent` provides conversational, emoji-rich responses for social channel interactions.
+
+**Activation**: Set `social_channel_mode: true` in request context:
+```python
+context = {
+    "social_channel_mode": True,
+    "location": {"city": "Madrid", "country": "España", "timezone": "Europe/Madrid"}
+}
+```
+
+**Capabilities**:
+| Feature | Tool | When Used |
+|---------|------|-----------|
+| Weather/News | `web_search` (DuckDuckGo) | Proactively for clima/tiempo/noticias queries |
+| Document Search | `quick_document_search` | When user asks about their files |
+| Conversational | — | Greetings, identity, general chat |
+
+**Proactive Tool Calling**: Since Qwen 7B doesn't reliably call tools, `social_node` detects weather/news queries via regex patterns and calls `web_search` **proactively** before LLM generation. Results are injected into context.
+
+**Key files**:
+- `agents/langgraph/nodes/specialists/social.py` — Social agent node with proactive web search
+- `agents/langgraph/nodes/specialists/base.py` — Special user_content for social_agent
+- `agents/langgraph/nodes/plan.py` — Early exit for social_channel_mode (before identity fast-path)
+- `services/web_search.py` — DuckDuckGo async client
+
+**Response style**:
+- Brief (2-3 sentences max, chat-style)
+- Emojis with moderation (1-2 per message)
+- Conversational tone, never robotic
+- Same language as user query
 
 ### Emma Reactive System
 
@@ -305,6 +339,21 @@ docker compose exec weaviate-service bash -c \
 - Run: `cd backend/tests && ./run_tests.sh`
 - Coverage in `backend/tests/coverage_report/`
 - Test environment uses **real GCS** (credentials at `./credentials`)
+
+### Testing Best Practices (IMPORTANT)
+- **NEVER validate tests based only on server logs** — always verify the complete HTTP response (status code + body)
+- Bash pipes (`curl ... | python3 -c "..."`) can fail silently due to buffering issues
+- **Always save responses to a file first**, then parse:
+  ```bash
+  # ❌ WRONG - can fail silently
+  curl -s http://api/endpoint | python3 -c "import json,sys; print(json.load(sys.stdin))"
+
+  # ✅ CORRECT - verifiable
+  curl -s http://api/endpoint > /tmp/response.json
+  python3 -c "import json; print(json.load(open('/tmp/response.json')))"
+  ```
+- For API tests, use Python `httpx`/`requests` directly instead of bash+curl for reliable results
+- Server logs showing "success" ≠ client receiving correct response
 
 ## Troubleshooting
 

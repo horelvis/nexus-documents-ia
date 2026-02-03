@@ -4,22 +4,23 @@ LangGraph RAG StateGraph Assembly
 Main graph construction that wires together all nodes with
 conditional routing for multi-agent execution.
 
-Graph Structure:
-    START → retrieve → plan → route_to_agents → [agents] → synthesize → END
-                                    ↓
-                         ┌─────────┴─────────┐
-                         ↓                   ↓
-                   privacy_agent      general_agent
-                         ↓                   ↓
-                         └─────────┬─────────┘
+Graph Structure (Parallel Context Expansion):
+    START → coordinator → ┬─────────────────┬
+                          │                 │
+                     context_tree     graph_expand  (parallel)
+                          │                 │
+                          └────────┬────────┘
                                    ↓
-                            check_more_agents
+                              retrieve ← (uses expanded_boe_ids from graph_expand)
                                    ↓
-                         ┌─────────┴─────────┐
-                         ↓                   ↓
-                    next_agent          synthesize
-                                             ↓
-                                           END
+                              rlm_plan → [rlm_map → rlm_reduce] or plan
+                                   ↓
+                                 plan → route_to_agents → [agents] → synthesize → END
+
+The parallel execution of context_tree and graph_expand allows:
+1. graph_expand to extract BOE IDs from QA matches and knowledge graph
+2. These IDs are then used by retrieve to filter PublicKnowledge searches
+3. Better retrieval precision without added latency (runs in parallel)
 
 Design Decisions:
 1. Use StateGraph for explicit state management
@@ -57,7 +58,7 @@ from .nodes.specialists import (
     privacy_node, legal_node, general_node,
     labor_node, fiscal_node, contract_node,
     compliance_node, realestate_node, education_node,
-    docgen_node,
+    docgen_node, social_node,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,9 +97,10 @@ def create_rag_graph(
 
     # Core pipeline nodes
     workflow.add_node("coordinator", coordinator_node)
+    workflow.add_node("expansion_fork", _expansion_fork_node)  # Fan-out for parallel expansion
     workflow.add_node("context_tree", context_tree_node)
-    workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("graph_expand", graph_expand_node)
+    workflow.add_node("retrieve", retrieve_node)
     workflow.add_node("rlm_plan", rlm_plan_node)
     workflow.add_node("rlm_map", rlm_map_node)
     workflow.add_node("rlm_reduce", rlm_reduce_node)
@@ -109,6 +111,7 @@ def create_rag_graph(
     workflow.add_node("privacy_agent", privacy_node)
     workflow.add_node("legal_agent", legal_node)
     workflow.add_node("general_agent", general_node)
+    workflow.add_node("social_agent", social_node)  # Social channel specialist
 
     # Domain specialist agent nodes (loaded from emma_prompts.yaml)
     workflow.add_node("labor_agent", labor_node)
@@ -129,23 +132,29 @@ def create_rag_graph(
     # Entry point
     workflow.set_entry_point("coordinator")
 
-    # coordinator → retrieve (conditional)
+    # coordinator → conditional routing
     workflow.add_conditional_edges(
         "coordinator",
         _route_from_coordinator,
         {
-            "retrieve": "context_tree",
+            "expand": "expansion_fork",  # Routes to parallel expansion
             "plan": "plan",
             "end": END,
         },
     )
 
-    # context_tree → retrieve
-    workflow.add_edge("context_tree", "retrieve")
+    # expansion_fork → [context_tree, graph_expand] (parallel fan-out)
+    # Both edges from expansion_fork: LangGraph executes them concurrently
+    workflow.add_edge("expansion_fork", "context_tree")
+    workflow.add_edge("expansion_fork", "graph_expand")
 
-    # retrieve → graph_expand → rlm_plan → (rlm_map | plan | synthesize)
-    workflow.add_edge("retrieve", "graph_expand")
-    workflow.add_edge("graph_expand", "rlm_plan")
+    # Fan-in: Both parallel nodes converge at retrieve
+    # graph_expand populates expanded_boe_ids that retrieve will use
+    workflow.add_edge("context_tree", "retrieve")
+    workflow.add_edge("graph_expand", "retrieve")
+
+    # retrieve → rlm_plan → (rlm_map | plan | synthesize)
+    workflow.add_edge("retrieve", "rlm_plan")
 
     # RLM conditional routing from plan node
     workflow.add_conditional_edges(
@@ -177,6 +186,7 @@ def create_rag_graph(
             "education_agent": "education_agent",
             "legal_agent": "legal_agent",
             "docgen_agent": "docgen_agent",
+            "social_agent": "social_agent",  # Social channel specialist
             "synthesize": "synthesize",
             "end": END,
         },
@@ -186,7 +196,7 @@ def create_rag_graph(
     for agent in [
         "privacy_agent", "general_agent", "labor_agent", "fiscal_agent",
         "contract_agent", "compliance_agent", "realestate_agent",
-        "education_agent", "legal_agent", "docgen_agent",
+        "education_agent", "legal_agent", "docgen_agent", "social_agent",
     ]:
         workflow.add_edge(agent, "agent_router")
 
@@ -205,6 +215,7 @@ def create_rag_graph(
             "education_agent": "education_agent",
             "legal_agent": "legal_agent",
             "docgen_agent": "docgen_agent",
+            "social_agent": "social_agent",
             "synthesize": "synthesize",
         },
     )
@@ -270,7 +281,7 @@ def _route_from_plan(state: RAGState) -> str:
     valid_agents = [
         "privacy_agent", "general_agent", "labor_agent", "fiscal_agent",
         "contract_agent", "compliance_agent", "realestate_agent",
-        "education_agent", "legal_agent", "docgen_agent",
+        "education_agent", "legal_agent", "docgen_agent", "social_agent",
     ]
 
     if first_agent not in valid_agents:
@@ -285,7 +296,12 @@ def _route_from_coordinator(state: RAGState) -> str:
     Route from coordinator to the next step.
 
     Uses coordinator_route metadata to decide if we should end early
-    (e.g., empty query) or proceed to retrieval.
+    (e.g., empty query) or proceed to parallel context expansion.
+
+    Returns:
+        "expand" - Proceed to parallel expansion (context_tree || graph_expand)
+        "plan" - Skip retrieval entirely
+        "end" - Early termination
     """
     route = state.get("metadata", {}).get("coordinator_route", "retrieve")
     if route == "end":
@@ -294,7 +310,9 @@ def _route_from_coordinator(state: RAGState) -> str:
     if route == "plan":
         logger.info("🧭 Coordinator skipping retrieval")
         return "plan"
-    return "retrieve"
+    # Default: proceed to parallel expansion (formerly "retrieve")
+    logger.info("🧭 Coordinator → parallel expansion (context_tree || graph_expand)")
+    return "expand"
 
 
 def _route_after_agent(state: RAGState) -> str:
@@ -333,6 +351,22 @@ async def _agent_router_node(state: RAGState) -> Dict[str, Any]:
     after each agent completes.
     """
     # Just return empty dict - state flows through unchanged
+    return {}
+
+
+async def _expansion_fork_node(state: RAGState) -> Dict[str, Any]:
+    """
+    Fork node for parallel context expansion.
+
+    This node does nothing but pass state through. Its purpose is to
+    serve as a fan-out point for parallel execution of context_tree
+    and graph_expand nodes.
+
+    LangGraph will execute both downstream nodes (context_tree and
+    graph_expand) concurrently, then merge their state updates before
+    continuing to retrieve.
+    """
+    logger.debug("🔀 Expansion fork: dispatching to context_tree and graph_expand")
     return {}
 
 
