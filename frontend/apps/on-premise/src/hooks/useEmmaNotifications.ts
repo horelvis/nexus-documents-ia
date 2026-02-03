@@ -46,7 +46,7 @@ export function useEmmaNotifications(options: UseEmmaNotificationsOptions = {}) 
 
     const fetchNotifications = async () => {
       try {
-        const res = await fetch(`${baseUrl}/notifications?limit=50`);
+        const res = await fetch(`${baseUrl}/emma/notifications?limit=50`);
         if (res.ok) {
           const data = await res.json();
           setNotifications(data.notifications || []);
@@ -116,7 +116,7 @@ export function useEmmaNotifications(options: UseEmmaNotificationsOptions = {}) 
 
   const markAsRead = async (notificationId: string) => {
     try {
-      const res = await fetch(`${baseUrl}/notifications/${notificationId}/read`, {
+      const res = await fetch(`${baseUrl}/emma/notifications/${notificationId}/read`, {
         method: "PATCH",
       });
       if (res.ok) {
@@ -132,7 +132,7 @@ export function useEmmaNotifications(options: UseEmmaNotificationsOptions = {}) 
 
   const markAllAsRead = async () => {
     try {
-      const res = await fetch(`${baseUrl}/notifications/read-all`, {
+      const res = await fetch(`${baseUrl}/emma/notifications/read-all`, {
         method: "POST",
       });
       if (res.ok) {

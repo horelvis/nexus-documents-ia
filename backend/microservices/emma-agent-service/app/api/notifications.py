@@ -1,21 +1,28 @@
 """Notifications API — In-app notification management.
 
 Endpoints:
-    GET   /notifications           — List notifications
-    GET   /notifications/unread    — Unread count
-    PATCH /notifications/{id}/read — Mark as read
-    POST  /notifications/read-all  — Mark all as read
+    GET   /notifications             — List notifications
+    GET   /notifications/unread      — Unread count
+    PATCH /notifications/{id}/read   — Mark as read
+    POST  /notifications/read-all    — Mark all as read
+    WS    /emma/ws/notifications     — Real-time WebSocket push
 """
+import asyncio
+import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+import redis.asyncio as aioredis
 
 from app.core.config import settings
 from app.services.notification_service import notification_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Redis channel for real-time notifications
+WS_NOTIFICATION_CHANNEL = "emma:notifications:realtime"
 
 
 def _get_tenant_and_user(
@@ -81,3 +88,80 @@ async def mark_all_read(
     tenant_id, user_id = _get_tenant_and_user(x_tenant_id, x_user_id)
     count = await notification_service.mark_all_read(tenant_id, user_id)
     return {"marked_read": count}
+
+
+# =============================================================================
+# WebSocket Endpoint for Real-Time Notifications
+# =============================================================================
+
+@router.websocket("/ws/notifications")
+async def websocket_notifications(websocket: WebSocket):
+    """WebSocket endpoint for real-time notification push.
+
+    Clients connect here to receive notifications in real-time via Redis Pub/Sub.
+    Uses single-tenant defaults if no tenant/user specified.
+    """
+    await websocket.accept()
+    logger.info("WebSocket client connected for notifications")
+
+    # Get tenant/user from query params or use defaults
+    tenant_id = websocket.query_params.get("tenant_id") or (
+        settings.default_tenant_id if settings.single_tenant_mode else None
+    )
+    user_id = websocket.query_params.get("user_id") or "system"
+
+    if not tenant_id:
+        await websocket.close(code=4000, reason="tenant_id required")
+        return
+
+    # Connect to Redis Pub/Sub
+    redis_client = aioredis.Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        decode_responses=True,
+    )
+    pubsub = redis_client.pubsub()
+
+    try:
+        # Subscribe to notification channel
+        await pubsub.subscribe(WS_NOTIFICATION_CHANNEL)
+        logger.info(f"Subscribed to {WS_NOTIFICATION_CHANNEL} for tenant {tenant_id}")
+
+        # Keep connection alive and forward messages
+        while True:
+            try:
+                # Check for new messages (non-blocking with timeout)
+                message = await asyncio.wait_for(
+                    pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0),
+                    timeout=5.0,
+                )
+
+                if message and message["type"] == "message":
+                    try:
+                        notification = json.loads(message["data"])
+                        # Filter by tenant/user
+                        if notification.get("tenant_id") == tenant_id:
+                            if notification.get("user_id") == user_id or notification.get("user_id") == "system":
+                                await websocket.send_json(notification)
+                    except json.JSONDecodeError:
+                        pass
+
+                # Send ping to keep connection alive
+                await websocket.send_json({"type": "ping"})
+
+            except asyncio.TimeoutError:
+                # Send keepalive ping
+                try:
+                    await websocket.send_json({"type": "ping"})
+                except Exception:
+                    break
+
+    except WebSocketDisconnect:
+        logger.info("WebSocket client disconnected")
+    except Exception as e:
+        logger.warning(f"WebSocket error: {e}")
+    finally:
+        await pubsub.unsubscribe(WS_NOTIFICATION_CHANNEL)
+        await pubsub.close()
+        await redis_client.close()
+        logger.info("WebSocket cleanup complete")

@@ -185,7 +185,7 @@ app.include_router(predictive_router, tags=["predictive-analysis"])
 app.include_router(training_router, tags=["training"])
 app.include_router(background_router, prefix="/emma", tags=["background"])
 app.include_router(triggers_router, tags=["triggers"])
-app.include_router(notifications_router, tags=["notifications"])
+app.include_router(notifications_router, prefix="/emma", tags=["notifications"])
 app.include_router(channels_router, tags=["channels"])
 app.include_router(heartbeat_router, prefix="/emma", tags=["heartbeat"])
 
