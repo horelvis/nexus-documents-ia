@@ -208,7 +208,7 @@ class DeliveryManager:
                     await self._deliver_slack(delivered_insight, tenant_id)
                     delivered = True
                 elif channel == "email":
-                    await self._deliver_email(delivered_insight, tenant_id)
+                    await self._deliver_email(delivered_insight, tenant_id, config)
                     delivered = True
                 # Continue to deliver to other channels (multi-channel delivery)
             except Exception as e:
@@ -262,11 +262,56 @@ class DeliveryManager:
         self,
         insight: ProactiveInsight,
         tenant_id: str,
+        config: HeartbeatConfig,
     ):
-        """Queue email delivery via background worker."""
-        # This would integrate with the email task in background-worker
-        logger.info(f"Email delivery queued for insight {insight.id}")
-        # TODO: Call background worker email task
+        """Send email to configured recipients via background worker.
+
+        Reads email_recipients from HeartbeatConfig and sends an email
+        to each recipient using the background worker's email task.
+        """
+        import httpx
+
+        recipients = config.email_recipients
+        if not recipients:
+            logger.debug(f"No email recipients configured for tenant {tenant_id}")
+            return
+
+        # Build email content
+        urgency_value = insight.urgency if isinstance(insight.urgency, str) else insight.urgency.value
+        urgency_emoji = {
+            "critical": "🚨",
+            "high": "⚠️",
+            "medium": "📋",
+            "low": "ℹ️",
+        }.get(urgency_value, "📋")
+
+        subject = f"{urgency_emoji} Emma Insight: {insight.title}"
+
+        # Call background worker for each recipient
+        for email in recipients:
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    await client.post(
+                        f"{settings.background_worker_url}/tasks/email/send",
+                        json={
+                            "to_email": email,
+                            "subject": subject,
+                            "template_name": "emma_insight",
+                            "template_data": {
+                                "title": insight.title,
+                                "summary": insight.summary,
+                                "urgency": urgency_value,
+                                "insight_type": insight.insight_type.value if hasattr(insight.insight_type, 'value') else str(insight.insight_type),
+                                "priority_score": insight.priority_score,
+                                "related_documents": insight.related_documents,
+                                "tenant_id": tenant_id,
+                            },
+                        },
+                        headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+                    )
+                logger.info(f"Email queued for {email} (insight {insight.id})")
+            except Exception as e:
+                logger.warning(f"Failed to queue email for {email}: {e}")
 
     async def _deliver_slack(
         self,

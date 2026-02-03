@@ -406,6 +406,48 @@ class EmailService:
             return False
 
     @staticmethod
+    async def send_email(
+        to: str,
+        subject: str,
+        template: str,
+        **template_data: Any
+    ) -> bool:
+        """Send email to a single recipient using a template.
+
+        Args:
+            to: Recipient email address
+            subject: Email subject
+            template: Template name (without .html extension)
+            **template_data: Variables to pass to the template
+
+        Returns:
+            True if email was sent successfully, False otherwise
+        """
+        try:
+            template_obj = env.get_template(f"{template}.html")
+
+            # Add default context
+            template_data['current_year'] = datetime.now().year
+
+            html_content = template_obj.render(**template_data)
+
+            message = MessageSchema(
+                subject=subject,
+                recipients=[to],
+                body=html_content,
+                subtype=MessageType.html
+            )
+
+            mail_client = EmailService._get_mail_client()
+            await mail_client.send_message(message)
+            logger.info(f"Email sent to {to} with template {template}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to send email to {to}: {str(e)}")
+            return False
+
+    @staticmethod
     async def send_bulk_email(
         recipients: List[str],
         subject: str,

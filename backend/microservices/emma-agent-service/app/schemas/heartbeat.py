@@ -132,6 +132,11 @@ class HeartbeatConfig(BaseModel):
         description="Ordered list of notification channels"
     )
 
+    email_recipients: List[str] = Field(
+        default_factory=list,
+        description="List of email addresses to receive heartbeat notifications"
+    )
+
     batch_low_priority: bool = Field(
         default=True,
         description="Batch low-priority insights into daily digest"
@@ -178,6 +183,7 @@ class HeartbeatConfigUpdate(BaseModel):
     quiet_hours_start: Optional[str] = None
     quiet_hours_end: Optional[str] = None
     channel_priority: Optional[List[str]] = None
+    email_recipients: Optional[List[str]] = None
     batch_low_priority: Optional[bool] = None
     digest_hour: Optional[int] = Field(None, ge=0, le=23)
     contract_expiry_days_warning: Optional[int] = None
