@@ -258,6 +258,8 @@ async def export_analysis_docx(
         renderer = get_docx_renderer()
 
         # Build DOCX data using predictive report format
+        # WeightedFactor uses 'outcome' (favorable/unfavorable) and 'weight' (0-1)
+        # All factors in result.factors are weighted (verified), rejected ones are not stored
         docx_data = {
             "query": meta.get("case_description", "Análisis Predictivo"),
             "session_id": session_id,
@@ -270,15 +272,15 @@ async def export_analysis_docx(
             ),
             "claims": [
                 {
-                    "text": f"[{f.factor_type}] {f.description}",
+                    "text": f"[{f.factor_type}] {f.description} → {f.outcome}",
                     "confidence": f.confidence,
-                    "status": "verified" if f.status == "weighted" else "rejected",
+                    "status": "verified",  # All weighted factors are verified
                 }
                 for f in result.factors
             ],
-            "claims_verified": len([f for f in result.factors if f.status == "weighted"]),
+            "claims_verified": len(result.factors),
             "claims_corrected": 0,
-            "claims_rejected": len([f for f in result.factors if f.status == "rejected"]),
+            "claims_rejected": 0,
             "average_confidence": (
                 sum(f.confidence for f in result.factors if f.confidence) / len(result.factors)
                 if result.factors else 0
