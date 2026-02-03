@@ -165,6 +165,10 @@ api_router.include_router(sharing_insights.router, tags=["sharing-insights"])
 from app.api.v1 import features
 api_router.include_router(features.router)
 
+# Heartbeat Stats - Internal endpoints for Emma Heartbeat System
+from app.api.v1 import heartbeat_stats
+api_router.include_router(heartbeat_stats.router)
+
 # === CONNECTORS (On-premise data source management) ===
 # These are always enabled as they're core to Emma's data access
 from app.api.v1 import connectors, user_sync, data_learning

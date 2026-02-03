@@ -117,7 +117,7 @@ class ContextGatherer:
     async def _gather_document_stats(
         self, tenant_id: str
     ) -> tuple[List[DocumentSummary], int, Dict[str, int], int]:
-        """Gather document statistics from weaviate-service."""
+        """Gather document statistics from main API."""
         docs_24h: List[DocumentSummary] = []
         docs_7d = 0
         by_collection: Dict[str, int] = {}
@@ -125,9 +125,9 @@ class ContextGatherer:
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                # Get recent documents via weaviate-service stats endpoint
+                # Get recent documents via main API stats endpoint
                 response = await client.get(
-                    f"{settings.weaviate_service_url}/stats/tenant/{tenant_id}",
+                    f"{settings.api_url}/api/v1/stats/tenant/{tenant_id}",
                     headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                 )
 
@@ -172,7 +172,7 @@ class ContextGatherer:
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
-                    f"{settings.weaviate_service_url}/contracts/expiring",
+                    f"{settings.api_url}/api/v1/stats/contracts/expiring",
                     params={"tenant_id": tenant_id, "days": 30},
                     headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                 )
@@ -270,9 +270,9 @@ class ContextGatherer:
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                # Check weaviate-service for pending analyses
+                # Check main API for pending analyses
                 response = await client.get(
-                    f"{settings.weaviate_service_url}/analyses/pending",
+                    f"{settings.api_url}/api/v1/stats/analyses/pending",
                     params={"tenant_id": tenant_id},
                     headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                 )
@@ -290,13 +290,13 @@ class ContextGatherer:
         return pending, stale
 
     async def _gather_anomalies(self, tenant_id: str) -> List[AnomalyInfo]:
-        """Gather anomalies (duplicates, failures) from weaviate-service."""
+        """Gather anomalies (duplicates, failures) from main API."""
         anomalies: List[AnomalyInfo] = []
 
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
-                    f"{settings.weaviate_service_url}/anomalies/recent",
+                    f"{settings.api_url}/api/v1/stats/anomalies/recent",
                     params={"tenant_id": tenant_id, "hours": 24},
                     headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                 )
