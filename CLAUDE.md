@@ -161,7 +161,7 @@ Events (Redis Streams) → Event Listener → Trigger Engine → Emma Background
 - **Event Listener** (`workers/event_listener.py`): Standalone async consumer process
 - **Trigger Engine** (`services/trigger_engine.py`): Rules engine matching events → actions
 - **Background Service** (`services/emma_background_service.py`): LangGraph execution without HTTP
-- **Notification Service** (`services/notification_service.py`): In-app (WebSocket) + email + webhook
+- **Notification Service** (`services/notification_service.py`): In-app (WebSocket) + email + webhook + Slack
 - **Channel Router** (`services/channel_router.py`): Multi-channel inbound→Emma→outbound
 - **Pairing Service** (`services/pairing_service.py`): Links external users (Telegram, WhatsApp) to KeyCloak
 - **Heartbeat Service** (`services/heartbeat/`): Proactive context evaluation + insight generation
@@ -176,6 +176,24 @@ Events (Redis Streams) → Event Listener → Trigger Engine → Emma Background
 **Events**: `document.indexed`, `document.updated`, `connector.synced`, `knowledge.graph_updated`, `analysis.completed`
 
 **Channels**: Telegram, WhatsApp (Twilio), Slack, Email — all via `channels/` package with `BaseChannel` ABC
+
+**Slack Notification Channel**: Configure a dedicated Slack channel to receive automatic notifications:
+```bash
+# Create a Slack channel for notifications (via API or UI)
+curl -X POST "http://localhost:8009/channels" \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-ID: $TENANT_ID" \
+  -d '{
+    "channel_type": "slack",
+    "channel_name": "Emma Alerts",
+    "config": {
+      "is_notification_channel": true,
+      "default_channel": "#emma-alerts"
+    },
+    "credentials": "xoxb-your-slack-bot-token"
+  }'
+```
+Then add `"slack"` to the `notification_channels` array in your triggers to receive alerts.
 
 **Key files**:
 - `emma-agent-service/app/schemas/events.py` — EmmaEvent model

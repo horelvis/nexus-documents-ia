@@ -4,6 +4,7 @@ Supports:
 - in_app: Stored in DB + pushed via WebSocket
 - email: Sent via SMTP (delegates to background worker)
 - webhook: HTTP POST to configured URL
+- slack: Sent to dedicated notification channels via Slack API
 
 Notifications are created by trigger executions, system events,
 or manual API calls.
@@ -14,6 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import httpx
 import redis.asyncio as aioredis
 
 from app.core.config import settings
@@ -156,6 +158,14 @@ class NotificationService:
                     notification_type="trigger_match",
                     metadata={"event": event.model_dump()},
                 )
+            elif channel == "slack":
+                await self._send_slack_notification(
+                    tenant_id=tenant_id,
+                    title=f"🔔 Trigger activado: {trigger_name}",
+                    body=f"Evento `{event.event_type}` coincidió con el trigger '{trigger_name}'.",
+                    priority="normal",
+                    metadata={"event_type": event.event_type},
+                )
 
     async def send_trigger_result(
         self,
@@ -182,7 +192,6 @@ class NotificationService:
             elif channel == "email":
                 # Delegate to background worker email task
                 try:
-                    import httpx
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         await client.post(
                             f"{settings.background_worker_url}/api/send_email",
@@ -195,6 +204,152 @@ class NotificationService:
                         )
                 except Exception as e:
                     logger.warning(f"Failed to send email notification: {e}")
+
+            elif channel == "slack":
+                # Send to dedicated Slack notification channels
+                await self._send_slack_notification(
+                    tenant_id=tenant_id,
+                    title=f"{emoji} Resultado: {trigger_name}",
+                    body=f"Trigger '{trigger_name}' completado con estado: {status}",
+                    priority="high" if status == "failed" else "normal",
+                    metadata={"execution_id": execution.get("id")},
+                )
+
+    # ── Slack Integration ──────────────────────────────────────────────
+
+    async def _get_notification_channels(self, tenant_id: str, channel_type: str = "slack") -> List[Dict[str, Any]]:
+        """Get channels marked as notification channels for a tenant.
+
+        Queries Redis directly to find channels with config.is_notification_channel=true.
+        """
+        try:
+            from cryptography.fernet import Fernet
+
+            r = await self._get_redis()
+
+            # Get channel encryption key
+            key = getattr(settings, "credentials_encryption_key", None)
+            if not key:
+                import os
+                key = os.getenv("CREDENTIALS_ENCRYPTION_KEY", "")
+
+            fernet = Fernet(key.encode()) if key else None
+
+            # Query all channels for this tenant
+            CHANNELS_PREFIX = "emma:channels"
+            channel_ids = await r.smembers(f"{CHANNELS_PREFIX}:{tenant_id}:index")
+
+            notification_channels = []
+            for cid in channel_ids:
+                data = await r.get(f"{CHANNELS_PREFIX}:{tenant_id}:{cid}")
+                if data:
+                    ch = json.loads(data)
+                    # Check if it's a notification channel of the right type
+                    if (
+                        ch.get("channel_type") == channel_type
+                        and ch.get("is_active", False)
+                        and ch.get("config", {}).get("is_notification_channel", False)
+                    ):
+                        # Decrypt credentials
+                        encrypted = ch.get("credentials_encrypted", "")
+                        if encrypted and fernet:
+                            try:
+                                ch["credentials_decrypted"] = fernet.decrypt(encrypted.encode()).decode()
+                            except Exception:
+                                ch["credentials_decrypted"] = encrypted
+                        else:
+                            ch["credentials_decrypted"] = encrypted
+                        notification_channels.append(ch)
+
+            return notification_channels
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch notification channels: {e}")
+        return []
+
+    async def _send_slack_notification(
+        self,
+        tenant_id: str,
+        title: str,
+        body: str,
+        priority: str = "normal",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Send a notification to all Slack notification channels for a tenant.
+
+        Finds channels marked with config.is_notification_channel=true and sends
+        the notification to the configured default_channel (e.g., #emma-alerts).
+        """
+        from app.channels.slack_channel import SlackChannel
+
+        channels = await self._get_notification_channels(tenant_id, "slack")
+
+        if not channels:
+            logger.debug(f"No Slack notification channels configured for tenant {tenant_id}")
+            return
+
+        for channel_data in channels:
+            try:
+                config = channel_data.get("config", {})
+                credentials = channel_data.get("credentials_decrypted", "")
+                default_channel = config.get("default_channel", "")
+
+                if not default_channel:
+                    logger.warning(f"Slack notification channel {channel_data['id']} has no default_channel")
+                    continue
+
+                # Create channel instance
+                slack = SlackChannel(
+                    channel_id=channel_data["id"],
+                    config=config,
+                    credentials=credentials,
+                )
+
+                # Format message with emoji based on priority
+                priority_emoji = {
+                    "critical": "🚨",
+                    "high": "⚠️",
+                    "normal": "📢",
+                    "low": "ℹ️",
+                }.get(priority, "📢")
+
+                message = f"{priority_emoji} *{title}*\n{body}"
+
+                if metadata:
+                    # Add action link if present
+                    if metadata.get("execution_id"):
+                        message += f"\n\n_Execution ID: `{metadata['execution_id']}`_"
+
+                # Send to the default channel
+                result = await slack.send_message(to=default_channel, content=message)
+
+                if result.get("success"):
+                    logger.info(f"Slack notification sent to {default_channel}: {title}")
+                else:
+                    logger.warning(f"Slack notification failed: {result.get('error')}")
+
+            except Exception as e:
+                logger.error(f"Failed to send Slack notification: {e}", exc_info=True)
+
+    async def send_to_slack_channels(
+        self,
+        tenant_id: str,
+        title: str,
+        body: str,
+        priority: str = "normal",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """Public method to send notifications to Slack channels.
+
+        Use this for direct Slack notifications outside of trigger results.
+        """
+        await self._send_slack_notification(
+            tenant_id=tenant_id,
+            title=title,
+            body=body,
+            priority=priority,
+            metadata=metadata,
+        )
 
 
 # Global singleton
