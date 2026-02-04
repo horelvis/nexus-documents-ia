@@ -610,7 +610,7 @@ async def emma_heartbeat_config(
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
-                f"{EMMA_SERVICE_URL}/heartbeat/config",
+                f"{EMMA_SERVICE_URL}/emma/heartbeat/config",
                 params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
@@ -637,7 +637,7 @@ async def emma_heartbeat_config_update(
         body = await request.json()
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.patch(
-                f"{EMMA_SERVICE_URL}/heartbeat/config",
+                f"{EMMA_SERVICE_URL}/emma/heartbeat/config",
                 params={"tenant_id": tenant_id},
                 json=body,
                 headers={
@@ -664,7 +664,7 @@ async def emma_heartbeat_status(
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
-                f"{EMMA_SERVICE_URL}/heartbeat/status",
+                f"{EMMA_SERVICE_URL}/emma/heartbeat/status",
                 params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
@@ -690,7 +690,7 @@ async def emma_heartbeat_run(
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
             response = await client.post(
-                f"{EMMA_SERVICE_URL}/heartbeat/run",
+                f"{EMMA_SERVICE_URL}/emma/heartbeat/run",
                 params={"tenant_id": tenant_id, "force": str(force).lower()},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
@@ -723,7 +723,7 @@ async def emma_heartbeat_insights(
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
-                f"{EMMA_SERVICE_URL}/heartbeat/insights",
+                f"{EMMA_SERVICE_URL}/emma/heartbeat/insights",
                 params=params,
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
@@ -746,7 +746,7 @@ async def emma_heartbeat_digest(
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.get(
-                f"{EMMA_SERVICE_URL}/heartbeat/digest",
+                f"{EMMA_SERVICE_URL}/emma/heartbeat/digest",
                 params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
