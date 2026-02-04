@@ -47,6 +47,8 @@ import {
   IconBrandSlack,
   IconClock,
   IconBell,
+  IconSparkles,
+  IconExternalLink,
 } from "@tabler/icons-react"
 import {
   SidebarProvider,
@@ -2343,6 +2345,29 @@ const loadBoePresets = async () => {
                         </div>
                         <Button variant="outline" asChild>
                           <Link href="/data-learning">Configurar</Link>
+                        </Button>
+                      </div>
+
+                      <div className="flex items-center justify-between p-4 border rounded-lg border-violet-200 bg-violet-50/50">
+                        <div className="flex items-center gap-4">
+                          <IconSparkles className="h-8 w-8 text-violet-500" />
+                          <div>
+                            <h4 className="font-medium">Gestión de Prompts (Langfuse)</h4>
+                            <p className="text-sm text-muted-foreground">
+                              Edita y versiona los prompts de Emma. A/B testing, rollback y métricas.
+                            </p>
+                          </div>
+                        </div>
+                        <Button variant="outline" className="border-violet-300 hover:bg-violet-100" asChild>
+                          <a
+                            href={process.env.NEXT_PUBLIC_LANGFUSE_URL || "http://localhost:3002"}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-2"
+                          >
+                            Abrir Langfuse
+                            <IconExternalLink className="h-4 w-4" />
+                          </a>
                         </Button>
                       </div>
                     </div>
