@@ -797,12 +797,12 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-nexus_user}:${POSTGRES_PASSWORD:-nexus_password}@db:5432/langfuse
       # Auth
       - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-changeme-langfuse-secret-key-32chars}
-      - NEXTAUTH_URL=${LANGFUSE_NEXTAUTH_URL:-http://localhost:3002}
+      - NEXTAUTH_URL=${LANGFUSE_NEXTAUTH_URL:-http://nouxcube.local.es:3002}
       - SALT=${LANGFUSE_SALT:-changeme-langfuse-salt-key}
       # Telemetry (optional, can disable)
       - TELEMETRY_ENABLED=false
-      # Allow sign-up (set to true after creating admin user)
-      - AUTH_DISABLE_SIGNUP=false
+      # Sign-up: set to true after creating admin user
+      - AUTH_DISABLE_SIGNUP=${LANGFUSE_DISABLE_SIGNUP:-false}
       # Init admin user (for first run)
       - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}
       - LANGFUSE_INIT_USER_NAME=${LANGFUSE_INIT_USER_NAME:-Admin}

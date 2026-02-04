@@ -245,7 +245,6 @@ def migrate_to_langfuse(
                 name=name,
                 prompt=content,
                 labels=labels,
-                is_active=True,
             )
 
             if existing:

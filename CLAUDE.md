@@ -104,6 +104,7 @@ Note: `context_tree` and `graph_expand` run in **parallel**. `graph_expand` popu
 ### Prompt Management System
 
 > **Full docs**: [`docs/architecture/PROMPT_MANAGEMENT.md`](docs/architecture/PROMPT_MANAGEMENT.md)
+> **Langfuse Setup**: [`docs/guides/LANGFUSE_SETUP.md`](docs/guides/LANGFUSE_SETUP.md)
 
 Dynamic prompt management with Langfuse integration:
 
