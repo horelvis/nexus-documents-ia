@@ -697,6 +697,177 @@ celery -A worker_app.celery_app call emma.heartbeat_check \
 
 ---
 
+## Adding New Insight Types
+
+To add a new proactive insight type (e.g., `budget_alert`), follow these 4 steps:
+
+### Step 1: Add to Enum
+
+**File:** `emma-agent-service/app/schemas/heartbeat.py`
+
+```python
+class InsightType(str, Enum):
+    """Types of proactive insights Emma can generate."""
+
+    CONTRACT_EXPIRATION = "contract_expiration"
+    COMPLIANCE_ALERT = "compliance_alert"
+    RISK_ALERT = "risk_alert"
+    ANOMALY_DETECTED = "anomaly_detected"
+    TASK_REMINDER = "task_reminder"
+    ACTIVITY_SUMMARY = "activity_summary"
+    DOCUMENT_UPDATE = "document_update"
+    DEADLINE_APPROACHING = "deadline_approaching"
+
+    # ✅ ADD YOUR NEW TYPE HERE
+    BUDGET_ALERT = "budget_alert"
+    """Budget exceeded or approaching limit."""
+```
+
+### Step 2: Update the LLM System Prompt
+
+**File:** `emma-agent-service/app/services/heartbeat/insight_evaluator.py`
+
+The LLM needs to know about the new type. Add it to `_get_system_prompt()`:
+
+```python
+def _get_system_prompt(self) -> str:
+    return """Eres Emma, un asistente de IA especializado en gestión documental legal.
+
+...
+
+TIPOS DE INSIGHTS VÁLIDOS:
+- contract_expiration: Contratos próximos a vencer
+- compliance_alert: Gaps de cumplimiento normativo detectados
+- risk_alert: Riesgos identificados en documentos
+- anomaly_detected: Duplicados, fallos de indexación, patrones inusuales
+- task_reminder: Análisis o firmas pendientes por mucho tiempo
+- activity_summary: Resumen de actividad (solo si hay datos significativos)
+- budget_alert: Presupuesto excedido o próximo al límite  # ✅ ADD HERE
+
+...
+"""
+```
+
+Also update the `INSIGHT_TYPE_MAP` at the top of the file:
+
+```python
+INSIGHT_TYPE_MAP = {
+    "contract_expiration": InsightType.CONTRACT_EXPIRATION,
+    "compliance_alert": InsightType.COMPLIANCE_ALERT,
+    "risk_alert": InsightType.RISK_ALERT,
+    "anomaly_detected": InsightType.ANOMALY_DETECTED,
+    "task_reminder": InsightType.TASK_REMINDER,
+    "activity_summary": InsightType.ACTIVITY_SUMMARY,
+    "document_update": InsightType.DOCUMENT_UPDATE,
+    "deadline_approaching": InsightType.DEADLINE_APPROACHING,
+    "budget_alert": InsightType.BUDGET_ALERT,  # ✅ ADD HERE
+}
+```
+
+### Step 3: Gather Context Data (Optional)
+
+**File:** `emma-agent-service/app/services/heartbeat/context_gatherer.py`
+
+If your insight type needs specific data, add it to `TenantContext` and gather it:
+
+```python
+# In schemas/heartbeat.py - TenantContext model
+class TenantContext(BaseModel):
+    # ... existing fields ...
+
+    # ✅ ADD NEW CONTEXT FIELDS
+    budget_total: float = 0.0
+    budget_used: float = 0.0
+    budget_threshold_percent: float = 80.0
+```
+
+```python
+# In context_gatherer.py - gather() method
+async def gather(self, tenant_id: str) -> TenantContext:
+    # ... existing code ...
+
+    # ✅ GATHER BUDGET DATA
+    try:
+        budget_data = await self._gather_budget_data(tenant_id)
+        context.budget_total = budget_data.get("total", 0)
+        context.budget_used = budget_data.get("used", 0)
+    except Exception as e:
+        logger.warning(f"Failed to gather budget data: {e}")
+```
+
+### Step 4: Configure Priority Score (Optional)
+
+**File:** `emma-agent-service/app/services/heartbeat/priority_scorer.py`
+
+Add base priority for your new type:
+
+```python
+# Base priority by insight type (0.0 to 1.0)
+TYPE_BASE_PRIORITY = {
+    InsightType.CONTRACT_EXPIRATION: 0.85,
+    InsightType.COMPLIANCE_ALERT: 0.80,
+    InsightType.RISK_ALERT: 0.75,
+    InsightType.ANOMALY_DETECTED: 0.60,
+    InsightType.TASK_REMINDER: 0.55,
+    InsightType.ACTIVITY_SUMMARY: 0.40,
+    InsightType.DOCUMENT_UPDATE: 0.50,
+    InsightType.DEADLINE_APPROACHING: 0.70,
+    InsightType.BUDGET_ALERT: 0.75,  # ✅ ADD HERE
+}
+```
+
+### Step 5: Enable for Tenants
+
+Update the default configuration in `schemas/heartbeat.py`:
+
+```python
+class HeartbeatConfig(BaseModel):
+    # ...
+    enabled_insight_types: List[InsightType] = Field(
+        default=[
+            InsightType.CONTRACT_EXPIRATION,
+            InsightType.COMPLIANCE_ALERT,
+            InsightType.RISK_ALERT,
+            InsightType.ANOMALY_DETECTED,
+            InsightType.TASK_REMINDER,
+            InsightType.BUDGET_ALERT,  # ✅ ADD TO DEFAULT LIST
+        ],
+        description="Which insight types are enabled for this tenant"
+    )
+```
+
+Or enable per-tenant via API:
+
+```bash
+curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=TENANT_ID" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled_insight_types": [
+      "contract_expiration",
+      "compliance_alert",
+      "budget_alert"
+    ]
+  }'
+```
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  1. InsightType Enum    →  Defines valid type values                │
+│  2. System Prompt       →  Tells LLM what each type means           │
+│  3. Context Gatherer    →  Provides data for LLM to analyze         │
+│  4. Priority Scorer     →  Assigns base priority weight             │
+│  5. HeartbeatConfig     →  Controls which types are active          │
+└─────────────────────────────────────────────────────────────────────┘
+
+The LLM reads the context, decides which insight_type fits best,
+and returns structured JSON. The system then scores and delivers.
+```
+
+---
+
 ## Summary: Emma Reactive Capabilities
 
 | Phase | Feature | Status |
