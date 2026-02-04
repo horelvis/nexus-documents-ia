@@ -109,7 +109,7 @@ Dynamic prompt management with Langfuse integration:
 
 | Component | Description | API Endpoint |
 |-----------|-------------|--------------|
-| **Langfuse** | Prompt versioning, A/B testing, rollback | Web UI: http://localhost:3002 |
+| **Langfuse** | Prompt versioning, A/B testing, rollback | Web UI: http://localhost:3002 (admin@nouxcube.com / LangfuseAdmin2024!) |
 | **Rules** | Dynamic prompt injection by context | `/prompts/rules` |
 | **Guardrails** | Post-LLM validation (PII, keywords) | `/prompts/guardrails` |
 | **Few-Shot** | Semantic example retrieval | `/prompts/few-shot` |

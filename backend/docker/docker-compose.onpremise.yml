@@ -801,6 +801,8 @@ services:
       - SALT=${LANGFUSE_SALT:-changeme-langfuse-salt-key}
       # Telemetry (optional, can disable)
       - TELEMETRY_ENABLED=false
+      # Allow sign-up (set to true after creating admin user)
+      - AUTH_DISABLE_SIGNUP=false
       # Init admin user (for first run)
       - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}
       - LANGFUSE_INIT_USER_NAME=${LANGFUSE_INIT_USER_NAME:-Admin}
