@@ -662,11 +662,57 @@ async def knowledge_delete_by_document(
 
 @router.get("/knowledge/stats")
 async def knowledge_stats(
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    include_public: bool = True
 ):
-    """Get knowledge graph statistics for current tenant"""
+    """Get knowledge graph statistics for current tenant.
+
+    Combines tenant-specific entities with public_knowledge entities
+    which are extracted from public legislation/regulations.
+    """
     try:
-        return await weaviate_client.knowledge_stats(tenant_id)
+        # Get tenant-specific stats
+        tenant_stats = await weaviate_client.knowledge_stats(tenant_id)
+
+        if not include_public:
+            return tenant_stats
+
+        # Also get public_knowledge stats (shared across all tenants)
+        try:
+            public_stats = await weaviate_client.knowledge_stats("public_knowledge")
+
+            # Merge stats - public entities are accessible to all tenants
+            combined_stats = {
+                "tenant_id": tenant_id,
+                "total_entities": (tenant_stats.get("total_entities", 0) +
+                                   public_stats.get("total_entities", 0)),
+                "entities_by_type": {},
+                "entities_by_domain": {},
+                "tenant_entities": tenant_stats.get("total_entities", 0),
+                "public_entities": public_stats.get("total_entities", 0),
+            }
+
+            # Merge by type
+            for entity_type, count in tenant_stats.get("entities_by_type", {}).items():
+                combined_stats["entities_by_type"][entity_type] = count
+            for entity_type, count in public_stats.get("entities_by_type", {}).items():
+                combined_stats["entities_by_type"][entity_type] = (
+                    combined_stats["entities_by_type"].get(entity_type, 0) + count
+                )
+
+            # Merge by domain
+            for domain, count in tenant_stats.get("entities_by_domain", {}).items():
+                combined_stats["entities_by_domain"][domain] = count
+            for domain, count in public_stats.get("entities_by_domain", {}).items():
+                combined_stats["entities_by_domain"][domain] = (
+                    combined_stats["entities_by_domain"].get(domain, 0) + count
+                )
+
+            return combined_stats
+        except Exception as public_err:
+            logger.warning(f"Could not fetch public_knowledge stats: {public_err}")
+            return tenant_stats
+
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:

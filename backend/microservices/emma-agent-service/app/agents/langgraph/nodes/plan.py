@@ -578,15 +578,80 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
             metadata={"route": "ACTION_INTENT", "domains": domains}
         )
     elif action_intent:
-        # Action detected but no priority agent — log it and continue to normal routing
-        tracker.add_step(
-            StepType.ROUTING,
-            f"Intención '{action_intent.action}' detectada (sin agente prioritario), "
-            "usando enrutamiento por dominio",
-            confidence=action_intent.confidence,
-        )
-        # Fall through to normal domain routing below
-        action_intent = None  # Clear so the block below executes
+        # Action detected but no priority agent
+        if action_intent.action == "retrieve":
+            # DETERMINISTIC HANDLER: "muéstrame el documento X" → search + read
+            # No LLM needed - direct document retrieval
+            tracker.add_step(
+                StepType.ROUTING,
+                f"Intención 'retrieve' detectada → búsqueda directa de documento",
+                confidence=action_intent.confidence,
+            )
+
+            # Execute deterministic document retrieval
+            # Note: tenant_id is stored directly in state, not in metadata
+            doc_result = await _retrieve_document_directly(
+                query=query,
+                tenant_id=state.get("tenant_id"),
+                tracker=tracker,
+            )
+
+            if doc_result:
+                latency_ms = (time.time() - start_time) * 1000
+                tracker.add_step(
+                    StepType.RESPONSE,
+                    f"Documento recuperado: {doc_result.get('title', 'unknown')}",
+                    confidence=0.95,
+                )
+
+                # Format source as dict for Pydantic validation
+                source_dict = {
+                    "title": doc_result.get("title", "Documento"),
+                    "document_id": doc_result.get("document_id", ""),
+                    "score": doc_result.get("score", 1.0),
+                    "type": "tenant_document",
+                }
+
+                return {
+                    "detected_domains": ["retrieve"],
+                    "execution_plan": [],  # No agents needed
+                    "plan_reasoning": "Recuperación directa de documento sin LLM",
+                    "reasoning_steps": tracker.get_steps(),
+                    "fast_path_used": True,
+                    "fast_path_answer": doc_result.get("content"),
+                    "final_answer": doc_result.get("content"),
+                    "success": True,
+                    "sources": [source_dict],
+                    "metadata": {
+                        **metadata,
+                        "planning_latency_ms": latency_ms,
+                        "decision_method": "deterministic_retrieve",
+                        "decision_path": ["plan", "retrieve", "direct"],
+                        "action_intent": "retrieve",
+                        "retrieved_document": doc_result.get("title"),
+                    },
+                }
+            else:
+                # Document not found - continue to normal routing
+                # but with a helpful message
+                tracker.add_step(
+                    StepType.ROUTING,
+                    "Documento no encontrado, delegando a agente para respuesta",
+                    confidence=0.5,
+                )
+                # Fall through to normal routing with context
+                action_intent = None
+
+        else:
+            # Other actions without priority agent - log and continue
+            tracker.add_step(
+                StepType.ROUTING,
+                f"Intención '{action_intent.action}' detectada (sin agente prioritario), "
+                "usando enrutamiento por dominio",
+                confidence=action_intent.confidence,
+            )
+            # Fall through to normal domain routing below
+            action_intent = None  # Clear so the block below executes
 
     if not (action_intent and action_intent.priority_agent):
         # Step 3: Use DomainRouter for keyword-based detection
@@ -784,6 +849,180 @@ def _extract_domains_from_docs(docs: List[Dict]) -> List[str]:
             domains.add("contract")
 
     return list(domains)
+
+
+async def _retrieve_document_directly(
+    query: str,
+    tenant_id: Optional[str],
+    tracker: ReasoningTracker,
+) -> Optional[Dict[str, Any]]:
+    """
+    Deterministic document retrieval for "muéstrame documento X" queries.
+
+    This bypasses LLM reasoning and directly:
+    1. Searches for the document by name/content
+    2. Gets full document content
+    3. Returns formatted result
+
+    Args:
+        query: User query (e.g., "muéstrame el contrato de Juan")
+        tenant_id: Tenant identifier
+        tracker: Reasoning tracker for logging steps
+
+    Returns:
+        Dict with title, content, source if found; None otherwise
+    """
+    if not tenant_id:
+        logger.warning("_retrieve_document_directly: No tenant_id provided")
+        return None
+
+    try:
+        from app.clients import get_weaviate_client
+
+        client = get_weaviate_client()
+
+        # Step 1: Search for document
+        tracker.add_step(
+            StepType.TOOL_CALL,
+            f"Buscando documento: '{query}'",
+            confidence=0.9,
+            metadata={"tool": "search", "action": "retrieve"}
+        )
+
+        # Search using the query - extract likely document name patterns
+        search_query = _extract_document_name(query)
+        if not search_query:
+            search_query = query  # Fall back to full query
+
+        results = await client.search_documents(
+            tenant_id=tenant_id,
+            query=search_query,
+            limit=5,
+            include_content=True
+        )
+
+        if not results:
+            tracker.add_step(
+                StepType.OBSERVATION,
+                f"No se encontraron documentos para '{search_query}'",
+                confidence=0.5,
+            )
+            return None
+
+        # Find best match (highest score)
+        best_match = max(results, key=lambda r: r.score)
+
+        if best_match.score < 0.5:  # Threshold for relevance
+            tracker.add_step(
+                StepType.OBSERVATION,
+                f"Mejor coincidencia '{best_match.metadata.get('title')}' "
+                f"con score bajo ({best_match.score:.2f})",
+                confidence=best_match.score,
+            )
+            return None
+
+        tracker.add_step(
+            StepType.OBSERVATION,
+            f"Documento encontrado: '{best_match.metadata.get('title')}' "
+            f"(score: {best_match.score:.2f})",
+            confidence=best_match.score,
+        )
+
+        # Step 2: Get full document content
+        tracker.add_step(
+            StepType.TOOL_CALL,
+            f"Recuperando contenido completo del documento",
+            confidence=0.9,
+            metadata={"tool": "read_document", "document_id": best_match.document_id}
+        )
+
+        full_content = await client.get_document_content(
+            tenant_id=tenant_id,
+            document_id=best_match.document_id,
+            include_chunks=False
+        )
+
+        if "error" in full_content:
+            # Fall back to content from search result
+            content = best_match.content
+        else:
+            content = full_content.get("content", best_match.content)
+
+        title = best_match.metadata.get("title") or best_match.metadata.get("filename", "Documento")
+
+        # Format response
+        formatted_content = f"""# 📄 {title}
+
+{content}
+
+---
+**Fuente**: {title} (ID: {best_match.document_id[:8]}...)
+"""
+
+        tracker.add_step(
+            StepType.OBSERVATION,
+            f"Contenido recuperado: {len(content)} caracteres",
+            confidence=0.95,
+        )
+
+        return {
+            "title": title,
+            "content": formatted_content,
+            "source": f"{title} ({best_match.document_id[:8]}...)",
+            "document_id": best_match.document_id,
+            "score": best_match.score,
+        }
+
+    except Exception as e:
+        logger.error(f"_retrieve_document_directly failed: {e}")
+        tracker.add_step(
+            StepType.ERROR,
+            f"Error al recuperar documento: {str(e)}",
+            confidence=0.0,
+        )
+        return None
+
+
+def _extract_document_name(query: str) -> Optional[str]:
+    """
+    Extract document name from a "show document" query.
+
+    Examples:
+        "muéstrame el documento 01_contrato_laboral.md" → "01_contrato_laboral.md"
+        "abre el contrato de Juan" → "contrato de Juan"
+        "dame el archivo factura_2024.pdf" → "factura_2024.pdf"
+    """
+    import re
+
+    query_lower = query.lower()
+
+    # Pattern 1: Explicit filenames (with extensions)
+    filename_match = re.search(r'[\w\-]+\.(md|pdf|docx?|txt|xlsx?)', query, re.IGNORECASE)
+    if filename_match:
+        return filename_match.group(0)
+
+    # Pattern 2: After "documento/contrato/archivo/factura" keywords
+    patterns = [
+        r"(?:muéstrame|dame|abre|enséñame|ver)\s+(?:el|la|los|las)?\s*(?:documento|contrato|archivo|factura|nómina|expediente)\s+(?:de\s+)?(.+?)(?:\s*$|\s+y\s)",
+        r"(?:documento|contrato|archivo|factura|nómina)\s+(?:llamado|titulado)\s+(.+?)(?:\s*$|\s+y\s)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, query_lower)
+        if match:
+            name = match.group(1).strip()
+            # Clean up common suffixes
+            name = re.sub(r'\s+por\s+favor\s*$', '', name)
+            name = re.sub(r'\s+$', '', name)
+            if len(name) > 2:
+                return name
+
+    # Pattern 3: Codes like "01_contrato" anywhere
+    code_match = re.search(r'\d+_[\w\-]+', query)
+    if code_match:
+        return code_match.group(0)
+
+    return None
 
 
 async def _llm_planning(

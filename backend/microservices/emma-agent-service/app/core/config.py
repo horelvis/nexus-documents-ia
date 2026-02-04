@@ -73,8 +73,16 @@ class Settings(BaseSettings):
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-    # OpenRouter configuration
+    # OpenRouter configuration (unified gateway to 200+ models)
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
+    openrouter_base_url: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "google/gemma-3-27b-it")
+    openrouter_site_url: str = os.getenv("OPENROUTER_SITE_URL", "https://nouxcube.com")
+    openrouter_site_name: str = os.getenv("OPENROUTER_SITE_NAME", "NouxCubeIA")
+
+    # LLM Fallback Configuration (automatic failover between providers)
+    llm_fallback_enabled: bool = os.getenv("LLM_FALLBACK_ENABLED", "false").lower() == "true"
+    llm_fallback_chain: str = os.getenv("LLM_FALLBACK_CHAIN", "vllm,openrouter,openai")
 
     # ==========================================================================
     # Redis Configuration (for sessions and caching)
@@ -121,6 +129,24 @@ class Settings(BaseSettings):
     langfuse_sample_rate: float = float(os.getenv("LANGFUSE_SAMPLE_RATE", "1.0"))
     langfuse_debug: bool = os.getenv("LANGFUSE_DEBUG", "false").lower() == "true"
 
+    # ==========================================================================
+    # Prompt Management (Langfuse Prompts + Custom)
+    # ==========================================================================
+    # Feature flag to use Langfuse for prompt storage instead of YAML
+    use_langfuse_prompts: bool = os.getenv("USE_LANGFUSE_PROMPTS", "false").lower() == "true"
+    # Local cache TTL for Langfuse prompts (seconds)
+    langfuse_prompt_cache_ttl: int = int(os.getenv("LANGFUSE_PROMPT_CACHE_TTL", "300"))
+    # Enable few-shot example retrieval
+    few_shot_enabled: bool = os.getenv("FEW_SHOT_ENABLED", "true").lower() == "true"
+    # Max few-shot examples to include in prompts
+    few_shot_max_examples: int = int(os.getenv("FEW_SHOT_MAX_EXAMPLES", "3"))
+    # Min similarity score for few-shot retrieval (0.0-1.0)
+    few_shot_min_similarity: float = float(os.getenv("FEW_SHOT_MIN_SIMILARITY", "0.6"))
+    # Enable guardrail validation
+    guardrails_enabled: bool = os.getenv("GUARDRAILS_ENABLED", "true").lower() == "true"
+    # Enable rule engine for dynamic prompt injection
+    rule_engine_enabled: bool = os.getenv("RULE_ENGINE_ENABLED", "true").lower() == "true"
+
     # Main API URL (for auth validation)
     api_url: str = os.getenv("API_URL", "http://api:8000")
 
@@ -164,11 +190,13 @@ class Settings(BaseSettings):
     verified_claim_temperature: float = float(os.getenv("VERIFIED_CLAIM_TEMPERATURE", "0.3"))
 
     # ==========================================================================
-    # Web Search (DuckDuckGo)
+    # Web Search (Tavily primary, DuckDuckGo fallback)
     # ==========================================================================
     web_search_enabled: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
     web_search_max_results: int = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
     web_search_region: str = os.getenv("WEB_SEARCH_REGION", "es-es")
+    # Tavily API (get free key at https://tavily.com - 1000 searches/month free)
+    tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
 
     # ==========================================================================
     # Emma Reactive Configuration
@@ -188,6 +216,14 @@ class Settings(BaseSettings):
     upload_ttl_seconds: int = int(os.getenv("EMMA_UPLOAD_TTL_SECONDS", "3600"))
     upload_max_chars_per_doc: int = int(os.getenv("EMMA_UPLOAD_MAX_CHARS_PER_DOC", "15000"))
     upload_max_total_chars: int = int(os.getenv("EMMA_UPLOAD_MAX_TOTAL_CHARS", "40000"))
+
+    # ==========================================================================
+    # Default Location for Social Channels
+    # ==========================================================================
+    default_location_city: str = os.getenv("DEFAULT_LOCATION_CITY", "Molina de Segura")
+    default_location_region: str = os.getenv("DEFAULT_LOCATION_REGION", "Región de Murcia")
+    default_location_country: str = os.getenv("DEFAULT_LOCATION_COUNTRY", "España")
+    default_location_timezone: str = os.getenv("DEFAULT_LOCATION_TIMEZONE", "Europe/Madrid")
 
     class Config:
         env_file = ".env"

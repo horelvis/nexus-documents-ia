@@ -11,6 +11,7 @@ from .triggers import router as triggers_router
 from .notifications import router as notifications_router
 from .channels_emma import router as channels_router
 from .heartbeat import router as heartbeat_router
+from .prompts import router as prompts_router
 
 __all__ = [
     "emma_router",
@@ -24,4 +25,5 @@ __all__ = [
     "notifications_router",
     "channels_router",
     "heartbeat_router",
+    "prompts_router",
 ]

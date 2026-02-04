@@ -99,6 +99,29 @@ Note: `context_tree` and `graph_expand` run in **parallel**. `graph_expand` popu
 - **LLM Providers**: vLLM (primary), OpenAI, Anthropic, Google (fallbacks)
 - **Social Agent**: Conversational agent for social channels (see below)
 - **Emma Reactive**: Event-driven proactive system (see below)
+- **Prompt Management**: Dynamic prompts, rules, guardrails (see below)
+
+### Prompt Management System
+
+> **Full docs**: [`docs/architecture/PROMPT_MANAGEMENT.md`](docs/architecture/PROMPT_MANAGEMENT.md)
+
+Dynamic prompt management with Langfuse integration:
+
+| Component | Description | API Endpoint |
+|-----------|-------------|--------------|
+| **Langfuse** | Prompt versioning, A/B testing, rollback | Web UI: http://localhost:3002 |
+| **Rules** | Dynamic prompt injection by context | `/prompts/rules` |
+| **Guardrails** | Post-LLM validation (PII, keywords) | `/prompts/guardrails` |
+| **Few-Shot** | Semantic example retrieval | `/prompts/few-shot` |
+
+**Architecture**: Emma Service (8009) → HTTP Proxy → Main API (8000) → PostgreSQL
+
+**Key files**:
+- `emma-agent-service/app/api/prompts.py` — API endpoints (proxy to Main API)
+- `emma-agent-service/app/services/rule_engine.py` — Rule evaluation
+- `emma-agent-service/app/services/guardrail_service.py` — Output validation
+- `emma-agent-service/app/services/langfuse_prompt_client.py` — Langfuse client
+- `backend/app/api/v1/prompts.py` — Main API CRUD endpoints
 
 ### Social Agent (Slack, Telegram, WhatsApp)
 
@@ -108,7 +131,7 @@ The `social_agent` provides conversational, emoji-rich responses for social chan
 ```python
 context = {
     "social_channel_mode": True,
-    "location": {"city": "Madrid", "country": "España", "timezone": "Europe/Madrid"}
+    "location": {"city": "Molina de Segura", "region": "Región de Murcia", "country": "España", "timezone": "Europe/Madrid"}
 }
 ```
 

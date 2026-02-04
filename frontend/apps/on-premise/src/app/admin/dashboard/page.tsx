@@ -42,6 +42,11 @@ import {
   IconCpu,
   IconRobot,
   IconCheck,
+  IconHeartbeat,
+  IconMail,
+  IconBrandSlack,
+  IconClock,
+  IconBell,
 } from "@tabler/icons-react"
 import {
   SidebarProvider,
@@ -113,6 +118,8 @@ interface KnowledgeStats {
   total_entities: number
   entities_by_type: Record<string, number>
   entities_by_domain: Record<string, number>
+  tenant_entities?: number   // Entities specific to this tenant
+  public_entities?: number   // Shared entities from public knowledge
 }
 
 interface MaintenanceResult {
@@ -202,6 +209,31 @@ interface TrainingProgress {
   last_error: string | null
 }
 
+interface HeartbeatConfig {
+  enabled: boolean
+  run_interval_hours: number
+  priority_threshold: number
+  max_insights_per_day: number
+  max_insights_per_hour: number
+  min_interval_minutes: number
+  quiet_hours_start: string
+  quiet_hours_end: string
+  channel_priority: string[]
+  email_recipients: string[]
+  batch_low_priority: boolean
+  digest_hour: number
+}
+
+interface HeartbeatStatus {
+  tenant_id: string
+  enabled: boolean
+  last_run_at: string | null
+  next_run_at: string | null
+  insights_pending: number
+  insights_delivered_today: number
+  config: HeartbeatConfig
+}
+
 // ============================================================================
 // Main Component
 // ============================================================================
@@ -260,6 +292,14 @@ const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
   const [trainingEpochs, setTrainingEpochs] = useState<number>(3)
   const [showTrainingDialog, setShowTrainingDialog] = useState(false)
 
+  // Heartbeat
+  const [heartbeatStatus, setHeartbeatStatus] = useState<HeartbeatStatus | null>(null)
+  const [heartbeatConfig, setHeartbeatConfig] = useState<HeartbeatConfig | null>(null)
+  const [isLoadingHeartbeat, setIsLoadingHeartbeat] = useState(false)
+  const [isSavingHeartbeat, setIsSavingHeartbeat] = useState(false)
+  const [isRunningHeartbeat, setIsRunningHeartbeat] = useState(false)
+  const [newEmailRecipient, setNewEmailRecipient] = useState("")
+
   // Results
   const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResult | null>(null)
 
@@ -304,6 +344,7 @@ const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
         loadBoePresets(),
         loadPublicKnowledgeStats(),
         loadTrainingStatus(),
+        loadHeartbeatStatus(),
       ])
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error al cargar estadísticas'
@@ -398,6 +439,81 @@ const loadBoePresets = async () => {
     } catch (error) {
       console.error('Failed to load training progress:', error)
     }
+  }
+
+  const loadHeartbeatStatus = async () => {
+    setIsLoadingHeartbeat(true)
+    try {
+      const response = await apiClient.get<HeartbeatStatus>('/emma/heartbeat/status')
+      if (!response.error && response.data) {
+        setHeartbeatStatus(response.data)
+        setHeartbeatConfig(response.data.config)
+      }
+    } catch (error) {
+      console.error('Failed to load heartbeat status:', error)
+    } finally {
+      setIsLoadingHeartbeat(false)
+    }
+  }
+
+  const handleUpdateHeartbeatConfig = async (updates: Partial<HeartbeatConfig>) => {
+    setIsSavingHeartbeat(true)
+    setError(null)
+    try {
+      const response = await apiClient.patch<HeartbeatConfig>('/emma/heartbeat/config', updates)
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      if (response.data) {
+        setHeartbeatConfig(response.data)
+        setSuccessMessage('Configuración de Heartbeat actualizada')
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Error al actualizar configuración'
+      setError(errorMessage)
+    } finally {
+      setIsSavingHeartbeat(false)
+    }
+  }
+
+  const handleRunHeartbeat = async () => {
+    setIsRunningHeartbeat(true)
+    setError(null)
+    try {
+      const response = await apiClient.post<any>('/emma/heartbeat/run', null, { params: { force: 'true' } })
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      setSuccessMessage(`Heartbeat ejecutado: ${response.data?.insights_delivered || 0} insights generados`)
+      await loadHeartbeatStatus()
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Error al ejecutar heartbeat'
+      setError(errorMessage)
+    } finally {
+      setIsRunningHeartbeat(false)
+    }
+  }
+
+  const handleAddEmailRecipient = () => {
+    if (!newEmailRecipient || !heartbeatConfig) return
+    const email = newEmailRecipient.trim().toLowerCase()
+    if (!email.includes('@')) {
+      setError('Email inválido')
+      return
+    }
+    if (heartbeatConfig.email_recipients.includes(email)) {
+      setError('Email ya está en la lista')
+      return
+    }
+    const updated = [...heartbeatConfig.email_recipients, email]
+    handleUpdateHeartbeatConfig({ email_recipients: updated })
+    setNewEmailRecipient("")
+  }
+
+  const handleRemoveEmailRecipient = (email: string) => {
+    if (!heartbeatConfig) return
+    const updated = heartbeatConfig.email_recipients.filter(e => e !== email)
+    handleUpdateHeartbeatConfig({ email_recipients: updated })
   }
 
   // ============================================================================
@@ -817,7 +933,7 @@ const loadBoePresets = async () => {
 
             {/* Tabs for different admin sections */}
             <Tabs defaultValue="system" className="space-y-4">
-              <TabsList className="grid w-full grid-cols-6">
+              <TabsList className="grid w-full grid-cols-7">
                 <TabsTrigger value="system">
                   <IconServer className="h-4 w-4 mr-2" />
                   Sistema
@@ -833,6 +949,10 @@ const loadBoePresets = async () => {
                 <TabsTrigger value="boe">
                   <IconDatabase className="h-4 w-4 mr-2" />
                   BOE
+                </TabsTrigger>
+                <TabsTrigger value="heartbeat">
+                  <IconHeartbeat className="h-4 w-4 mr-2" />
+                  Heartbeat
                 </TabsTrigger>
                 <TabsTrigger value="training">
                   <IconCpu className="h-4 w-4 mr-2" />
@@ -987,6 +1107,18 @@ const loadBoePresets = async () => {
 
               {/* Knowledge Tab */}
               <TabsContent value="knowledge" className="space-y-4">
+                {/* Info banner when no entities */}
+                {!isLoading && knowledgeStats && knowledgeStats.total_entities === 0 && (
+                  <Alert>
+                    <IconSchool className="h-4 w-4" />
+                    <AlertDescription>
+                      <strong>No hay entidades en el Knowledge Graph.</strong> Para extraer entidades de los documentos
+                      públicos (legislación BOE), usa el botón "Extraer Entidades al Knowledge Graph" más abajo.
+                      Las entidades permiten consultas semánticas avanzadas.
+                    </AlertDescription>
+                  </Alert>
+                )}
+
                 <div className="grid gap-4 md:grid-cols-2">
                   {/* Knowledge Stats */}
                   <Card>
@@ -998,10 +1130,28 @@ const loadBoePresets = async () => {
                       <CardDescription>Entidades extraídas de documentos</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm">Total entidades</span>
-                        <span className="font-medium text-2xl">{formatNumber(knowledgeStats?.total_entities)}</span>
-                      </div>
+                      {isLoading ? (
+                        <div className="h-8 bg-muted animate-pulse rounded" />
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm">Total entidades</span>
+                            <span className="font-medium text-2xl">{formatNumber(knowledgeStats?.total_entities)}</span>
+                          </div>
+                          {(knowledgeStats?.tenant_entities !== undefined || knowledgeStats?.public_entities !== undefined) && (
+                            <div className="pt-2 border-t space-y-1">
+                              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                                <span>Propias del tenant</span>
+                                <span>{formatNumber(knowledgeStats?.tenant_entities || 0)}</span>
+                              </div>
+                              <div className="flex items-center justify-between text-sm text-muted-foreground">
+                                <span>Públicas (legislación)</span>
+                                <span>{formatNumber(knowledgeStats?.public_entities || 0)}</span>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -1320,6 +1470,458 @@ const loadBoePresets = async () => {
                     </Button>
                   </CardFooter>
                 </Card>
+              </TabsContent>
+
+              {/* Heartbeat Tab */}
+              <TabsContent value="heartbeat" className="space-y-4">
+                {/* Heartbeat Info Banner */}
+                <Alert>
+                  <IconHeartbeat className="h-4 w-4" />
+                  <AlertDescription>
+                    <strong>Emma Heartbeat — Inteligencia Proactiva</strong> — Sistema que evalúa periódicamente
+                    el contexto del tenant (documentos, contratos, actividad) y genera insights automáticamente.
+                    Configura notificaciones por email, Slack y otros canales.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Heartbeat Status */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconHeart className="h-5 w-5" />
+                        Estado del Heartbeat
+                      </CardTitle>
+                      <CardDescription>
+                        Estado actual y métricas del sistema proactivo
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {isLoadingHeartbeat ? (
+                        <div className="space-y-2">
+                          {[1, 2, 3].map(i => (
+                            <div key={i} className="h-8 bg-muted animate-pulse rounded" />
+                          ))}
+                        </div>
+                      ) : heartbeatStatus ? (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm">Estado</span>
+                            {heartbeatStatus.enabled ? (
+                              <Badge variant="default" className="bg-green-500">Activo</Badge>
+                            ) : (
+                              <Badge variant="secondary">Desactivado</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm">Última ejecución</span>
+                            <span className="text-sm text-muted-foreground">
+                              {heartbeatStatus.last_run_at
+                                ? new Date(heartbeatStatus.last_run_at).toLocaleString('es-ES')
+                                : 'Nunca'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm">Próxima ejecución</span>
+                            <span className="text-sm text-muted-foreground">
+                              {heartbeatStatus.next_run_at
+                                ? new Date(heartbeatStatus.next_run_at).toLocaleString('es-ES')
+                                : 'No programada'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm">Insights hoy</span>
+                            <span className="font-medium">{heartbeatStatus.insights_delivered_today}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm">Pendientes</span>
+                            <span className="font-medium">{heartbeatStatus.insights_pending}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">No se pudo cargar el estado</p>
+                      )}
+                    </CardContent>
+                    <CardFooter>
+                      <Button
+                        onClick={handleRunHeartbeat}
+                        disabled={isRunningHeartbeat}
+                        className="w-full"
+                      >
+                        {isRunningHeartbeat ? (
+                          <>
+                            <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Ejecutando...
+                          </>
+                        ) : (
+                          <>
+                            <IconPlayerPlay className="mr-2 h-4 w-4" />
+                            Ejecutar Heartbeat Ahora
+                          </>
+                        )}
+                      </Button>
+                    </CardFooter>
+                  </Card>
+
+                  {/* General Configuration */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconActivity className="h-5 w-5" />
+                        Configuración General
+                      </CardTitle>
+                      <CardDescription>
+                        Ajusta la frecuencia y comportamiento del heartbeat
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {heartbeatConfig ? (
+                        <>
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label>Heartbeat activo</Label>
+                              <p className="text-xs text-muted-foreground">
+                                Habilita o deshabilita el sistema
+                              </p>
+                            </div>
+                            <Switch
+                              checked={heartbeatConfig.enabled}
+                              onCheckedChange={(checked) =>
+                                handleUpdateHeartbeatConfig({ enabled: checked })
+                              }
+                              disabled={isSavingHeartbeat}
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Intervalo de ejecución</Label>
+                            <div className="flex gap-2">
+                              {[1, 2, 4, 6, 12, 24].map((hours) => (
+                                <Button
+                                  key={hours}
+                                  variant={heartbeatConfig.run_interval_hours === hours ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleUpdateHeartbeatConfig({ run_interval_hours: hours })}
+                                  disabled={isSavingHeartbeat}
+                                >
+                                  {hours}h
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Máx. insights por día</Label>
+                            <div className="flex gap-2">
+                              {[1, 3, 5, 10, 20].map((n) => (
+                                <Button
+                                  key={n}
+                                  variant={heartbeatConfig.max_insights_per_day === n ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleUpdateHeartbeatConfig({ max_insights_per_day: n })}
+                                  disabled={isSavingHeartbeat}
+                                >
+                                  {n}
+                                </Button>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Umbral de prioridad (0-1)</Label>
+                            <div className="flex gap-2">
+                              {[0.3, 0.5, 0.6, 0.7, 0.8].map((t) => (
+                                <Button
+                                  key={t}
+                                  variant={heartbeatConfig.priority_threshold === t ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleUpdateHeartbeatConfig({ priority_threshold: t })}
+                                  disabled={isSavingHeartbeat}
+                                >
+                                  {t}
+                                </Button>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Solo insights con prioridad mayor a este valor serán entregados
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Cargando configuración...</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Rate Limiting & Digest */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Rate Limiting */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconActivity className="h-5 w-5" />
+                        Control de Frecuencia
+                      </CardTitle>
+                      <CardDescription>
+                        Limita la cantidad de notificaciones para evitar saturación
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {heartbeatConfig ? (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Máx. insights por hora</Label>
+                            <div className="flex gap-2">
+                              {[1, 2, 3, 5, 10].map((n) => (
+                                <Button
+                                  key={n}
+                                  variant={heartbeatConfig.max_insights_per_hour === n ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleUpdateHeartbeatConfig({ max_insights_per_hour: n })}
+                                  disabled={isSavingHeartbeat}
+                                >
+                                  {n}
+                                </Button>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Límite de notificaciones por hora
+                            </p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Intervalo mínimo entre insights (min)</Label>
+                            <div className="flex gap-2">
+                              {[5, 15, 30, 60, 120].map((min) => (
+                                <Button
+                                  key={min}
+                                  variant={heartbeatConfig.min_interval_minutes === min ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleUpdateHeartbeatConfig({ min_interval_minutes: min })}
+                                  disabled={isSavingHeartbeat}
+                                >
+                                  {min}
+                                </Button>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Tiempo mínimo entre notificaciones consecutivas
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Cargando...</p>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Daily Digest */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconMail className="h-5 w-5" />
+                        Resumen Diario (Digest)
+                      </CardTitle>
+                      <CardDescription>
+                        Configura el envío del resumen diario de insights
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {heartbeatConfig ? (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Hora del digest diario</Label>
+                            <div className="flex flex-wrap gap-2">
+                              {[7, 8, 9, 10, 12, 18].map((hour) => (
+                                <Button
+                                  key={hour}
+                                  variant={heartbeatConfig.digest_hour === hour ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => handleUpdateHeartbeatConfig({ digest_hour: hour })}
+                                  disabled={isSavingHeartbeat}
+                                >
+                                  {hour}:00
+                                </Button>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Hora a la que se enviará el resumen diario (zona horaria del servidor)
+                            </p>
+                          </div>
+                          <div className="pt-2 border-t">
+                            <p className="text-sm text-muted-foreground">
+                              El digest incluye todos los insights de baja prioridad agrupados
+                              (si "Agrupar baja prioridad" está activo).
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Cargando...</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Email Recipients & Quiet Hours */}
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* Email Recipients */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconMail className="h-5 w-5" />
+                        Destinatarios de Email
+                      </CardTitle>
+                      <CardDescription>
+                        Lista de emails que recibirán los insights proactivos
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {heartbeatConfig ? (
+                        <>
+                          <div className="flex gap-2">
+                            <input
+                              type="email"
+                              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              placeholder="email@ejemplo.com"
+                              value={newEmailRecipient}
+                              onChange={(e) => setNewEmailRecipient(e.target.value)}
+                              onKeyDown={(e) => e.key === 'Enter' && handleAddEmailRecipient()}
+                            />
+                            <Button
+                              onClick={handleAddEmailRecipient}
+                              disabled={isSavingHeartbeat || !newEmailRecipient}
+                            >
+                              Añadir
+                            </Button>
+                          </div>
+                          <div className="space-y-2 max-h-48 overflow-y-auto">
+                            {heartbeatConfig.email_recipients.length > 0 ? (
+                              heartbeatConfig.email_recipients.map((email) => (
+                                <div
+                                  key={email}
+                                  className="flex items-center justify-between p-2 bg-muted/50 rounded"
+                                >
+                                  <span className="text-sm">{email}</span>
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleRemoveEmailRecipient(email)}
+                                    disabled={isSavingHeartbeat}
+                                  >
+                                    <IconTrash className="h-4 w-4 text-destructive" />
+                                  </Button>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-sm text-muted-foreground text-center py-4">
+                                No hay destinatarios configurados
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Cargando...</p>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Quiet Hours & Channels */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconClock className="h-5 w-5" />
+                        Horario y Canales
+                      </CardTitle>
+                      <CardDescription>
+                        Configura horas silenciosas y canales de notificación
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {heartbeatConfig ? (
+                        <>
+                          <div className="space-y-2">
+                            <Label>Horas silenciosas (no molestar)</Label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="time"
+                                className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                                value={heartbeatConfig.quiet_hours_start}
+                                onChange={(e) =>
+                                  handleUpdateHeartbeatConfig({ quiet_hours_start: e.target.value })
+                                }
+                                disabled={isSavingHeartbeat}
+                              />
+                              <span className="text-muted-foreground">a</span>
+                              <input
+                                type="time"
+                                className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm"
+                                value={heartbeatConfig.quiet_hours_end}
+                                onChange={(e) =>
+                                  handleUpdateHeartbeatConfig({ quiet_hours_end: e.target.value })
+                                }
+                                disabled={isSavingHeartbeat}
+                              />
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              No se enviarán notificaciones durante este horario
+                            </p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Canales activos</Label>
+                            <div className="flex flex-wrap gap-2">
+                              {['in_app', 'email', 'slack', 'telegram'].map((channel) => {
+                                const isActive = heartbeatConfig.channel_priority.includes(channel)
+                                const icons: Record<string, any> = {
+                                  in_app: IconBell,
+                                  email: IconMail,
+                                  slack: IconBrandSlack,
+                                  telegram: IconBell,
+                                }
+                                const labels: Record<string, string> = {
+                                  in_app: 'In-App',
+                                  email: 'Email',
+                                  slack: 'Slack',
+                                  telegram: 'Telegram',
+                                }
+                                const Icon = icons[channel] || IconBell
+                                return (
+                                  <Badge
+                                    key={channel}
+                                    variant={isActive ? "default" : "outline"}
+                                    className="cursor-pointer"
+                                    onClick={() => {
+                                      const newChannels = isActive
+                                        ? heartbeatConfig.channel_priority.filter(c => c !== channel)
+                                        : [...heartbeatConfig.channel_priority, channel]
+                                      handleUpdateHeartbeatConfig({ channel_priority: newChannels })
+                                    }}
+                                  >
+                                    <Icon className="h-3 w-3 mr-1" />
+                                    {labels[channel]}
+                                  </Badge>
+                                )
+                              })}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between pt-2">
+                            <div className="space-y-0.5">
+                              <Label>Agrupar baja prioridad</Label>
+                              <p className="text-xs text-muted-foreground">
+                                Agrupa insights de baja prioridad en digest diario
+                              </p>
+                            </div>
+                            <Switch
+                              checked={heartbeatConfig.batch_low_priority}
+                              onCheckedChange={(checked) =>
+                                handleUpdateHeartbeatConfig({ batch_low_priority: checked })
+                              }
+                              disabled={isSavingHeartbeat}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Cargando...</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
               </TabsContent>
 
               {/* Training Tab */}

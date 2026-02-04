@@ -84,8 +84,10 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # vLLM - GPU Inference Server (Qwen2.5-7B-Instruct-AWQ)
+  # vLLM - GPU Inference Server (Qwen2.5-7B-Instruct FP16 - NO QUANTIZATION)
   # =============================================================================
+  # Using FP16 (full precision) for maximum quality
+  # VRAM: ~14GB model + ~6GB KV cache = ~20GB (fits in 24GB)
   vllm:
     image: vllm/vllm-openai:v0.8.5.post1
     ports:
@@ -101,17 +103,16 @@ services:
       - CUDA_VISIBLE_DEVICES=0
     command:
       - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
+      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
       - "--served-model-name"
-      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}"
-      - "--quantization"
-      - "awq"
+      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
+      # NO quantization - using full FP16 precision for best quality
       - "--dtype"
       - "float16"
       - "--max-model-len"
       - "${VLLM_MAX_MODEL_LEN:-16384}"
       - "--gpu-memory-utilization"
-      - "0.65"
+      - "0.85"
       - "--enforce-eager"
       - "--trust-remote-code"
       # Enable tool calling for Emma v2 (native async client)
@@ -213,7 +214,7 @@ services:
       # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       # Embedding Configuration (BGE-M3 local)
@@ -310,6 +311,8 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
+      langfuse:
+        condition: service_started
     networks:
       - backend-network
     env_file:
@@ -327,7 +330,7 @@ services:
       # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       # Redis for sessions
@@ -343,13 +346,22 @@ services:
       # Single-tenant mode for on-premise
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
-      # Langfuse disabled (removed from stack)
-      - LANGFUSE_ENABLED=false
+      # Langfuse - Prompt Management & LLM Observability
+      - LANGFUSE_ENABLED=true
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3000}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-pk-emma-dev}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-emma-dev}
+      - USE_LANGFUSE_PROMPTS=${USE_LANGFUSE_PROMPTS:-true}
       # Background Worker (for Celery verification tasks)
       - BACKGROUND_WORKER_URL=http://background-worker:8100
       # Upload limits (temp file processing)
       - EMMA_UPLOAD_MAX_CHARS_PER_DOC=${EMMA_UPLOAD_MAX_CHARS_PER_DOC:-15000}
       - EMMA_UPLOAD_MAX_TOTAL_CHARS=${EMMA_UPLOAD_MAX_TOTAL_CHARS:-40000}
+      # Default Location for Social Channels
+      - DEFAULT_LOCATION_CITY=${DEFAULT_LOCATION_CITY:-Molina de Segura}
+      - DEFAULT_LOCATION_REGION=${DEFAULT_LOCATION_REGION:-Región de Murcia}
+      - DEFAULT_LOCATION_COUNTRY=${DEFAULT_LOCATION_COUNTRY:-España}
+      - DEFAULT_LOCATION_TIMEZONE=${DEFAULT_LOCATION_TIMEZONE:-Europe/Madrid}
       # RLM (Recursive Language Models) Configuration
       - RLM_ENABLED=${RLM_ENABLED:-false}
       - RLM_TOKEN_THRESHOLD=${RLM_TOKEN_THRESHOLD:-16000}
@@ -357,10 +369,11 @@ services:
       - RLM_CHUNK_OVERLAP=${RLM_CHUNK_OVERLAP:-500}
       - RLM_MAX_DEPTH=${RLM_MAX_DEPTH:-3}
       - RLM_MAX_CHUNKS=${RLM_MAX_CHUNKS:-20}
-      # Web Search (DuckDuckGo)
+      # Web Search (Tavily primary, DuckDuckGo fallback)
       - WEB_SEARCH_ENABLED=${WEB_SEARCH_ENABLED:-true}
       - WEB_SEARCH_MAX_RESULTS=${WEB_SEARCH_MAX_RESULTS:-5}
       - WEB_SEARCH_REGION=${WEB_SEARCH_REGION:-es-es}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
       # Suppress warnings
       - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:pydantic
     volumes:
@@ -392,7 +405,7 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Web Search (DuckDuckGo)
@@ -450,7 +463,7 @@ services:
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
@@ -760,6 +773,49 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    restart: unless-stopped
+
+  # =============================================================================
+  # Langfuse - LLM Observability & Prompt Management
+  # =============================================================================
+  # Core component for:
+  # - Prompt versioning and management (Web UI)
+  # - A/B testing for prompts
+  # - LLM tracing and observability
+  # - Rollback capabilities
+  langfuse:
+    image: langfuse/langfuse:2
+    ports:
+      - "3002:3000"  # Host 3002 (3000-3001 used by Next.js)
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    environment:
+      # Database (uses separate database to avoid schema conflicts)
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-nexus_user}:${POSTGRES_PASSWORD:-nexus_password}@db:5432/langfuse
+      # Auth
+      - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-changeme-langfuse-secret-key-32chars}
+      - NEXTAUTH_URL=${LANGFUSE_NEXTAUTH_URL:-http://localhost:3002}
+      - SALT=${LANGFUSE_SALT:-changeme-langfuse-salt-key}
+      # Telemetry (optional, can disable)
+      - TELEMETRY_ENABLED=false
+      # Init admin user (for first run)
+      - LANGFUSE_INIT_USER_EMAIL=${LANGFUSE_INIT_USER_EMAIL:-admin@example.com}
+      - LANGFUSE_INIT_USER_NAME=${LANGFUSE_INIT_USER_NAME:-Admin}
+      - LANGFUSE_INIT_USER_PASSWORD=${LANGFUSE_INIT_USER_PASSWORD:-langfuse-admin-password}
+      # Project/Org init
+      - LANGFUSE_INIT_ORG_NAME=${LANGFUSE_INIT_ORG_NAME:-NouxCubeIA}
+      - LANGFUSE_INIT_PROJECT_NAME=${LANGFUSE_INIT_PROJECT_NAME:-Emma}
+      - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-pk-emma-dev}
+      - LANGFUSE_INIT_PROJECT_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-emma-dev}
+    healthcheck:
+      test: ["CMD-SHELL", "IP=$(hostname -i) && node -e \"require('http').get('http://'+'$IP'+':3000/api/public/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
     restart: unless-stopped
 
 networks:

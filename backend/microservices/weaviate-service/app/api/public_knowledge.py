@@ -274,19 +274,44 @@ async def extract_knowledge_from_public_documents(
         weaviate_service = WeaviateService()
         await weaviate_service.initialize()
 
-        # Get public documents
-        search_request = PublicSearchRequest(
-            query="*",
+        # Get public documents using direct fetch (not search)
+        # BM25/keyword search doesn't support "*" wildcard, so we use fetch_objects
+        import weaviate.classes.query as wq
+
+        await public_knowledge_service.initialize()
+        collection = public_knowledge_service.client.collections.get("PublicKnowledge")
+
+        # Build filter for category (exclude legislation by default)
+        filters = None
+        if category:
+            filters = wq.Filter.by_property("category").equal(category.value)
+        else:
+            # Exclude legislation - it should go to Legal Graph
+            filters = wq.Filter.by_property("category").not_equal("legislation")
+
+        # Fetch documents directly without text search
+        response = collection.query.fetch_objects(
             limit=limit,
-            categories=[category] if category else None,
-            search_type="keyword"
+            filters=filters,
+            return_properties=["title", "content", "category", "jurisdiction", "keywords", "boe_id"]
         )
 
-        # Use a simple search to get documents
-        documents = await public_knowledge_service.search(search_request)
+        # Convert to list of document-like objects
+        class DocResult:
+            def __init__(self, obj):
+                self.id = str(obj.uuid)
+                self.title = obj.properties.get("title", "")
+                self.content = obj.properties.get("content", "")
+                self.category = type("Cat", (), {"value": obj.properties.get("category", "")})()
+                self.jurisdiction = type("Jur", (), {"value": obj.properties.get("jurisdiction", "")})()
+                self.keywords = obj.properties.get("keywords", [])
+                self.boe_id = obj.properties.get("boe_id", "")
+
+        documents_list = [DocResult(obj) for obj in response.objects]
+        logger.info(f"📄 Fetched {len(documents_list)} documents for extraction")
 
         results = {
-            "total_documents": len(documents.results),
+            "total_documents": len(documents_list),
             "processed": 0,
             "entities_extracted": 0,
             "errors": 0,
@@ -304,7 +329,7 @@ async def extract_knowledge_from_public_documents(
             "concepto_legal": r"(?:derecho\s+a\s+[\w\s]+|obligación\s+de\s+[\w\s]+|deber\s+de\s+[\w\s]+)",
         }
 
-        for doc in documents.results:
+        for doc in documents_list:
             try:
                 doc_id = doc.id
                 content = doc.content[:50000] if doc.content else ""  # Limit content size

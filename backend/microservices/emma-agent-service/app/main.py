@@ -43,7 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 
 from app.core.config import settings
-from app.api import emma_router, learning_router, uploads_router, verified_router, predictive_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router
+from app.api import emma_router, learning_router, uploads_router, verified_router, predictive_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router
 from app.clients import get_weaviate_client
 
 # Configure logging
@@ -188,6 +188,7 @@ app.include_router(triggers_router, tags=["triggers"])
 app.include_router(notifications_router, prefix="/emma", tags=["notifications"])
 app.include_router(channels_router, tags=["channels"])
 app.include_router(heartbeat_router, prefix="/emma", tags=["heartbeat"])
+app.include_router(prompts_router, tags=["prompts"])
 
 
 # Health check

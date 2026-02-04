@@ -8,16 +8,17 @@
  */
 
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import Image from 'next/image'
-import { IconLoader2, IconCircleCheck, IconAlertCircle } from '@tabler/icons-react'
+import { IconLoader2, IconAlertCircle } from '@tabler/icons-react'
 import { Button } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 
-type CallbackStatus = 'processing' | 'success' | 'error'
+type CallbackStatus = 'processing' | 'error'
 
 export default function AuthCallbackPage() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const { isLoaded, isAuthenticated } = useAuth()
   const [status, setStatus] = useState<CallbackStatus>('processing')
   const [error, setError] = useState<string | null>(null)
@@ -33,11 +34,12 @@ export default function AuthCallbackPage() {
     }
   }, [searchParams])
 
+  // Redirect immediately when authenticated (no success message)
   useEffect(() => {
     if (isLoaded && isAuthenticated) {
-      setStatus('success')
+      router.push('/')
     }
-  }, [isLoaded, isAuthenticated])
+  }, [isLoaded, isAuthenticated, router])
 
   const handleRetry = () => {
     sessionStorage.removeItem('nexus_oidc_state')
@@ -80,23 +82,6 @@ export default function AuthCallbackPage() {
                 </h2>
                 <p className="text-sm text-slate-400">
                   Verificando credenciales con KeyCloak...
-                </p>
-              </div>
-            </>
-          )}
-
-          {status === 'success' && (
-            <>
-              <div className="relative">
-                <div className="absolute inset-0 rounded-full bg-emerald-400/20 blur-lg" />
-                <IconCircleCheck className="relative h-10 w-10 text-emerald-400" />
-              </div>
-              <div>
-                <h2 className="mb-2 text-xl font-semibold">
-                  ¡Autenticación exitosa!
-                </h2>
-                <p className="text-sm text-slate-400">
-                  Redirigiendo a NouxCube...
                 </p>
               </div>
             </>

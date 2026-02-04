@@ -790,7 +790,7 @@ class WeaviateService:
             collection = self.client.collections.get(collection_name)
 
             # Generate embedding from context text
-            embedding = await self.get_embedding(context_text)
+            embedding = await generate_embedding(context_text)
 
             # Prepare entity data
             import json
@@ -855,7 +855,7 @@ class WeaviateService:
             collection = self.client.collections.get(collection_name)
 
             # Generate query embedding
-            query_embedding = await self.get_embedding(query)
+            query_embedding = await generate_embedding(query)
 
             # Build filters
             filters = []

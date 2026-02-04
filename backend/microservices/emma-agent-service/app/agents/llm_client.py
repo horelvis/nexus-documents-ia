@@ -65,6 +65,7 @@ class LLMProvider(str, Enum):
     VLLM = "vllm"
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
+    OPENROUTER = "openrouter"
 
 
 class ToolCallState(str, Enum):
@@ -219,6 +220,7 @@ class LLMConfig:
     timeout: float = 120.0
     enable_thinking: bool = False
     thinking_budget: int = 4096
+    extra: Dict[str, Any] = field(default_factory=dict)  # Provider-specific metadata
 
 
 def _parse_thinking(text: str) -> tuple[Optional[str], str]:
@@ -272,6 +274,11 @@ class LLMClient:
             headers = {"Content-Type": "application/json"}
             if self.config.api_key:
                 headers["Authorization"] = f"Bearer {self.config.api_key}"
+
+            # OpenRouter requires additional headers for identification
+            if self.config.provider == LLMProvider.OPENROUTER:
+                headers["HTTP-Referer"] = self.config.extra.get("site_url", "https://nouxcube.com")
+                headers["X-Title"] = self.config.extra.get("site_name", "NouxCubeIA")
 
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.config.timeout),
@@ -643,21 +650,20 @@ class LLMClient:
 # Factory Functions
 # =============================================================================
 
-def create_llm_client_from_settings() -> LLMClient:
+def create_llm_config_for_provider(provider: LLMProvider) -> LLMConfig:
     """
-    Create LLM client from weaviate-service settings.
+    Create LLM configuration for a specific provider.
+
+    Args:
+        provider: The LLM provider to configure
 
     Returns:
-        Configured LLMClient instance
+        Configured LLMConfig instance
     """
     from app.core.config import settings
 
-    # Determine provider
-    provider_str = settings.llm_provider.lower()
-    provider = LLMProvider(provider_str) if provider_str in [p.value for p in LLMProvider] else LLMProvider.VLLM
-
     if provider == LLMProvider.VLLM:
-        config = LLMConfig(
+        return LLMConfig(
             provider=LLMProvider.VLLM,
             base_url=settings.vllm_base_url,
             model=settings.vllm_model,
@@ -668,7 +674,7 @@ def create_llm_client_from_settings() -> LLMClient:
             timeout=settings.agent_timeout_seconds,
         )
     elif provider == LLMProvider.OPENAI:
-        config = LLMConfig(
+        return LLMConfig(
             provider=LLMProvider.OPENAI,
             base_url=settings.openai_base_url,
             model=settings.openai_model,
@@ -677,21 +683,48 @@ def create_llm_client_from_settings() -> LLMClient:
         )
     elif provider == LLMProvider.ANTHROPIC:
         # Note: Anthropic uses different API format, would need adapter
-        config = LLMConfig(
+        return LLMConfig(
             provider=LLMProvider.ANTHROPIC,
             base_url="https://api.anthropic.com/v1",
             model=settings.anthropic_model,
             api_key=settings.anthropic_api_key,
             timeout=settings.agent_timeout_seconds,
         )
+    elif provider == LLMProvider.OPENROUTER:
+        return LLMConfig(
+            provider=LLMProvider.OPENROUTER,
+            base_url=settings.openrouter_base_url,
+            model=settings.openrouter_model,
+            api_key=settings.openrouter_api_key,
+            timeout=settings.agent_timeout_seconds,
+            extra={
+                "site_url": settings.openrouter_site_url,
+                "site_name": settings.openrouter_site_name,
+            },
+        )
     else:
         # Default to vLLM
-        config = LLMConfig(
+        return LLMConfig(
             provider=LLMProvider.VLLM,
             base_url=settings.vllm_base_url,
             model=settings.vllm_model,
         )
 
+
+def create_llm_client_from_settings() -> LLMClient:
+    """
+    Create LLM client from emma-agent-service settings.
+
+    Returns:
+        Configured LLMClient instance
+    """
+    from app.core.config import settings
+
+    # Determine provider
+    provider_str = settings.llm_provider.lower()
+    provider = LLMProvider(provider_str) if provider_str in [p.value for p in LLMProvider] else LLMProvider.VLLM
+
+    config = create_llm_config_for_provider(provider)
     return LLMClient(config)
 
 

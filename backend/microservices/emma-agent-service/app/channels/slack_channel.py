@@ -60,16 +60,25 @@ class SlackChannel(BaseChannel):
     async def send_message(self, to: str, content: str, metadata: Optional[Dict] = None) -> Dict[str, Any]:
         token = self._get_token()
         url = "https://slack.com/api/chat.postMessage"
+        metadata = metadata or {}
+
+        # Build message payload
+        payload = {
+            "channel": to,
+            "text": content,
+        }
+
+        # Reply in thread if thread_ts is provided (keeps conversation in same thread)
+        thread_ts = metadata.get("thread_ts")
+        if thread_ts:
+            payload["thread_ts"] = thread_ts
+            logger.info(f"📎 Replying in Slack thread: {thread_ts}")
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 url,
                 headers={"Authorization": f"Bearer {token}"},
-                json={
-                    "channel": to,
-                    "text": content,
-                    "mrkdwn": True,
-                },
+                json=payload,
             )
             result = response.json()
 
@@ -130,11 +139,15 @@ class SlackChannel(BaseChannel):
         )
         is_mentioned = is_mentioned or emma_mentioned
 
+        # Thread tracking: thread_ts identifies the thread, or use message ts for new threads
+        thread_ts = event.get("thread_ts") or event.get("ts", "")
+
         return {
             "sender_id": sender_id,
             "content": clean_text,
             "message_id": message_id,
             "channel_id": event.get("channel", ""),
+            "thread_ts": thread_ts,  # For conversation memory persistence
             "chat_type": "dm" if is_dm else "channel",
             "is_group": is_group,
             "group_name": "",  # Would need API call to get channel name

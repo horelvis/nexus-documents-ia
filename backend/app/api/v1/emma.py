@@ -595,3 +595,166 @@ async def emma_feedback(
     except Exception as e:
         logger.error(f"❌ Emma feedback error: {e}")
         return {"status": "error", "message": str(e)}
+
+
+# ============================================================================
+# Heartbeat Endpoints (proxy to emma-agent-service /heartbeat/*)
+# ============================================================================
+
+@router.get("/heartbeat/config")
+async def emma_heartbeat_config(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get heartbeat configuration for the tenant."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/heartbeat/config",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Heartbeat config error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/heartbeat/config")
+async def emma_heartbeat_config_update(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Update heartbeat configuration for the tenant."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Solo administradores pueden modificar la configuración")
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.patch(
+                f"{EMMA_SERVICE_URL}/heartbeat/config",
+                params={"tenant_id": tenant_id},
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                },
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Heartbeat config update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/heartbeat/status")
+async def emma_heartbeat_status(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get heartbeat status for the tenant."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/heartbeat/status",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Heartbeat status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/heartbeat/run")
+async def emma_heartbeat_run(
+    force: bool = False,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Manually trigger a heartbeat evaluation for the tenant."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Solo administradores pueden ejecutar el heartbeat")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/heartbeat/run",
+                params={"tenant_id": tenant_id, "force": str(force).lower()},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Heartbeat run error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/heartbeat/insights")
+async def emma_heartbeat_insights(
+    status: str = None,
+    insight_type: str = None,
+    limit: int = 20,
+    page: int = 1,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """List proactive insights for the tenant."""
+    try:
+        params = {"tenant_id": tenant_id, "limit": limit, "page": page}
+        if status:
+            params["status"] = status
+        if insight_type:
+            params["insight_type"] = insight_type
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/heartbeat/insights",
+                params=params,
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Heartbeat insights error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/heartbeat/digest")
+async def emma_heartbeat_digest(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get daily digest of insights and activity."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/heartbeat/digest",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Heartbeat digest error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

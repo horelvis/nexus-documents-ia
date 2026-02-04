@@ -16,8 +16,12 @@ Template context variables (extracted from RAGState):
 Usage:
     engine = get_prompt_engine()
     prompt = engine.render_agent_prompt("DocGenAgent", fallback, state)
+
+Note: When USE_LANGFUSE_PROMPTS=true, this engine delegates to PromptComposer
+for enhanced prompt management (Langfuse versioning, rules, few-shot, guardrails).
 """
 
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -30,8 +34,31 @@ from .state import RAGState
 logger = logging.getLogger(__name__)
 
 
+def _run_async(coro):
+    """Run async coroutine from sync context."""
+    try:
+        loop = asyncio.get_running_loop()
+        # If we're already in an async context, create a task
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(asyncio.run, coro)
+            return future.result(timeout=10)
+    except RuntimeError:
+        # No running loop, safe to use asyncio.run
+        return asyncio.run(coro)
+
+
 class PromptEngine:
-    """Singleton engine that renders Jinja2 prompt templates."""
+    """Singleton engine that renders Jinja2 prompt templates.
+
+    When USE_LANGFUSE_PROMPTS=true, delegates to PromptComposer for:
+    - Langfuse prompt versioning and A/B testing
+    - Dynamic rule-based prompt injection
+    - Few-shot example retrieval
+    - Guardrail validation
+
+    When USE_LANGFUSE_PROMPTS=false (default), uses local YAML as before.
+    """
 
     _instance: Optional["PromptEngine"] = None
 
@@ -43,6 +70,31 @@ class PromptEngine:
             undefined=_SilentUndefined,
             autoescape=False,
         )
+        self._composer = None
+        self._use_composer: Optional[bool] = None
+
+    def _should_use_composer(self) -> bool:
+        """Check if we should use PromptComposer (lazy check)."""
+        if self._use_composer is None:
+            try:
+                from app.core.config import settings
+                self._use_composer = settings.use_langfuse_prompts
+                if self._use_composer:
+                    logger.info("🔄 PromptEngine: Using PromptComposer (USE_LANGFUSE_PROMPTS=true)")
+            except Exception:
+                self._use_composer = False
+        return self._use_composer
+
+    def _get_composer(self):
+        """Get PromptComposer instance (lazy initialization)."""
+        if self._composer is None and self._should_use_composer():
+            try:
+                from app.services.prompt_composer import get_prompt_composer
+                self._composer = get_prompt_composer()
+            except Exception as e:
+                logger.warning(f"⚠️ PromptEngine: Failed to initialize PromptComposer: {e}")
+                self._use_composer = False
+        return self._composer
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -65,6 +117,28 @@ class PromptEngine:
         Returns:
             Fully assembled system prompt string.
         """
+        # Try PromptComposer if enabled
+        composer = self._get_composer()
+        if composer:
+            try:
+                # Get tenant_id from state if available
+                tenant_id = state.get("tenant_id") or state.get("metadata", {}).get("tenant_id")
+
+                async def _compose():
+                    result = await composer.compose_agent_prompt(
+                        agent_name,
+                        dict(state),
+                        fallback_prompt=fallback_prompt,
+                        tenant_id=tenant_id,
+                    )
+                    return result.content
+
+                return _run_async(_compose())
+
+            except Exception as e:
+                logger.warning(f"⚠️ PromptEngine: PromptComposer failed, using YAML fallback: {e}")
+
+        # Fallback to original YAML-based logic
         ctx = self._build_context(state)
         template_str = self._find_template(agent_name)
 
@@ -108,6 +182,26 @@ class PromptEngine:
         Returns:
             Rendered prompt string, or empty string if not found.
         """
+        # Try PromptComposer if enabled
+        composer = self._get_composer()
+        if composer:
+            try:
+                tenant_id = state.get("tenant_id") or state.get("metadata", {}).get("tenant_id")
+
+                async def _compose():
+                    result = await composer.compose_system_prompt(
+                        key,
+                        dict(state),
+                        tenant_id=tenant_id,
+                    )
+                    return result.content
+
+                return _run_async(_compose())
+
+            except Exception as e:
+                logger.warning(f"⚠️ PromptEngine: PromptComposer failed for '{key}', using YAML fallback: {e}")
+
+        # Fallback to original YAML-based logic
         data = self._load_yaml()
         section = data.get("system_prompts", {})
         template_str = section.get(key)
@@ -119,6 +213,58 @@ class PromptEngine:
             return self._env.from_string(template_str).render(**ctx)
         except TemplateSyntaxError as exc:
             logger.warning(f"⚠️ PromptEngine: Error rendering system_prompt '{key}': {exc}")
+            return ""
+
+    def get_action_instruction(
+        self,
+        action: str,
+        state: RAGState,
+    ) -> str:
+        """Get action-specific instruction from ``action_instructions`` YAML section.
+
+        Used to prepend context-aware instructions based on detected action intent
+        (retrieve, generate, analyze, search, etc.).
+
+        Args:
+            action: Action intent key (e.g. "retrieve", "generate", "analyze").
+            state: Current RAG pipeline state.
+
+        Returns:
+            Rendered instruction string, or empty string if not found.
+        """
+        if not action:
+            return ""
+
+        # Try PromptComposer if enabled
+        composer = self._get_composer()
+        if composer:
+            try:
+                async def _compose():
+                    return await composer.compose_action_instruction(action, dict(state))
+
+                result = _run_async(_compose())
+                if result:
+                    logger.info(f"📋 PromptEngine: Loaded action instruction for '{action}' via Composer")
+                    return result
+
+            except Exception as e:
+                logger.warning(f"⚠️ PromptEngine: PromptComposer failed for action '{action}', using YAML fallback: {e}")
+
+        # Fallback to original YAML-based logic
+        data = self._load_yaml()
+        section = data.get("action_instructions", {})
+        template_str = section.get(action)
+        if not template_str:
+            return ""
+
+        ctx = self._build_context(state)
+        try:
+            rendered = self._env.from_string(template_str).render(**ctx).strip()
+            if rendered:
+                logger.info(f"📋 PromptEngine: Loaded action instruction for '{action}'")
+            return rendered
+        except TemplateSyntaxError as exc:
+            logger.warning(f"⚠️ PromptEngine: Error rendering action_instruction '{action}': {exc}")
             return ""
 
     # ── Private helpers ─────────────────────────────────────────────────

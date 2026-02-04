@@ -70,7 +70,10 @@ loguru>=0.7.0
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
 
-# Web Search (DuckDuckGo - no API key required)
+# Web Search
+# Primary: Tavily (optimized for LLM/RAG, 1000 free searches/month)
+# Fallback: DuckDuckGo (no API key required)
+tavily-python>=0.5.0
 duckduckgo-search>=7.0.0
 
 # PDF report generation

@@ -42,11 +42,13 @@ def _should_respond_in_group(
     content: str,
     is_mentioned: bool,
     is_group: bool,
+    is_thread_reply: bool = False,
 ) -> bool:
     """Determine if Emma should respond to a group message.
 
     Emma only responds when she can add value:
     - When explicitly mentioned
+    - When replying in a thread (continuing a conversation)
     - When someone asks about documents, contracts, legal topics
     - When someone asks a direct question she can answer
 
@@ -54,6 +56,7 @@ def _should_respond_in_group(
         content: The message text
         is_mentioned: Whether Emma was explicitly mentioned
         is_group: Whether this is a group chat
+        is_thread_reply: Whether this is a reply in an existing thread
 
     Returns:
         True if Emma should respond
@@ -65,6 +68,11 @@ def _should_respond_in_group(
     # Always respond if explicitly mentioned
     if is_mentioned:
         logger.info(f"Responding: Emma was mentioned")
+        return True
+
+    # Always respond to thread replies (user is continuing a conversation)
+    if is_thread_reply:
+        logger.info(f"Responding: Thread reply detected (continuing conversation)")
         return True
 
     content_lower = content.lower().strip()
@@ -185,12 +193,19 @@ class ChannelRouter:
         is_mentioned = parsed.get("is_mentioned", False)
         group_name = parsed.get("group_name", "")
 
-        if not _should_respond_in_group(content, is_mentioned, is_group):
+        # Detect thread replies: if thread_ts exists and differs from message_id (ts),
+        # it's a reply in an existing thread - Emma should respond to continue conversation
+        thread_ts = parsed.get("thread_ts", "")
+        message_ts = parsed.get("message_id", "")
+        is_thread_reply = bool(thread_ts and thread_ts != message_ts)
+
+        if not _should_respond_in_group(content, is_mentioned, is_group, is_thread_reply):
             return {
                 "status": "ignored",
                 "reason": "group_not_relevant",
                 "is_group": is_group,
                 "is_mentioned": is_mentioned,
+                "is_thread_reply": is_thread_reply,
             }
 
         logger.info(
@@ -220,7 +235,31 @@ class ChannelRouter:
 
         user_id = pairing["user_id"]
 
-        # 4. Execute through Emma with social channel context
+        # 4. Build deterministic session_id for conversation memory persistence
+        # Format: {channel_type}:{channel_id}:{thread_or_chat}:{user_id}
+        # This ensures the same conversation always uses the same session_id
+        session_key_parts = [channel_type]
+
+        if channel_type == "slack":
+            # For Slack: use channel + thread_ts (or channel if no thread)
+            slack_channel = parsed.get("channel_id", "")
+            thread_ts = parsed.get("thread_ts", "")
+            session_key_parts.extend([slack_channel, thread_ts or "main"])
+        elif channel_type in ("telegram", "whatsapp"):
+            # For Telegram/WhatsApp: use chat_id
+            chat_id = parsed.get("chat_id", sender_id)
+            session_key_parts.append(chat_id)
+        else:
+            # Default: use sender_id
+            session_key_parts.append(sender_id)
+
+        # Add user_id to make it user-specific within groups
+        session_key_parts.append(user_id[:12] if user_id else "anon")
+        session_id = ":".join(session_key_parts)
+
+        logger.info(f"📝 Session ID for conversation memory: {session_id}")
+
+        # 5. Execute through Emma with social channel context
         try:
             from app.services.emma_background_service import emma_background_service
 
@@ -232,6 +271,7 @@ class ChannelRouter:
                 is_group=is_group,
                 group_name=group_name,
                 channel_config=config,  # Pass channel config (includes location)
+                session_id=session_id,  # Pass deterministic session_id for memory
             )
             answer = result.get("answer", "")
 
@@ -243,11 +283,18 @@ class ChannelRouter:
             logger.error(f"Emma execution failed for channel message: {e}", exc_info=True)
             answer = "⚠️ Ups, hubo un problema. ¿Puedes intentarlo de nuevo?"
 
-        # 5. Send response
+        # 6. Send response (in thread for Slack)
         reply_to = parsed.get("channel_id") or parsed.get("chat_id") or sender_id
+
+        # Include thread_ts for Slack to reply in the same thread
+        send_metadata = {}
+        if channel_type == "slack" and thread_ts:
+            send_metadata["thread_ts"] = thread_ts
+
         send_result = await channel.send_message(
             to=reply_to,
             content=answer,
+            metadata=send_metadata,
         )
 
         return {

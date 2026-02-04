@@ -44,11 +44,46 @@ export function EmmaRenderChat({
 }: EmmaRenderChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const prevMessageCountRef = useRef(0)
+  const isUserNearBottomRef = useRef(true)
 
-  // Auto-scroll on new messages
+  // Check if user is near bottom of scroll area
+  const checkIfNearBottom = () => {
+    const scrollArea = scrollRef.current?.querySelector('[data-radix-scroll-area-viewport]')
+    if (!scrollArea) return true
+    const threshold = 150 // pixels from bottom
+    return scrollArea.scrollHeight - scrollArea.scrollTop - scrollArea.clientHeight < threshold
+  }
+
+  // Track scroll position
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    const scrollArea = scrollRef.current?.querySelector('[data-radix-scroll-area-viewport]')
+    if (!scrollArea) return
+
+    const handleScroll = () => {
+      isUserNearBottomRef.current = checkIfNearBottom()
+    }
+
+    scrollArea.addEventListener('scroll', handleScroll, { passive: true })
+    return () => scrollArea.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Auto-scroll only when:
+  // 1. New messages are added (not just updated)
+  // 2. User is already near the bottom (hasn't scrolled up to read)
+  useEffect(() => {
+    const messageCount = messages.length
+    const isNewMessage = messageCount > prevMessageCountRef.current
+    prevMessageCountRef.current = messageCount
+
+    // Only auto-scroll for new messages when user is near bottom
+    if (isNewMessage && isUserNearBottomRef.current) {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      })
+    }
+  }, [messages.length]) // Only trigger on message count change, not content updates
 
   return (
     <div className={cn('h-full flex flex-col', className)}>
@@ -600,9 +635,13 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
     workflowSteps.find(s => s.status === 'in_progress')?.agent ||
     'Emma'
 
+  // Determine the content to display - use same rendering as final result
+  const displayContent = hasStreamingText ? streamingText : (hasContent ? message.content : '')
+  const showContent = displayContent.trim().length > 0
+
   return (
     <div className="w-full">
-      {/* Same style as final Emma response */}
+      {/* Same style as final Emma response - consistent structure prevents layout shift */}
       <Card className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
         {/* EMMA label - always shown (same as final response) */}
         <div className="flex items-center gap-2">
@@ -616,6 +655,15 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
           )}
         </div>
 
+        {/* Agent info - same as final result */}
+        {currentAgent && currentAgent !== 'Emma' && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Procesando con</span>
+            <IconArrowRight className="h-3.5 w-3.5 text-primary/60" />
+            <span className="font-semibold text-primary font-mono">{currentAgent}</span>
+          </div>
+        )}
+
         {/* SLM Thinking Display - collapsible chain-of-thought */}
         {hasSLMThinking && (
           <ReasoningCollapsible
@@ -628,44 +676,35 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
           />
         )}
 
-        {hasSteps ? (
-          <>
-            {/* Current step message */}
-            {hasContent && !hasSLMThinking && (
-              <p className="text-sm text-muted-foreground font-mono">{message.content}</p>
-            )}
-
-            {/* Workflow steps */}
-            <div className="space-y-2">
-              {workflowSteps.map((step) => (
-                <WorkflowStepItem key={step.index} step={step} />
-              ))}
-            </div>
-
-            {/* Streaming answer while steps run */}
-            {(isStreaming || hasStreamingText) && (
-              <div className="pt-2 border-t border-primary/10 space-y-2">
-                {/* Streaming text with cursor */}
-                {hasStreamingText && (
-                  <div className="relative">
-                    <EmmaMarkdown content={streamingText} />
-                    {isStreaming && (
-                      <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse ml-0.5 align-middle" />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </>
-        ) : isStreaming && (hasContent || hasStreamingText) ? (
-          // Streaming content without workflow steps (direct response)
-          <div className="relative">
-            <EmmaMarkdown content={hasStreamingText ? streamingText : message.content} />
-            <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse ml-0.5 align-middle" />
+        {/* Workflow steps - shown above content like reasoning */}
+        {hasSteps && (
+          <div className="space-y-2">
+            {workflowSteps.map((step) => (
+              <WorkflowStepItem key={step.index} step={step} />
+            ))}
           </div>
-        ) : !hasSLMThinking ? (
+        )}
+
+        {/* Main content - ALWAYS use EmmaMarkdown for consistent doc formatting */}
+        {showContent ? (
+          <div className="relative min-h-[2rem]">
+            <EmmaMarkdown content={displayContent} />
+            {isStreaming && (
+              <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse ml-0.5 align-middle" />
+            )}
+          </div>
+        ) : !hasSLMThinking && !hasSteps ? (
           <ThinkingIndicator />
         ) : null}
+
+        {/* Placeholder footer - maintains consistent height during streaming */}
+        {showContent && (
+          <div className="flex items-center justify-between pt-2 border-t border-primary/10 min-h-[28px]">
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {isStreaming ? 'Generando respuesta...' : ''}
+            </span>
+          </div>
+        )}
       </Card>
     </div>
   )

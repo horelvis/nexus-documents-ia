@@ -427,6 +427,15 @@ INSTRUCCIONES:
 2. NO inventes leyes, artículos o BOE que no aparezcan en los documentos.
 3. Si los documentos NO son relevantes para la consulta, indica que no encontraste información relevante."""
 
+        # Inject action-specific instructions from YAML if available
+        # This provides additional context for specific actions like "retrieve"
+        action_intent = state.get("metadata", {}).get("action_intent", "")
+        if action_intent and action_intent != "generate" and not is_docgen:
+            action_instruction = engine.get_action_instruction(action_intent, state)
+            if action_instruction:
+                user_content = action_instruction + "\n\n" + user_content
+                logger.info(f"📋 {agent_name}: Injected action instruction for '{action_intent}'")
+
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
@@ -440,9 +449,11 @@ INSTRUCCIONES:
         llm_client = await get_llm_client()
 
         # Convert tools to OpenAI format.
-        # Disable tools for generate actions — the model should produce the
+        # Disable tools ONLY for generate actions — the model should produce the
         # document directly using the retrieved docs as context, not call tools.
-        action_intent = state.get("metadata", {}).get("action_intent", "")
+        # For all other intents (retrieve, search, analyze), let the LLM reason
+        # naturally about which tools to use based on the system prompt.
+        # Note: action_intent is already defined above for action instruction injection
         if action_intent == "generate":
             tool_schemas = None
             logger.info(f"🔇 {agent_name}: Tools disabled for action=generate")

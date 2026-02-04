@@ -127,3 +127,36 @@ intents:
       - "diferencias entre estos documentos"
       - "compara las cláusulas de ambos acuerdos"
       - "qué ha cambiado entre versiones"
+
+  # =========================================================================
+  # DOCUMENT RETRIEVAL — Retrieve existing document by name/ID
+  # MUST NOT generate content — only search and return existing documents
+  # =========================================================================
+  - id: document_retrieval
+    action: retrieve
+    priority_agent: null
+    description: "Recuperar, mostrar o abrir un documento existente por su nombre o ID"
+    questions:
+      - "muéstrame el documento"
+      - "abre el archivo"
+      - "dame el contrato de"
+      - "enséñame el documento"
+      - "quiero ver el archivo"
+      - "abre el contrato"
+      - "muéstrame el contrato laboral"
+      - "dame el acuerdo"
+      - "abre la factura"
+      - "muéstrame el informe"
+      - "quiero ver el documento llamado"
+      - "abre el fichero"
+      - "muéstrame 01_contrato"
+      - "dame el archivo que se llama"
+      - "enséñame la nómina de"
+      - "muestra el expediente"
+      - "abre el borrador"
+      - "recupera el documento"
+      - "busca y muéstrame el archivo"
+      - "necesito ver el contrato de"
+      - "show me the document"
+      - "open the file"
+      - "display the contract"

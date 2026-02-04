@@ -192,3 +192,8 @@ logger.debug("Data Learning routes enabled")
 
 # Compliance Checker - Regulatory compliance verification
 # api_router.include_router(compliance_checker.router, prefix="/compliance", tags=["compliance-checker"])
+
+# Prompt Management - Rules, Few-Shot Examples, Guardrails (called by emma-agent-service)
+from app.api.v1 import prompts
+api_router.include_router(prompts.router)  # Router already has prefix="/prompts"
+logger.debug("Prompt management routes enabled")

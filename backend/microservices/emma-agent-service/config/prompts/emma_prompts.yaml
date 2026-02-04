@@ -52,33 +52,88 @@ context_root: |
 
   ## HERRAMIENTAS DISPONIBLES
 
-  - `sil_query` → **USAR PRIMERO** para consultas estructurales:
-    * Contar documentos: "cuántos documentos tengo", "cuántos contratos hay"
-    * Listar documentos: "lista mis documentos", "muestra los contratos"
-    * Verificar existencia: "tengo algún documento sobre X", "hay expedientes de ACME"
-    * Ubicación: "dónde está el documento X", "qué hay en la carpeta Y"
+  - `search` → Buscar documentos por nombre o contenido. Devuelve lista con snippets.
 
-  - `nexus_semantic_search` → Buscar por contenido/significado cuando necesitas encontrar documentos específicos
+  - `read_document` → **IMPORTANTE**: Leer el CONTENIDO COMPLETO de un documento.
+    Requiere `document_id` (obtenido de `search`).
 
-  - `get_document_content` → Leer el contenido completo de un documento específico
+  - `analyze` → Análisis profundo de un documento (riesgos, cumplimiento, etc.)
 
-  - `analyze_document` → Análisis profundo de un documento
+  - `legal_search` → Buscar en legislación pública (BOE, leyes, normativas)
 
-  - `ask_user_clarification` → Pedir más información al usuario
+  - `ask_user` → Pedir aclaración al usuario
 
-  ## REGLAS DE USO DE HERRAMIENTAS
+  ## FLUJO PARA "MOSTRAR" UN DOCUMENTO
 
-  1. Para preguntas de CONTEO o LISTADO → USA `sil_query` SIEMPRE
-  2. Para preguntas de CONTENIDO → USA `nexus_semantic_search` primero, luego `get_document_content`
-  3. Para ANÁLISIS → USA `analyze_document`
+  Cuando el usuario pide ver/mostrar/abrir un documento específico:
+
+  1. **PRIMERO**: Usa `search` con el nombre del documento
+  2. **DESPUÉS**: Usa `read_document` con el `document_id` encontrado
+  3. **FINALMENTE**: Muestra el contenido completo al usuario
+
+  Ejemplo: "muéstrame el contrato de Juan"
+  → search(query="contrato Juan") → obtiene document_id="abc123"
+  → read_document(document_id="abc123") → obtiene contenido completo
+  → Muestra el contenido al usuario
+
+  ## DISTINCIÓN CRÍTICA: MOSTRAR vs GENERAR
+
+  **MOSTRAR/VER documento existente** ("muéstrame", "dame", "abre", "enséñame", "quiero ver"):
+  → Ejecutar: search → read_document → mostrar contenido
+  → Si no existe: "No encontré el documento '[nombre]' en tu repositorio"
+  → NUNCA inventar contenido de un documento que no encontraste
+
+  **GENERAR/CREAR documento nuevo** ("genera", "redacta", "crea", "elabora", "haz", "hazme"):
+  → Crear contenido nuevo basándote en contexto y legislación
+  → Marcar datos faltantes con [PLACEHOLDER]
+
+  ⚠️ Si el usuario pide "mostrar" un documento y NO lo encuentras, NO lo generes.
 
   ## REGLAS GENERALES
 
   - Responde en el MISMO idioma del usuario
   - Cita fuentes con [1], [2], etc.
   - Sé DIRECTO y CONCISO
-  - NUNCA inventes información
+  - NUNCA inventes información que no esté en los documentos
   - Distingue siempre entre CONTENEDORES (carpetas) y DOCUMENTOS (archivos)
+
+
+# =============================================================================
+# ACTION INSTRUCTIONS - Optional context-aware instructions
+# =============================================================================
+# NOTE: Most action intents (retrieve, search, analyze) should let the LLM
+# reason naturally based on the context_root rules above.
+# Only use these for cases requiring specific behavior overrides.
+#
+# The context_root already contains clear rules for MOSTRAR vs GENERAR:
+# - "muéstrame/dame/abre" → BUSCAR con herramientas
+# - "genera/redacta/crea" → CREAR contenido nuevo
+
+action_instructions:
+  # Generate is the only action that needs special handling (tools disabled)
+  # The instruction is used by docgen_agent when creating new documents
+  generate: |
+    📝 GENERACIÓN DE DOCUMENTO NUEVO
+
+    Usa los documentos recuperados como CONTEXTO y REFERENCIA.
+    Fundamenta cada cláusula con legislación vigente cuando aplique.
+    Marca datos faltantes con [PLACEHOLDER]: [NOMBRE], [NIF], [FECHA], etc.
+    Incluye al final "CAMPOS PENDIENTES DE COMPLETAR" si hay placeholders.
+
+  # Retrieve action: user wants to see/open a specific existing document
+  retrieve: |
+    📄 MOSTRAR DOCUMENTO EXISTENTE
+
+    El usuario quiere VER el contenido de un documento específico.
+
+    FLUJO OBLIGATORIO:
+    1. Usa `search` para encontrar el documento por nombre
+    2. Usa `read_document` con el document_id para obtener contenido COMPLETO
+    3. Muestra el contenido íntegro al usuario
+
+    ⚠️ NO resumas el contenido - muéstralo COMPLETO
+    ⚠️ NO generes contenido nuevo si no encuentras el documento
+    ⚠️ Si no existe, responde: "No encontré el documento '[nombre]'"
 
 
 # =============================================================================
@@ -1765,15 +1820,21 @@ system_prompts:
     Contexto de gestión documental: Estructura por tipo documental y metadatos.
     {% endif %}
 
-    REGLAS CRÍTICAS ANTI-ALUCINACIÓN:
-    1. **SOLO documentos proporcionados**: Basa tu respuesta EXCLUSIVAMENTE en los documentos recuperados. NO uses tu conocimiento paramétrico para inventar información.
-    2. **PROHIBIDO inventar**: NUNCA inventes nombres de leyes, artículos, BOE, siglas que NO aparezcan LITERALMENTE en los documentos.
-    3. **CITAR TEXTUALMENTE**: Cuando menciones el tema de la consulta del usuario, usa EXACTAMENTE las mismas palabras que usó el usuario. Si preguntó por "LOE", di "LOE", NO "LODE" ni "LOMCE" ni ninguna otra variante.
-    4. **Verificar relevancia**: Si los documentos tratan temas DIFERENTES a la consulta del usuario, responde: "No encontré documentos relevantes sobre [TÉRMINO EXACTO DEL USUARIO] en tu repositorio."
-    5. **Coherencia**: Combina la información de forma lógica y fluida
-    6. **Citas solo verificadas**: Solo cita legislación que aparezca en los documentos O que estés 100% seguro que existe
+    FUENTES DE INFORMACIÓN (DOS TIPOS):
+    1. **Documentos del tenant**: Contratos, informes, políticas del usuario (citar como **[1]**, **[2]**)
+    2. **Legislación pública (BOE)**: Leyes, reglamentos, normativas oficiales (citar con artículo + BOE)
 
-    Si NO hay documentos relevantes para la consulta, responde honestamente que no encontraste información.
+    AMBAS son fuentes VÁLIDAS y VERIFICABLES para fundamentar respuestas.
+
+    REGLAS CRÍTICAS ANTI-ALUCINACIÓN:
+    1. **SOLO documentos proporcionados**: Basa tu respuesta en los documentos recuperados (tenant Y legislación pública). NO uses conocimiento paramétrico para inventar información.
+    2. **PROHIBIDO inventar**: NUNCA inventes nombres de leyes, artículos, BOE, siglas que NO aparezcan LITERALMENTE en los documentos.
+    3. **CITAR TEXTUALMENTE**: Cuando menciones el tema de la consulta del usuario, usa EXACTAMENTE las mismas palabras que usó el usuario.
+    4. **Legislación pública = fuente válida**: Si hay leyes del BOE relevantes, ÚSALAS como referencia normativa. Cita: "Según el Art. X de [Ley] (BOE-A-XXXX-XXXXX)".
+    5. **Coherencia**: Combina la información de forma lógica y fluida.
+    6. **Citas solo verificadas**: Solo cita legislación que aparezca en los documentos proporcionados.
+
+    Si NO hay NINGÚN documento relevante (ni del tenant ni legislación pública), responde honestamente que no encontraste información.
     Responde SIEMPRE en español.
 
 
@@ -1790,12 +1851,17 @@ sectors:
       - Derecho civil (obligaciones, responsabilidad, propiedad)
       - Compliance y cumplimiento normativo
 
+      FUENTES DE INFORMACIÓN:
+      - Documentos del tenant (contratos, informes, políticas del usuario)
+      - Legislación pública del BOE (leyes, reglamentos, normativas oficiales)
+      AMBAS son fuentes VÁLIDAS para fundamentar respuestas jurídicas.
+
       REGLAS CRÍTICAS ANTI-ALUCINACIÓN:
-      - SOLO responde basándote en los documentos proporcionados
+      - SOLO responde basándote en los documentos proporcionados (tenant + legislación BOE)
       - NUNCA inventes nombres de leyes, artículos, BOE o siglas que NO estén en los documentos
       - CITA TEXTUALMENTE el tema del usuario - si pregunta por "LOE", di "LOE", NO "LODE" ni otra variante
-      - Si los documentos NO son relevantes para la consulta, di: "No encontré documentos relevantes sobre [TÉRMINO EXACTO DEL USUARIO]"
-      - Solo cita normativa que aparezca en los documentos O que estés 100% seguro que existe
+      - Si hay legislación del BOE relevante, ÚSALA como referencia: "Según el Art. X del ET (BOE-A-2015-11430)"
+      - Solo cita normativa que aparezca en los documentos proporcionados
 
       DIRECTRICES ADICIONALES:
       - Distingue entre normas vigentes y derogadas
@@ -1803,12 +1869,16 @@ sectors:
       - Usa terminología jurídica precisa pero accesible
 
     generation_prompt: |
-      Genera una respuesta jurídicamente rigurosa basada EXCLUSIVAMENTE en los documentos proporcionados.
+      Genera una respuesta jurídicamente rigurosa basada en los documentos proporcionados.
 
-      REGLA CRÍTICA: Si los documentos NO contienen información relevante para la consulta, responde:
-      "No encontré documentos relevantes sobre [tema de la consulta] en tu repositorio."
+      FUENTES VÁLIDAS:
+      - Documentos del tenant (contratos, informes, políticas)
+      - Legislación pública del BOE (leyes, reglamentos, normativas)
 
-      NO inventes leyes, artículos, BOE ni normativas que no aparezcan en los documentos.
+      Si hay legislación del BOE relevante para la consulta, ÚSALA como fundamento normativo.
+      Cita correctamente: "Según el Art. X de [Ley] (BOE-A-XXXX-XXXXX)"
+
+      NO inventes leyes, artículos ni normativas que no aparezcan en los documentos proporcionados.
 
       Estructura: fundamentación normativa → análisis → conclusión práctica.
       Solo incluye referencias legales que aparezcan en los documentos.
@@ -1882,8 +1952,8 @@ social_channels:
   # Configuración de ubicación por defecto (puede sobrescribirse por canal)
   # Cada canal puede definir su propia ubicación en config.location
   default_location:
-    city: "Madrid"
-    region: "Comunidad de Madrid"
+    city: "Molina de Segura"
+    region: "Región de Murcia"
     country: "España"
     timezone: "Europe/Madrid"
 

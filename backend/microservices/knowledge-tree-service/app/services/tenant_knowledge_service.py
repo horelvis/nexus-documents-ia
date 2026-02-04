@@ -357,12 +357,15 @@ class TenantKnowledgeService:
         """
         try:
             await self.initialize()
+            # Note: Apache AGE doesn't support using aliases in ORDER BY for aggregations
+            # Use WITH to project the aggregation result, then ORDER BY the alias
             result = await age_client.execute_cypher(
                 f"""
                 SELECT * FROM cypher('{settings.age_graph_name}', $$
                     MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
                     OPTIONAL MATCH (f)-[:HAS_DOCUMENT]->(d:structural_document {{tenant_id: '{tenant_id}'}})
-                    RETURN f.name as name, f.folder_type as folder_type, count(d) as doc_count
+                    WITH f.name as name, f.folder_type as folder_type, count(d) as doc_count
+                    RETURN name, folder_type, doc_count
                     ORDER BY doc_count DESC
                     LIMIT {limit}
                 $$) as (name agtype, folder_type agtype, doc_count agtype)

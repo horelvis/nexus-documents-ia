@@ -108,6 +108,7 @@ class EmmaBackgroundService:
         is_group: bool = False,
         group_name: str = "",
         channel_config: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Process a query from a social channel with conversational tone.
 
@@ -116,6 +117,7 @@ class EmmaBackgroundService:
         2. Post-processes the response to make it more conversational
         3. Shortens long responses with a "see more in app" suggestion
         4. Includes location context for weather/news queries
+        5. Maintains conversation memory using session_id
         """
         # Load location from channel config or use defaults
         location = self._get_channel_location(channel_config)
@@ -135,11 +137,12 @@ class EmmaBackgroundService:
             "location": location,
         }
 
-        # Execute through Emma
+        # Execute through Emma with persistent session_id for conversation memory
         result = await self._execute_emma(
             query=query,
             tenant_id=tenant_id,
             context=context,
+            session_id=session_id,  # Pass session_id for memory persistence
         )
 
         if not result.get("success"):
@@ -346,21 +349,14 @@ Respuesta a reescribir:
             import yaml
             from pathlib import Path
 
-            # Load defaults from YAML
-            prompts_path = Path(__file__).parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml"
+            # Load defaults from settings (environment variables)
+            from app.core.config import settings
             defaults = {
-                "city": "Madrid",
-                "region": "Comunidad de Madrid",
-                "country": "España",
-                "timezone": "Europe/Madrid",
+                "city": settings.default_location_city,
+                "region": settings.default_location_region,
+                "country": settings.default_location_country,
+                "timezone": settings.default_location_timezone,
             }
-
-            if prompts_path.exists():
-                with open(prompts_path, "r", encoding="utf-8") as f:
-                    prompts = yaml.safe_load(f)
-                yaml_defaults = prompts.get("social_channels", {}).get("default_location", {})
-                if yaml_defaults:
-                    defaults.update(yaml_defaults)
 
             # Override with channel-specific config
             if channel_config and channel_config.get("location"):
@@ -376,9 +372,10 @@ Respuesta a reescribir:
 
         except Exception as e:
             logger.warning(f"Could not load location config: {e}")
+            # Fallback to hardcoded defaults if settings not available
             return {
-                "city": "Madrid",
-                "region": "Comunidad de Madrid",
+                "city": "Molina de Segura",
+                "region": "Región de Murcia",
                 "country": "España",
                 "timezone": "Europe/Madrid",
             }
@@ -435,9 +432,21 @@ Respuesta a reescribir:
         tenant_id: str,
         agent: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Execute a query through the LangGraph pipeline."""
-        session_id = f"bg-{uuid.uuid4().hex[:12]}"
+        """Execute a query through the LangGraph pipeline.
+
+        Args:
+            query: User query
+            tenant_id: Tenant identifier
+            agent: Optional specific agent to use
+            context: Optional context dict
+            session_id: Optional session ID for conversation memory persistence.
+                        If not provided, generates a random one (no memory).
+        """
+        # Use provided session_id or generate random one (for backward compatibility)
+        session_id = session_id or f"bg-{uuid.uuid4().hex[:12]}"
+        logger.info(f"🧠 Executing Emma with session_id: {session_id}")
 
         try:
             from app.services.emma_service import emma_service
