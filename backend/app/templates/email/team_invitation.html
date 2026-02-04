@@ -1,31 +1,43 @@
 {% extends "base.html" %}
 
-{% block title %}Invitation to join {{ team_name }}{% endblock %}
+{% block title %}Invitación al equipo {{ team_name }}{% endblock %}
 
 {% block content %}
-<h2>You're invited to join the {{ team_name }} team!</h2>
+<h2 style="color: #1f2937; font-size: 20px; margin: 0 0 20px 0;">¡Te han invitado al equipo {{ team_name }}!</h2>
 
-<p>Hi there,</p>
+<p style="color: #374151; font-size: 15px;">Hola,</p>
 
-<p><strong>{{ inviter_name }}</strong> has invited you to join the <strong>{{ team_name }}</strong> team.</p>
+<p style="color: #6B7280; font-size: 14px; line-height: 1.7;">
+    <span style="color: #8B5CF6; font-weight: 600;">{{ inviter_name }}</span> te ha invitado a unirte al equipo
+    <strong style="color: #374151;">{{ team_name }}</strong>.
+</p>
 
-<p>To accept this invitation and join the team, please click the button below:</p>
+<p style="color: #6B7280; font-size: 14px; margin-top: 24px;">
+    Para aceptar esta invitación y unirte al equipo, haz clic en el botón:
+</p>
 
-<div style="text-align: center;">
-    <a href="{{ invitation_link }}" class="button">Join Team</a>
+<div style="text-align: center; margin: 32px 0;">
+    <a href="{{ invitation_link }}" class="button">Unirse al Equipo →</a>
 </div>
 
-<p style="margin-top: 30px;">Or copy and paste this link into your browser:</p>
-<p style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; word-break: break-all;">
+<p style="color: #9CA3AF; font-size: 13px; margin-top: 28px;">O copia y pega este enlace en tu navegador:</p>
+<p style="background-color: #F9FAFB; padding: 12px 16px; border-radius: 8px; word-break: break-all; font-size: 12px; color: #6B7280; border: 1px solid #E5E7EB;">
     {{ invitation_link }}
 </p>
 
-<p style="margin-top: 30px; color: #dc3545;">
-    <strong>Important:</strong> This invitation will expire on {{ expires_at }}.
+<div style="background-color: #FEF3C7; border: 1px solid #FCD34D; border-radius: 8px; padding: 14px 20px; margin: 24px 0; display: flex; align-items: center; gap: 10px;">
+    <span style="font-size: 18px;">⚠️</span>
+    <span style="color: #92400E; font-size: 13px;">
+        <strong>Importante:</strong> Esta invitación expirará el {{ expires_at }}.
+    </span>
+</div>
+
+<p style="color: #6B7280; font-size: 14px;">
+    Si tienes alguna pregunta, contacta con {{ inviter_name }}.
 </p>
 
-<p>If you have any questions, please contact {{ inviter_name }}.</p>
-
-<p>Best regards,<br>
-The {{ team_name }} Team</p>
+<p style="color: #6B7280; font-size: 14px; margin-top: 32px;">
+    Saludos,<br>
+    <span style="color: #8B5CF6; font-weight: 600;">El equipo de {{ team_name }}</span>
+</p>
 {% endblock %}

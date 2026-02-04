@@ -3,208 +3,320 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document Shared with You</title>
+    <title>Documento Compartido</title>
     <style>
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             line-height: 1.6;
-            color: #333;
-            background-color: #f5f5f5;
+            color: #1f2937;
+            background-color: #F9FAFB;
             margin: 0;
-            padding: 0;
+            padding: 20px;
         }
         .container {
             max-width: 600px;
-            margin: 40px auto;
+            margin: 0 auto;
             background-color: #ffffff;
-            border-radius: 8px;
+            border-radius: 12px;
             overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+            border: 1px solid #E5E7EB;
         }
         .header {
-            background-color: #4f46e5;
+            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%);
             color: #ffffff;
-            padding: 40px 30px;
+            padding: 32px 24px;
             text-align: center;
+        }
+        .header-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
         }
         .header h1 {
             margin: 0;
-            font-size: 28px;
+            font-size: 22px;
             font-weight: 600;
         }
         .content {
-            padding: 40px 30px;
+            padding: 40px 32px;
         }
         .greeting {
-            font-size: 18px;
-            margin-bottom: 20px;
+            font-size: 16px;
+            color: #374151;
+            margin-bottom: 16px;
+        }
+        .message {
+            color: #6B7280;
+            margin-bottom: 24px;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+        .sender-name {
+            color: #8B5CF6;
+            font-weight: 600;
         }
         .document-info {
-            background-color: #f8f9fa;
-            border-radius: 6px;
+            background-color: #F9FAFB;
+            border-radius: 8px;
             padding: 20px;
-            margin: 20px 0;
+            margin: 24px 0;
+            border: 1px solid #E5E7EB;
         }
         .document-title {
-            font-size: 20px;
+            font-size: 18px;
             font-weight: 600;
-            color: #1a1a1a;
-            margin-bottom: 10px;
+            color: #1f2937;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        .share-message {
-            background-color: #e5e7eb;
-            border-left: 4px solid #4f46e5;
-            padding: 15px;
-            margin: 20px 0;
-            font-style: italic;
-        }
-        .button-container {
-            text-align: center;
-            margin: 30px 0;
-        }
-        .button {
-            display: inline-block;
-            padding: 14px 32px;
-            background-color: #4f46e5;
-            color: #ffffff;
-            text-decoration: none;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 16px;
-        }
-        .button:hover {
-            background-color: #4338ca;
-        }
-        .details {
-            margin: 20px 0;
-            padding: 15px;
-            background-color: #f3f4f6;
-            border-radius: 6px;
+        .document-title-icon {
+            font-size: 24px;
         }
         .detail-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
             margin: 8px 0;
-            font-size: 14px;
+            font-size: 13px;
+            color: #6B7280;
         }
         .detail-label {
-            font-weight: 600;
-            color: #6b7280;
-            display: inline-block;
-            width: 120px;
+            font-weight: 500;
+            color: #374151;
+            min-width: 100px;
         }
-        .warning {
-            background-color: #fef3c7;
-            border: 1px solid #f59e0b;
-            color: #92400e;
-            padding: 12px;
-            border-radius: 6px;
-            margin: 20px 0;
+        .share-message {
+            background-color: #F9FAFB;
+            border-left: 4px solid #8B5CF6;
+            border-radius: 0 8px 8px 0;
+            padding: 16px 20px;
+            margin: 24px 0;
+        }
+        .share-message-label {
+            font-size: 11px;
+            color: #6B7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+        .share-message-text {
+            color: #4B5563;
             font-size: 14px;
+            font-style: italic;
+            margin: 0;
+            line-height: 1.6;
+        }
+        .details-section {
+            background-color: #F9FAFB;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 24px 0;
+            border: 1px solid #E5E7EB;
+        }
+        .details-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 14px;
+        }
+        .permission-badge {
+            display: inline-block;
+            background-color: #EDE9FE;
+            color: #7C3AED;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .warning-box {
+            background-color: #FEF3C7;
+            border: 1px solid #FCD34D;
+            border-radius: 8px;
+            padding: 14px 20px;
+            margin: 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .warning-icon {
+            font-size: 18px;
+        }
+        .warning-text {
+            color: #92400E;
+            font-size: 13px;
+        }
+        .cta-container {
+            text-align: center;
+            margin: 32px 0;
+        }
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 100%);
+            color: white !important;
+            text-decoration: none;
+            padding: 14px 36px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
+        }
+        .link-fallback {
+            font-size: 12px;
+            color: #9CA3AF;
+            text-align: center;
+            margin-top: 16px;
+        }
+        .link-fallback code {
+            background-color: #F3F4F6;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            word-break: break-all;
         }
         .footer {
-            background-color: #f8f9fa;
-            padding: 30px;
+            background-color: #F9FAFB;
+            padding: 24px;
             text-align: center;
-            font-size: 14px;
-            color: #6b7280;
+            border-top: 1px solid #E5E7EB;
         }
-        .footer a {
-            color: #4f46e5;
+        .footer-text {
+            color: #9CA3AF;
+            font-size: 12px;
+            margin: 0 0 8px 0;
+        }
+        .footer-brand {
+            color: #8B5CF6;
+            font-weight: 600;
+        }
+        .footer-links {
+            margin-top: 12px;
+        }
+        .footer-links a {
+            color: #8B5CF6;
             text-decoration: none;
-        }
-        .icon {
-            font-size: 48px;
-            margin-bottom: 20px;
+            font-size: 12px;
+            margin: 0 8px;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <div class="icon">📄</div>
-            <h1>Document Shared with You</h1>
+            <div class="header-icon">📄</div>
+            <h1>Documento Compartido</h1>
         </div>
-        
+
         <div class="content">
-            <p class="greeting">Hi {{ recipient_name }},</p>
-            
-            <p>{{ creator_name }} has shared a document with you through Nexus Document.</p>
-            
+            <p class="greeting">Hola {{ recipient_name }},</p>
+
+            <p class="message">
+                <span class="sender-name">{{ creator_name }}</span> ha compartido un documento contigo a través de NouxCubeIA.
+            </p>
+
             <div class="document-info">
-                <div class="document-title">{{ document_title }}</div>
-                <div class="detail-item">
-                    <span class="detail-label">Access Type:</span>
-                    <span>{{ share_type.title() }} Only</span>
+                <div class="document-title">
+                    <span class="document-title-icon">📋</span>
+                    {{ document_title }}
                 </div>
-            </div>
-            
-            {% if share_message %}
-            <div class="share-message">
-                <strong>Message from {{ creator_name }}:</strong><br>
-                {{ share_message }}
-            </div>
-            {% endif %}
-            
-            <div class="details">
-                <h3 style="margin-top: 0;">Share Details</h3>
-                
-                {% if expires_at %}
                 <div class="detail-item">
-                    <span class="detail-label">Expires:</span>
-                    <span>{{ expires_at }}</span>
-                </div>
-                {% endif %}
-                
-                {% if has_password %}
-                <div class="detail-item">
-                    <span class="detail-label">Protection:</span>
-                    <span>Password Protected</span>
-                </div>
-                {% endif %}
-                
-                <div class="detail-item">
-                    <span class="detail-label">Permissions:</span>
-                    <span>
+                    <span class="detail-label">Tipo de acceso:</span>
+                    <span class="permission-badge">
                         {% if share_type == 'view' %}
-                            View document only
+                            Solo lectura
                         {% elif share_type == 'download' %}
-                            View and download document
+                            Lectura y descarga
                         {% elif share_type == 'edit' %}
-                            View, download, and edit document
+                            Lectura, descarga y edición
+                        {% else %}
+                            {{ share_type | title }}
                         {% endif %}
                     </span>
                 </div>
             </div>
-            
+
+            {% if share_message %}
+            <div class="share-message">
+                <div class="share-message-label">Mensaje de {{ creator_name }}</div>
+                <p class="share-message-text">"{{ share_message }}"</p>
+            </div>
+            {% endif %}
+
+            <div class="details-section">
+                <div class="details-title">Detalles del acceso</div>
+
+                {% if expires_at %}
+                <div class="detail-item">
+                    <span>📅</span>
+                    <span class="detail-label">Expira:</span>
+                    <span>{{ expires_at }}</span>
+                </div>
+                {% endif %}
+
+                {% if has_password %}
+                <div class="detail-item">
+                    <span>🔒</span>
+                    <span class="detail-label">Protección:</span>
+                    <span>Con contraseña</span>
+                </div>
+                {% endif %}
+
+                <div class="detail-item">
+                    <span>✓</span>
+                    <span class="detail-label">Permisos:</span>
+                    <span>
+                        {% if share_type == 'view' %}
+                            Ver documento
+                        {% elif share_type == 'download' %}
+                            Ver y descargar
+                        {% elif share_type == 'edit' %}
+                            Ver, descargar y editar
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+
             {% if expires_at %}
-            <div class="warning">
-                ⚠️ This share link will expire on {{ expires_at }}. 
-                Please access the document before this date.
+            <div class="warning-box">
+                <span class="warning-icon">⏱️</span>
+                <span class="warning-text">
+                    Este enlace expirará el {{ expires_at }}. Accede al documento antes de esa fecha.
+                </span>
             </div>
             {% endif %}
-            
+
             {% if has_password %}
-            <div class="warning">
-                🔒 This document is password protected. You'll need to enter the password provided by {{ creator_name }} to access it.
+            <div class="warning-box">
+                <span class="warning-icon">🔐</span>
+                <span class="warning-text">
+                    Este documento está protegido con contraseña. Necesitarás la contraseña proporcionada por {{ creator_name }}.
+                </span>
             </div>
             {% endif %}
-            
-            <div class="button-container">
-                <a href="{{ share_url }}" class="button">Access Document</a>
+
+            <div class="cta-container">
+                <a href="{{ share_url }}" class="cta-button">Acceder al Documento →</a>
             </div>
-            
-            <p style="font-size: 14px; color: #6b7280; text-align: center;">
-                Or copy this link to your browser:<br>
-                <code style="background-color: #f3f4f6; padding: 4px 8px; border-radius: 4px;">{{ share_url }}</code>
+
+            <p class="link-fallback">
+                O copia este enlace en tu navegador:<br>
+                <code>{{ share_url }}</code>
             </p>
         </div>
-        
+
         <div class="footer">
-            <p>This email was sent by Nexus Document on behalf of {{ creator_name }}.</p>
-            <p>If you believe this email was sent in error, please ignore it.</p>
-            <p>
-                <a href="https://nexus-document.com">Nexus Document</a> | 
-                <a href="https://nexus-document.com/privacy">Privacy Policy</a>
+            <p class="footer-text">
+                Este email fue enviado por <span class="footer-brand">NouxCubeIA</span> en nombre de {{ creator_name }}.
             </p>
+            <p class="footer-text">
+                Si crees que este email fue enviado por error, puedes ignorarlo.
+            </p>
+            <div class="footer-links">
+                <a href="https://nouxcube.com">NouxCubeIA</a> |
+                <a href="https://nouxcube.com/privacy">Política de Privacidad</a>
+            </div>
         </div>
     </div>
 </body>

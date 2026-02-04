@@ -1,27 +1,39 @@
 {% extends "base.html" %}
 
-{% block title %}Invitation to join {{ tenant_name }}{% endblock %}
+{% block title %}Invitación a {{ tenant_name }}{% endblock %}
 
 {% block content %}
-<h2>You're invited to join {{ tenant_name }}!</h2>
+<h2 style="color: #1f2937; font-size: 20px; margin: 0 0 20px 0;">¡Te han invitado a unirte a {{ tenant_name }}!</h2>
 
-<p>Hi there,</p>
+<p style="color: #374151; font-size: 15px;">Hola,</p>
 
-<p><strong>{{ inviter_name }}</strong> has invited you to join <strong>{{ tenant_name }}</strong> as a <strong>{{ role }}</strong>.</p>
+<p style="color: #6B7280; font-size: 14px; line-height: 1.7;">
+    <span style="color: #8B5CF6; font-weight: 600;">{{ inviter_name }}</span> te ha invitado a unirte a
+    <strong style="color: #374151;">{{ tenant_name }}</strong> como <strong style="color: #374151;">{{ role }}</strong>.
+</p>
 
-<p>To accept this invitation and create your account, please click the button below:</p>
+<p style="color: #6B7280; font-size: 14px; margin-top: 24px;">
+    Para aceptar esta invitación y crear tu cuenta, haz clic en el botón:
+</p>
 
-<div style="text-align: center;">
-    <a href="{{ invitation_link }}" class="button">Accept Invitation</a>
+<div style="text-align: center; margin: 32px 0;">
+    <a href="{{ invitation_link }}" class="button">Aceptar Invitación →</a>
 </div>
 
-<p style="margin-top: 30px;">Or copy and paste this link into your browser:</p>
-<p style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; word-break: break-all;">
+<p style="color: #9CA3AF; font-size: 13px; margin-top: 28px;">O copia y pega este enlace en tu navegador:</p>
+<p style="background-color: #F9FAFB; padding: 12px 16px; border-radius: 8px; word-break: break-all; font-size: 12px; color: #6B7280; border: 1px solid #E5E7EB;">
     {{ invitation_link }}
 </p>
 
-<p style="margin-top: 30px;">This invitation link will expire in 7 days. If you need a new invitation, please contact {{ inviter_name }}.</p>
+<div style="background-color: #FEF3C7; border: 1px solid #FCD34D; border-radius: 8px; padding: 14px 20px; margin: 24px 0; display: flex; align-items: center; gap: 10px;">
+    <span style="font-size: 18px;">⏱️</span>
+    <span style="color: #92400E; font-size: 13px;">
+        Este enlace de invitación expirará en 7 días. Si necesitas una nueva invitación, contacta con {{ inviter_name }}.
+    </span>
+</div>
 
-<p>Best regards,<br>
-The {{ tenant_name }} Team</p>
+<p style="color: #6B7280; font-size: 14px; margin-top: 32px;">
+    Saludos,<br>
+    <span style="color: #8B5CF6; font-weight: 600;">El equipo de {{ tenant_name }}</span>
+</p>
 {% endblock %}
