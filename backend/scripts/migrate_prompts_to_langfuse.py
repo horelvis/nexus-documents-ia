@@ -240,7 +240,9 @@ def migrate_to_langfuse(
                 print(f"⏭️  Skipped (exists): {name}")
                 continue
 
-            # Create or update prompt
+            # Create or update prompt (always include 'production' label)
+            if "production" not in labels:
+                labels.append("production")
             langfuse.create_prompt(
                 name=name,
                 prompt=content,

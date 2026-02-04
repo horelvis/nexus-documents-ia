@@ -410,13 +410,20 @@ class PromptComposer:
     def _agent_to_prompt_name(self, agent_name: str) -> str:
         """Convert agent name to Langfuse prompt name format."""
         # LaborAgent -> emma_agent_labor
-        # DocGenAgent -> emma_agent_docgen
-        # ContractAgent -> emma_agent_contract
+        # labor_agent -> emma_agent_labor
+        # DocGenAgent -> emma_agent_doc_gen
 
-        name = agent_name.replace("Agent", "")
+        import re
+
+        # Handle snake_case names (e.g., "labor_agent" → "labor")
+        name = agent_name
+        if "_agent" in name:
+            name = name.replace("_agent", "")
+
+        # Handle CamelCase names (e.g., "LaborAgent" → "Labor")
+        name = name.replace("Agent", "")
 
         # Convert CamelCase to snake_case
-        import re
         name = re.sub(r'(?<!^)(?=[A-Z])', '_', name).lower()
 
         return f"emma_agent_{name}"
