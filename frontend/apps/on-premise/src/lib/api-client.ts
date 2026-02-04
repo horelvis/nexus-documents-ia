@@ -160,6 +160,15 @@ class ApiClient {
     }
   }
 
+  async patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+    try {
+      const response = await this.client.patch<T>(url, data, config)
+      return { data: response.data, error: null, status: response.status }
+    } catch (error) {
+      return this.handleError<T>(error)
+    }
+  }
+
   async upload<T>(
     url: string,
     formData: FormData,
