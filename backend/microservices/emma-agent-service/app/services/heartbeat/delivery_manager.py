@@ -252,7 +252,7 @@ class DeliveryManager:
             action_url=f"/emma/insights/{insight.id}",
             metadata={
                 "insight_id": insight.id,
-                "insight_type": insight.insight_type.value if hasattr(insight.insight_type, 'value') else insight.insight_type,
+                "insight_type": insight.insight_type,
                 "urgency": urgency_value,
                 "related_documents": insight.related_documents,
             },
@@ -301,7 +301,7 @@ class DeliveryManager:
                                 "title": insight.title,
                                 "summary": insight.summary,
                                 "urgency": urgency_value,
-                                "insight_type": insight.insight_type.value if hasattr(insight.insight_type, 'value') else str(insight.insight_type),
+                                "insight_type": insight.insight_type,
                                 "priority_score": insight.priority_score,
                                 "related_documents": insight.related_documents,
                                 "tenant_id": tenant_id,
@@ -337,7 +337,7 @@ class DeliveryManager:
             priority=priority,
             metadata={
                 "insight_id": insight.id,
-                "insight_type": insight.insight_type.value if hasattr(insight.insight_type, 'value') else str(insight.insight_type),
+                "insight_type": insight.insight_type,
                 "urgency": urgency_value,
             },
         )
@@ -355,12 +355,12 @@ class DeliveryManager:
         key = f"emma:insights:{tenant_id}:{insight.id}"
         await r.hset(key, mapping={
             "id": insight.id,
-            "insight_type": insight.insight_type.value if hasattr(insight.insight_type, 'value') else str(insight.insight_type),
+            "insight_type": insight.insight_type,
             "title": insight.title,
             "summary": insight.summary or "",
             "priority_score": str(insight.priority_score),
-            "urgency": insight.urgency.value if hasattr(insight.urgency, 'value') else str(insight.urgency),
-            "status": insight.status.value if hasattr(insight.status, 'value') else str(insight.status),
+            "urgency": insight.urgency if isinstance(insight.urgency, str) else insight.urgency.value,
+            "status": insight.status if isinstance(insight.status, str) else insight.status.value,
             "delivered_at": insight.delivered_at.isoformat() if insight.delivered_at else "",
             "created_at": insight.created_at.isoformat(),
         })

@@ -192,10 +192,10 @@ Events (Redis Streams) → Event Listener → Trigger Engine → Emma Background
 
 **Heartbeat System** (Phase 6):
 - **Context Gatherer**: Collects tenant data (documents, contracts, activity)
-- **Insight Evaluator**: LLM-based analysis to generate insights
-- **Priority Scorer**: Multi-factor scoring (type × urgency × confidence)
+- **Insight Evaluator**: LLM Router + Langfuse prompt (`emma_heartbeat_evaluator`) with YAML fallback
+- **Priority Scorer**: Configurable per-tenant weights via `type_priorities` (merged with `DEFAULT_TYPE_PRIORITIES`)
 - **Delivery Manager**: Rate limiting (5/day, 2/hour) + quiet hours (22:00-08:00)
-- **Insight Types**: `contract_expiration`, `compliance_alert`, `risk_alert`, `anomaly_detected`, `task_reminder`
+- **Insight Types**: Dynamic (string-based). Built-in: `contract_expiration`, `compliance_alert`, `risk_alert`, `anomaly_detected`, `task_reminder`, `deadline_approaching`, `document_update`, `activity_summary`. New types added via Langfuse prompt, no code changes needed.
 
 **Events**: `document.indexed`, `document.updated`, `connector.synced`, `knowledge.graph_updated`, `analysis.completed`
 

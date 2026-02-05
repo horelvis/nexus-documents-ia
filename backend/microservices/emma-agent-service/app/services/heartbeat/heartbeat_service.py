@@ -31,7 +31,6 @@ from app.schemas.heartbeat import (
     HeartbeatConfigUpdate,
     HeartbeatRunResponse,
     HeartbeatStatusResponse,
-    InsightType,
     ProactiveInsight,
 )
 
@@ -112,12 +111,10 @@ class HeartbeatService:
             # 1. Gather context
             context = await context_gatherer.gather(tenant_id)
 
-            # 2. Evaluate with LLM
-            enabled_types = [
-                InsightType(t) if isinstance(t, str) else t
-                for t in config.enabled_insight_types
-            ]
-            evaluation = await insight_evaluator.evaluate(context, enabled_types)
+            # 2. Evaluate with LLM (enabled_insight_types are already strings)
+            evaluation = await insight_evaluator.evaluate(
+                context, config.enabled_insight_types
+            )
 
             if evaluation.no_action_needed:
                 await self._update_run_timestamp(tenant_id, now, config)
@@ -139,8 +136,10 @@ class HeartbeatService:
                 evaluation.insights, tenant_id
             )
 
-            # 4. Score and filter by priority
-            scored_insights = priority_scorer.score_insights(insight_candidates, context)
+            # 4. Score and filter by priority (pass tenant-specific weights)
+            scored_insights = priority_scorer.score_insights(
+                insight_candidates, context, config.type_priorities
+            )
             filtered_insights = priority_scorer.filter_by_threshold(
                 scored_insights, config.priority_threshold
             )

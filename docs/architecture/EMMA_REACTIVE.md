@@ -456,18 +456,20 @@ Continuous background evaluation of tenant context to generate proactive insight
      │  - indexing_failures               │
      └────────┬─────────┘
               │
-     ┌────────▼────────┐
-     │ Insight Evaluator│ ← vLLM/Qwen evaluates context
-     │  - JSON structured output          │
-     │  - Insight type classification     │
-     │  - Priority 0.0-1.0                │
-     └────────┬─────────┘
+     ┌────────▼──────────┐     ┌──────────────────────┐
+     │ Insight Evaluator  │ ←── │ Langfuse Prompt Mgmt │
+     │  - LLM Router      │     │ "emma_heartbeat_     │
+     │    (vLLM/fallback)  │     │  evaluator"          │
+     │  - Dynamic types    │     │ (5 min TTL cache)    │
+     │  - JSON output      │     └──────────────────────┘
+     └────────┬──────────┘
               │
      ┌────────▼────────┐
-     │ Priority Scorer  │ ← Multi-factor scoring
-     │  - Type base (0.40-0.85)           │
-     │  - Urgency multiplier              │
-     │  - Confidence adjustment           │
+     │ Priority Scorer  │ ← Configurable per-tenant weights
+     │  - DEFAULT_TYPE_PRIORITIES         │
+     │  - config.type_priorities (merge)  │
+     │  - Urgency multiplier             │
+     │  - Unknown types → 0.50 default   │
      └────────┬─────────┘
               │
      ┌────────▼────────┐
@@ -480,14 +482,21 @@ Continuous background evaluation of tenant context to generate proactive insight
 
 ### Insight Types
 
-| Type | Base Priority | Example | When Generated |
-|------|--------------|---------|----------------|
+Insight types are **dynamic** — new types can be added by editing the Langfuse prompt `emma_heartbeat_evaluator` without code changes. The `InsightType` enum in `schemas/heartbeat.py` is kept as documentation reference only; runtime uses plain strings.
+
+**Built-in types (defaults):**
+
+| Type | Default Priority | Example | When Generated |
+|------|-----------------|---------|----------------|
 | `contract_expiration` | 0.85 | "Contract with Acme expires in 15 days" | Contract expires in <30 days |
 | `compliance_alert` | 0.80 | "Regulatory gap detected in clause 4.2" | Compliance risk identified |
 | `risk_alert` | 0.75 | "Abusive clause detected in contract" | Risk identified in analysis |
+| `deadline_approaching` | 0.70 | "Tax filing deadline in 5 days" | Generic deadline approaching |
 | `anomaly_detected` | 0.60 | "3 duplicate invoices found" | Duplicates, indexing failures |
 | `task_reminder` | 0.55 | "5 analyses pending for 10 days" | Pending items >7 days |
+| `document_update` | 0.50 | "Labour law updated: 3 articles changed" | Important document updated |
 | `activity_summary` | 0.40 | "Summary: 12 new docs, 3 queries" | Inactivity >7 days |
+| *(custom)* | 0.50 | Any type added via Langfuse prompt | Defined by admin |
 
 ### Configuration (Per Tenant)
 
@@ -505,10 +514,20 @@ HeartbeatConfig:
     batch_low_priority: bool = True       # Batch low priority in digest
     digest_hour: int = 9                  # Send digest at 9 AM
     contract_expiry_days_warning: int = 30
-    enabled_insight_types: List[str] = [
+    enabled_insight_types: List[str] = [  # Extensible — any string type valid
         "contract_expiration", "compliance_alert", "risk_alert",
         "anomaly_detected", "task_reminder"
     ]
+    type_priorities: Dict[str, float] = { # Per-tenant priority overrides
+        "contract_expiration": 0.85,      # Merged with DEFAULT_TYPE_PRIORITIES
+        "compliance_alert": 0.80,         # Unknown types default to 0.50
+        "risk_alert": 0.75,
+        "deadline_approaching": 0.70,
+        "anomaly_detected": 0.60,
+        "task_reminder": 0.55,
+        "document_update": 0.50,
+        "activity_summary": 0.40,
+    }
 ```
 
 ### API Endpoints
@@ -593,6 +612,12 @@ curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=00000000-00
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"priority_threshold": 0.5, "max_insights_per_day": 10}'
+
+# Add custom insight type priority
+curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=00000000-0000-0000-0000-000000000001" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"type_priorities": {"invoice_overdue": 0.75}}'
 
 # Test via Celery
 celery -A worker_app.celery_app call emma.heartbeat_check \
@@ -697,44 +722,33 @@ celery -A worker_app.celery_app call emma.heartbeat_check \
 
 ---
 
-## Adding New Insight Types
+## Adding New Insight Types (Zero Code)
 
-To add a new proactive insight type (e.g., `budget_alert`), follow these 4 steps:
+Insight types are **fully dynamic** — no Python code changes or redeployments needed. The system uses string-based types throughout, with the `InsightType` enum kept only as documentation.
 
-### Step 1: Add to Enum
+### How It Works
 
-**File:** `emma-agent-service/app/schemas/heartbeat.py`
-
-```python
-class InsightType(str, Enum):
-    """Types of proactive insights Emma can generate."""
-
-    CONTRACT_EXPIRATION = "contract_expiration"
-    COMPLIANCE_ALERT = "compliance_alert"
-    RISK_ALERT = "risk_alert"
-    ANOMALY_DETECTED = "anomaly_detected"
-    TASK_REMINDER = "task_reminder"
-    ACTIVITY_SUMMARY = "activity_summary"
-    DOCUMENT_UPDATE = "document_update"
-    DEADLINE_APPROACHING = "deadline_approaching"
-
-    # ✅ ADD YOUR NEW TYPE HERE
-    BUDGET_ALERT = "budget_alert"
-    """Budget exceeded or approaching limit."""
+```
+┌───────────────────────────────────────────────────────────────────────────┐
+│  Admin edits prompt in Langfuse UI (adds "invoice_overdue")              │
+│       ↓ (5 min TTL cache expires)                                        │
+│  InsightEvaluator.evaluate() → fetches prompt from Langfuse              │
+│       ↓                                                                   │
+│  LLM generates insight with type="invoice_overdue"                       │
+│       ↓                                                                   │
+│  PriorityScorer → looks up config.type_priorities, uses 0.50 default     │
+│       ↓                                                                   │
+│  DeliveryManager → delivers via configured channels                      │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Step 2: Update the LLM System Prompt
+### Step 1: Edit the Prompt in Langfuse (Required)
 
-**File:** `emma-agent-service/app/services/heartbeat/insight_evaluator.py`
+Open Langfuse UI (http://localhost:3002) and edit the prompt `emma_heartbeat_evaluator`.
 
-The LLM needs to know about the new type. Add it to `_get_system_prompt()`:
+Add the new type to the `TIPOS DE INSIGHTS VALIDOS` section:
 
-```python
-def _get_system_prompt(self) -> str:
-    return """Eres Emma, un asistente de IA especializado en gestión documental legal.
-
-...
-
+```
 TIPOS DE INSIGHTS VÁLIDOS:
 - contract_expiration: Contratos próximos a vencer
 - compliance_alert: Gaps de cumplimiento normativo detectados
@@ -742,101 +756,33 @@ TIPOS DE INSIGHTS VÁLIDOS:
 - anomaly_detected: Duplicados, fallos de indexación, patrones inusuales
 - task_reminder: Análisis o firmas pendientes por mucho tiempo
 - activity_summary: Resumen de actividad (solo si hay datos significativos)
-- budget_alert: Presupuesto excedido o próximo al límite  # ✅ ADD HERE
-
-...
-"""
+- invoice_overdue: Facturas vencidas o próximas a vencer          ← NEW
 ```
 
-Also update the `INSIGHT_TYPE_MAP` at the top of the file:
+The change takes effect within 5 minutes (Langfuse prompt cache TTL).
 
-```python
-INSIGHT_TYPE_MAP = {
-    "contract_expiration": InsightType.CONTRACT_EXPIRATION,
-    "compliance_alert": InsightType.COMPLIANCE_ALERT,
-    "risk_alert": InsightType.RISK_ALERT,
-    "anomaly_detected": InsightType.ANOMALY_DETECTED,
-    "task_reminder": InsightType.TASK_REMINDER,
-    "activity_summary": InsightType.ACTIVITY_SUMMARY,
-    "document_update": InsightType.DOCUMENT_UPDATE,
-    "deadline_approaching": InsightType.DEADLINE_APPROACHING,
-    "budget_alert": InsightType.BUDGET_ALERT,  # ✅ ADD HERE
-}
+**Alternative (YAML fallback):** If Langfuse is not available, edit `emma-agent-service/config/prompts/emma_prompts.yaml` section `heartbeat.evaluation_system`.
+
+### Step 2: Configure Priority Weight (Optional)
+
+By default, unknown types get a priority weight of **0.50**. To customize:
+
+```bash
+curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=TENANT_ID" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type_priorities": {
+      "invoice_overdue": 0.75
+    }
+  }'
 ```
 
-### Step 3: Gather Context Data (Optional)
+The `type_priorities` dict is **merged** with `DEFAULT_TYPE_PRIORITIES` — existing types keep their defaults, only the specified types are overridden.
 
-**File:** `emma-agent-service/app/services/heartbeat/context_gatherer.py`
+### Step 3: Enable for Tenant (Optional)
 
-If your insight type needs specific data, add it to `TenantContext` and gather it:
-
-```python
-# In schemas/heartbeat.py - TenantContext model
-class TenantContext(BaseModel):
-    # ... existing fields ...
-
-    # ✅ ADD NEW CONTEXT FIELDS
-    budget_total: float = 0.0
-    budget_used: float = 0.0
-    budget_threshold_percent: float = 80.0
-```
-
-```python
-# In context_gatherer.py - gather() method
-async def gather(self, tenant_id: str) -> TenantContext:
-    # ... existing code ...
-
-    # ✅ GATHER BUDGET DATA
-    try:
-        budget_data = await self._gather_budget_data(tenant_id)
-        context.budget_total = budget_data.get("total", 0)
-        context.budget_used = budget_data.get("used", 0)
-    except Exception as e:
-        logger.warning(f"Failed to gather budget data: {e}")
-```
-
-### Step 4: Configure Priority Score (Optional)
-
-**File:** `emma-agent-service/app/services/heartbeat/priority_scorer.py`
-
-Add base priority for your new type:
-
-```python
-# Base priority by insight type (0.0 to 1.0)
-TYPE_BASE_PRIORITY = {
-    InsightType.CONTRACT_EXPIRATION: 0.85,
-    InsightType.COMPLIANCE_ALERT: 0.80,
-    InsightType.RISK_ALERT: 0.75,
-    InsightType.ANOMALY_DETECTED: 0.60,
-    InsightType.TASK_REMINDER: 0.55,
-    InsightType.ACTIVITY_SUMMARY: 0.40,
-    InsightType.DOCUMENT_UPDATE: 0.50,
-    InsightType.DEADLINE_APPROACHING: 0.70,
-    InsightType.BUDGET_ALERT: 0.75,  # ✅ ADD HERE
-}
-```
-
-### Step 5: Enable for Tenants
-
-Update the default configuration in `schemas/heartbeat.py`:
-
-```python
-class HeartbeatConfig(BaseModel):
-    # ...
-    enabled_insight_types: List[InsightType] = Field(
-        default=[
-            InsightType.CONTRACT_EXPIRATION,
-            InsightType.COMPLIANCE_ALERT,
-            InsightType.RISK_ALERT,
-            InsightType.ANOMALY_DETECTED,
-            InsightType.TASK_REMINDER,
-            InsightType.BUDGET_ALERT,  # ✅ ADD TO DEFAULT LIST
-        ],
-        description="Which insight types are enabled for this tenant"
-    )
-```
-
-Or enable per-tenant via API:
+If the tenant has a custom `enabled_insight_types` list, add the new type:
 
 ```bash
 curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=TENANT_ID" \
@@ -846,25 +792,39 @@ curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=TENANT_ID" 
     "enabled_insight_types": [
       "contract_expiration",
       "compliance_alert",
-      "budget_alert"
-    ]
+      "risk_alert",
+      "anomaly_detected",
+      "task_reminder",
+      "invoice_overdue"
+    ],
+    "type_priorities": {
+      "invoice_overdue": 0.75
+    }
   }'
 ```
 
-### How It Works
+If the tenant uses the default config (`enabled_insight_types` not customized), the LLM may still generate the new type if the prompt includes it — the `enabled_insight_types` filter is advisory.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│  1. InsightType Enum    →  Defines valid type values                │
-│  2. System Prompt       →  Tells LLM what each type means           │
-│  3. Context Gatherer    →  Provides data for LLM to analyze         │
-│  4. Priority Scorer     →  Assigns base priority weight             │
-│  5. HeartbeatConfig     →  Controls which types are active          │
-└─────────────────────────────────────────────────────────────────────┘
+### Step 4: Add Context Data (Optional, Requires Code)
 
-The LLM reads the context, decides which insight_type fits best,
-and returns structured JSON. The system then scores and delivers.
-```
+If the new insight type needs specific data not already in `TenantContext`, this is the **only step that requires code changes**:
+
+1. Add fields to `TenantContext` in `schemas/heartbeat.py`
+2. Gather the data in `context_gatherer.py`
+
+For most types, the existing context (documents, contracts, activity, anomalies) is sufficient.
+
+### Summary: What Changed vs. Old Process
+
+| Before (Old) | After (New) |
+|--------------|-------------|
+| 1. Add to `InsightType` enum | Not needed (enum is documentation only) |
+| 2. Update `INSIGHT_TYPE_MAP` | Not needed (removed) |
+| 3. Edit hardcoded `_get_system_prompt()` | Edit prompt in Langfuse UI |
+| 4. Add to `TYPE_BASE_PRIORITY` dict | `PATCH /config` with `type_priorities` |
+| 5. Redeploy service | Not needed (5 min cache) |
+
+**Files involved:** Zero for basic types. Only `context_gatherer.py` + `schemas/heartbeat.py` if custom context data is needed.
 
 ---
 

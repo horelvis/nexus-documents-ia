@@ -1,39 +1,25 @@
 """Insight Evaluator — LLM-based context analysis for proactive insights.
 
-Uses the configured LLM (vLLM/Qwen) to evaluate tenant context and
-generate actionable insights. The LLM receives structured context
-and returns JSON-formatted insight candidates.
+Uses the configured LLM (via LLM Router with provider fallback) to evaluate
+tenant context and generate actionable insights. The system prompt is fetched
+from Langfuse (with YAML fallback), enabling dynamic insight type management
+without code changes.
 """
 import json
 import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from app.core.config import settings
 from app.schemas.heartbeat import (
-    InsightType,
     InsightUrgency,
     LLMEvaluationResult,
     LLMInsightCandidate,
-    ProactiveInsight,
     ProactiveInsightCreate,
     SuggestedAction,
     TenantContext,
 )
 
 logger = logging.getLogger(__name__)
-
-# Mapping from string to enum
-INSIGHT_TYPE_MAP = {
-    "contract_expiration": InsightType.CONTRACT_EXPIRATION,
-    "compliance_alert": InsightType.COMPLIANCE_ALERT,
-    "risk_alert": InsightType.RISK_ALERT,
-    "anomaly_detected": InsightType.ANOMALY_DETECTED,
-    "task_reminder": InsightType.TASK_REMINDER,
-    "activity_summary": InsightType.ACTIVITY_SUMMARY,
-    "document_update": InsightType.DOCUMENT_UPDATE,
-    "deadline_approaching": InsightType.DEADLINE_APPROACHING,
-}
 
 URGENCY_MAP = {
     "critical": InsightUrgency.CRITICAL,
@@ -44,65 +30,33 @@ URGENCY_MAP = {
 
 
 class InsightEvaluator:
-    """Evaluates tenant context using LLM to generate proactive insights."""
+    """Evaluates tenant context using LLM to generate proactive insights.
 
-    def __init__(self):
-        self._llm_client = None
+    The system prompt is fetched from Langfuse (prompt name:
+    'emma_heartbeat_evaluator') with a YAML fallback from
+    emma_prompts.yaml → heartbeat.evaluation_system.
 
-    async def _get_llm_client(self):
-        """Get or create async OpenAI client for vLLM."""
-        if self._llm_client is None:
-            from openai import AsyncOpenAI
-            self._llm_client = AsyncOpenAI(
-                api_key="not-needed",
-                base_url=settings.vllm_base_url,
-            )
-        return self._llm_client
+    New insight types can be added by editing the prompt in Langfuse UI
+    without modifying Python code or redeploying.
+    """
 
-    async def evaluate(
-        self,
-        context: TenantContext,
-        enabled_types: Optional[List[InsightType]] = None,
-    ) -> LLMEvaluationResult:
-        """Evaluate tenant context and generate insight candidates.
-
-        Args:
-            context: The gathered tenant context
-            enabled_types: Which insight types are enabled (None = all)
-
-        Returns:
-            LLMEvaluationResult with insight candidates
-        """
-        # Build the evaluation prompt
-        prompt = self._build_evaluation_prompt(context, enabled_types)
-
+    async def _get_system_prompt(self) -> str:
+        """Fetch the evaluation system prompt from Langfuse (or YAML fallback)."""
         try:
-            client = await self._get_llm_client()
+            from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
-            response = await client.chat.completions.create(
-                model=settings.vllm_model,
-                messages=[
-                    {"role": "system", "content": self._get_system_prompt()},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=2048,
-                response_format={"type": "json_object"},
-            )
-
-            raw_response = response.choices[0].message.content
-            return self._parse_llm_response(raw_response)
-
+            client = get_langfuse_prompt_client()
+            cached = await client.get_prompt("emma_heartbeat_evaluator")
+            if cached and cached.content:
+                return cached.content
         except Exception as e:
-            logger.error(f"LLM evaluation failed: {e}", exc_info=True)
-            return LLMEvaluationResult(
-                insights=[],
-                overall_assessment=f"Error during evaluation: {str(e)}",
-                no_action_needed=True,
-            )
+            logger.warning(f"Failed to fetch Langfuse prompt: {e}")
 
-    def _get_system_prompt(self) -> str:
-        """System prompt for the insight evaluator."""
+        # Hardcoded fallback (matches emma_prompts.yaml heartbeat.evaluation_system)
+        return self._fallback_system_prompt()
+
+    def _fallback_system_prompt(self) -> str:
+        """Fallback system prompt when Langfuse and YAML are both unavailable."""
         return """Eres Emma, un asistente de IA especializado en gestión documental legal.
 
 Tu tarea es analizar el contexto de un tenant y generar insights proactivos que sean:
@@ -149,15 +103,57 @@ FORMATO DE RESPUESTA (JSON):
   "no_action_needed": false
 }"""
 
+    async def evaluate(
+        self,
+        context: TenantContext,
+        enabled_types: Optional[List[str]] = None,
+    ) -> LLMEvaluationResult:
+        """Evaluate tenant context and generate insight candidates.
+
+        Args:
+            context: The gathered tenant context
+            enabled_types: Which insight types are enabled (None = all)
+
+        Returns:
+            LLMEvaluationResult with insight candidates
+        """
+        # Build the evaluation prompt
+        prompt = self._build_evaluation_prompt(context, enabled_types)
+        system_prompt = await self._get_system_prompt()
+
+        try:
+            from app.agents.llm_router import get_llm_router
+
+            router = await get_llm_router()
+            response = await router.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=2048,
+            )
+
+            raw_response = response.content
+            return self._parse_llm_response(raw_response)
+
+        except Exception as e:
+            logger.error(f"LLM evaluation failed: {e}", exc_info=True)
+            return LLMEvaluationResult(
+                insights=[],
+                overall_assessment=f"Error during evaluation: {str(e)}",
+                no_action_needed=True,
+            )
+
     def _build_evaluation_prompt(
         self,
         context: TenantContext,
-        enabled_types: Optional[List[InsightType]] = None,
+        enabled_types: Optional[List[str]] = None,
     ) -> str:
         """Build the evaluation prompt from context."""
         # Format enabled types
         if enabled_types:
-            types_str = ", ".join([t.value for t in enabled_types])
+            types_str = ", ".join(enabled_types)
         else:
             types_str = "todos los tipos"
 
@@ -279,17 +275,16 @@ FORMATO DE RESPUESTA (JSON):
         candidates: List[LLMInsightCandidate],
         tenant_id: str,
     ) -> List[ProactiveInsightCreate]:
-        """Convert LLM candidates to ProactiveInsightCreate objects."""
+        """Convert LLM candidates to ProactiveInsightCreate objects.
+
+        Insight types are passed through as strings directly — no enum
+        mapping needed. This allows the LLM to generate any type defined
+        in the Langfuse prompt without code changes.
+        """
         insights = []
 
         for candidate in candidates:
-            # Map insight type
-            insight_type = INSIGHT_TYPE_MAP.get(
-                candidate.insight_type,
-                InsightType.ACTIVITY_SUMMARY,
-            )
-
-            # Map urgency
+            # Map urgency (still enum-based for validation)
             urgency = URGENCY_MAP.get(candidate.urgency, InsightUrgency.MEDIUM)
 
             # Build suggested actions
@@ -300,7 +295,7 @@ FORMATO DE RESPUESTA (JSON):
 
             insights.append(ProactiveInsightCreate(
                 tenant_id=tenant_id,
-                insight_type=insight_type,
+                insight_type=candidate.insight_type,  # Pass string directly
                 title=candidate.title[:255],
                 summary=candidate.summary[:500] if candidate.summary else "",
                 priority_score=0.0,  # Will be set by PriorityScorer

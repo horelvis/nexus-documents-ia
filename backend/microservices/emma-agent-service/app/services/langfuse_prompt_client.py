@@ -180,6 +180,9 @@ class LangfusePromptClient:
             # Social channel
             "emma_social_system": ("social_channels", "system_prompt"),
             "emma_social_conversational": ("social_channels", "conversational_prompt"),
+
+            # Heartbeat
+            "emma_heartbeat_evaluator": ("heartbeat", "evaluation_system"),
         }
 
         # Check explicit mapping first
@@ -424,6 +427,7 @@ class LangfusePromptClient:
                 "emma_agent_privacy",
                 "emma_agent_docgen",
                 "emma_social_system",
+                "emma_heartbeat_evaluator",
             ]
 
         synced = []

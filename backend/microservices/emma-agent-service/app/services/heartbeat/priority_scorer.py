@@ -1,43 +1,41 @@
 """Priority Scorer — Multi-factor scoring for proactive insights.
 
 Calculates a priority score (0.0-1.0) for each insight based on:
-- Insight type base priority
+- Insight type base priority (configurable per tenant via HeartbeatConfig)
 - Urgency level
 - LLM confidence
 - Time sensitivity (e.g., days until contract expiry)
 - Tenant activity level
 """
 import logging
-from datetime import datetime, timezone
-from typing import List
+from typing import Dict, List, Optional
 
 from app.schemas.heartbeat import (
-    InsightType,
-    InsightUrgency,
     ProactiveInsightCreate,
     TenantContext,
 )
 
 logger = logging.getLogger(__name__)
 
-# Base priority by insight type (0.0-1.0)
-TYPE_BASE_PRIORITY = {
-    InsightType.CONTRACT_EXPIRATION: 0.85,
-    InsightType.COMPLIANCE_ALERT: 0.80,
-    InsightType.RISK_ALERT: 0.75,
-    InsightType.ANOMALY_DETECTED: 0.60,
-    InsightType.TASK_REMINDER: 0.55,
-    InsightType.DEADLINE_APPROACHING: 0.70,
-    InsightType.DOCUMENT_UPDATE: 0.50,
-    InsightType.ACTIVITY_SUMMARY: 0.40,
+# Default base priority by insight type (string keys, 0.0-1.0)
+# These are used when no tenant-specific type_priorities are configured.
+DEFAULT_TYPE_PRIORITIES: Dict[str, float] = {
+    "contract_expiration": 0.85,
+    "compliance_alert": 0.80,
+    "risk_alert": 0.75,
+    "deadline_approaching": 0.70,
+    "anomaly_detected": 0.60,
+    "task_reminder": 0.55,
+    "document_update": 0.50,
+    "activity_summary": 0.40,
 }
 
-# Urgency multipliers
-URGENCY_MULTIPLIER = {
-    InsightUrgency.CRITICAL: 1.20,
-    InsightUrgency.HIGH: 1.10,
-    InsightUrgency.MEDIUM: 1.00,
-    InsightUrgency.LOW: 0.85,
+# Urgency multipliers (string keys)
+URGENCY_MULTIPLIER: Dict[str, float] = {
+    "critical": 1.20,
+    "high": 1.10,
+    "medium": 1.00,
+    "low": 0.85,
 }
 
 
@@ -48,20 +46,25 @@ class PriorityScorer:
         self,
         insights: List[ProactiveInsightCreate],
         context: TenantContext,
+        type_priorities: Optional[Dict[str, float]] = None,
     ) -> List[ProactiveInsightCreate]:
         """Score all insights and return sorted by priority.
 
         Args:
             insights: List of insight candidates from LLM
             context: Tenant context for additional scoring factors
+            type_priorities: Optional per-tenant priority overrides
+                (merged with DEFAULT_TYPE_PRIORITIES)
 
         Returns:
             Insights with priority_score set, sorted descending
         """
-        scored = []
+        # Merge defaults with tenant-specific overrides
+        effective_priorities = {**DEFAULT_TYPE_PRIORITIES, **(type_priorities or {})}
 
+        scored = []
         for insight in insights:
-            score = self._calculate_score(insight, context)
+            score = self._calculate_score(insight, context, effective_priorities)
             insight.priority_score = min(1.0, max(0.0, score))  # Clamp to 0-1
             scored.append(insight)
 
@@ -74,13 +77,15 @@ class PriorityScorer:
         self,
         insight: ProactiveInsightCreate,
         context: TenantContext,
+        type_priorities: Dict[str, float],
     ) -> float:
         """Calculate priority score for a single insight."""
-        # Start with base priority for the insight type
-        base = TYPE_BASE_PRIORITY.get(insight.insight_type, 0.50)
+        # Start with base priority for the insight type (default 0.50 for unknown types)
+        base = type_priorities.get(insight.insight_type, 0.50)
 
-        # Apply urgency multiplier
-        urgency_mult = URGENCY_MULTIPLIER.get(insight.urgency, 1.0)
+        # Apply urgency multiplier (resolve enum to string value)
+        urgency_str = insight.urgency.value if hasattr(insight.urgency, 'value') else str(insight.urgency)
+        urgency_mult = URGENCY_MULTIPLIER.get(urgency_str, 1.0)
         score = base * urgency_mult
 
         # Factor in LLM confidence (weight: 20%)
@@ -88,7 +93,7 @@ class PriorityScorer:
         score *= confidence_factor
 
         # Time sensitivity bonus for contracts
-        if insight.insight_type == InsightType.CONTRACT_EXPIRATION:
+        if insight.insight_type == "contract_expiration":
             score = self._apply_contract_time_bonus(score, insight, context)
 
         # Activity-based adjustment

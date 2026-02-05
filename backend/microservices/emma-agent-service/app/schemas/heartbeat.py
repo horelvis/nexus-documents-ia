@@ -155,16 +155,31 @@ class HeartbeatConfig(BaseModel):
         description="Days before expiry to generate contract warnings"
     )
 
-    # Insight type toggles
-    enabled_insight_types: List[InsightType] = Field(
+    # Insight type toggles (strings allow dynamic types from Langfuse prompts)
+    enabled_insight_types: List[str] = Field(
         default=[
-            InsightType.CONTRACT_EXPIRATION,
-            InsightType.COMPLIANCE_ALERT,
-            InsightType.RISK_ALERT,
-            InsightType.ANOMALY_DETECTED,
-            InsightType.TASK_REMINDER,
+            "contract_expiration",
+            "compliance_alert",
+            "risk_alert",
+            "anomaly_detected",
+            "task_reminder",
         ],
-        description="Which insight types are enabled for this tenant"
+        description="Which insight types are enabled for this tenant (extensible via Langfuse)"
+    )
+
+    # Configurable priority weights per insight type (merge with defaults)
+    type_priorities: Dict[str, float] = Field(
+        default={
+            "contract_expiration": 0.85,
+            "compliance_alert": 0.80,
+            "risk_alert": 0.75,
+            "deadline_approaching": 0.70,
+            "anomaly_detected": 0.60,
+            "task_reminder": 0.55,
+            "document_update": 0.50,
+            "activity_summary": 0.40,
+        },
+        description="Base priority weights per insight type (0.0-1.0). New types default to 0.50."
     )
 
     class Config:
@@ -187,7 +202,8 @@ class HeartbeatConfigUpdate(BaseModel):
     batch_low_priority: Optional[bool] = None
     digest_hour: Optional[int] = Field(None, ge=0, le=23)
     contract_expiry_days_warning: Optional[int] = None
-    enabled_insight_types: Optional[List[InsightType]] = None
+    enabled_insight_types: Optional[List[str]] = None
+    type_priorities: Optional[Dict[str, float]] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -289,7 +305,7 @@ class ProactiveInsight(BaseModel):
     id: Optional[str] = None
     tenant_id: str
 
-    insight_type: InsightType
+    insight_type: str
     title: str = Field(..., max_length=255)
     summary: str = Field(..., max_length=500)
     details: Optional[str] = None
@@ -340,7 +356,7 @@ class ProactiveInsightCreate(BaseModel):
     """Schema for creating a new insight."""
 
     tenant_id: str
-    insight_type: InsightType
+    insight_type: str
     title: str = Field(..., max_length=255)
     summary: str = Field(..., max_length=500)
     details: Optional[str] = None
