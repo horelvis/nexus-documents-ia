@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     
     # Development/Debug mode
-    DEBUG: bool = os.getenv("DEBUG", "true").lower() == "true"
+    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
     SQL_ECHO: bool = os.getenv("SQL_ECHO", "false").lower() == "true"
     DB_POOL_DEBUG: bool = os.getenv("DB_POOL_DEBUG", "false").lower() == "true"
 
@@ -206,6 +206,7 @@ class Settings(BaseSettings):
     BACKGROUND_TASKS_URL: str = os.getenv("BACKGROUND_TASKS_URL", "http://background-worker:8100")
     MCP_ALFRESCO_URL: str = os.getenv("MCP_ALFRESCO_URL", "http://mcp-alfresco:8000")
     MCP_GOOGLE_DRIVE_URL: str = os.getenv("MCP_GOOGLE_DRIVE_URL", "http://mcp-google-drive:8000")
+    MCP_ONEDRIVE_URL: str = os.getenv("MCP_ONEDRIVE_URL", "http://mcp-onedrive:8000")
 
     # Identity Document Processing (GDPR-compliant)
     IDENTITY_DOC_ENABLED: bool = os.getenv("IDENTITY_DOC_ENABLED", "true").lower() == "true"

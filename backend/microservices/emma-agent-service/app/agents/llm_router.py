@@ -25,6 +25,7 @@ Environment Variables:
     LLM_FALLBACK_CHAIN: Comma-separated provider order (e.g., "vllm,openrouter,openai")
 """
 
+import asyncio
 import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -345,18 +346,21 @@ class LLMRouter:
 # =============================================================================
 
 _llm_router: Optional[LLMRouter] = None
+_llm_router_lock = asyncio.Lock()
 
 
 async def get_llm_router() -> LLMRouter:
     """
-    Get global LLM router instance.
+    Get global LLM router instance (thread-safe with double-check locking).
 
     Returns:
         Shared LLMRouter instance
     """
     global _llm_router
     if _llm_router is None:
-        _llm_router = LLMRouter()
+        async with _llm_router_lock:
+            if _llm_router is None:
+                _llm_router = LLMRouter()
     return _llm_router
 
 
