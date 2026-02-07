@@ -39,15 +39,19 @@ Usage:
     result = await graph.ainvoke(state)
 
 Feature Flags:
-    - LANGGRAPH_RAG_ENABLED: Enable LangGraph for all tenants
+    - LANGGRAPH_RAG_ENABLED: Enable LangGraph for all tenants (uses ReAct agent)
     - LANGGRAPH_TENANTS: Comma-separated list of tenant IDs to enable
 """
 
-from .state import RAGState, ExecutionConfig, create_initial_state
-from .graph import create_rag_graph, get_rag_graph, execute_rag_query
+from .state import RAGState, ReActState, ExecutionConfig, create_initial_state, create_initial_react_state
+from .graph import (
+    create_rag_graph, get_rag_graph, execute_rag_query,
+    create_react_graph, get_react_graph, execute_react_query,
+)
 from .api import (
     execute_langgraph_query,
     stream_langgraph_query,
+    stream_react_query,
     is_langgraph_enabled,
     is_langgraph_enabled_for_tenant,
     maybe_use_langgraph,
@@ -58,15 +62,22 @@ from .api import (
 __all__ = [
     # State
     "RAGState",
+    "ReActState",
     "ExecutionConfig",
     "create_initial_state",
-    # Graph
+    "create_initial_react_state",
+    # RAG Graph (legacy)
     "create_rag_graph",
     "get_rag_graph",
     "execute_rag_query",
+    # ReAct Graph
+    "create_react_graph",
+    "get_react_graph",
+    "execute_react_query",
     # API
     "execute_langgraph_query",
     "stream_langgraph_query",
+    "stream_react_query",
     "is_langgraph_enabled",
     "is_langgraph_enabled_for_tenant",
     "maybe_use_langgraph",

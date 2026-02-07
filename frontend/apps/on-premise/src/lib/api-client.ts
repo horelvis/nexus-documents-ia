@@ -15,6 +15,7 @@ const SSO_TOKEN_KEY = 'nexus_sso_tokens'
 interface SSOTokens {
   access_token: string
   refresh_token?: string
+  id_token?: string
   expires_at?: number
 }
 
@@ -108,6 +109,7 @@ class ApiClient {
       const newTokens: SSOTokens = {
         access_token: response.data.access_token,
         refresh_token: response.data.refresh_token || tokens.refresh_token,
+        id_token: tokens.id_token,
         expires_at: Date.now() + (response.data.expires_in || 3600) * 1000,
       }
 

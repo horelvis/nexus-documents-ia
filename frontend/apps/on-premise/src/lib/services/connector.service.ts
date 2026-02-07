@@ -66,14 +66,10 @@ export interface IndexedDocument {
 }
 
 export type ConnectorType =
-  | 'sharepoint'
   | 'onedrive'
   | 'google_drive'
-  | 'google_workspace'
   | 'dropbox'
   | 'box'
-  | 's3'
-  | 'azure_blob'
   | 'network_share'
   | 'alfresco'
   | 'database'
@@ -84,28 +80,20 @@ export type SyncStatus = 'pending' | 'syncing' | 'completed' | 'paused' | 'faile
 
 // Connector icons mapping
 export const connectorIcons: Record<ConnectorType, string> = {
-  sharepoint: '📁',
   onedrive: '☁️',
   google_drive: '📂',
-  google_workspace: '🔷',
   dropbox: '📦',
   box: '📥',
-  s3: '🪣',
-  azure_blob: '💠',
   network_share: '🔗',
   alfresco: '🗄️',
   database: '🗃️',
 }
 
 export const connectorNames: Record<ConnectorType, string> = {
-  sharepoint: 'SharePoint',
   onedrive: 'OneDrive',
   google_drive: 'Google Drive',
-  google_workspace: 'Google Workspace',
   dropbox: 'Dropbox',
   box: 'Box',
-  s3: 'Amazon S3',
-  azure_blob: 'Azure Blob Storage',
   network_share: 'Network Share',
   alfresco: 'Alfresco',
   database: 'Base de Datos',
@@ -113,18 +101,17 @@ export const connectorNames: Record<ConnectorType, string> = {
 
 // Connector descriptions for selection UI
 export const connectorDescriptions: Record<ConnectorType, string> = {
-  sharepoint: 'Conecta con sitios de SharePoint Online para sincronizar documentos y bibliotecas compartidas de tu organización.',
   onedrive: 'Sincroniza archivos personales y compartidos desde OneDrive for Business o cuentas personales de Microsoft.',
   google_drive: 'Accede a documentos almacenados en Google Drive, incluyendo archivos compartidos y carpetas de equipo.',
-  google_workspace: 'Integración empresarial con Google Workspace para acceder a documentos de toda la organización.',
   dropbox: 'Conecta con Dropbox para sincronizar archivos y carpetas compartidas de tu espacio de trabajo.',
   box: 'Sincroniza contenido empresarial desde Box, incluyendo carpetas compartidas y colaboración de equipos.',
-  s3: 'Conecta con buckets de Amazon S3 para indexar documentos almacenados en la nube de AWS.',
-  azure_blob: 'Accede a contenedores de Azure Blob Storage para sincronizar documentos empresariales.',
   network_share: 'Conecta con carpetas compartidas en red (SMB/CIFS) de tu servidor de archivos local.',
   alfresco: 'Integración con Alfresco ECM para acceder a repositorios documentales y flujos de trabajo.',
   database: 'Conecta con bases de datos SQL (PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, SQLite) para indexar documentos almacenados como BLOBs o referencias a archivos.',
 }
+
+// Connector types that use OAuth popup flow (no manual credentials)
+export const OAUTH_CONNECTOR_TYPES: ConnectorType[] = ['google_drive', 'onedrive']
 
 // Connector categories for grouping in UI
 export type ConnectorCategory = 'microsoft' | 'google' | 'cloud_storage' | 'enterprise' | 'file_systems' | 'databases'
@@ -132,15 +119,15 @@ export type ConnectorCategory = 'microsoft' | 'google' | 'cloud_storage' | 'ente
 export const connectorCategories: Record<ConnectorCategory, { name: string; types: ConnectorType[] }> = {
   microsoft: {
     name: 'Microsoft 365',
-    types: ['sharepoint', 'onedrive'],
+    types: ['onedrive'],
   },
   google: {
     name: 'Google',
-    types: ['google_drive', 'google_workspace'],
+    types: ['google_drive'],
   },
   cloud_storage: {
     name: 'Almacenamiento en la Nube',
-    types: ['dropbox', 'box', 's3', 'azure_blob'],
+    types: ['dropbox', 'box'],
   },
   enterprise: {
     name: 'ECM Empresarial',
@@ -247,31 +234,11 @@ export const connectorConfigs: Record<ConnectorType, { fields: ConfigField[] }> 
       { name: 'afts_exclude_paths', label: 'Rutas a Excluir', type: 'text', required: false, placeholder: '/app:company_home/st:sites/cm:archive//*', description: 'Rutas separadas por coma a excluir de la sincronización' },
     ],
   },
-  sharepoint: {
-    fields: [
-      { name: 'tenant_id', label: 'Azure AD Tenant ID', type: 'text', required: true, description: 'ID del tenant de Azure AD' },
-      { name: 'client_id', label: 'Application (Client) ID', type: 'text', required: true, description: 'ID de la aplicación registrada en Azure AD' },
-      { name: 'client_secret', label: 'Client Secret', type: 'password', required: true, description: 'Secret de la aplicación' },
-      { name: 'site_url', label: 'URL del Sitio', type: 'text', required: false, placeholder: 'https://company.sharepoint.com/sites/docs', description: 'Sincronizar solo este sitio (dejar vacío para todos)' },
-    ],
-  },
   onedrive: {
-    fields: [
-      { name: 'tenant_id', label: 'Azure AD Tenant ID', type: 'text', required: true },
-      { name: 'client_id', label: 'Application (Client) ID', type: 'text', required: true },
-      { name: 'client_secret', label: 'Client Secret', type: 'password', required: true },
-      { name: 'user_principal_name', label: 'Usuario a Sincronizar', type: 'text', required: false, placeholder: 'user@company.com', description: 'Sincronizar solo este usuario (dejar vacío para todos)' },
-    ],
+    fields: [],  // OAuth flow handles auth, like google_drive
   },
   google_drive: {
     fields: [],
-  },
-  google_workspace: {
-    fields: [
-      { name: 'service_account_json', label: 'Service Account JSON', type: 'textarea', required: true, description: 'Contenido completo del archivo JSON de cuenta de servicio' },
-      { name: 'domain', label: 'Dominio', type: 'text', required: true, placeholder: 'empresa.com' },
-      { name: 'admin_email', label: 'Email del Admin', type: 'text', required: true, placeholder: 'admin@empresa.com', description: 'Email con permisos para delegación de dominio' },
-    ],
   },
   dropbox: {
     fields: [
@@ -285,23 +252,6 @@ export const connectorConfigs: Record<ConnectorType, { fields: ConfigField[] }> 
       { name: 'client_secret', label: 'Client Secret', type: 'password', required: true },
       { name: 'enterprise_id', label: 'Enterprise ID', type: 'text', required: true, description: 'ID de la empresa en Box' },
       { name: 'jwt_private_key', label: 'JWT Private Key', type: 'textarea', required: true, description: 'Clave privada para autenticación JWT' },
-    ],
-  },
-  s3: {
-    fields: [
-      { name: 'bucket_name', label: 'Nombre del Bucket', type: 'text', required: true },
-      { name: 'region', label: 'Región AWS', type: 'text', required: true, defaultValue: 'us-east-1' },
-      { name: 'access_key_id', label: 'Access Key ID', type: 'text', required: true },
-      { name: 'secret_access_key', label: 'Secret Access Key', type: 'password', required: true },
-      { name: 'prefix', label: 'Prefijo', type: 'text', required: false, placeholder: 'documents/', description: 'Sincronizar solo archivos con este prefijo' },
-    ],
-  },
-  azure_blob: {
-    fields: [
-      { name: 'storage_account', label: 'Storage Account', type: 'text', required: true },
-      { name: 'container_name', label: 'Nombre del Container', type: 'text', required: true },
-      { name: 'connection_string', label: 'Connection String', type: 'password', required: true },
-      { name: 'prefix', label: 'Prefijo', type: 'text', required: false, description: 'Sincronizar solo blobs con este prefijo' },
     ],
   },
   network_share: {
@@ -647,7 +597,7 @@ class ConnectorService {
   }
 
   // ==========================================================================
-  // Google Drive OAuth & Folder methods
+  // OAuth & Folder methods (Google Drive, OneDrive)
   // ==========================================================================
 
   /**
@@ -704,10 +654,12 @@ class ConnectorService {
   }
 }
 
-// Google Drive OAuth types
+// OAuth types (Google Drive, OneDrive)
 export interface OAuthStatus {
   connected: boolean
   google_email?: string
+  microsoft_email?: string
+  email?: string  // generic field
   folder_id?: string
 }
 

@@ -53,6 +53,7 @@ import {
   ConnectorType,
   ConnectorCategory,
   CreateConnectorData,
+  OAUTH_CONNECTOR_TYPES,
 } from '@/lib/services/connector.service'
 import { ConnectorIcon, GoogleDriveOAuthStep } from '@/components/connectors'
 
@@ -122,14 +123,14 @@ export default function NewConnectorPage() {
     setError(null)
 
     try {
-      const isGoogleDrive = connectorType === 'google_drive'
+      const isOAuthConnector = OAUTH_CONNECTOR_TYPES.includes(connectorType)
 
       const data: CreateConnectorData = {
         name,
         description: description || undefined,
         connector_type: connectorType,
-        auth_type: isGoogleDrive ? 'delegated' : 'service_account',
-        config: isGoogleDrive ? {} : config,
+        auth_type: isOAuthConnector ? 'delegated' : 'service_account',
+        config: isOAuthConnector ? {} : config,
         sync_enabled: syncEnabled,
         sync_interval_hours: syncIntervalHours,
       }
@@ -138,7 +139,7 @@ export default function NewConnectorPage() {
 
       if (result.error) {
         setError(result.error)
-      } else if (isGoogleDrive && result.data) {
+      } else if (isOAuthConnector && result.data) {
         setConnectorId(result.data.id)
         setStep('oauth')
       } else {
@@ -210,7 +211,7 @@ export default function NewConnectorPage() {
               <span className="font-medium">2</span>
               <span className="hidden sm:inline">Configurar</span>
             </div>
-            {connectorType === 'google_drive' && (
+            {connectorType && OAUTH_CONNECTOR_TYPES.includes(connectorType) && (
               <>
                 <IconChevronRight className="h-4 w-4 text-muted-foreground" />
                 <div className={cn(
@@ -371,7 +372,7 @@ export default function NewConnectorPage() {
                   </CardContent>
                 </Card>
 
-                {/* Type-specific Config (skip for Google Drive — uses OAuth) */}
+                {/* Type-specific Config (skip for OAuth connectors — Google Drive, OneDrive) */}
                 {connectorFields && connectorFields.length > 0 && (
                   <Card>
                     <CardHeader>
@@ -499,12 +500,13 @@ export default function NewConnectorPage() {
               </div>
             </div>
           )}
-          {/* Step 3: Google Drive OAuth & Folder Selection */}
-          {step === 'oauth' && connectorId && (
+          {/* Step 3: OAuth & Folder Selection */}
+          {step === 'oauth' && connectorId && connectorType && (
             <div className="max-w-2xl mx-auto">
               <GoogleDriveOAuthStep
                 connectorId={connectorId}
                 connectorName={name}
+                connectorType={connectorType}
                 onComplete={() => router.push('/connectors')}
               />
             </div>

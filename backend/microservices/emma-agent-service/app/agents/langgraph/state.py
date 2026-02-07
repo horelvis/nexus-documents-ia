@@ -45,18 +45,21 @@ except ImportError:
 # ─── Custom reducers for parallel node execution ─────────────────────────────
 def merge_dicts(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Merge two dictionaries, with right taking precedence.
+    Recursively merge two dictionaries, with right taking precedence.
     Used for metadata field when parallel nodes both update it.
+
+    Unlike a shallow merge, nested dicts at any depth are merged
+    rather than overwritten. This ensures parallel nodes can both
+    contribute to nested metadata sections without data loss.
     """
     if left is None:
         return right or {}
     if right is None:
         return left or {}
-    # Deep merge: right values override left, but nested dicts are merged
     result = {**left}
     for key, value in right.items():
         if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = {**result[key], **value}
+            result[key] = merge_dicts(result[key], value)
         else:
             result[key] = value
     return result
@@ -439,3 +442,202 @@ class ExecutionConfig:
 
     # Whether to enable streaming
     enable_streaming: bool = True
+
+
+# =============================================================================
+# ReAct Agent State (new graph — coexists with RAGState via feature flag)
+# =============================================================================
+
+class ReActState(TypedDict, total=False):
+    """
+    Simplified state for the ReAct agent graph.
+
+    Unlike RAGState which has ~40 fields for the static pipeline,
+    ReActState lets information flow through messages (tool results)
+    rather than explicit state fields. This mirrors the OpenManus
+    pattern where the agent's memory IS the conversation history.
+
+    State Flow:
+        1. CLASSIFY: Sets fast_path or continues to react_loop
+        2. REACT_LOOP: Iterates Think→Act→Observe via messages
+        3. SYNTHESIZE: Reads final_answer + sources
+
+    The agent accumulates knowledge through tool call/result messages
+    rather than through explicit state fields like retrieved_docs,
+    execution_plan, or agent_results.
+    """
+
+    # =========================================================================
+    # Conversation
+    # =========================================================================
+    messages: Annotated[Sequence[BaseMessage], add_messages]
+    query: str
+    thread_id: str
+
+    # =========================================================================
+    # ACL Context (same as RAGState)
+    # =========================================================================
+    tenant_id: str
+    user_id: Optional[str]
+    user_role_ids: Optional[List[str]]
+    is_admin: bool
+
+    # =========================================================================
+    # Sector Configuration (same as RAGState)
+    # =========================================================================
+    sector: Optional[str]
+    sector_config: Optional[Dict[str, Any]]
+
+    # =========================================================================
+    # ReAct Loop Control
+    # =========================================================================
+    # Current iteration in the react loop
+    current_step: int
+
+    # Maximum iterations before forced exit (safety)
+    max_steps: int
+
+    # History of tool calls for observability and stuck detection
+    tool_calls_history: List[Dict[str, Any]]
+
+    # Whether the agent has decided to stop (terminate tool called)
+    is_complete: bool
+
+    # =========================================================================
+    # Fast-path
+    # =========================================================================
+    fast_path_used: bool
+    fast_path_answer: Optional[str]
+
+    # =========================================================================
+    # Output
+    # =========================================================================
+    final_answer: Optional[str]
+    sources: List[Dict[str, Any]]
+    success: bool
+
+    # =========================================================================
+    # Observability
+    # =========================================================================
+    # Structured reasoning steps (THINKING, TOOL_CALL, OBSERVATION, etc.)
+    reasoning_steps: Annotated[List[Dict[str, Any]], merge_lists]
+
+    # Metadata for tracing/debugging (merge-safe for parallel nodes)
+    metadata: Annotated[Dict[str, Any], merge_dicts]
+
+    # =========================================================================
+    # Features (derived from request context)
+    # =========================================================================
+    features: Dict[str, bool]
+
+
+def create_initial_react_state(
+    query: str,
+    tenant_id: str,
+    user_id: Optional[str] = None,
+    user_role_ids: Optional[List[str]] = None,
+    is_admin: bool = False,
+    thread_id: Optional[str] = None,
+    conversation_history: Optional[List[BaseMessage]] = None,
+    request_context: Optional[Dict[str, Any]] = None,
+    max_steps: int = 10,
+) -> ReActState:
+    """Create initial state for the ReAct graph.
+
+    Args:
+        query: User's query
+        tenant_id: Tenant ID for ACL
+        user_id: Optional user ID
+        user_role_ids: Optional role IDs
+        is_admin: Admin bypass flag
+        thread_id: Conversation thread ID
+        conversation_history: Prior conversation messages
+        request_context: Request context (document_id, social_channel_mode, etc.)
+        max_steps: Maximum ReAct iterations (default: 10)
+
+    Returns:
+        Initialized ReActState
+    """
+    if thread_id is None:
+        thread_id = str(uuid.uuid4())
+
+    messages: List[BaseMessage] = []
+    if conversation_history:
+        messages.extend(conversation_history)
+    messages.append(HumanMessage(content=query))
+
+    normalized_context = request_context or {}
+
+    # Load active sector
+    sector_name = None
+    sector_config_dict = None
+    try:
+        from .sectors import get_active_sector_config
+        sc = get_active_sector_config()
+        if sc is not None:
+            sector_name = sc.sector.value
+            sector_config_dict = {
+                "name": sc.name,
+                "sector": sc.sector.value,
+                "agents": sc.agents,
+                "default_agent": sc.default_agent,
+                "hybrid_alpha": sc.hybrid_alpha,
+                "top_k": sc.top_k,
+                "rerank_enabled": sc.rerank_enabled,
+                "chunk_strategy": sc.chunk_strategy,
+                "system_prompt_key": sc.system_prompt_key,
+            }
+    except Exception:
+        pass
+
+    # Derive features from context and environment
+    features = {
+        "web_search_enabled": normalized_context.get("social_channel_mode", False)
+            or bool(normalized_context.get("web_search_enabled")),
+        "connectors_enabled": bool(normalized_context.get("connectors_enabled")),
+        "social_channel_mode": normalized_context.get("social_channel_mode", False),
+    }
+
+    return ReActState(
+        # Conversation
+        messages=messages,
+        query=query,
+        thread_id=thread_id,
+
+        # ACL
+        tenant_id=tenant_id,
+        user_id=user_id,
+        user_role_ids=user_role_ids or [],
+        is_admin=is_admin,
+
+        # Sector
+        sector=sector_name,
+        sector_config=sector_config_dict,
+
+        # ReAct control
+        current_step=0,
+        max_steps=max_steps,
+        tool_calls_history=[],
+        is_complete=False,
+
+        # Fast-path
+        fast_path_used=False,
+        fast_path_answer=None,
+
+        # Output
+        final_answer=None,
+        sources=[],
+        success=False,
+
+        # Observability
+        reasoning_steps=[],
+        metadata={
+            "document_id": normalized_context.get("document_id"),
+            "indexed_document_ids": normalized_context.get("indexed_document_ids", []),
+            "social_channel_mode": normalized_context.get("social_channel_mode", False),
+            "location": normalized_context.get("location"),
+        },
+
+        # Features
+        features=features,
+    )

@@ -8,7 +8,7 @@ import {
   DialogDescription,
 } from '@nexus/shared/ui'
 import { GoogleDriveOAuthStep } from './GoogleDriveOAuthStep'
-import { Connector } from '@/lib/services/connector.service'
+import { Connector, connectorNames } from '@/lib/services/connector.service'
 
 interface ReconnectOAuthDialogProps {
   open: boolean
@@ -36,12 +36,13 @@ export function ReconnectOAuthDialog({
         <DialogHeader>
           <DialogTitle>Reconectar {connector.name}</DialogTitle>
           <DialogDescription>
-            Vuelve a autorizar la conexión con Google Drive
+            Vuelve a autorizar la conexión con {connectorNames[connector.connector_type]}
           </DialogDescription>
         </DialogHeader>
         <GoogleDriveOAuthStep
           connectorId={connector.id}
           connectorName={connector.name}
+          connectorType={connector.connector_type}
           onComplete={handleComplete}
         />
       </DialogContent>

@@ -19,12 +19,14 @@ function getEnvConfig() {
   }
 
   // In browser, use window origin for redirect URIs if not specified
+  // Force HTTPS to avoid mixed-content issues (required for Microsoft OAuth, KeyCloak HTTPS clients)
   if (typeof window !== 'undefined') {
+    const origin = window.location.origin.replace(/^http:\/\//, 'https://')
     if (!process.env.NEXT_PUBLIC_SSO_REDIRECT_URI) {
-      defaults.redirectUri = `${window.location.origin}/auth/callback`
+      defaults.redirectUri = `${origin}/auth/callback`
     }
     if (!process.env.NEXT_PUBLIC_SSO_POST_LOGOUT_REDIRECT_URI) {
-      defaults.postLogoutRedirectUri = `${window.location.origin}/auth/sign-in`
+      defaults.postLogoutRedirectUri = `${origin}/auth/sign-in`
     }
   }
 
@@ -60,17 +62,19 @@ export const OIDC_CONFIG = {
     return getEnvConfig().postLogoutRedirectUri
   },
 
-  // Computed endpoints
+  // Authorization endpoint — browser navigates here (KeyCloak handles HTTPS→HTTP redirect)
   get authorizationEndpoint() {
     return `${this.issuer}/protocol/openid-connect/auth`
   },
 
+  // Token, userinfo, logout — fetched from browser, so use local proxy to avoid mixed content
+  // Next.js rewrites /oidc/* → KeyCloak /protocol/openid-connect/* (HTTPS→HTTP server-side)
   get tokenEndpoint() {
-    return `${this.issuer}/protocol/openid-connect/token`
+    return typeof window !== 'undefined' ? `${window.location.origin}/oidc/token` : `${this.issuer}/protocol/openid-connect/token`
   },
 
   get userinfoEndpoint() {
-    return `${this.issuer}/protocol/openid-connect/userinfo`
+    return typeof window !== 'undefined' ? `${window.location.origin}/oidc/userinfo` : `${this.issuer}/protocol/openid-connect/userinfo`
   },
 
   get endSessionEndpoint() {

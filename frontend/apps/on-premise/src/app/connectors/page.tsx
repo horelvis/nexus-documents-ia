@@ -357,7 +357,7 @@ export default function ConnectorsPage() {
                             </div>
                             <TooltipProvider>
                               <div className="flex gap-2">
-                                {connector.connector_type === 'google_drive' && connector.users_connected === 0 && (
+                                {['google_drive', 'onedrive'].includes(connector.connector_type) && connector.users_connected === 0 && (
                                   <Tooltip>
                                     <TooltipTrigger asChild>
                                       <Button

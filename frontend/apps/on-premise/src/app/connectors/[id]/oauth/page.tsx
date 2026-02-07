@@ -89,6 +89,7 @@ export default function OAuthReconnectPage() {
               <GoogleDriveOAuthStep
                 connectorId={connector.id}
                 connectorName={connector.name}
+                connectorType={connector.connector_type}
                 onComplete={handleComplete}
               />
             ) : (

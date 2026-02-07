@@ -8,6 +8,8 @@ For each piece of evidence found, the LLM evaluates:
 
 This is the "verifier" equivalent from Verified Generation,
 but instead of true/false verification, it produces outcome classifications.
+
+Prompts are managed via LangfusePromptClient with YAML fallback.
 """
 
 from __future__ import annotations
@@ -18,11 +20,42 @@ import re
 from typing import Dict, List, Optional
 
 from app.agents.langgraph.sectors.predictive_config import PredictiveConfig
+from app.core.langfuse_config import observe
 from app.schemas.predictive_analysis import PredictionFactor, VerificationMatch
+from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
 logger = logging.getLogger(__name__)
 
+# ─── Fallback prompts (Spanish) ───
 
+FALLBACK_OUTCOME_SYSTEM = (
+    "Eres un evaluador de evidencias para análisis predictivo.\n\n"
+    "Para cada pieza de evidencia, determina:\n"
+    "1. Si apoya o contradice el factor analítico\n"
+    "2. Qué resultado sugiere\n"
+    "3. Tu nivel de confianza\n\n"
+    "Responde SOLO con un objeto JSON (sin markdown, sin explicación):\n"
+    '{{"supports_factor": true/false, "outcome": "una de las claves de resultado", '
+    '"confidence": 0.0-1.0, "reason": "razón breve en español"}}\n\n'
+    "Resultados disponibles: {outcome_display}\n\n"
+    "Reglas:\n"
+    "- Basa tu evaluación estrictamente en el texto de la evidencia\n"
+    "- Considera cómo la evidencia se relaciona con el factor específico\n"
+    "- Escribe la razón SIEMPRE en español\n"
+    "- NUNCA uses etiquetas <think>. Responde directamente con JSON."
+)
+
+FALLBACK_OUTCOME_USER = (
+    "FACTOR A EVALUAR:\n"
+    "Tipo: {factor_type}\n"
+    "Descripción: {factor_description}\n"
+    "Base legal: {legal_basis}\n\n"
+    "EVIDENCIA:\n{doc_excerpt}\n\n"
+    "Evalúa esta evidencia respecto al factor. Responde solo con JSON."
+)
+
+
+@observe(name="predictive.evaluate_evidence")
 async def evaluate_evidence_outcomes(
     factor: PredictionFactor,
     evidence: List[dict],
@@ -42,23 +75,18 @@ async def evaluate_evidence_outcomes(
     if not evidence:
         return []
 
+    client = get_langfuse_prompt_client()
     outcome_keys = list(config.outcome_labels.keys())
     outcome_display = ", ".join(f'"{k}" ({v})' for k, v in config.outcome_labels.items())
 
-    system_prompt = (
-        "You are an evidence evaluator for predictive analysis.\n\n"
-        "For each piece of evidence, determine:\n"
-        "1. Whether it supports or contradicts the analytical factor\n"
-        "2. What outcome it suggests\n"
-        "3. Your confidence level\n\n"
-        "Respond ONLY with a JSON object (no markdown, no explanation):\n"
-        '{"supports_factor": true/false, "outcome": "one of the outcome keys", '
-        '"confidence": 0.0-1.0, "reason": "brief reason"}\n\n'
-        f"Available outcomes: {outcome_display}\n\n"
-        "Rules:\n"
-        "- Base assessment strictly on the evidence text\n"
-        "- Consider how the evidence relates to the specific factor\n"
-        "- NEVER use <think> tags. Output JSON directly."
+    # System prompt (once per factor, reused across evidence items)
+    sys_cached = await client.get_prompt(
+        "emma_predictive_outcome_system",
+        variables={"outcome_display": outcome_display},
+        fallback=FALLBACK_OUTCOME_SYSTEM.format(outcome_display=outcome_display),
+    )
+    system_prompt = sys_cached.content if sys_cached else FALLBACK_OUTCOME_SYSTEM.format(
+        outcome_display=outcome_display
     )
 
     matches: List[VerificationMatch] = []
@@ -68,13 +96,20 @@ async def evaluate_evidence_outcomes(
         if not excerpt:
             continue
 
-        user_prompt = (
-            f"FACTOR TO EVALUATE:\n"
-            f"Type: {factor.factor_type}\n"
-            f"Description: {factor.description}\n"
-            f"Legal basis: {factor.legal_basis or 'N/A'}\n\n"
-            f"EVIDENCE:\n{excerpt}\n\n"
-            "Evaluate this evidence against the factor. Respond with JSON only."
+        # User prompt (per evidence item)
+        user_variables = {
+            "factor_type": factor.factor_type,
+            "factor_description": factor.description,
+            "legal_basis": factor.legal_basis or "N/A",
+            "doc_excerpt": excerpt,
+        }
+        user_cached = await client.get_prompt(
+            "emma_predictive_outcome_user",
+            variables=user_variables,
+            fallback=FALLBACK_OUTCOME_USER.format(**user_variables),
+        )
+        user_prompt = user_cached.content if user_cached else FALLBACK_OUTCOME_USER.format(
+            **user_variables
         )
 
         # Evaluate with LLM
@@ -90,6 +125,11 @@ async def evaluate_evidence_outcomes(
             supports_factor=evaluation.get("supports_factor", False),
             source=ev.get("source", "internal"),
             url=ev.get("url"),
+            roj=ev.get("roj"),
+            ecli=ev.get("ecli"),
+            date=ev.get("date"),
+            resolution_type=ev.get("resolution_type"),
+            ponente=ev.get("ponente"),
         ))
 
     logger.info(
@@ -108,7 +148,7 @@ async def _call_llm_evaluation(
         "supports_factor": False,
         "outcome": valid_outcomes[0] if valid_outcomes else "positive",
         "confidence": 0.5,
-        "reason": "LLM evaluation failed",
+        "reason": "Evaluación LLM fallida",
     }
 
     try:

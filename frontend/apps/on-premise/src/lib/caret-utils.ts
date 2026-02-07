@@ -44,9 +44,8 @@ export function getCaretCoordinates(
   const computedStyle = window.getComputedStyle(element)
 
   MIRROR_STYLE_PROPERTIES.forEach(prop => {
-    mirror.style[prop as keyof CSSStyleDeclaration] = computedStyle.getPropertyValue(
-      prop.replace(/([A-Z])/g, '-$1').toLowerCase()
-    ) as string
+    const kebabProp = prop.replace(/([A-Z])/g, '-$1').toLowerCase()
+    mirror.style.setProperty(kebabProp, computedStyle.getPropertyValue(kebabProp))
   })
 
   mirror.style.position = 'absolute'

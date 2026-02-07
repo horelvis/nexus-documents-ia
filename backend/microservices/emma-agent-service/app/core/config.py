@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     # vLLM configuration (PRIMARY - Qwen2.5-7B-Instruct AWQ 4-bit)
     vllm_enabled: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
     vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct-AWQ")
+    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-14B-AWQ")
     vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "16384"))
     vllm_temperature: float = float(os.getenv("VLLM_TEMPERATURE", "0.6"))
     vllm_enable_thinking: bool = os.getenv("VLLM_ENABLE_THINKING", "true").lower() == "true"
@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     # OpenRouter configuration (unified gateway to 200+ models)
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
     openrouter_base_url: str = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "google/gemma-3-27b-it")
+    openrouter_model: str = os.getenv("OPENROUTER_MODEL", "qwen/qwen3-235b-a22b-2507")
     openrouter_site_url: str = os.getenv("OPENROUTER_SITE_URL", "https://nouxcube.com")
     openrouter_site_name: str = os.getenv("OPENROUTER_SITE_NAME", "NouxCubeIA")
 
@@ -108,6 +108,21 @@ class Settings(BaseSettings):
     analysis_max_per_tenant: int = int(os.getenv("ANALYSIS_MAX_PER_TENANT", "3"))
     llm_queue_timeout: int = int(os.getenv("LLM_QUEUE_TIMEOUT", "90"))
     tenant_isolation_enabled: bool = os.getenv("TENANT_ISOLATION_ENABLED", "true").lower() == "true"
+
+    # ReAct Agent Loop
+    react_max_observe_length: int = int(os.getenv("REACT_MAX_OBSERVE_LENGTH", "8000"))
+    react_stuck_detection_window: int = int(os.getenv("REACT_STUCK_DETECTION_WINDOW", "5"))
+    react_max_completion_tokens: int = int(os.getenv("REACT_MAX_COMPLETION_TOKENS", "4096"))
+    react_tool_timeout_seconds: float = float(os.getenv("REACT_TOOL_TIMEOUT_SECONDS", "60"))
+    react_max_history_messages: int = int(os.getenv("REACT_MAX_HISTORY_MESSAGES", "40"))
+    react_tool_description_max_chars: int = int(os.getenv("REACT_TOOL_DESCRIPTION_MAX_CHARS", "200"))
+    react_global_timeout_seconds: float = float(os.getenv("REACT_GLOBAL_TIMEOUT_SECONDS", "120"))
+
+    # LLM Fallback
+    llm_retry_delay_seconds: float = float(os.getenv("LLM_RETRY_DELAY_SECONDS", "0.5"))
+
+    # Agent Fallback Timeouts (factor_agent, writer_agent raw vLLM calls)
+    agent_raw_vllm_timeout_seconds: float = float(os.getenv("AGENT_RAW_VLLM_TIMEOUT_SECONDS", "60"))
 
     # Visualization settings
     enable_dynamic_display: bool = os.getenv("ENABLE_DYNAMIC_DISPLAY", "true").lower() == "true"
@@ -188,6 +203,8 @@ class Settings(BaseSettings):
     # ==========================================================================
     verified_cache_ttl_seconds: int = int(os.getenv("VERIFIED_CACHE_TTL_SECONDS", "3600"))
     verified_claim_temperature: float = float(os.getenv("VERIFIED_CLAIM_TEMPERATURE", "0.3"))
+    verified_duplicate_threshold: float = float(os.getenv("VERIFIED_DUPLICATE_THRESHOLD", "0.65"))
+    verified_evidence_excerpt_limit: int = int(os.getenv("VERIFIED_EVIDENCE_EXCERPT_LIMIT", "2000"))
 
     # ==========================================================================
     # Web Search (Tavily primary, DuckDuckGo fallback)
@@ -195,14 +212,43 @@ class Settings(BaseSettings):
     web_search_enabled: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
     web_search_max_results: int = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "5"))
     web_search_region: str = os.getenv("WEB_SEARCH_REGION", "es-es")
+    web_search_snippet_max_chars: int = int(os.getenv("WEB_SEARCH_SNIPPET_MAX_CHARS", "500"))
     # Tavily API (get free key at https://tavily.com - 1000 searches/month free)
     tavily_api_key: str = os.getenv("TAVILY_API_KEY", "")
+
+    # ==========================================================================
+    # Predictive Analysis Thresholds
+    # ==========================================================================
+    predictive_duplicate_threshold: float = float(os.getenv("PREDICTIVE_DUPLICATE_THRESHOLD", "0.65"))
+    predictive_similarity_threshold: float = float(os.getenv("PREDICTIVE_SIMILARITY_THRESHOLD", "0.60"))
+    predictive_evidence_excerpt_limit: int = int(os.getenv("PREDICTIVE_EVIDENCE_EXCERPT_LIMIT", "500"))
+    predictive_fallback_weight: float = float(os.getenv("PREDICTIVE_FALLBACK_WEIGHT", "0.5"))
+    predictive_fallback_confidence: float = float(os.getenv("PREDICTIVE_FALLBACK_CONFIDENCE", "0.5"))
+
+    # ==========================================================================
+    # CENDOJ Jurisprudence Search (Legal Sector)
+    # ==========================================================================
+    cendoj_enabled: bool = os.getenv(
+        "CENDOJ_ENABLED",
+        "true" if os.getenv("ACTIVE_SECTOR", "") == "legal" else "false"
+    ).lower() == "true"
+    cendoj_timeout: int = int(os.getenv("CENDOJ_TIMEOUT", "300"))
+    cendoj_max_content: int = int(os.getenv("CENDOJ_MAX_CONTENT", "2"))
+
+    # ==========================================================================
+    # Emma Service
+    # ==========================================================================
+    emma_document_content_max_chars: int = int(os.getenv("EMMA_DOCUMENT_CONTENT_MAX_CHARS", "20000"))
 
     # ==========================================================================
     # Emma Reactive Configuration
     # ==========================================================================
     event_bus_enabled: bool = os.getenv("EVENT_BUS_ENABLED", "true").lower() == "true"
     credentials_encryption_key: str = os.getenv("CREDENTIALS_ENCRYPTION_KEY", "")
+
+    # Heartbeat Delivery
+    heartbeat_insight_ttl_seconds: int = int(os.getenv("HEARTBEAT_INSIGHT_TTL_SECONDS", "604800"))
+    heartbeat_max_insights_stored: int = int(os.getenv("HEARTBEAT_MAX_INSIGHTS_STORED", "100"))
 
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

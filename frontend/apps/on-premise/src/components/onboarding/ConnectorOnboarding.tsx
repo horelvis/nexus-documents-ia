@@ -42,15 +42,10 @@ const ConnectorIcon = ({ type }: { type: ConnectorType }) => {
   const iconClass = 'h-6 w-6'
 
   switch (type) {
-    case 'sharepoint':
     case 'onedrive':
       return <IconCloud className={iconClass} />
     case 'google_drive':
-    case 'google_workspace':
       return <IconFolderShare className={iconClass} />
-    case 's3':
-    case 'azure_blob':
-      return <IconDatabase className={iconClass} />
     case 'network_share':
       return <IconServer className={iconClass} />
     default:
@@ -285,8 +280,8 @@ export function ConnectorOnboarding({
         <h3 className="text-xl font-semibold">No hay conectores disponibles</h3>
         <p className="text-muted-foreground max-w-md">
           El administrador aún no ha configurado ningún conector de datos.
-          Contacta a tu administrador para que configure SharePoint, OneDrive,
-          Google Drive u otras fuentes de datos.
+          Contacta a tu administrador para que configure OneDrive,
+          Google Drive, Alfresco u otras fuentes de datos.
         </p>
         {onSkip && (
           <Button variant="outline" onClick={onSkip}>

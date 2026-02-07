@@ -34,13 +34,15 @@ References:
 - https://langchain-ai.github.io/langgraph/tutorials/multi_agent/
 """
 
+import asyncio
 import logging
+import time
 from typing import Any, Dict, Literal, Optional, Union
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.checkpoint.memory import MemorySaver
 
-from .state import RAGState, ExecutionConfig
+from .state import RAGState, ReActState, ExecutionConfig
 from .nodes.context_tree import context_tree_node
 from .nodes.retrieve import retrieve_node
 from .nodes.coordinator import coordinator_node
@@ -63,7 +65,13 @@ from .nodes.specialists import (
 
 logger = logging.getLogger(__name__)
 
-# Global graph instance (singleton)
+# =============================================================================
+# LEGACY RAG Graph (unused — kept for reference)
+# The RAG graph is a 23-node fixed pipeline that was replaced by the 3-node
+# ReAct agent graph below. execute_langgraph_query() routes exclusively to
+# execute_react_query(), so this code is never invoked. Retained for rollback.
+# =============================================================================
+
 _rag_graph: Optional[StateGraph] = None
 
 
@@ -501,4 +509,230 @@ async def execute_rag_query(
             "sources": [],
             "thread_id": initial_state["thread_id"],
             "error": str(e),
+        }
+
+
+# =============================================================================
+# ReAct Agent Graph (ACTIVE — default when LangGraph is enabled)
+# =============================================================================
+
+_react_graph: Optional[StateGraph] = None
+
+
+def create_react_graph(enable_checkpointing: bool = True) -> StateGraph:
+    """Create the ReAct agent StateGraph.
+
+    Simplified graph with 3 nodes + 2 conditional edges:
+
+        START → classify → [fast_path → END]
+                          → react_loop ⟲ (think → act → observe → decide)
+                          → synthesize → END
+
+    Args:
+        enable_checkpointing: Whether to enable MemorySaver for conversation persistence
+
+    Returns:
+        Compiled StateGraph
+    """
+    from .nodes.classify import classify_node
+    from .nodes.react_loop import react_loop_node
+    from .nodes.synthesize_react import synthesize_react_node
+
+    logger.info("Creating ReAct Agent StateGraph")
+
+    workflow = StateGraph(ReActState)
+
+    # 3 nodes (vs 23 in the RAG graph)
+    workflow.add_node("classify", classify_node)
+    workflow.add_node("react_loop", react_loop_node)
+    workflow.add_node("synthesize", synthesize_react_node)
+
+    # Entry point
+    workflow.set_entry_point("classify")
+
+    # classify → fast_path END | react_loop
+    workflow.add_conditional_edges(
+        "classify",
+        _route_from_classify,
+        {
+            "react": "react_loop",
+            "end": END,
+        },
+    )
+
+    # react_loop → react_loop (continue) | synthesize (terminate)
+    workflow.add_conditional_edges(
+        "react_loop",
+        _route_from_react,
+        {
+            "continue": "react_loop",
+            "synthesize": "synthesize",
+        },
+    )
+
+    # synthesize → END
+    workflow.add_edge("synthesize", END)
+
+    # Compile
+    if enable_checkpointing:
+        memory = MemorySaver()
+        compiled = workflow.compile(checkpointer=memory)
+        logger.info("ReAct graph compiled with checkpointing")
+    else:
+        compiled = workflow.compile()
+        logger.info("ReAct graph compiled without checkpointing")
+
+    return compiled
+
+
+def _route_from_classify(state: ReActState) -> str:
+    """Route from classify node: fast-path or react loop."""
+    if state.get("fast_path_used") or state.get("is_complete"):
+        return "end"
+    return "react"
+
+
+def _route_from_react(state: ReActState) -> str:
+    """Route from react_loop: continue iterating or synthesize."""
+    if state.get("is_complete"):
+        return "synthesize"
+    return "continue"
+
+
+def get_react_graph(force_new: bool = False) -> StateGraph:
+    """Get or create the global ReAct graph instance (singleton)."""
+    global _react_graph
+    if _react_graph is None or force_new:
+        _react_graph = create_react_graph()
+    return _react_graph
+
+
+async def execute_react_query(
+    query: str,
+    tenant_id: str,
+    user_id: Optional[str] = None,
+    user_role_ids: Optional[list] = None,
+    is_admin: bool = False,
+    thread_id: Optional[str] = None,
+    conversation_history: Optional[list] = None,
+    context: Optional[Dict[str, Any]] = None,
+    max_steps: int = 10,
+) -> Dict[str, Any]:
+    """Execute a query using the ReAct agent graph.
+
+    High-level API analogous to execute_rag_query but for the ReAct graph.
+
+    Args:
+        query: User's query
+        tenant_id: Tenant ID for ACL
+        user_id: Optional user ID
+        user_role_ids: Optional role IDs
+        is_admin: Admin bypass flag
+        thread_id: Optional conversation thread ID
+        conversation_history: Previous conversation messages
+        context: Request context (document_id, social_channel_mode, etc.)
+        max_steps: Maximum ReAct iterations (default: 10)
+
+    Returns:
+        Dict with success, answer, sources, thread_id, metadata
+    """
+    if not tenant_id or not tenant_id.strip():
+        return {
+            "success": False,
+            "answer": "Error: tenant_id is required",
+            "sources": [],
+            "thread_id": thread_id or "",
+            "fast_path": False,
+            "latency_ms": 0,
+            "metadata": {"error": "tenant_id_required"},
+        }
+
+    from .state import create_initial_react_state
+    from langchain_core.messages import HumanMessage, AIMessage
+
+    start_time = time.time()
+
+    # Convert conversation history
+    langchain_history = None
+    if conversation_history:
+        langchain_history = []
+        for msg in conversation_history:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "user":
+                langchain_history.append(HumanMessage(content=content))
+            elif role == "assistant":
+                langchain_history.append(AIMessage(content=content))
+
+    # Hydrate upload context
+    try:
+        from app.services.upload_context_service import upload_context_service
+        hydrated_context = upload_context_service.hydrate_context(context or {})
+    except Exception:
+        hydrated_context = context or {}
+
+    # Create initial state
+    initial_state = create_initial_react_state(
+        query=query,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        user_role_ids=user_role_ids,
+        is_admin=is_admin,
+        thread_id=thread_id,
+        conversation_history=langchain_history,
+        request_context=hydrated_context,
+        max_steps=max_steps,
+    )
+
+    # Get graph
+    graph = get_react_graph()
+
+    # Execute
+    config_dict = {"configurable": {"thread_id": thread_id or initial_state["thread_id"]}}
+
+    try:
+        from app.core.config import settings as _settings
+        result = await asyncio.wait_for(
+            graph.ainvoke(initial_state, config_dict),
+            timeout=_settings.react_global_timeout_seconds,
+        )
+
+        latency_ms = (time.time() - start_time) * 1000
+
+        return {
+            "success": result.get("success", False),
+            "answer": result.get("final_answer", ""),
+            "sources": result.get("sources", []),
+            "thread_id": result.get("thread_id", ""),
+            "fast_path": result.get("fast_path_used", False),
+            "latency_ms": latency_ms,
+            "metadata": {
+                **(result.get("metadata") or {}),
+                "graph_type": "react",
+                "total_steps": result.get("current_step", 0),
+                "reasoning_steps": result.get("reasoning_steps", []),
+            },
+        }
+
+    except asyncio.TimeoutError:
+        latency_ms = (time.time() - start_time) * 1000
+        logger.error(f"ReAct query timed out after {_settings.react_global_timeout_seconds}s")
+        return {
+            "success": False,
+            "answer": "La consulta ha excedido el tiempo máximo. Intenta con una pregunta más específica.",
+            "sources": [],
+            "thread_id": initial_state["thread_id"],
+            "metadata": {"graph_type": "react", "timeout": True},
+        }
+
+    except Exception as e:
+        logger.error(f"ReAct query execution failed: {e}", exc_info=True)
+
+        return {
+            "success": False,
+            "answer": f"Error processing query: {str(e)}",
+            "sources": [],
+            "thread_id": initial_state["thread_id"],
+            "error": str(e),
+            "metadata": {"graph_type": "react"},
         }

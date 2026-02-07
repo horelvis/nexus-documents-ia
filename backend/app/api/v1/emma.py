@@ -4,14 +4,13 @@ Dedicated router for Emma AI assistant, proxying to emma-agent-service.
 This replaces the legacy /weaviate/emma/* endpoints.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
-from fastapi.responses import StreamingResponse
-from typing import AsyncGenerator
 import logging
 import httpx
 
 from app.api.async_dependencies import get_current_tenant_id_async, get_current_user_async
 from app.db.models import User
 from app.core.config import settings
+from app.core.sse_proxy import proxy_sse_stream
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -91,46 +90,9 @@ async def emma_query_stream(
         body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
         body["is_admin"] = current_user.is_admin
 
-        async def stream_sse() -> AsyncGenerator[bytes, None]:
-            """Stream SSE events from Emma Agent Service to client."""
-            import asyncio
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(300.0, connect=10.0),
-                http2=False,  # Disable HTTP/2 to avoid buffering issues
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    f"{EMMA_SERVICE_URL}/emma/query/stream",
-                    json=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "text/event-stream",
-                        "X-API-Key": settings.MICROSERVICES_API_KEY or "",
-                    },
-                ) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        logger.error(f"❌ Emma stream error: {response.status_code} - {error_text}")
-                        yield f"event: error\ndata: {{\"error\": \"Service error: {response.status_code}\"}}\n\n".encode()
-                        return
-
-                    # Use aiter_lines for SSE - each line is yielded immediately
-                    async for line in response.aiter_lines():
-                        if line:
-                            yield (line + "\n").encode()
-                        else:
-                            # Empty line marks end of SSE event
-                            yield b"\n"
-                        await asyncio.sleep(0)
-
-        return StreamingResponse(
-            stream_sse(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache, no-transform",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            }
+        return await proxy_sse_stream(
+            f"{EMMA_SERVICE_URL}/emma/query/stream", body,
+            timeout=300.0, log_prefix="Emma stream",
         )
 
     except Exception as e:
@@ -190,43 +152,9 @@ async def emma_verified_generate_stream(
         body["tenant_id"] = tenant_id
         body["user_id"] = str(current_user.id)
 
-        async def stream_sse() -> AsyncGenerator[bytes, None]:
-            import asyncio
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(600.0, connect=10.0),
-                http2=False,
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    f"{EMMA_SERVICE_URL}/verified/generate/stream",
-                    json=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "text/event-stream",
-                        "X-API-Key": settings.MICROSERVICES_API_KEY or "",
-                    },
-                ) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        logger.error(f"❌ Verified stream error: {response.status_code} - {error_text}")
-                        yield f"data: {{\"event_type\": \"error\", \"data\": {{\"error\": \"Service error: {response.status_code}\"}}}}\n\n".encode()
-                        return
-
-                    async for line in response.aiter_lines():
-                        if line:
-                            yield (line + "\n").encode()
-                        else:
-                            yield b"\n"
-                        await asyncio.sleep(0)
-
-        return StreamingResponse(
-            stream_sse(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache, no-transform",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            }
+        return await proxy_sse_stream(
+            f"{EMMA_SERVICE_URL}/verified/generate/stream", body,
+            timeout=600.0, log_prefix="Verified stream",
         )
 
     except Exception as e:
@@ -251,43 +179,9 @@ async def emma_predictive_analyze_stream(
         body["tenant_id"] = tenant_id
         body["user_id"] = str(current_user.id)
 
-        async def stream_sse() -> AsyncGenerator[bytes, None]:
-            import asyncio
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(600.0, connect=10.0),
-                http2=False,
-            ) as client:
-                async with client.stream(
-                    "POST",
-                    f"{EMMA_SERVICE_URL}/predictive/analyze/stream",
-                    json=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "text/event-stream",
-                        "X-API-Key": settings.MICROSERVICES_API_KEY or "",
-                    },
-                ) as response:
-                    if response.status_code != 200:
-                        error_text = await response.aread()
-                        logger.error(f"❌ Predictive stream error: {response.status_code} - {error_text}")
-                        yield f"data: {{\"event_type\": \"error\", \"data\": {{\"error\": \"Service error: {response.status_code}\"}}}}\n\n".encode()
-                        return
-
-                    async for line in response.aiter_lines():
-                        if line:
-                            yield (line + "\n").encode()
-                        else:
-                            yield b"\n"
-                        await asyncio.sleep(0)
-
-        return StreamingResponse(
-            stream_sse(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache, no-transform",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            }
+        return await proxy_sse_stream(
+            f"{EMMA_SERVICE_URL}/predictive/analyze/stream", body,
+            timeout=600.0, log_prefix="Predictive stream",
         )
 
     except Exception as e:
@@ -757,4 +651,58 @@ async def emma_heartbeat_digest(
         raise
     except Exception as e:
         logger.error(f"❌ Heartbeat digest error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# CENDOJ Endpoints (proxy to emma-agent-service /emma/cendoj/*)
+# ============================================================================
+
+@router.get("/cendoj/status")
+async def emma_cendoj_status(
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get CENDOJ jurisprudence search status."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/cendoj/status",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ CENDOJ status error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/cendoj/status")
+async def emma_cendoj_status_update(
+    request: Request,
+    current_user: User = Depends(get_current_user_async)
+):
+    """Toggle CENDOJ jurisprudence search on/off."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Solo administradores pueden modificar CENDOJ")
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.patch(
+                f"{EMMA_SERVICE_URL}/emma/cendoj/status",
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                },
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ CENDOJ status update error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

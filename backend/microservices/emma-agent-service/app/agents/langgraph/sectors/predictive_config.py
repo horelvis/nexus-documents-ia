@@ -49,7 +49,7 @@ PREDICTIVE_CONFIGS: Dict[str, PredictiveConfig] = {
             "unfavorable": "Desfavorable",
             "mixed": "Parcialmente estimado",
         },
-        verification_sources=["weaviate", "graph", "public_knowledge", "web"],
+        verification_sources=["weaviate", "graph", "public_knowledge", "jurisprudence", "web"],
         system_prompt_key="predictive.legal",
         disclaimer=(
             "⚠️ Esta predicción es orientativa y NO sustituye el criterio profesional. "

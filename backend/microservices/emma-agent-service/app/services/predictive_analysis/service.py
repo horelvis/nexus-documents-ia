@@ -42,6 +42,8 @@ from typing import AsyncGenerator, Dict, List, Optional
 import httpx
 
 from app.core.config import settings
+from app.core.langfuse_config import trace_context, langfuse_context, observe
+from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 from app.schemas.predictive_analysis import (
     PredictionFactor,
     PredictionRequest,
@@ -65,33 +67,26 @@ from .prediction_synthesizer import synthesize_prediction
 logger = logging.getLogger(__name__)
 
 
+from app.services.shared.deduplication import is_duplicate_with_type
+
+
 def _is_duplicate_factor(
     new_factor: PredictionFactor,
-    existing: List[WeightedFactor],
-    threshold: float = 0.65,
+    weighted: List[WeightedFactor],
+    all_extracted: Optional[List[PredictionFactor]] = None,
+    threshold: float = settings.predictive_duplicate_threshold,
 ) -> bool:
-    """Check if a factor is too similar to any existing factor using word overlap."""
-    if not existing:
-        return False
+    """Check if a factor is too similar to any previously extracted factor.
 
-    new_words = set(new_factor.description.lower().split())
-    if len(new_words) < 3:
-        return False
-
-    for ef in existing:
-        existing_words = set(ef.description.lower().split())
-        if not existing_words:
-            continue
-        intersection = new_words & existing_words
-        union = new_words | existing_words
-        similarity = len(intersection) / len(union) if union else 0
-        if similarity >= threshold:
-            return True
-        # Also check same factor_type + high overlap
-        if ef.factor_type == new_factor.factor_type and similarity >= 0.5:
-            return True
-
-    return False
+    Checks against BOTH weighted (accepted) and all previously extracted
+    factors (including rejected), so the LLM doesn't retry the same factor.
+    """
+    items = [(ef.description, ef.factor_type) for ef in weighted]
+    items += [(ef.description, ef.factor_type) for ef in (all_extracted or [])]
+    return is_duplicate_with_type(
+        new_factor.description, new_factor.factor_type, items,
+        threshold=threshold,
+    )
 
 
 class PredictiveAnalysisService:
@@ -123,7 +118,8 @@ class PredictiveAnalysisService:
         """
         Run predictive analysis with streaming progress events.
 
-        This is the main SSE entry point.
+        This is the main SSE entry point. Delegates to the StopAndGo
+        LangGraph which handles the extract→verify→decide loop.
         """
         await self.initialize()
 
@@ -133,232 +129,90 @@ class PredictiveAnalysisService:
         # Resolve sector config
         config = get_predictive_config(request.sector_override)
 
-        # Clear existing session
-        await self._cache.clear_session(request.tenant_id, session_id)
+        import os
+        sector = os.getenv("ACTIVE_SECTOR", "").strip().lower() or config.system_prompt_key
 
-        # Store metadata
-        from datetime import datetime, timezone
-        await self._cache.store_session_metadata(
-            request.tenant_id, session_id,
-            {
-                "case_description": request.case_description,
-                "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
-                "session_id": session_id,
-                "sector": config.system_prompt_key,
-            },
-        )
+        with trace_context(
+            "predictive.analyze",
+            session_id=session_id,
+            metadata={"tenant_id": str(request.tenant_id), "sector": sector},
+            input={"case_description": request.case_description[:500]},
+            tags=["predictive", f"sector:{sector}"],
+        ):
+            # Hydrate uploaded texts
+            uploaded_texts: list[dict] = []
+            if request.uploaded_file_ids:
+                try:
+                    from app.services.upload_context_service import upload_context_service
+                    uploaded_texts = upload_context_service.get_texts(request.uploaded_file_ids)
+                    if uploaded_texts:
+                        logger.info(f"📎 Hydrated {len(uploaded_texts)} uploaded doc(s) for predictive analysis")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to hydrate uploads: {e}")
 
-        # Hydrate uploaded texts
-        uploaded_texts: list[dict] = []
-        if request.uploaded_file_ids:
-            try:
-                from app.services.upload_context_service import upload_context_service
-                uploaded_texts = upload_context_service.get_texts(request.uploaded_file_ids)
-                if uploaded_texts:
-                    logger.info(f"📎 Hydrated {len(uploaded_texts)} uploaded doc(s) for predictive analysis")
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to hydrate uploads: {e}")
-
-        # Get source context
-        source_context = await self._get_source_context(
-            query=request.case_description,
-            tenant_id=request.tenant_id,
-            document_ids=request.context_document_ids,
-            collections=request.collections,
-            uploaded_texts=uploaded_texts,
-        )
-
-        yield PredictiveEvent(
-            event_type=PredictiveEventType.PROGRESS,
-            data={
-                "message": "Context retrieved, starting factor extraction...",
-                "session_id": session_id,
-            },
-            progress_percent=10,
-        )
-
-        # Statistics
-        factors_extracted = 0
-        factors_weighted = 0
-        factors_rejected = 0
-        duplicate_streak = 0
-        max_factors = min(request.max_factors, config.max_factors)
-
-        # Stop-and-go loop
-        while factors_extracted < max_factors:
-            # Get existing factors
-            existing_factors = await self._cache.get_weighted_factors(
-                request.tenant_id, session_id
+            # Build initial state for the stop-and-go graph
+            from app.agents.langgraph.stop_and_go import (
+                get_stop_and_go_graph,
+                stream_stop_and_go,
+                create_initial_state,
             )
 
-            # Check completion
-            if len(existing_factors) >= 3:
-                is_complete = await self._factor_agent.check_completion(
-                    case_description=request.case_description,
-                    config=config,
-                    existing_factors=existing_factors,
-                    source_context=source_context,
-                )
-                if is_complete:
-                    logger.info(f"🏁 Factor extraction complete at {len(existing_factors)} factors")
-                    break
+            max_factors = min(request.max_factors, config.max_factors)
 
-            # Extract next factor
-            factors_extracted += 1
-            factor_position = len(existing_factors) + 1
-
-            try:
-                factor = await self._factor_agent.extract_next_factor(
-                    case_description=request.case_description,
-                    config=config,
-                    existing_factors=existing_factors,
-                    source_context=source_context,
-                    factor_number=factor_position,
-                )
-            except Exception as e:
-                logger.error(f"❌ Factor extraction failed: {e}")
-                yield PredictiveEvent(
-                    event_type=PredictiveEventType.ERROR,
-                    data={"error": f"Factor extraction failed: {str(e)}"},
-                )
-                break
-
-            # Deduplicate: skip if too similar to an existing factor
-            if _is_duplicate_factor(factor, existing_factors):
-                logger.info(
-                    f"⏭️ Skipping duplicate factor #{factor_position}: {factor.description[:60]}..."
-                )
-                duplicate_streak += 1
-                if duplicate_streak >= 2:
-                    logger.info("🏁 Stopping extraction: consecutive duplicates detected")
-                    break
-                continue
-            duplicate_streak = 0
-
-            yield PredictiveEvent(
-                event_type=PredictiveEventType.FACTOR_EXTRACTED,
-                factor_id=factor.id,
-                data={
-                    "factor_type": factor.factor_type,
-                    "description": factor.description,
-                    "legal_basis": factor.legal_basis,
-                    "factor_number": factor_position,
+            initial_state = create_initial_state(
+                session_id=session_id,
+                tenant_id=request.tenant_id,
+                user_id=request.user_id,
+                query=request.case_description,
+                mode="predictive",
+                max_items=max_factors,
+                confidence_threshold=request.confidence_threshold,
+                uploaded_texts=uploaded_texts,
+                collections=request.collections,
+                context_document_ids=request.context_document_ids,
+                mode_config={
+                    "sector_override": request.sector_override,
+                    "verification_sources": config.verification_sources,
                 },
-                progress_percent=min(80, 10 + (factors_extracted * 70 // max_factors)),
             )
 
-            # Search for evidence
-            yield PredictiveEvent(
-                event_type=PredictiveEventType.FACTOR_VERIFICATION_STARTED,
-                factor_id=factor.id,
-                data={"message": "Searching for supporting documents..."},
-            )
+            graph = get_stop_and_go_graph()
 
-            try:
-                evidence = await self._search_evidence(
-                    factor=factor,
-                    tenant_id=request.tenant_id,
-                    collections=request.collections,
-                    uploaded_texts=uploaded_texts,
-                    config=config,
-                )
+            # Map graph events → PredictiveEvent SSE types
+            EVENT_TYPE_MAP = {
+                "progress": PredictiveEventType.PROGRESS,
+                "predictive_item_extracted": PredictiveEventType.FACTOR_EXTRACTED,
+                "predictive_verification_started": PredictiveEventType.FACTOR_VERIFICATION_STARTED,
+                "factor_weighted": PredictiveEventType.FACTOR_WEIGHTED,
+                "factor_rejected": PredictiveEventType.FACTOR_REJECTED,
+                "predictive_complete": PredictiveEventType.PREDICTION_COMPLETE,
+                "error": PredictiveEventType.ERROR,
+            }
 
-                # Evaluate evidence outcomes
-                matches = await evaluate_evidence_outcomes(factor, evidence, config)
+            async for event in stream_stop_and_go(graph, initial_state):
+                event_type_str = event.get("event_type", "progress")
+                mapped_type = EVENT_TYPE_MAP.get(event_type_str)
 
-                # Weight the factor
-                weighted = await self._weight_factor(
-                    factor, matches, config, request.confidence_threshold
-                )
+                if mapped_type is None:
+                    continue
 
-                if weighted:
-                    await self._cache.add_weighted_factor(
-                        request.tenant_id, session_id, weighted
-                    )
-                    factors_weighted += 1
-
+                # Compute execution_time_ms for the final event
+                if mapped_type == PredictiveEventType.PREDICTION_COMPLETE:
+                    execution_time_ms = int((time.time() - start_time) * 1000)
+                    data = event.get("data", {})
+                    data["execution_time_ms"] = execution_time_ms
                     yield PredictiveEvent(
-                        event_type=PredictiveEventType.FACTOR_WEIGHTED,
-                        factor_id=factor.id,
-                        data={
-                            "factor_type": weighted.factor_type,
-                            "description": weighted.description,
-                            "weight": weighted.weight,
-                            "confidence": weighted.confidence,
-                            "outcome": weighted.outcome,
-                            "outcome_label": config.outcome_labels.get(weighted.outcome, weighted.outcome),
-                            "matches_count": len(weighted.supporting_matches),
-                        },
+                        event_type=mapped_type,
+                        data=data,
+                        progress_percent=100,
                     )
                 else:
-                    factors_rejected += 1
                     yield PredictiveEvent(
-                        event_type=PredictiveEventType.FACTOR_REJECTED,
-                        factor_id=factor.id,
-                        data={
-                            "factor_type": factor.factor_type,
-                            "description": factor.description,
-                            "reason": "Insufficient evidence or below confidence threshold",
-                        },
+                        event_type=mapped_type,
+                        factor_id=event.get("factor_id") or event.get("item_id"),
+                        data=event.get("data", {}),
+                        progress_percent=event.get("progress_percent"),
                     )
-
-            except Exception as e:
-                logger.error(f"❌ Factor verification failed: {e}")
-                factors_rejected += 1
-                yield PredictiveEvent(
-                    event_type=PredictiveEventType.FACTOR_REJECTED,
-                    factor_id=factor.id,
-                    data={"error": str(e)},
-                )
-
-            await self._cache.extend_ttl(request.tenant_id, session_id)
-
-        # Synthesize prediction
-        yield PredictiveEvent(
-            event_type=PredictiveEventType.SYNTHESIS_STARTED,
-            data={"message": "Synthesizing prediction..."},
-            progress_percent=85,
-        )
-
-        final_factors = await self._cache.get_weighted_factors(
-            request.tenant_id, session_id
-        )
-        execution_time_ms = int((time.time() - start_time) * 1000)
-
-        result = await synthesize_prediction(
-            session_id=session_id,
-            factors=final_factors,
-            config=config,
-            case_description=request.case_description,
-            execution_time_ms=execution_time_ms,
-        )
-
-        # Store result in cache
-        await self._cache.store_result(request.tenant_id, session_id, result)
-
-        yield PredictiveEvent(
-            event_type=PredictiveEventType.PREDICTION_COMPLETE,
-            data={
-                "session_id": session_id,
-                "probability": result.probability,
-                "confidence_interval": result.confidence_interval,
-                "primary_outcome": result.primary_outcome,
-                "primary_outcome_label": config.outcome_labels.get(
-                    result.primary_outcome, result.primary_outcome
-                ),
-                "outcome_probabilities": {
-                    k: {"probability": v, "label": config.outcome_labels.get(k, k)}
-                    for k, v in result.outcome_probabilities.items()
-                },
-                "factors_extracted": factors_extracted,
-                "factors_weighted": factors_weighted,
-                "factors_rejected": factors_rejected,
-                "recommendation": result.recommendation,
-                "disclaimer": result.disclaimer,
-                "execution_time_ms": execution_time_ms,
-            },
-            progress_percent=100,
-        )
 
     async def analyze_sync(self, request: PredictionRequest) -> PredictionResponse:
         """Synchronous analysis — waits for complete result."""
@@ -450,7 +304,7 @@ class PredictiveAnalysisService:
         config: Optional[PredictiveConfig] = None,
     ) -> list[dict]:
         """Search Weaviate + web for evidence supporting/contradicting a factor."""
-        SIMILARITY_THRESHOLD = 0.60
+        similarity_threshold = settings.predictive_similarity_threshold
         evidence: list[dict] = []
 
         # Weaviate search
@@ -486,12 +340,12 @@ class PredictiveAnalysisService:
                         for r in results:
                             distance = r.get("distance", 1.0)
                             similarity = 1.0 - min(distance, 1.0)
-                            if similarity >= SIMILARITY_THRESHOLD:
+                            if similarity >= similarity_threshold:
                                 evidence.append({
                                     "document_id": r.get("document_id", ""),
                                     "document_title": r.get("title", ""),
                                     "chunk_id": r.get("chunk_id"),
-                                    "text_excerpt": r.get("content", "")[:500],
+                                    "text_excerpt": r.get("content", "")[:settings.predictive_evidence_excerpt_limit],
                                     "similarity_score": round(similarity, 3),
                                     "source": "internal",
                                 })
@@ -527,7 +381,7 @@ class PredictiveAnalysisService:
                         "document_id": f"web:{url_hash}",
                         "document_title": wr.title,
                         "chunk_id": None,
-                        "text_excerpt": wr.snippet[:500],
+                        "text_excerpt": wr.snippet[:settings.predictive_evidence_excerpt_limit],
                         "similarity_score": 0.65,
                         "source": "web",
                         "url": wr.url,
@@ -597,6 +451,7 @@ class PredictiveAnalysisService:
             extraction_order=factor.extraction_order,
         )
 
+    @observe(name="predictive.weight_factor")
     async def _llm_weight_factor(
         self,
         factor: PredictionFactor,
@@ -604,25 +459,48 @@ class PredictiveAnalysisService:
         config: PredictiveConfig,
     ) -> tuple[float, float]:
         """Use LLM to determine factor weight and confidence."""
+        client = get_langfuse_prompt_client()
         matches_summary = "\n".join(
             f"- [{m.outcome}] {m.text_excerpt[:200]}..."
             for m in matches[:5]
         )
 
-        system_prompt = (
-            "You are an expert analyst evaluating the weight of a factor in predictive analysis.\n\n"
-            "Respond ONLY with a JSON object:\n"
+        # System prompt via Langfuse/YAML
+        _FALLBACK_WEIGHT_SYSTEM = (
+            "Eres un analista experto evaluando el peso de un factor en análisis predictivo.\n\n"
+            "Responde SOLO con un objeto JSON:\n"
             '{"weight": 0.0-1.0, "confidence": 0.0-1.0}\n\n'
-            "weight: How impactful is this factor? (0=negligible, 1=decisive)\n"
-            "confidence: How certain are you? (0=no evidence, 1=strong evidence)\n"
-            "NEVER use <think> tags."
+            "weight: ¿Qué tan impactante es este factor? (0=insignificante, 1=decisivo)\n"
+            "confidence: ¿Qué tan seguro estás? (0=sin evidencia, 1=evidencia sólida)\n"
+            "NUNCA uses etiquetas <think>."
         )
+        sys_cached = await client.get_prompt(
+            "emma_predictive_weight_system",
+            fallback=_FALLBACK_WEIGHT_SYSTEM,
+        )
+        system_prompt = sys_cached.content if sys_cached else _FALLBACK_WEIGHT_SYSTEM
 
-        user_prompt = (
-            f"FACTOR: [{factor.factor_type}] {factor.description}\n"
-            f"Legal basis: {factor.legal_basis or 'N/A'}\n\n"
-            f"SUPPORTING EVIDENCE ({len(matches)} matches):\n{matches_summary}\n\n"
-            "Evaluate the weight and confidence. JSON only."
+        # User prompt via Langfuse/YAML
+        _FALLBACK_WEIGHT_USER = (
+            "FACTOR: [{factor_type}] {factor_description}\n"
+            "Base legal: {legal_basis}\n\n"
+            "EVIDENCIA DE APOYO ({match_count} coincidencias):\n{matches_summary}\n\n"
+            "Evalúa el peso y la confianza. Solo JSON."
+        )
+        user_variables = {
+            "factor_type": factor.factor_type,
+            "factor_description": factor.description,
+            "legal_basis": factor.legal_basis or "N/A",
+            "match_count": str(len(matches)),
+            "matches_summary": matches_summary,
+        }
+        user_cached = await client.get_prompt(
+            "emma_predictive_weight_user",
+            variables=user_variables,
+            fallback=_FALLBACK_WEIGHT_USER.format(**user_variables),
+        )
+        user_prompt = user_cached.content if user_cached else _FALLBACK_WEIGHT_USER.format(
+            **user_variables
         )
 
         try:
@@ -654,8 +532,8 @@ class PredictiveAnalysisService:
                 try:
                     result = json.loads(content)
                     return (
-                        float(result.get("weight", 0.5)),
-                        float(result.get("confidence", 0.5)),
+                        float(result.get("weight", settings.predictive_fallback_weight)),
+                        float(result.get("confidence", settings.predictive_fallback_confidence)),
                     )
                 except json.JSONDecodeError:
                     json_match = re.search(r'\{[^{}]*"weight"[^{}]*\}', content)
@@ -663,8 +541,8 @@ class PredictiveAnalysisService:
                         try:
                             result = json.loads(json_match.group())
                             return (
-                                float(result.get("weight", 0.5)),
-                                float(result.get("confidence", 0.5)),
+                                float(result.get("weight", settings.predictive_fallback_weight)),
+                                float(result.get("confidence", settings.predictive_fallback_confidence)),
                             )
                         except json.JSONDecodeError:
                             pass

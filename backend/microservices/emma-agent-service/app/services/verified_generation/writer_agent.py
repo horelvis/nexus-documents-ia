@@ -21,6 +21,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import List, Optional
@@ -28,66 +29,86 @@ from typing import List, Optional
 import httpx
 
 from app.core.config import settings
+from app.core.langfuse_config import observe
 from app.schemas.verified_generation import CandidateClaim, VerifiedClaim
+from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
 logger = logging.getLogger(__name__)
 
-# Writer Agent prompts
-WRITER_SYSTEM_PROMPT = """You are a precise document writer that generates factual claims.
+# ── Fallback prompts (Spanish) — used when Langfuse + YAML are both unavailable ──
 
-CRITICAL RULES:
-1. Generate EXACTLY ONE factual claim at a time
-2. Each claim must be a complete, self-contained statement
-3. Claims must be verifiable against the source documents
-4. Do NOT generate opinions, speculation, or uncertain statements
-5. Use specific data: names, dates, numbers, percentages when available
-6. Keep claims concise (1-2 sentences max)
-7. Write in the same language as the source documents
+FALLBACK_CLAIM_SYSTEM = """Eres un redactor preciso de documentos que genera afirmaciones factuales.
 
-FORMAT:
-- Output ONLY the claim text, nothing else
-- No bullet points, numbers, or prefixes
-- No explanations or meta-commentary
-- DO NOT use <think> tags or reasoning blocks
-- DO NOT explain your thought process
-- Just output the claim directly
+REGLAS CRÍTICAS:
+1. Genera EXACTAMENTE UNA afirmación factual por llamada
+2. Cada afirmación debe ser una declaración completa y autónoma
+3. Las afirmaciones deben ser verificables contra los documentos fuente
+4. NO generes opiniones, especulaciones ni declaraciones inciertas
+5. Usa datos específicos: nombres, fechas, números, porcentajes cuando estén disponibles
+6. Mantén las afirmaciones concisas (1-2 frases máximo)
+7. Escribe SIEMPRE en el mismo idioma que los documentos fuente
 
-EXAMPLES OF GOOD CLAIMS:
+FORMATO:
+- Genera SOLO el texto de la afirmación, nada más
+- Sin viñetas, números ni prefijos
+- Sin explicaciones ni meta-comentarios
+- NO uses etiquetas <think> ni bloques de razonamiento
+- NO expliques tu proceso de pensamiento
+- Solo genera la afirmación directamente
+
+EJEMPLOS DE BUENAS AFIRMACIONES:
 - "El contrato tiene una vigencia de 24 meses a partir del 1 de enero de 2024."
 - "La cláusula de penalización establece un 5% del valor total por incumplimiento."
 - "ACME Corporation es responsable del mantenimiento del software según la sección 4.2."
 
-EXAMPLES OF BAD CLAIMS:
-- "El contrato parece establecer..." (uncertain)
-- "Según mi análisis..." (meta-commentary)
-- "1. El contrato..." (numbered/bulleted)
-- "<think>Let me analyze...</think>" (thinking tags - NEVER USE)
+EJEMPLOS DE MALAS AFIRMACIONES:
+- "El contrato parece establecer..." (incierto)
+- "Según mi análisis..." (meta-comentario)
+- "1. El contrato..." (numerado/con viñeta)
+- "<think>Voy a analizar...</think>" (etiquetas de pensamiento - NUNCA USAR)
 """
 
-WRITER_USER_PROMPT_TEMPLATE = """Generate the NEXT factual claim for this document.
+FALLBACK_CLAIM_USER_NEXT = """Genera la SIGUIENTE afirmación factual para este documento.
 
-QUERY/TOPIC:
+CONSULTA/TEMA:
 {query}
 
-SOURCE CONTEXT (from documents):
+CONTEXTO FUENTE (de documentos):
 {source_context}
 
-PREVIOUSLY VERIFIED CLAIMS (build on these, don't repeat):
+AFIRMACIONES PREVIAMENTE VERIFICADAS (complementa estas, no repitas):
 {verified_claims_text}
 
-CLAIM NUMBER TO GENERATE: {claim_number}
+NÚMERO DE AFIRMACIÓN A GENERAR: {claim_number}
 
-Generate ONLY ONE new factual claim. Output the claim text only, nothing else."""
+Genera SOLO UNA nueva afirmación factual. Solo el texto de la afirmación, nada más."""
 
-WRITER_FIRST_CLAIM_PROMPT = """Generate the FIRST factual claim for this document.
+FALLBACK_CLAIM_USER_FIRST = """Genera la PRIMERA afirmación factual para este documento.
 
-QUERY/TOPIC:
+CONSULTA/TEMA:
 {query}
 
-SOURCE CONTEXT (from documents):
+CONTEXTO FUENTE (de documentos):
 {source_context}
 
-Generate ONLY ONE factual claim to start the document. Output the claim text only, nothing else."""
+Genera SOLO UNA afirmación factual para iniciar el documento. Solo el texto de la afirmación, nada más."""
+
+FALLBACK_COMPLETION_SYSTEM = "Eres un verificador de completitud de documentos. Responde SOLO con SÍ o NO."
+
+FALLBACK_COMPLETION_USER = """Determina si este documento está COMPLETO.
+
+CONSULTA/TEMA:
+{query}
+
+CONTEXTO FUENTE:
+{source_context}
+
+AFIRMACIONES GENERADAS HASTA AHORA:
+{verified_claims_text}
+
+¿Está completo el documento? Responde SOLO "SÍ" o "NO".
+- SÍ: Toda la información importante de las fuentes ha sido capturada
+- NO: Hay más información relevante por incluir"""
 
 
 class WriterAgent:
@@ -120,6 +141,7 @@ class WriterAgent:
         self._temperature = temperature
         self._max_tokens = max_tokens
 
+    @observe(name="verified.generate_claim")
     async def generate_next_claim(
         self,
         query: str,
@@ -143,25 +165,46 @@ class WriterAgent:
         if claim_number is None:
             claim_number = len(verified_claims) + 1
 
+        client = get_langfuse_prompt_client()
+
+        # Resolve system prompt via Langfuse → YAML → fallback
+        sys_cached = await client.get_prompt(
+            "emma_verified_claim_system",
+            fallback=FALLBACK_CLAIM_SYSTEM,
+        )
+        system_prompt = sys_cached.content if sys_cached else FALLBACK_CLAIM_SYSTEM
+
         # Build user prompt
         if verified_claims:
             verified_text = self._format_verified_claims(verified_claims)
-            user_prompt = WRITER_USER_PROMPT_TEMPLATE.format(
-                query=query,
-                source_context=source_context[:4000],  # Limit context
-                verified_claims_text=verified_text,
-                claim_number=claim_number,
+            variables = {
+                "query": query,
+                "source_context": source_context[:4000],
+                "verified_claims_text": verified_text,
+                "claim_number": str(claim_number),
+            }
+            user_cached = await client.get_prompt(
+                "emma_verified_claim_user_next",
+                variables=variables,
+                fallback=FALLBACK_CLAIM_USER_NEXT.format(**variables),
             )
+            user_prompt = user_cached.content if user_cached else FALLBACK_CLAIM_USER_NEXT.format(**variables)
         else:
             # First claim - simpler prompt
-            user_prompt = WRITER_FIRST_CLAIM_PROMPT.format(
-                query=query,
-                source_context=source_context[:4000],
+            variables = {
+                "query": query,
+                "source_context": source_context[:4000],
+            }
+            user_cached = await client.get_prompt(
+                "emma_verified_claim_user_first",
+                variables=variables,
+                fallback=FALLBACK_CLAIM_USER_FIRST.format(**variables),
             )
+            user_prompt = user_cached.content if user_cached else FALLBACK_CLAIM_USER_FIRST.format(**variables)
 
         # Generate claim
         raw_text = await self._call_vllm(
-            system_prompt=WRITER_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
         logger.info(f"🔍 Raw vLLM response ({len(raw_text)} chars): {raw_text[:300]}")
@@ -185,6 +228,7 @@ class WriterAgent:
 
         return candidate
 
+    @observe(name="verified.check_completion")
     async def check_completion(
         self,
         query: str,
@@ -209,30 +253,36 @@ class WriterAgent:
             # Minimum 3 claims before checking completion
             return False
 
+        client = get_langfuse_prompt_client()
         verified_text = self._format_verified_claims(verified_claims)
 
-        check_prompt = f"""Determine if this document is COMPLETE.
+        # System prompt
+        sys_cached = await client.get_prompt(
+            "emma_verified_completion_system",
+            fallback=FALLBACK_COMPLETION_SYSTEM,
+        )
+        system_prompt = sys_cached.content if sys_cached else FALLBACK_COMPLETION_SYSTEM
 
-QUERY/TOPIC:
-{query}
-
-SOURCE CONTEXT:
-{source_context[:2000]}
-
-CLAIMS GENERATED SO FAR:
-{verified_text}
-
-Is the document complete? Answer ONLY "YES" or "NO".
-- YES: All important information from the source has been captured
-- NO: There is more relevant information to include"""
+        # User prompt
+        variables = {
+            "query": query,
+            "source_context": source_context[:2000],
+            "verified_claims_text": verified_text,
+        }
+        user_cached = await client.get_prompt(
+            "emma_verified_completion_user",
+            variables=variables,
+            fallback=FALLBACK_COMPLETION_USER.format(**variables),
+        )
+        check_prompt = user_cached.content if user_cached else FALLBACK_COMPLETION_USER.format(**variables)
 
         response = await self._call_vllm(
-            system_prompt="You are a document completion checker. Answer only YES or NO.",
+            system_prompt=system_prompt,
             user_prompt=check_prompt,
         )
 
         response = response.strip().upper()
-        is_complete = "YES" in response
+        is_complete = "SÍ" in response or "SI" in response or "YES" in response
 
         logger.info(
             f"🏁 Completion check: {is_complete} "
@@ -381,7 +431,7 @@ Is the document complete? Answer ONLY "YES" or "NO".
 
         # Fallback: direct vLLM call
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=settings.agent_raw_vllm_timeout_seconds) as client:
                 payload = {
                     "model": self._vllm_model,
                     "messages": [
@@ -416,15 +466,34 @@ Is the document complete? Answer ONLY "YES" or "NO".
 
 
 # =============================================================================
-# Singleton Instance
+# Singleton Instance (with asyncio.Lock for race-safe initialization)
 # =============================================================================
 
 _writer_agent: Optional[WriterAgent] = None
+_writer_agent_lock: Optional["asyncio.Lock"] = None
+
+
+def _get_writer_lock() -> "asyncio.Lock":
+    """Lazy lock creation (must be called inside a running event loop)."""
+    global _writer_agent_lock
+    if _writer_agent_lock is None:
+        _writer_agent_lock = asyncio.Lock()
+    return _writer_agent_lock
 
 
 def get_writer_agent() -> WriterAgent:
-    """Get the global WriterAgent singleton."""
+    """Get the global WriterAgent singleton (sync — init is cheap, no I/O)."""
     global _writer_agent
     if _writer_agent is None:
         _writer_agent = WriterAgent(temperature=settings.verified_claim_temperature)
+    return _writer_agent
+
+
+async def get_writer_agent_async() -> WriterAgent:
+    """Get the global WriterAgent singleton (async — race-safe)."""
+    global _writer_agent
+    if _writer_agent is None:
+        async with _get_writer_lock():
+            if _writer_agent is None:
+                _writer_agent = WriterAgent(temperature=settings.verified_claim_temperature)
     return _writer_agent

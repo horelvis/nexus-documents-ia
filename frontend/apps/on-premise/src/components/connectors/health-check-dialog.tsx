@@ -329,10 +329,8 @@ export function HealthCheckDialog({
               )}
 
               {/* Microsoft/Google specific details */}
-              {(connector.connector_type === 'sharepoint' ||
-                connector.connector_type === 'onedrive' ||
-                connector.connector_type === 'google_drive' ||
-                connector.connector_type === 'google_workspace') && (
+              {(connector.connector_type === 'onedrive' ||
+                connector.connector_type === 'google_drive') && (
                 <Card>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -365,46 +363,6 @@ export function HealthCheckDialog({
                 </Card>
               )}
 
-              {/* S3/Azure specific details */}
-              {(connector.connector_type === 's3' ||
-                connector.connector_type === 'azure_blob') && (
-                <Card>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium flex items-center gap-2">
-                      <IconServer className="h-4 w-4 text-muted-foreground" />
-                      Configuración de Almacenamiento
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-2">
-                      {details.bucket && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Bucket</span>
-                          <span className="font-medium">{details.bucket}</span>
-                        </div>
-                      )}
-                      {details.container && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Container</span>
-                          <span className="font-medium">{details.container}</span>
-                        </div>
-                      )}
-                      {details.region && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Región</span>
-                          <span className="font-medium">{details.region}</span>
-                        </div>
-                      )}
-                      {details.storage_account && (
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Storage Account</span>
-                          <span className="font-medium">{details.storage_account}</span>
-                        </div>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
 
               {/* Database-specific details */}
               {connector.connector_type === 'database' && (

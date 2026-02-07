@@ -37,6 +37,7 @@ References:
 - https://platform.openai.com/docs/api-reference/chat
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -728,20 +729,23 @@ def create_llm_client_from_settings() -> LLMClient:
     return LLMClient(config)
 
 
-# Global client instance (lazy initialization)
+# Global client instance (lazy initialization with double-check locking)
 _llm_client: Optional[LLMClient] = None
+_llm_client_lock = asyncio.Lock()
 
 
 async def get_llm_client() -> LLMClient:
     """
-    Get global LLM client instance.
+    Get global LLM client instance (thread-safe with double-check locking).
 
     Returns:
         Shared LLMClient instance
     """
     global _llm_client
     if _llm_client is None:
-        _llm_client = create_llm_client_from_settings()
+        async with _llm_client_lock:
+            if _llm_client is None:
+                _llm_client = create_llm_client_from_settings()
     return _llm_client
 
 

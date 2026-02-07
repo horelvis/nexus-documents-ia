@@ -59,7 +59,7 @@ _user_role_ids_var: ContextVar[Optional[list]] = ContextVar('user_role_ids', def
 _is_admin_var: ContextVar[bool] = ContextVar('is_admin', default=False)
 _session_id_var: ContextVar[Optional[str]] = ContextVar('session_id', default=None)
 _document_id_var: ContextVar[Optional[str]] = ContextVar('document_id', default=None)
-_extra_context_var: ContextVar[Dict[str, Any]] = ContextVar('extra_context', default={})
+_extra_context_var: ContextVar[Dict[str, Any]] = ContextVar('extra_context')
 
 
 def set_execution_context(
@@ -191,7 +191,10 @@ def resolve_document_id(llm_provided: Optional[str] = None) -> Optional[str]:
 
 def get_extra_context() -> Dict[str, Any]:
     """Get additional context values."""
-    return _extra_context_var.get()
+    try:
+        return _extra_context_var.get()
+    except LookupError:
+        return {}
 
 
 def get_tenant_id_or_raise() -> str:

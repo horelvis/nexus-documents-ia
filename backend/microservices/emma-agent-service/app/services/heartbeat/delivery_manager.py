@@ -364,12 +364,12 @@ class DeliveryManager:
             "delivered_at": insight.delivered_at.isoformat() if insight.delivered_at else "",
             "created_at": insight.created_at.isoformat(),
         })
-        await r.expire(key, 86400 * 7)  # 7 days TTL
+        await r.expire(key, settings.heartbeat_insight_ttl_seconds)
 
         # Add to tenant's insight list
         list_key = f"emma:insights:{tenant_id}:list"
         await r.lpush(list_key, insight.id)
-        await r.ltrim(list_key, 0, 99)  # Keep last 100
+        await r.ltrim(list_key, 0, settings.heartbeat_max_insights_stored - 1)
 
     async def _get_delivery_stats(self, tenant_id: str) -> Dict[str, Any]:
         """Get current delivery statistics for rate limiting."""

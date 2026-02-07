@@ -278,26 +278,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     checkAuth()
   }, [searchParams, pathname, handleCallback, fetchUser, tryRefreshTokens])
 
-  // Proactive token refresh: schedule a refresh before the access token expires
-  // so the user stays authenticated for the full SSO session (e.g. 6 hours)
+  // Proactive token refresh: schedule a self-sustaining chain of refreshes
+  // so the user stays authenticated for the full SSO session (e.g. 24 hours).
+  // Each successful refresh re-reads tokens from sessionStorage and schedules the next one.
   useEffect(() => {
     if (!isAuthenticated) return
 
-    const tokens = getStoredTokens()
-    if (!tokens?.refresh_token) return
+    let cancelled = false
+    let timerId: ReturnType<typeof setTimeout> | null = null
 
-    const delay = msUntilRefresh(tokens)
-    console.log(`[Auth] Scheduling token refresh in ${Math.round(delay / 1000)}s`)
+    function scheduleNextRefresh() {
+      // Always read FRESH tokens from sessionStorage (not from closure)
+      const freshTokens = getStoredTokens()
+      if (!freshTokens?.refresh_token || cancelled) return
 
-    const timer = setTimeout(async () => {
-      console.log('[Auth] Proactive token refresh...')
-      const ok = await tryRefreshTokens(tokens)
-      if (!ok) {
-        console.warn('[Auth] Proactive refresh failed, session may expire')
-      }
-    }, delay)
+      const delay = msUntilRefresh(freshTokens)
+      console.log(`[Auth] Scheduling token refresh in ${Math.round(delay / 1000)}s`)
 
-    return () => clearTimeout(timer)
+      timerId = setTimeout(async () => {
+        if (cancelled) return
+        console.log('[Auth] Proactive token refresh...')
+        // Re-read tokens right before refresh (may have been updated by apiClient)
+        const currentTokens = getStoredTokens()
+        if (!currentTokens?.refresh_token || cancelled) return
+
+        const ok = await tryRefreshTokens(currentTokens)
+        if (ok && !cancelled) {
+          // Chain: schedule the next refresh with updated tokens
+          scheduleNextRefresh()
+        } else if (!ok) {
+          console.warn('[Auth] Proactive refresh failed, session may expire')
+        }
+      }, delay)
+    }
+
+    scheduleNextRefresh()
+
+    return () => {
+      cancelled = true
+      if (timerId) clearTimeout(timerId)
+    }
   }, [isAuthenticated, tryRefreshTokens])
 
   // Login - redirect to KeyCloak

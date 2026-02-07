@@ -76,8 +76,14 @@ class VerificationMatch(BaseModel):
     similarity_score: float = Field(..., ge=0.0, le=1.0)
     outcome: str = Field(..., description="Outcome label for this match (sector-specific)")
     supports_factor: bool = Field(..., description="Whether this match supports the factor")
-    source: str = Field(default="internal", description="Source: internal, web, uploaded, public_knowledge")
+    source: str = Field(default="internal", description="Source: internal, web, uploaded, public_knowledge, jurisprudence")
     url: Optional[str] = Field(None, description="URL if web source")
+    # CENDOJ jurisprudence fields (optional, only populated for jurisprudence sources)
+    roj: Optional[str] = Field(None, description="ROJ identifier (e.g., STS 1234/2024)")
+    ecli: Optional[str] = Field(None, description="ECLI identifier")
+    date: Optional[str] = Field(None, description="Resolution date")
+    resolution_type: Optional[str] = Field(None, description="Type of resolution (Sentencia, Auto, etc.)")
+    ponente: Optional[str] = Field(None, description="Reporting judge")
 
 
 class WeightedFactor(BaseModel):

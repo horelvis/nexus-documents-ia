@@ -10,6 +10,8 @@ Produces:
 - Confidence interval
 - Outcome probabilities breakdown
 - Natural language recommendation
+
+Prompts are managed via LangfusePromptClient with YAML fallback.
 """
 
 from __future__ import annotations
@@ -20,11 +22,31 @@ import re
 from typing import Dict, List, Optional
 
 from app.agents.langgraph.sectors.predictive_config import PredictiveConfig
+from app.core.langfuse_config import observe
 from app.schemas.predictive_analysis import PredictionResult, WeightedFactor
+from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
 logger = logging.getLogger(__name__)
 
+# ─── Fallback prompts (Spanish) ───
 
+FALLBACK_REC_SYSTEM = (
+    "Eres un analista experto redactando recomendaciones basadas en factores predictivos.\n"
+    "Escribe una recomendación concisa (3-5 frases) SIEMPRE en ESPAÑOL.\n"
+    "Sé equilibrado, mencionando factores a favor y en contra.\n"
+    "NO uses etiquetas <think>. Responde directamente con la recomendación."
+)
+
+FALLBACK_REC_USER = (
+    "DESCRIPCIÓN DEL CASO:\n{case_description}\n\n"
+    "FACTORES ANALIZADOS:\n{factors_summary}\n\n"
+    "RESULTADOS PREDICHOS:\n{outcome_summary}\n\n"
+    "PREDICCIÓN PRINCIPAL: {primary_label} ({primary_probability})\n\n"
+    "Escribe una recomendación concisa (3-5 frases) en español. Sé específico sobre los factores clave."
+)
+
+
+@observe(name="predictive.synthesize")
 async def synthesize_prediction(
     session_id: str,
     factors: List[WeightedFactor],
@@ -47,6 +69,33 @@ async def synthesize_prediction(
     """
     outcome_keys = list(config.outcome_labels.keys())
 
+    # Determine active sector
+    import os
+    active_sector = os.getenv("ACTIVE_SECTOR", "").strip().lower() or None
+
+    # --- Handle insufficient evidence (no weighted factors) ---
+    if not factors:
+        logger.warning("⚠️ No weighted factors — insufficient evidence for prediction")
+        n = len(outcome_keys)
+        uniform = {k: round(1.0 / n, 3) for k in outcome_keys}
+        return PredictionResult(
+            session_id=session_id,
+            probability=0.0,
+            confidence_interval=[0.0, round(1.0 / n, 3)],
+            primary_outcome=outcome_keys[0] if outcome_keys else "unknown",
+            outcome_probabilities=uniform,
+            factors=[],
+            recommendation=(
+                "No se encontró evidencia suficiente en los documentos disponibles para generar "
+                "una predicción fiable. Los factores extraídos no superaron el umbral de confianza "
+                "requerido. Se recomienda aportar documentación adicional (contratos, informes "
+                "periciales, resoluciones judiciales) y repetir el análisis."
+            ),
+            disclaimer=config.disclaimer,
+            sector=active_sector,
+            execution_time_ms=execution_time_ms,
+        )
+
     # --- Step 1: Statistical aggregation ---
     outcome_probs = _compute_outcome_probabilities(factors, outcome_keys)
 
@@ -61,10 +110,6 @@ async def synthesize_prediction(
     recommendation = await _generate_recommendation(
         factors, config, case_description, outcome_probs, primary_outcome
     )
-
-    # Determine active sector
-    import os
-    active_sector = os.getenv("ACTIVE_SECTOR", "").strip().lower() or None
 
     result = PredictionResult(
         session_id=session_id,
@@ -167,6 +212,8 @@ async def _generate_recommendation(
     primary_outcome: str,
 ) -> str:
     """Generate natural language recommendation using LLM."""
+    client = get_langfuse_prompt_client()
+
     # Build factors summary
     factors_summary = "\n".join(
         f"- [{f.factor_type}] {f.description} (weight: {f.weight:.2f}, outcome: {f.outcome})"
@@ -180,26 +227,31 @@ async def _generate_recommendation(
     )
 
     primary_label = config.outcome_labels.get(primary_outcome, primary_outcome)
+    primary_probability = f"{outcome_probs.get(primary_outcome, 0):.1%}"
 
-    system_prompt = (
-        "Eres un analista experto redactando recomendaciones basadas en factores predictivos.\n"
-        "Escribe una recomendación concisa (3-5 frases) en ESPAÑOL.\n"
-        "Sé equilibrado, mencionando factores a favor y en contra.\n"
-        "NO uses etiquetas <think>. Responde directamente con la recomendación."
+    # System prompt
+    sys_cached = await client.get_prompt(
+        "emma_predictive_recommendation_system",
+        fallback=FALLBACK_REC_SYSTEM,
     )
+    system_prompt = sys_cached.content if sys_cached else FALLBACK_REC_SYSTEM
 
-    user_prompt = f"""DESCRIPCIÓN DEL CASO:
-{case_description[:2000]}
-
-FACTORES ANALIZADOS:
-{factors_summary}
-
-RESULTADOS PREDICHOS:
-{outcome_summary}
-
-PREDICCIÓN PRINCIPAL: {primary_label} ({outcome_probs.get(primary_outcome, 0):.1%})
-
-Escribe una recomendación concisa (3-5 frases). Sé específico sobre los factores clave."""
+    # User prompt
+    user_variables = {
+        "case_description": case_description[:2000],
+        "factors_summary": factors_summary,
+        "outcome_summary": outcome_summary,
+        "primary_label": primary_label,
+        "primary_probability": primary_probability,
+    }
+    user_cached = await client.get_prompt(
+        "emma_predictive_recommendation_user",
+        variables=user_variables,
+        fallback=FALLBACK_REC_USER.format(**user_variables),
+    )
+    user_prompt = user_cached.content if user_cached else FALLBACK_REC_USER.format(
+        **user_variables
+    )
 
     try:
         from app.agents.llm_client import get_llm_client

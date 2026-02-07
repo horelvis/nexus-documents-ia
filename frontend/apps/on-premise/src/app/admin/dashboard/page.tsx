@@ -49,6 +49,7 @@ import {
   IconBell,
   IconSparkles,
   IconExternalLink,
+  IconGavel,
 } from "@tabler/icons-react"
 import {
   SidebarProvider,
@@ -302,6 +303,11 @@ const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
   const [isRunningHeartbeat, setIsRunningHeartbeat] = useState(false)
   const [newEmailRecipient, setNewEmailRecipient] = useState("")
 
+  // CENDOJ
+  const [cendojEnabled, setCendojEnabled] = useState<boolean | null>(null)
+  const [cendojSector, setCendojSector] = useState<string>("")
+  const [isSavingCendoj, setIsSavingCendoj] = useState(false)
+
   // Results
   const [maintenanceResult, setMaintenanceResult] = useState<MaintenanceResult | null>(null)
 
@@ -347,6 +353,7 @@ const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
         loadPublicKnowledgeStats(),
         loadTrainingStatus(),
         loadHeartbeatStatus(),
+        loadCendojStatus(),
       ])
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error al cargar estadísticas'
@@ -516,6 +523,39 @@ const loadBoePresets = async () => {
     if (!heartbeatConfig) return
     const updated = heartbeatConfig.email_recipients.filter(e => e !== email)
     handleUpdateHeartbeatConfig({ email_recipients: updated })
+  }
+
+  // CENDOJ
+  const loadCendojStatus = async () => {
+    try {
+      const response = await apiClient.get<{ enabled: boolean; sector: string; docker_image: string }>('/emma/cendoj/status')
+      if (!response.error && response.data) {
+        setCendojEnabled(response.data.enabled)
+        setCendojSector(response.data.sector)
+      }
+    } catch (error) {
+      console.error('Failed to load CENDOJ status:', error)
+    }
+  }
+
+  const handleToggleCendoj = async (checked: boolean) => {
+    setIsSavingCendoj(true)
+    setError(null)
+    try {
+      const response = await apiClient.patch<{ enabled: boolean; sector: string }>('/emma/cendoj/status', { enabled: checked })
+      if (response.error) {
+        throw new Error(response.error)
+      }
+      if (response.data) {
+        setCendojEnabled(response.data.enabled)
+        setSuccessMessage(checked ? 'CENDOJ habilitado' : 'CENDOJ deshabilitado')
+      }
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Error al actualizar CENDOJ'
+      setError(errorMessage)
+    } finally {
+      setIsSavingCendoj(false)
+    }
   }
 
   // ============================================================================
@@ -1030,6 +1070,53 @@ const loadBoePresets = async () => {
                           Emma AI con agentes multi-propósito
                         </p>
                       )}
+                    </CardContent>
+                  </Card>
+
+                  {/* CENDOJ Jurisprudence */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <IconGavel className="h-5 w-5" />
+                        Jurisprudencia CENDOJ
+                      </CardTitle>
+                      <CardDescription>
+                        Consulta de jurisprudencia del Poder Judicial
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label htmlFor="cendoj-toggle">Habilitado</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Busca sentencias en CENDOJ durante el análisis predictivo
+                          </p>
+                        </div>
+                        <Switch
+                          id="cendoj-toggle"
+                          checked={cendojEnabled ?? false}
+                          onCheckedChange={handleToggleCendoj}
+                          disabled={isSavingCendoj || cendojEnabled === null}
+                        />
+                      </div>
+                      <div className="space-y-2 text-sm text-muted-foreground">
+                        <p>
+                          Lanza un contenedor Docker efímero con Playwright para consultar
+                          la base de datos de jurisprudencia del CENDOJ. Los resultados se
+                          usan como evidencia en el análisis predictivo.
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline">{cendojSector || "—"}</Badge>
+                          <span className="text-xs">Sector activo</span>
+                        </div>
+                      </div>
+                      <Alert>
+                        <IconAlertCircle className="h-4 w-4" />
+                        <AlertDescription className="text-xs">
+                          Solo uso personal de consulta (art. 560 LOPJ). No se almacena
+                          contenido. Las sentencias se procesan en memoria y se descartan.
+                        </AlertDescription>
+                      </Alert>
                     </CardContent>
                   </Card>
                 </div>
@@ -2309,7 +2396,7 @@ const loadBoePresets = async () => {
                           <div>
                             <h4 className="font-medium">Conectores</h4>
                             <p className="text-sm text-muted-foreground">
-                              Configura fuentes de datos externas (Alfresco, SharePoint, etc.)
+                              Configura fuentes de datos externas (Alfresco, OneDrive, Google Drive, etc.)
                             </p>
                           </div>
                         </div>

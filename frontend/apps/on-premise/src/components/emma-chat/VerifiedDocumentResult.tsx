@@ -15,6 +15,10 @@ import {
   IconFile,
   IconFileTypePdf,
   IconFileTypeDocx,
+  IconZoomIn,
+  IconZoomOut,
+  IconZoomReset,
+  IconPrinter,
 } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -24,19 +28,27 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import { VerifiedGenerationMetadata, VerifiedSource } from '@/lib/types/emma'
 import { API_CONFIG } from '@/lib/config'
+import { DocumentViewer, verifiedToViewerDocument } from '@/components/document-viewer'
 
 interface VerifiedDocumentResultProps {
   content: string
   verified: VerifiedGenerationMetadata
 }
 
+const ZOOM_STEP = 0.1
+const ZOOM_MIN = 0.5
+const ZOOM_MAX = 2.0
+
 export function VerifiedDocumentResult({ content, verified }: VerifiedDocumentResultProps) {
   const [copied, setCopied] = useState(false)
   const [isDownloading, setIsDownloading] = useState(false)
+  const [fitZoom, setFitZoom] = useState(0.65)
+  const [zoom, setZoom] = useState<number | null>(null)
+  const effectiveZoom = zoom ?? fitZoom
   const { claims, verified_count, rejected_count, total_claims, execution_time_ms, average_confidence } = verified
   const documentText = verified.document_text || content
   const correctedCount = claims.filter(c => c.status === 'corrected').length
@@ -106,7 +118,25 @@ export function VerifiedDocumentResult({ content, verified }: VerifiedDocumentRe
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          {/* Zoom controls */}
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom(Math.max(effectiveZoom - ZOOM_STEP, ZOOM_MIN))} disabled={effectiveZoom <= ZOOM_MIN} title="Alejar">
+            <IconZoomOut className="h-4 w-4" />
+          </Button>
+          <span className="text-xs font-mono text-muted-foreground w-10 text-center">{Math.round(effectiveZoom * 100)}%</span>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom(Math.min(effectiveZoom + ZOOM_STEP, ZOOM_MAX))} disabled={effectiveZoom >= ZOOM_MAX} title="Acercar">
+            <IconZoomIn className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setZoom(null)} title="Ajustar al ancho">
+            <IconZoomReset className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => window.print()} title="Imprimir">
+            <IconPrinter className="h-4 w-4" />
+          </Button>
+
+          <Separator orientation="vertical" className="h-5 mx-1" />
+
+          {/* Copy & Download */}
           <Button
             variant="outline"
             size="sm"
@@ -186,97 +216,91 @@ export function VerifiedDocumentResult({ content, verified }: VerifiedDocumentRe
         </div>
       </div>
 
-      {/* Paper sheet with scroll */}
-      <div className="bg-muted/50 dark:bg-muted/20 p-4 sm:p-6">
-        <ScrollArea className="h-[600px]">
-          <div className="bg-white dark:bg-card text-gray-900 dark:text-card-foreground shadow-md border rounded-md px-8 py-8 mx-auto w-[80%] min-h-[300px]">
+      {/* Document Viewer */}
+      <DocumentViewer documents={[verifiedToViewerDocument(verified)]} zoom={effectiveZoom} onFitZoomCalculated={setFitZoom}>
+        {/* ── Informe de Verificación ── */}
+        <h2 className="text-base font-bold mb-3">Informe de Verificación</h2>
+        <div className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5 mb-5">
+          <p><span className="font-semibold text-gray-700 dark:text-gray-300">Tema:</span> {verified.topic}</p>
+          <p><span className="font-semibold text-gray-700 dark:text-gray-300">Fecha:</span> {dateStr}</p>
+          <p><span className="font-semibold text-gray-700 dark:text-gray-300">Sesión:</span> {verified.session_id.slice(0, 16)}…</p>
+        </div>
 
-            {/* ── Informe de Verificación ── */}
-            <h2 className="text-base font-bold mb-3">Informe de Verificación</h2>
-            <div className="text-xs text-gray-500 dark:text-gray-400 space-y-0.5 mb-5">
-              <p><span className="font-semibold text-gray-700 dark:text-gray-300">Tema:</span> {verified.topic}</p>
-              <p><span className="font-semibold text-gray-700 dark:text-gray-300">Fecha:</span> {dateStr}</p>
-              <p><span className="font-semibold text-gray-700 dark:text-gray-300">Sesión:</span> {verified.session_id.slice(0, 16)}…</p>
-            </div>
-
-            {/* ── Stats Grid ── */}
-            <div className="grid grid-cols-4 gap-2 mb-6">
-              <div className="text-center p-2 rounded-md bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20">
-                <div className="text-lg font-bold text-emerald-600">{verified_count}</div>
-                <div className="text-[10px] uppercase tracking-wider text-emerald-600/70">Verificados</div>
-              </div>
-              <div className="text-center p-2 rounded-md bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
-                <div className="text-lg font-bold text-amber-600">{correctedCount}</div>
-                <div className="text-[10px] uppercase tracking-wider text-amber-600/70">Corregidos</div>
-              </div>
-              <div className="text-center p-2 rounded-md bg-red-50 dark:bg-destructive/10 border border-red-200 dark:border-destructive/20">
-                <div className="text-lg font-bold text-red-600 dark:text-destructive">{rejected_count}</div>
-                <div className="text-[10px] uppercase tracking-wider text-red-600/70 dark:text-destructive/70">Rechazados</div>
-              </div>
-              <div className="text-center p-2 rounded-md bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
-                <div className={cn('text-lg font-bold', gaugeColor)}>{confidencePct}%</div>
-                <div className="text-[10px] uppercase tracking-wider text-blue-600/70">Confianza</div>
-              </div>
-            </div>
-
-            {/* ── Documento Verificado ── */}
-            <h3 className="text-sm font-bold mb-3 pb-2 border-b">Documento Verificado</h3>
-            <div className="bg-gray-50/50 dark:bg-muted/30 rounded-md border p-4 mb-6">
-              {claims.map((claim, idx) => (
-                <p key={claim.claim_id} className={cn(
-                  'text-sm leading-relaxed',
-                  idx < claims.length - 1 && 'mb-3',
-                  claim.status === 'rejected' && 'line-through text-gray-400 dark:text-muted-foreground/60'
-                )}>
-                  {claim.claim_text}
-                </p>
-              ))}
-            </div>
-
-            {/* ── Detalle de Claims ── */}
-            <h3 className="text-sm font-bold mb-3 pb-2 border-b">
-              Detalle de Claims ({claims.length})
-            </h3>
-            <div className="space-y-3 mb-6">
-              {claims.map((claim, idx) => (
-                <ClaimDetail key={claim.claim_id} claim={claim} index={idx + 1} />
-              ))}
-            </div>
-
-            {/* ── Fuentes Consultadas ── */}
-            {verified.sources && verified.sources.length > 0 && (
-              <>
-                <h3 className="text-sm font-bold mb-3 pb-2 border-b">
-                  Fuentes Consultadas ({verified.sources.length})
-                </h3>
-                <table className="w-full text-xs mb-6">
-                  <thead>
-                    <tr className="border-b text-left">
-                      <th className="pb-1.5 font-semibold text-gray-500 dark:text-gray-400 w-20">Tipo</th>
-                      <th className="pb-1.5 font-semibold text-gray-500 dark:text-gray-400">Título / ID</th>
-                      <th className="pb-1.5 font-semibold text-gray-500 dark:text-gray-400 w-20 text-right">URL</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {verified.sources.map((source, idx) => (
-                      <SourceRow key={source.id || idx} source={source} />
-                    ))}
-                  </tbody>
-                </table>
-              </>
-            )}
-
-            {/* ── Footer ── */}
-            <div className="pt-3 border-t text-center">
-              <p className="text-[10px] text-gray-400 dark:text-gray-500">
-                Generado por NouxCubeIA
-                {execution_time_ms ? ` — Tiempo de ejecución: ${Math.round(execution_time_ms)}ms` : ''}
-              </p>
-            </div>
-
+        {/* ── Stats Grid ── */}
+        <div className="grid grid-cols-4 gap-2 mb-6">
+          <div className="text-center p-2 rounded-md bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/20">
+            <div className="text-lg font-bold text-emerald-600">{verified_count}</div>
+            <div className="text-[10px] uppercase tracking-wider text-emerald-600/70">Verificados</div>
           </div>
-        </ScrollArea>
-      </div>
+          <div className="text-center p-2 rounded-md bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+            <div className="text-lg font-bold text-amber-600">{correctedCount}</div>
+            <div className="text-[10px] uppercase tracking-wider text-amber-600/70">Corregidos</div>
+          </div>
+          <div className="text-center p-2 rounded-md bg-red-50 dark:bg-destructive/10 border border-red-200 dark:border-destructive/20">
+            <div className="text-lg font-bold text-red-600 dark:text-destructive">{rejected_count}</div>
+            <div className="text-[10px] uppercase tracking-wider text-red-600/70 dark:text-destructive/70">Rechazados</div>
+          </div>
+          <div className="text-center p-2 rounded-md bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20">
+            <div className={cn('text-lg font-bold', gaugeColor)}>{confidencePct}%</div>
+            <div className="text-[10px] uppercase tracking-wider text-blue-600/70">Confianza</div>
+          </div>
+        </div>
+
+        {/* ── Documento Verificado ── */}
+        <h3 className="text-sm font-bold mb-3 pb-2 border-b">Documento Verificado</h3>
+        <div className="bg-gray-50/50 dark:bg-muted/30 rounded-md border p-4 mb-6">
+          {claims.map((claim, idx) => (
+            <p key={claim.claim_id} className={cn(
+              'text-sm leading-relaxed',
+              idx < claims.length - 1 && 'mb-3',
+              claim.status === 'rejected' && 'line-through text-gray-400 dark:text-muted-foreground/60'
+            )}>
+              {claim.claim_text}
+            </p>
+          ))}
+        </div>
+
+        {/* ── Detalle de Claims ── */}
+        <h3 className="text-sm font-bold mb-3 pb-2 border-b">
+          Detalle de Claims ({claims.length})
+        </h3>
+        <div className="space-y-3 mb-6">
+          {claims.map((claim, idx) => (
+            <ClaimDetail key={claim.claim_id} claim={claim} index={idx + 1} />
+          ))}
+        </div>
+
+        {/* ── Fuentes Consultadas ── */}
+        {verified.sources && verified.sources.length > 0 && (
+          <>
+            <h3 className="text-sm font-bold mb-3 pb-2 border-b">
+              Fuentes Consultadas ({verified.sources.length})
+            </h3>
+            <table className="w-full text-xs mb-6">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="pb-1.5 font-semibold text-gray-500 dark:text-gray-400 w-20">Tipo</th>
+                  <th className="pb-1.5 font-semibold text-gray-500 dark:text-gray-400">Título / ID</th>
+                  <th className="pb-1.5 font-semibold text-gray-500 dark:text-gray-400 w-20 text-right">URL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {verified.sources.map((source, idx) => (
+                  <SourceRow key={source.id || idx} source={source} />
+                ))}
+              </tbody>
+            </table>
+          </>
+        )}
+
+        {/* ── Footer ── */}
+        <div className="pt-3 border-t text-center">
+          <p className="text-[10px] text-gray-400 dark:text-gray-500">
+            Generado por NouxCubeIA
+            {execution_time_ms ? ` — Tiempo de ejecución: ${Math.round(execution_time_ms)}ms` : ''}
+          </p>
+        </div>
+      </DocumentViewer>
     </div>
   )
 }

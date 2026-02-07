@@ -41,11 +41,13 @@ from app.agents.emma import (
     Emma, EmmaResult, ExecutionContext, EmmaConfig
 )
 
-# LangGraph multi-agent RAG (optional, enabled via LANGGRAPH_RAG_ENABLED)
+# LangGraph multi-agent (optional, enabled via LANGGRAPH_RAG_ENABLED)
+# When enabled, uses ReAct agent graph as default behavior
 from app.agents.langgraph import (
     is_langgraph_enabled_for_tenant,
     execute_langgraph_query,
-    stream_langgraph_query,
+    stream_react_query,
+    execute_react_query,
     LangGraphQueryResponse,
 )
 
@@ -323,9 +325,9 @@ Responde SOLO una palabra:"""
                 content = doc.get("content", "")
                 title = doc.get("title", doc.get("filename", "Document"))
 
-                # Load document content if reasonable size (< 20000 chars)
+                # Load document content if reasonable size
                 # This allows direct analysis without tool calls for most documents
-                if len(content) < 20000:
+                if len(content) < settings.emma_document_content_max_chars:
                     user_context["document_content"] = content
                     user_context["document_title"] = title
                     logger.info(f"📄 Loaded document content: {title} ({len(content)} chars)")

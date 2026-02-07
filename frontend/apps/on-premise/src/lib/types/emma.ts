@@ -175,6 +175,34 @@ export interface VerifiedGenerationMetadata {
 // Predictive Analysis types
 export type PredictiveFactorStatus = 'extracting' | 'verifying' | 'weighted' | 'rejected'
 
+export interface PredictiveMatchInfo {
+  document_id: string
+  document_title?: string
+  text_excerpt: string
+  similarity_score: number
+  outcome: string
+  supports_factor: boolean
+  source: string
+  url?: string
+  roj?: string
+  ecli?: string
+  date?: string
+  resolution_type?: string
+  ponente?: string
+}
+
+export interface PredictiveSource {
+  id: string
+  title?: string
+  source: string
+  url?: string
+  roj?: string
+  ecli?: string
+  date?: string
+  resolution_type?: string
+  ponente?: string
+}
+
 export interface PredictiveFactorInfo {
   factor_id: string
   factor_number: number
@@ -186,6 +214,7 @@ export interface PredictiveFactorInfo {
   confidence?: number
   outcome?: string
   evidence_count?: number
+  supporting_matches?: PredictiveMatchInfo[]
 }
 
 export interface PredictiveAnalysisMetadata {
@@ -203,6 +232,7 @@ export interface PredictiveAnalysisMetadata {
   recommendation?: string
   disclaimer?: string
   execution_time_ms?: number
+  sources?: PredictiveSource[]
 }
 
 export interface DocGenMetadata {

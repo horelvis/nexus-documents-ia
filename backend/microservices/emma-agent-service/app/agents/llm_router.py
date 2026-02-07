@@ -175,47 +175,55 @@ class LLMRouter:
         providers = self._get_providers_to_try(provider_override)
         last_error: Optional[Exception] = None
 
+        from app.core.config import settings
+        retry_delay = settings.llm_retry_delay_seconds
+
         for i, provider in enumerate(providers):
             is_fallback = i > 0
 
-            try:
-                client = self._get_or_create_client(provider)
+            client = self._get_or_create_client(provider)
 
-                if is_fallback:
-                    logger.info(f"Fallback attempt {i}: trying provider {provider.value}")
+            if is_fallback:
+                logger.info(f"Fallback attempt {i}: trying provider {provider.value}")
 
-                response = await client.chat(messages, tools, **kwargs)
+            # Try each provider up to 2 times (initial + 1 fast retry)
+            for attempt in range(2):
+                try:
+                    response = await client.chat(messages, tools, **kwargs)
 
-                # Log success
-                if is_fallback:
-                    logger.info(f"Fallback to {provider.value} succeeded")
+                    if is_fallback:
+                        logger.info(f"Fallback to {provider.value} succeeded")
 
-                # Update Langfuse with provider info
-                langfuse_context.update_current_observation(
-                    metadata={
-                        "provider": provider.value,
-                        "is_fallback": is_fallback,
-                        "fallback_attempt": i if is_fallback else 0,
-                    }
-                )
+                    langfuse_context.update_current_observation(
+                        metadata={
+                            "provider": provider.value,
+                            "is_fallback": is_fallback,
+                            "fallback_attempt": i if is_fallback else 0,
+                            "retry_attempt": attempt,
+                        }
+                    )
 
-                return response
+                    return response
 
-            except Exception as e:
-                last_error = e
-                logger.warning(
-                    f"Provider {provider.value} failed: {type(e).__name__}: {str(e)[:200]}"
-                )
+                except Exception as e:
+                    last_error = e
+                    logger.warning(
+                        f"Provider {provider.value} attempt {attempt}: "
+                        f"{type(e).__name__}: {str(e)[:200]}"
+                    )
 
-                # Update Langfuse with failure
-                langfuse_context.update_current_observation(
-                    metadata={
-                        f"provider_{provider.value}_error": str(e)[:200],
-                    }
-                )
-
-                # Continue to next provider
-                continue
+                    if attempt == 0:
+                        # Fast retry before escalating to next provider
+                        await asyncio.sleep(retry_delay)
+                        continue
+                    else:
+                        # Both attempts failed, update Langfuse and try next provider
+                        langfuse_context.update_current_observation(
+                            metadata={
+                                f"provider_{provider.value}_error": str(e)[:200],
+                            }
+                        )
+                        break
 
         # All providers failed
         error_msg = f"All LLM providers failed. Last error: {last_error}"

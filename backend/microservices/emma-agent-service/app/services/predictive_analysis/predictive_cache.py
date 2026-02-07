@@ -179,16 +179,37 @@ class PredictiveCache:
 
 
 # =============================================================================
-# Singleton
+# Singleton (with asyncio.Lock for race-safe initialization)
 # =============================================================================
 
 _predictive_cache: Optional[PredictiveCache] = None
+_predictive_cache_lock: Optional["asyncio.Lock"] = None
+
+
+def _get_cache_lock() -> "asyncio.Lock":
+    """Lazy lock creation (must be called inside a running event loop)."""
+    global _predictive_cache_lock
+    if _predictive_cache_lock is None:
+        import asyncio
+        _predictive_cache_lock = asyncio.Lock()
+    return _predictive_cache_lock
 
 
 def get_predictive_cache() -> PredictiveCache:
+    """Get the singleton PredictiveCache (sync — init is cheap, no I/O)."""
     global _predictive_cache
     if _predictive_cache is None:
         _predictive_cache = PredictiveCache()
+    return _predictive_cache
+
+
+async def get_predictive_cache_async() -> PredictiveCache:
+    """Get the singleton PredictiveCache (async — race-safe)."""
+    global _predictive_cache
+    if _predictive_cache is None:
+        async with _get_cache_lock():
+            if _predictive_cache is None:
+                _predictive_cache = PredictiveCache()
     return _predictive_cache
 
 

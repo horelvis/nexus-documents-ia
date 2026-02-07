@@ -98,7 +98,7 @@ class TavilySearchProvider(BaseSearchProvider):
                 results.append(WebSearchResult(
                     title=r.get("title", ""),
                     url=r.get("url", ""),
-                    snippet=r.get("content", "")[:500],  # Tavily returns longer content
+                    snippet=r.get("content", "")[:settings.web_search_snippet_max_chars],
                     content=r.get("content"),
                     score=r.get("score"),
                 ))

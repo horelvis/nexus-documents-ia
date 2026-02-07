@@ -84,10 +84,11 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # vLLM - GPU Inference Server (Qwen2.5-7B-Instruct FP16 - NO QUANTIZATION)
+  # vLLM - GPU Inference Server (Qwen3-14B-AWQ — tool calling nativo)
   # =============================================================================
-  # Using FP16 (full precision) for maximum quality
-  # VRAM: ~14GB model + ~6GB KV cache = ~20GB (fits in 24GB)
+  # Qwen3-14B-AWQ: 14B denso, AWQ 4-bit quantization
+  # VRAM: ~8GB model + ~14GB KV cache = ~22GB (fits in RTX 4090 24GB)
+  # Context: 32K tokens (native 128K, limited for VRAM)
   vllm:
     image: vllm/vllm-openai:v0.8.5.post1
     ports:
@@ -103,19 +104,18 @@ services:
       - CUDA_VISIBLE_DEVICES=0
     command:
       - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
+      - "${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}"
       - "--served-model-name"
-      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
-      # NO quantization - using full FP16 precision for best quality
+      - "${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}"
       - "--dtype"
-      - "float16"
+      - "auto"
       - "--max-model-len"
-      - "${VLLM_MAX_MODEL_LEN:-16384}"
+      - "${VLLM_MAX_MODEL_LEN:-32768}"
       - "--gpu-memory-utilization"
-      - "0.85"
+      - "0.90"
       - "--enforce-eager"
       - "--trust-remote-code"
-      # Enable tool calling for Emma v2 (native async client)
+      # Enable tool calling for ReAct agent (Qwen3 uses hermes format)
       - "--enable-auto-tool-choice"
       - "--tool-call-parser"
       - "hermes"
@@ -214,7 +214,7 @@ services:
       # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       # Embedding Configuration (BGE-M3 local)
@@ -298,6 +298,8 @@ services:
     build:
       context: ../microservices/emma-agent-service
       dockerfile: Dockerfile
+      args:
+        DOCKER_GID: ${DOCKER_GID:-988}
     ports:
       - "8009:8009"
     depends_on:
@@ -330,7 +332,7 @@ services:
       # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       # Redis for sessions
@@ -381,6 +383,8 @@ services:
       - ../microservices/emma-agent-service/config:/app/config:ro
       - huggingface_cache:/root/.cache/huggingface
       - fastembed_cache:/tmp/fastembed_cache
+      # Docker socket for ephemeral CENDOJ agent containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8009", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8009/health"]
@@ -405,7 +409,7 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Web Search (DuckDuckGo)
@@ -463,7 +467,7 @@ services:
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
@@ -569,6 +573,44 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # MCP OneDrive Server - OneDrive for Business sync, indexing & MCP tools
+  # =============================================================================
+  mcp-onedrive:
+    build:
+      context: ../microservices/mcp-onedrive-server
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      - PORT=8000
+      - DEBUG=${DEBUG:-false}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID}
+      - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET}
+      - MS_OAUTH_TENANT_ID=${MS_OAUTH_TENANT_ID:-common}
+      - MS_OAUTH_REDIRECT_URI=${MS_OAUTH_REDIRECT_URI:-https://localhost:3001/connectors/oauth/callback}
+      - CREDENTIALS_ENCRYPTION_KEY=${CREDENTIALS_ENCRYPTION_KEY}
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - CONNECTOR_CACHE_TTL=${CONNECTOR_CACHE_TTL:-300}
+    volumes:
+      - ../microservices/mcp-onedrive-server/app:/app/app:ro
+    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
   # Main API - Backend for UI integration
   # =============================================================================
   api:
@@ -596,6 +638,8 @@ services:
         condition: service_healthy
       mcp-google-drive:
         condition: service_healthy
+      mcp-onedrive:
+        condition: service_healthy
       presentation-service:
         condition: service_started
       keycloak:
@@ -616,6 +660,7 @@ services:
       - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
       - MCP_ALFRESCO_URL=${MCP_ALFRESCO_URL:-http://mcp-alfresco:8000}
       - MCP_GOOGLE_DRIVE_URL=${MCP_GOOGLE_DRIVE_URL:-http://mcp-google-drive:8000}
+      - MCP_ONEDRIVE_URL=${MCP_ONEDRIVE_URL:-http://mcp-onedrive:8000}
       - MCP_ENABLED=${MCP_ENABLED:-true}
       - REDIS_HOST=redis
       - WEAVIATE_URL=http://weaviate:8080
@@ -666,7 +711,8 @@ services:
       - KC_PROXY_HEADERS=xforwarded
       - KC_HEALTH_ENABLED=true
       - KC_METRICS_ENABLED=true
-      - KC_SPI_THEME_DEFAULT=bufete-lexnova
+      # Only set login theme (not admin/welcome/account which don't exist in custom theme)
+      - KC_SPI_THEME_LOGIN_DEFAULT=bufete-lexnova
     volumes:
       - ./keycloak/themes/bufete-lexnova:/opt/keycloak/themes/bufete-lexnova:ro
     depends_on:
@@ -754,7 +800,7 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - PRESENTATION_API_KEY=${MICROSERVICES_API_KEY}
       - PRESENTATION_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
       - PRESENTATION_STORAGE_SERVICE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
       - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
       - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-http://nouxcube.local.es:8000}

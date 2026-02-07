@@ -1,17 +1,18 @@
 'use client'
 
 /**
- * Google Drive OAuth Step Component
+ * OAuth Step Component (Google Drive, OneDrive)
  *
  * 3-phase component for the connector creation wizard:
  * 1. Authorize — opens OAuth popup, polls for completion
- * 2. Folder Selection — browse Drive folders, select sync root
+ * 2. Folder Selection — browse folders, select sync root
  * 3. Complete — redirects to connectors list
  */
 
 import { useState, useEffect, useRef } from 'react'
 import {
   IconBrandGoogle,
+  IconBrandWindows,
   IconCheck,
   IconChevronRight,
   IconFolder,
@@ -36,19 +37,59 @@ import {
   connectorService,
   OAuthStatus,
   DriveFolder,
+  ConnectorType,
 } from '@/lib/services/connector.service'
 
 interface GoogleDriveOAuthStepProps {
   connectorId: string
   connectorName: string
+  connectorType?: ConnectorType
   onComplete: () => void
+}
+
+// Provider-specific branding config
+const OAUTH_BRANDING: Record<string, {
+  providerName: string
+  authorizeTitle: string
+  authorizeDescription: string
+  authorizeButtonLabel: string
+  authorizeButtonPolling: string
+  authPopupHint: string
+  syncAllLabel: string
+  rootFolderName: string
+  Icon: typeof IconBrandGoogle
+}> = {
+  google_drive: {
+    providerName: 'Google Drive',
+    authorizeTitle: 'Autorizar Google Drive',
+    authorizeDescription: 'Conecta tu cuenta de Google para acceder a los documentos de Drive',
+    authorizeButtonLabel: 'Autorizar con Google',
+    authorizeButtonPolling: 'Esperando autorización...',
+    authPopupHint: 'Al hacer clic en "Autorizar con Google", se abrirá una ventana para iniciar sesión con tu cuenta de Google y otorgar permisos de lectura a los documentos de Drive.',
+    syncAllLabel: 'Sincronizar todo Google Drive',
+    rootFolderName: 'Mi Drive',
+    Icon: IconBrandGoogle,
+  },
+  onedrive: {
+    providerName: 'Microsoft OneDrive',
+    authorizeTitle: 'Autorizar OneDrive',
+    authorizeDescription: 'Conecta tu cuenta de Microsoft para acceder a los archivos de OneDrive',
+    authorizeButtonLabel: 'Autorizar con Microsoft',
+    authorizeButtonPolling: 'Esperando autorización...',
+    authPopupHint: 'Al hacer clic en "Autorizar con Microsoft", se abrirá una ventana para iniciar sesión con tu cuenta de Microsoft y otorgar permisos de lectura a los archivos de OneDrive.',
+    syncAllLabel: 'Sincronizar todo OneDrive',
+    rootFolderName: 'Mi OneDrive',
+    Icon: IconBrandWindows,
+  },
 }
 
 export function GoogleDriveOAuthStep({
   connectorId,
   connectorName,
+  connectorType = 'google_drive',
   onComplete,
 }: GoogleDriveOAuthStepProps) {
+  const branding = OAUTH_BRANDING[connectorType] || OAUTH_BRANDING.google_drive
   const [phase, setPhase] = useState<'authorize' | 'folders' | 'complete'>('authorize')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -61,7 +102,7 @@ export function GoogleDriveOAuthStep({
   // Folder state
   const [folders, setFolders] = useState<DriveFolder[]>([])
   const [breadcrumb, setBreadcrumb] = useState<{ id: string; name: string }[]>([
-    { id: 'root', name: 'Mi Drive' },
+    { id: 'root', name: branding.rootFolderName },
   ])
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
   const [isFoldersLoading, setIsFoldersLoading] = useState(false)
@@ -103,7 +144,7 @@ export function GoogleDriveOAuthStep({
         return
       }
 
-      const popup = window.open(result.data.auth_url, 'google-oauth', 'width=600,height=700,scrollbars=yes')
+      const popup = window.open(result.data.auth_url, 'oauth-popup', 'width=600,height=700,scrollbars=yes')
 
       if (!popup) {
         setError('No se pudo abrir la ventana de autorización. Verifica que los popups estén permitidos.')
@@ -144,7 +185,12 @@ export function GoogleDriveOAuthStep({
           pollingRef.current = null
         }
         setIsPolling(false)
-        setOauthStatus({ connected: true, google_email: event.data.email })
+        setOauthStatus({
+          connected: true,
+          ...(connectorType === 'onedrive'
+            ? { microsoft_email: event.data.email }
+            : { google_email: event.data.email }),
+        })
         setPhase('folders')
         loadFolders('root')
       }
@@ -267,17 +313,14 @@ export function GoogleDriveOAuthStep({
       {phase === 'authorize' && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-lg">Autorizar Google Drive</CardTitle>
+            <CardTitle className="text-lg">{branding.authorizeTitle}</CardTitle>
             <CardDescription>
-              Conecta tu cuenta de Google para acceder a los documentos de Drive
+              {branding.authorizeDescription}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="p-4 rounded-lg border bg-muted/30 text-sm text-muted-foreground">
-              <p>
-                Al hacer clic en "Autorizar con Google", se abrirá una ventana para iniciar sesión
-                con tu cuenta de Google y otorgar permisos de lectura a los documentos de Drive.
-              </p>
+              <p>{branding.authPopupHint}</p>
             </div>
 
             <Button
@@ -289,12 +332,12 @@ export function GoogleDriveOAuthStep({
               {isPolling ? (
                 <>
                   <IconLoader2 className="h-5 w-5 mr-2 animate-spin" />
-                  Esperando autorización...
+                  {branding.authorizeButtonPolling}
                 </>
               ) : (
                 <>
-                  <IconBrandGoogle className="h-5 w-5 mr-2" />
-                  Autorizar con Google
+                  <branding.Icon className="h-5 w-5 mr-2" />
+                  {branding.authorizeButtonLabel}
                 </>
               )}
             </Button>
@@ -319,10 +362,10 @@ export function GoogleDriveOAuthStep({
                   Elige qué carpeta de Drive sincronizar, o sincroniza todo
                 </CardDescription>
               </div>
-              {oauthStatus?.google_email && (
+              {(oauthStatus?.google_email || oauthStatus?.microsoft_email || oauthStatus?.email) && (
                 <Badge variant="secondary" className="flex items-center gap-1.5">
                   <IconCheck className="h-3 w-3 text-green-600" />
-                  {oauthStatus.google_email}
+                  {oauthStatus.google_email || oauthStatus.microsoft_email || oauthStatus.email}
                 </Badge>
               )}
             </div>
@@ -404,7 +447,7 @@ export function GoogleDriveOAuthStep({
                 className="text-muted-foreground"
               >
                 <IconCloudUpload className="h-4 w-4 mr-2" />
-                Sincronizar todo Google Drive
+                {branding.syncAllLabel}
               </Button>
             </div>
           </CardContent>

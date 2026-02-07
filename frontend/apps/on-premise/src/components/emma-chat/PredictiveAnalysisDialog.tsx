@@ -3,7 +3,6 @@
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  IconChartBar,
   IconChevronDown,
   IconChevronUp,
   IconX,
@@ -57,7 +56,7 @@ export function PredictiveAnalysisDialog({ open, onOpenChange, jobs }: Predictiv
         )}
         onClick={() => onOpenChange(true)}
       >
-        <IconChartBar className="h-5 w-5 animate-pulse" />
+        <IconScale className="h-5 w-5 animate-pulse" />
         <span className="font-medium text-sm">
           {jobCount > 1 ? `${jobCount} análisis` : 'Analizando...'}
         </span>
@@ -87,7 +86,7 @@ export function PredictiveAnalysisDialog({ open, onOpenChange, jobs }: Predictiv
                 'w-10 h-10 rounded-full flex items-center justify-center',
                 hasActiveJobs ? 'bg-blue-500/10' : 'bg-muted'
               )}>
-                <IconChartBar className={cn(
+                <IconScale className={cn(
                   'h-5 w-5',
                   hasActiveJobs ? 'text-blue-600 animate-pulse' : 'text-muted-foreground'
                 )} />

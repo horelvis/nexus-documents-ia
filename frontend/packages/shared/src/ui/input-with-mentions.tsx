@@ -1,8 +1,11 @@
 "use client"
 
 import { useState, useRef, forwardRef, ComponentType } from "react"
-import { Input, InputProps } from "./input"
-import { Textarea, TextareaProps } from "./textarea"
+import { Input } from "./input"
+import { Textarea } from "./textarea"
+
+type InputProps = React.ComponentProps<typeof Input>
+type TextareaProps = React.ComponentProps<typeof Textarea>
 import { createEntityTag, findEntityAtPosition } from "./entity-renderer"
 
 export interface Entity {
@@ -397,4 +400,3 @@ const TextareaWithMentions = forwardRef<HTMLTextAreaElement, TextareaWithMention
 TextareaWithMentions.displayName = "TextareaWithMentions"
 
 export { InputWithMentions, TextareaWithMentions }
-export type { Entity, InputWithMentionsProps, TextareaWithMentionsProps }

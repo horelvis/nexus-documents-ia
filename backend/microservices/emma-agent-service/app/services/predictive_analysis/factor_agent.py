@@ -7,53 +7,92 @@ it extracts analytical factors parametrized by sector config.
 Each factor is short, focused, and includes a factor_type from the sector's
 factor_types list. The agent builds on previously extracted factors to avoid
 repetition.
+
+Prompts are managed via LangfusePromptClient with YAML fallback.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
-from pathlib import Path
 from typing import List, Optional
 
 import httpx
-import yaml
 
 from app.core.config import settings
+from app.core.langfuse_config import observe
 from app.schemas.predictive_analysis import PredictionFactor, WeightedFactor
 from app.agents.langgraph.sectors.predictive_config import PredictiveConfig
+from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
 logger = logging.getLogger(__name__)
 
-# Load prompts from YAML
-_prompts_cache: Optional[dict] = None
+# ─── Fallback prompts (Spanish) — used when Langfuse + YAML both fail ───
 
+FALLBACK_FACTOR_SYSTEM = """Eres un agente analítico experto que extrae factores críticos para análisis predictivo.
 
-def _load_prompts() -> dict:
-    global _prompts_cache
-    if _prompts_cache is None:
-        prompts_path = Path(__file__).parent.parent.parent.parent / "config" / "prompts" / "predictive_prompts.yaml"
-        if prompts_path.exists():
-            with open(prompts_path, "r", encoding="utf-8") as f:
-                _prompts_cache = yaml.safe_load(f) or {}
-        else:
-            logger.warning(f"⚠️ Predictive prompts not found at {prompts_path}")
-            _prompts_cache = {}
-    return _prompts_cache
+REGLAS CRÍTICAS:
+1. Extrae EXACTAMENTE UN factor por llamada
+2. Cada factor debe ser de estos tipos: {factor_types}
+3. Los factores deben basarse en los documentos fuente
+4. Incluye referencias específicas (artículos, cláusulas, normativas) cuando estén disponibles
+5. Mantén los factores concisos y enfocados (2-3 frases máximo)
+6. Responde SIEMPRE en español
+7. NO uses etiquetas <think> ni bloques de razonamiento
 
+FORMATO DE SALIDA (JSON):
+{{"factor_type": "uno de los tipos anteriores", "description": "descripción clara del factor", "legal_basis": "referencia específica o null"}}
 
-def _get_prompt(key: str, fallback: str = "") -> str:
-    """Get a prompt by dot-separated key (e.g., 'predictive.legal.factor_extraction')."""
-    prompts = _load_prompts()
-    parts = key.split(".")
-    current = prompts
-    for part in parts:
-        if isinstance(current, dict) and part in current:
-            current = current[part]
-        else:
-            return fallback
-    return current if isinstance(current, str) else fallback
+Responde SOLO con el objeto JSON, nada más."""
+
+FALLBACK_FACTOR_USER_FIRST = """Extrae el PRIMER factor analítico.
+
+DESCRIPCIÓN DEL CASO:
+{case_description}
+
+CONTEXTO FUENTE:
+{source_context}
+
+TIPOS DE FACTORES DISPONIBLES: {factor_types}
+
+Extrae UN factor como JSON. Responde solo con el JSON."""
+
+FALLBACK_FACTOR_USER_NEXT = """Extrae el SIGUIENTE factor analítico.
+
+DESCRIPCIÓN DEL CASO:
+{case_description}
+
+CONTEXTO FUENTE:
+{source_context}
+
+FACTORES YA EXTRAÍDOS (no repetir):
+{previous_factors}
+
+TIPOS DE FACTORES DISPONIBLES: {factor_types}
+NÚMERO DE FACTOR: {factor_number}
+
+Extrae UN nuevo factor como JSON. Responde solo con el JSON."""
+
+FALLBACK_COMPLETION_SYSTEM = "Eres un verificador de completitud. Responde SOLO con SÍ o NO."
+
+FALLBACK_COMPLETION_USER = """Determina si el análisis de factores está COMPLETO.
+
+DESCRIPCIÓN DEL CASO:
+{case_description}
+
+CONTEXTO FUENTE:
+{source_context}
+
+FACTORES EXTRAÍDOS HASTA AHORA:
+{factors_text}
+
+TIPOS DE FACTORES DISPONIBLES: {factor_types}
+
+¿Está completo el análisis? Responde SOLO "SÍ" o "NO".
+- SÍ: Todos los factores relevantes de los documentos han sido identificados
+- NO: Hay más factores significativos por extraer"""
 
 
 class FactorAgent:
@@ -72,6 +111,7 @@ class FactorAgent:
         self._temperature = temperature
         self._max_tokens = max_tokens
 
+    @observe(name="predictive.extract_factor")
     async def extract_next_factor(
         self,
         case_description: str,
@@ -79,15 +119,17 @@ class FactorAgent:
         existing_factors: List[WeightedFactor],
         source_context: str,
         factor_number: Optional[int] = None,
+        rejected_factors: Optional[List[PredictionFactor]] = None,
     ) -> PredictionFactor:
         """Extract the next factor for analysis."""
         if factor_number is None:
             factor_number = len(existing_factors) + 1
 
-        # Build prompts from sector config
-        system_prompt = self._build_system_prompt(config)
-        user_prompt = self._build_user_prompt(
-            case_description, config, existing_factors, source_context, factor_number
+        # Build prompts from Langfuse/YAML with fallback
+        system_prompt = await self._build_system_prompt(config)
+        user_prompt = await self._build_user_prompt(
+            case_description, config, existing_factors, source_context, factor_number,
+            rejected_factors=rejected_factors,
         )
 
         raw_text = await self._call_llm(system_prompt, user_prompt)
@@ -103,6 +145,7 @@ class FactorAgent:
         )
         return factor
 
+    @observe(name="predictive.check_completion")
     async def check_completion(
         self,
         case_description: str,
@@ -114,31 +157,36 @@ class FactorAgent:
         if len(existing_factors) < 3:
             return False
 
+        client = get_langfuse_prompt_client()
         factors_text = self._format_existing_factors(existing_factors)
-        check_prompt = f"""Determine if the factor analysis is COMPLETE.
 
-CASE DESCRIPTION:
-{case_description}
+        variables = {
+            "case_description": case_description,
+            "source_context": source_context[:2000],
+            "factors_text": factors_text,
+            "factor_types": ", ".join(config.factor_types),
+        }
 
-SOURCE CONTEXT:
-{source_context[:2000]}
-
-FACTORS EXTRACTED SO FAR:
-{factors_text}
-
-AVAILABLE FACTOR TYPES: {', '.join(config.factor_types)}
-
-Is the analysis complete? Answer ONLY "YES" or "NO".
-- YES: All relevant factors from the documents have been identified
-- NO: There are more significant factors to extract"""
-
-        response = await self._call_llm(
-            "You are a completeness checker. Answer only YES or NO.",
-            check_prompt,
+        # System prompt
+        sys_cached = await client.get_prompt(
+            "emma_predictive_completion_system",
+            fallback=FALLBACK_COMPLETION_SYSTEM,
         )
+        system_prompt = sys_cached.content if sys_cached else FALLBACK_COMPLETION_SYSTEM
+
+        # User prompt
+        user_cached = await client.get_prompt(
+            "emma_predictive_completion_user",
+            variables=variables,
+            fallback=FALLBACK_COMPLETION_USER.format(**variables),
+        )
+        user_prompt = user_cached.content if user_cached else FALLBACK_COMPLETION_USER.format(**variables)
+
+        response = await self._call_llm(system_prompt, user_prompt)
 
         response = response.strip().upper()
-        is_complete = "YES" in response
+        # Retrocompatible: accept both Spanish and English
+        is_complete = "SÍ" in response or "SI" in response or "YES" in response
 
         logger.info(
             f"🏁 Factor completion check: {is_complete} "
@@ -146,74 +194,79 @@ Is the analysis complete? Answer ONLY "YES" or "NO".
         )
         return is_complete
 
-    def _build_system_prompt(self, config: PredictiveConfig) -> str:
-        """Build system prompt from sector config."""
-        # Try to load from YAML first
-        prompt_key = f"{config.system_prompt_key}.factor_extraction"
-        yaml_prompt = _get_prompt(prompt_key)
-        if yaml_prompt:
-            return yaml_prompt
-
-        # Fallback: construct dynamically
+    async def _build_system_prompt(self, config: PredictiveConfig) -> str:
+        """Build system prompt from Langfuse/YAML with inline fallback."""
+        client = get_langfuse_prompt_client()
         factor_types_str = ", ".join(config.factor_types)
-        return f"""You are an expert analytical agent that extracts critical factors for predictive analysis.
 
-CRITICAL RULES:
-1. Extract EXACTLY ONE factor at a time
-2. Each factor must be from these types: {factor_types_str}
-3. Factors must be grounded in the source documents
-4. Include specific references (articles, clauses, standards) when available
-5. Keep factors concise and focused (2-3 sentences max)
-6. Write in the same language as the source documents
-7. DO NOT use <think> tags or reasoning blocks
+        cached = await client.get_prompt(
+            "emma_predictive_factor_system",
+            variables={"factor_types": factor_types_str},
+            fallback=FALLBACK_FACTOR_SYSTEM.format(factor_types=factor_types_str),
+        )
+        if cached and cached.content:
+            return cached.content
 
-OUTPUT FORMAT (JSON):
-{{"factor_type": "one of the types above", "description": "clear description of the factor", "legal_basis": "specific reference or null"}}
+        return FALLBACK_FACTOR_SYSTEM.format(factor_types=factor_types_str)
 
-Output ONLY the JSON object, nothing else."""
-
-    def _build_user_prompt(
+    async def _build_user_prompt(
         self,
         case_description: str,
         config: PredictiveConfig,
         existing_factors: List[WeightedFactor],
         source_context: str,
         factor_number: int,
+        rejected_factors: Optional[List[PredictionFactor]] = None,
     ) -> str:
-        """Build user prompt with context."""
-        if existing_factors:
-            factors_text = self._format_existing_factors(existing_factors)
-            return f"""Extract the NEXT analytical factor.
+        """Build user prompt from Langfuse/YAML with inline fallback."""
+        client = get_langfuse_prompt_client()
+        factor_types_str = ", ".join(config.factor_types)
 
-CASE DESCRIPTION:
-{case_description}
+        # Combine weighted + rejected factors into context so LLM doesn't repeat
+        all_previous = self._format_existing_factors(existing_factors)
+        if rejected_factors:
+            rejected_text = "\n".join(
+                f"- [{f.factor_type}] {f.description} (RECHAZADO — sin evidencia suficiente)"
+                for f in rejected_factors
+            )
+            all_previous += f"\n\nFACTORES YA RECHAZADOS (no repetir, busca otros diferentes):\n{rejected_text}"
 
-SOURCE CONTEXT:
-{source_context[:4000]}
+        has_previous = bool(existing_factors) or bool(rejected_factors)
 
-PREVIOUSLY EXTRACTED FACTORS (don't repeat these):
-{factors_text}
-
-AVAILABLE FACTOR TYPES: {', '.join(config.factor_types)}
-FACTOR NUMBER: {factor_number}
-
-Extract ONE new factor as JSON. Output the JSON only."""
+        if has_previous:
+            variables = {
+                "case_description": case_description,
+                "source_context": source_context[:4000],
+                "previous_factors": all_previous,
+                "factor_types": factor_types_str,
+                "factor_number": str(factor_number),
+            }
+            cached = await client.get_prompt(
+                "emma_predictive_factor_user_next",
+                variables=variables,
+                fallback=FALLBACK_FACTOR_USER_NEXT.format(**variables),
+            )
+            if cached and cached.content:
+                return cached.content
+            return FALLBACK_FACTOR_USER_NEXT.format(**variables)
         else:
-            return f"""Extract the FIRST analytical factor.
-
-CASE DESCRIPTION:
-{case_description}
-
-SOURCE CONTEXT:
-{source_context[:4000]}
-
-AVAILABLE FACTOR TYPES: {', '.join(config.factor_types)}
-
-Extract ONE factor as JSON. Output the JSON only."""
+            variables = {
+                "case_description": case_description,
+                "source_context": source_context[:4000],
+                "factor_types": factor_types_str,
+            }
+            cached = await client.get_prompt(
+                "emma_predictive_factor_user_first",
+                variables=variables,
+                fallback=FALLBACK_FACTOR_USER_FIRST.format(**variables),
+            )
+            if cached and cached.content:
+                return cached.content
+            return FALLBACK_FACTOR_USER_FIRST.format(**variables)
 
     def _format_existing_factors(self, factors: List[WeightedFactor]) -> str:
         if not factors:
-            return "(No factors extracted yet)"
+            return "(No hay factores extraídos aún)"
         lines = []
         for i, f in enumerate(factors, 1):
             lines.append(f"{i}. [{f.factor_type}] {f.description}")
@@ -288,7 +341,7 @@ Extract ONE factor as JSON. Output the JSON only."""
 
         # Fallback: direct vLLM
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=settings.agent_raw_vllm_timeout_seconds) as client:
                 payload = {
                     "model": settings.vllm_model,
                     "messages": [
@@ -314,14 +367,34 @@ Extract ONE factor as JSON. Output the JSON only."""
 
 
 # =============================================================================
-# Singleton
+# Singleton (with asyncio.Lock for race-safe initialization)
 # =============================================================================
 
 _factor_agent: Optional[FactorAgent] = None
+_factor_agent_lock: Optional["asyncio.Lock"] = None
+
+
+def _get_factor_lock() -> "asyncio.Lock":
+    """Lazy lock creation (must be called inside a running event loop)."""
+    global _factor_agent_lock
+    if _factor_agent_lock is None:
+        _factor_agent_lock = asyncio.Lock()
+    return _factor_agent_lock
 
 
 def get_factor_agent() -> FactorAgent:
+    """Get the singleton FactorAgent (sync — init is cheap, no I/O)."""
     global _factor_agent
     if _factor_agent is None:
         _factor_agent = FactorAgent(temperature=settings.verified_claim_temperature)
+    return _factor_agent
+
+
+async def get_factor_agent_async() -> FactorAgent:
+    """Get the singleton FactorAgent (async — race-safe)."""
+    global _factor_agent
+    if _factor_agent is None:
+        async with _get_factor_lock():
+            if _factor_agent is None:
+                _factor_agent = FactorAgent(temperature=settings.verified_claim_temperature)
     return _factor_agent

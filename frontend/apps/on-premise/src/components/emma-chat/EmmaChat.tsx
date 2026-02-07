@@ -1103,6 +1103,7 @@ export function EmmaChat({
                 recommendation: event.data.recommendation,
                 disclaimer: event.data.disclaimer,
                 execution_time_ms: event.data.execution_time_ms,
+                sources: event.data.sources,
               }
 
               updateMessages((prev) => [...prev, {
@@ -1150,6 +1151,7 @@ export function EmmaChat({
                   factorUpdate.confidence = event.data.confidence
                   factorUpdate.outcome = event.data.outcome
                   factorUpdate.evidence_count = event.data.evidence_count
+                  factorUpdate.supporting_matches = event.data.supporting_matches
                 } else if (event.event_type === 'factor_rejected') {
                   factorUpdate.status = 'rejected'
                 }

@@ -183,6 +183,28 @@ class LangfusePromptClient:
 
             # Heartbeat
             "emma_heartbeat_evaluator": ("heartbeat", "evaluation_system"),
+
+            # Predictive Analysis
+            "emma_predictive_factor_system": ("predictive", "factor_extraction", "system"),
+            "emma_predictive_factor_user_first": ("predictive", "factor_extraction", "user_first"),
+            "emma_predictive_factor_user_next": ("predictive", "factor_extraction", "user_next"),
+            "emma_predictive_completion_system": ("predictive", "completion_check", "system"),
+            "emma_predictive_completion_user": ("predictive", "completion_check", "user"),
+            "emma_predictive_outcome_system": ("predictive", "outcome_evaluation", "system"),
+            "emma_predictive_outcome_user": ("predictive", "outcome_evaluation", "user"),
+            "emma_predictive_weight_system": ("predictive", "factor_weighting", "system"),
+            "emma_predictive_weight_user": ("predictive", "factor_weighting", "user"),
+            "emma_predictive_recommendation_system": ("predictive", "recommendation", "system"),
+            "emma_predictive_recommendation_user": ("predictive", "recommendation", "user"),
+
+            # Verified Generation
+            "emma_verified_claim_system": ("verified_generation", "claim_generation", "system"),
+            "emma_verified_claim_user_first": ("verified_generation", "claim_generation", "user_first"),
+            "emma_verified_claim_user_next": ("verified_generation", "claim_generation", "user_next"),
+            "emma_verified_completion_system": ("verified_generation", "completion_check", "system"),
+            "emma_verified_completion_user": ("verified_generation", "completion_check", "user"),
+            "emma_verified_factcheck_system": ("verified_generation", "fact_checking", "system"),
+            "emma_verified_factcheck_user": ("verified_generation", "fact_checking", "user"),
         }
 
         # Check explicit mapping first
@@ -246,7 +268,16 @@ class LangfusePromptClient:
             if not cached.is_expired(settings.langfuse_prompt_cache_ttl):
                 logger.debug(f"🎯 Cache hit for prompt '{name}'")
                 if variables:
-                    cached.content = self._render_template(cached.content, variables)
+                    # Return copy with rendered content — don't mutate cached template
+                    rendered = self._render_template(cached.content, variables)
+                    return CachedPrompt(
+                        name=cached.name,
+                        content=rendered,
+                        version=cached.version,
+                        labels=cached.labels,
+                        cached_at=cached.cached_at,
+                        is_fallback=cached.is_fallback,
+                    )
                 return cached
 
         # Try Langfuse if enabled
@@ -303,7 +334,16 @@ class LangfusePromptClient:
 
         # Render template if variables provided
         if variables:
-            cached_prompt.content = self._render_template(cached_prompt.content, variables)
+            # Return copy with rendered content — keep raw template in cache
+            rendered = self._render_template(cached_prompt.content, variables)
+            return CachedPrompt(
+                name=cached_prompt.name,
+                content=rendered,
+                version=cached_prompt.version,
+                labels=cached_prompt.labels,
+                cached_at=cached_prompt.cached_at,
+                is_fallback=cached_prompt.is_fallback,
+            )
 
         return cached_prompt
 
@@ -428,6 +468,14 @@ class LangfusePromptClient:
                 "emma_agent_docgen",
                 "emma_social_system",
                 "emma_heartbeat_evaluator",
+                # Predictive Analysis (system prompts)
+                "emma_predictive_factor_system",
+                "emma_predictive_outcome_system",
+                "emma_predictive_weight_system",
+                "emma_predictive_recommendation_system",
+                # Verified Generation (system prompts)
+                "emma_verified_claim_system",
+                "emma_verified_factcheck_system",
             ]
 
         synced = []

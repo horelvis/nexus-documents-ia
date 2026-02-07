@@ -226,6 +226,49 @@ class HealthResponse(BaseModel):
     orchestration: Optional[str] = None
 
 
+class CendojStatusResponse(BaseModel):
+    """CENDOJ service status."""
+    enabled: bool
+    sector: str
+    docker_image: str
+
+
+class CendojStatusUpdate(BaseModel):
+    """CENDOJ toggle request."""
+    enabled: bool
+
+
+# =============================================================================
+# Redis helper (CENDOJ toggle)
+# =============================================================================
+
+import redis.asyncio as aioredis
+
+CENDOJ_REDIS_KEY = "emma:cendoj:enabled"
+_cendoj_redis = None
+
+
+async def _get_cendoj_redis() -> aioredis.Redis:
+    global _cendoj_redis
+    if _cendoj_redis is None:
+        _cendoj_redis = aioredis.Redis(
+            host=settings.redis_host, port=settings.redis_port, decode_responses=True
+        )
+    return _cendoj_redis
+
+
+async def _get_cendoj_enabled() -> bool:
+    """Read CENDOJ enabled state: Redis → env var → sector default."""
+    try:
+        r = await _get_cendoj_redis()
+        val = await r.get(CENDOJ_REDIS_KEY)
+        if val is not None:
+            return val.lower() == "true"
+    except Exception as e:
+        logger.warning(f"Redis read failed for CENDOJ toggle: {e}")
+    return settings.cendoj_enabled
+
+
 # =============================================================================
 # Feature Flag
 # =============================================================================
@@ -572,13 +615,15 @@ async def emma_query_stream(
             detail="Emma is not enabled. Set EMMA_ENABLED=true",
         )
 
-    # Check if LangGraph is enabled for this tenant
-    from app.agents.langgraph import is_langgraph_enabled_for_tenant, stream_langgraph_query
+    # Check if LangGraph is enabled → uses ReAct agent graph (default behavior)
+    from app.agents.langgraph import (
+        is_langgraph_enabled_for_tenant, stream_react_query,
+    )
 
     if is_langgraph_enabled_for_tenant(query.tenant_id):
-        logger.info(f"🔀 LangGraph streaming enabled for tenant {query.tenant_id}")
+        logger.info(f"LangGraph ReAct streaming for tenant {query.tenant_id}")
         return StreamingResponse(
-            _generate_langgraph_sse(query, stream_langgraph_query),
+            _generate_langgraph_sse(query, stream_react_query),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -895,6 +940,42 @@ async def health_check():
             sil_enabled=False,
             features={"error": str(e)},
         )
+
+
+# =============================================================================
+# CENDOJ Toggle Endpoints
+# =============================================================================
+
+@router.get("/cendoj/status", response_model=CendojStatusResponse)
+async def cendoj_status(_: bool = Depends(verify_api_key)):
+    """Get CENDOJ jurisprudence search status."""
+    enabled = await _get_cendoj_enabled()
+    return CendojStatusResponse(
+        enabled=enabled,
+        sector=settings.active_sector or "none",
+        docker_image="nouxcube-cendoj-agent",
+    )
+
+
+@router.patch("/cendoj/status", response_model=CendojStatusResponse)
+async def update_cendoj_status(
+    body: CendojStatusUpdate,
+    _: bool = Depends(verify_api_key),
+):
+    """Toggle CENDOJ jurisprudence search on/off (persisted in Redis)."""
+    try:
+        r = await _get_cendoj_redis()
+        await r.set(CENDOJ_REDIS_KEY, str(body.enabled).lower())
+        logger.info(f"CENDOJ toggled to {body.enabled}")
+    except Exception as e:
+        logger.error(f"Failed to write CENDOJ toggle to Redis: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update CENDOJ status")
+
+    return CendojStatusResponse(
+        enabled=body.enabled,
+        sector=settings.active_sector or "none",
+        docker_image="nouxcube-cendoj-agent",
+    )
 
 
 @router.get("/compare")

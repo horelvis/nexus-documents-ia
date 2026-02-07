@@ -6,13 +6,17 @@ FROM python:3.12-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies + Docker CLI (for ephemeral CENDOJ agent containers)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     git \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 \
     libffi-dev libcairo2 \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update && apt-get install -y --no-install-recommends docker-ce-cli \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -26,7 +30,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY . .
 
 # Create non-root user for security
+# ARG DOCKER_GID allows matching the host's docker socket group at build time
+ARG DOCKER_GID=988
 RUN useradd --create-home --shell /bin/bash appuser && \
+    groupadd -g ${DOCKER_GID} dockerhost || true && \
+    usermod -aG dockerhost appuser && \
     chown -R appuser:appuser /app && \
     mkdir -p /tmp/fastembed_cache /home/appuser/.cache/huggingface && \
     chown -R appuser:appuser /tmp/fastembed_cache /home/appuser/.cache/huggingface
