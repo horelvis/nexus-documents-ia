@@ -1,10 +1,13 @@
 /**
- * useEmmaNotifications — Real-time notification hook via WebSocket.
+ * useEmmaNotifications — Real-time notification hook via polling.
  *
- * Connects to the Emma notification WebSocket and provides:
- * - Real-time notification updates
+ * Polls the Emma notification API and provides:
+ * - Periodic notification updates (every 30s)
  * - Unread count badge
  * - Mark as read functionality
+ *
+ * Uses relative URLs proxied through Next.js rewrites to avoid
+ * mixed content issues (HTTPS page → HTTP emma-agent-service).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -23,112 +26,60 @@ export interface EmmaNotification {
 }
 
 interface UseEmmaNotificationsOptions {
-  /** Emma Agent Service base URL */
-  baseUrl?: string;
+  /** Polling interval in ms (default: 30000) */
+  pollInterval?: number;
   /** Whether to auto-connect */
   enabled?: boolean;
 }
 
+const NOTIFICATIONS_BASE = "/emma/notifications";
+
 export function useEmmaNotifications(options: UseEmmaNotificationsOptions = {}) {
   const {
-    baseUrl = process.env.NEXT_PUBLIC_EMMA_SERVICE_URL || "http://localhost:8009",
+    pollInterval = 30000,
     enabled = true,
   } = options;
 
   const [notifications, setNotifications] = useState<EmmaNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch initial notifications
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await fetch(`${NOTIFICATIONS_BASE}?limit=50`);
+      if (res.ok) {
+        const data = await res.json();
+        const items: EmmaNotification[] = data.notifications || [];
+        setNotifications(items);
+        setUnreadCount(items.filter((n) => !n.is_read).length);
+        setIsConnected(true);
+      } else {
+        setIsConnected(false);
+      }
+    } catch {
+      setIsConnected(false);
+    }
+  }, []);
+
+  // Initial fetch + polling interval
   useEffect(() => {
     if (!enabled) return;
-
-    const fetchNotifications = async () => {
-      try {
-        const res = await fetch(`${baseUrl}/emma/notifications?limit=50`);
-        if (res.ok) {
-          const data = await res.json();
-          setNotifications(data.notifications || []);
-          setUnreadCount(
-            (data.notifications || []).filter((n: EmmaNotification) => !n.is_read).length
-          );
-        }
-      } catch (err) {
-        console.warn("Failed to fetch notifications:", err);
-      }
-    };
 
     fetchNotifications();
-  }, [baseUrl, enabled]);
-
-  // WebSocket connection for real-time updates
-  useEffect(() => {
-    if (!enabled) return;
-
-    const wsUrl = baseUrl.replace(/^http/, "ws") + "/emma/ws/notifications";
-    let ws: WebSocket;
-
-    const connect = () => {
-      try {
-        ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          setIsConnected(true);
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-
-            // Ignore ping/pong messages and messages without required fields
-            if (data.type === "ping" || data.type === "pong") {
-              return;
-            }
-
-            // Validate it's a real notification with required fields
-            if (!data.id || !data.title) {
-              return;
-            }
-
-            const notification = data as EmmaNotification;
-            setNotifications((prev) => [notification, ...prev].slice(0, 100));
-            if (!notification.is_read) {
-              setUnreadCount((prev) => prev + 1);
-            }
-          } catch (err) {
-            // Silently ignore parse errors (keepalive messages, etc.)
-          }
-        };
-
-        ws.onclose = () => {
-          setIsConnected(false);
-          // Auto-reconnect after 5 seconds
-          setTimeout(connect, 5000);
-        };
-
-        ws.onerror = () => {
-          ws.close();
-        };
-      } catch (err) {
-        console.warn("WebSocket connection failed:", err);
-      }
-    };
-
-    connect();
+    intervalRef.current = setInterval(fetchNotifications, pollInterval);
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
     };
-  }, [baseUrl, enabled]);
+  }, [enabled, pollInterval, fetchNotifications]);
 
   const markAsRead = async (notificationId: string) => {
     try {
-      const res = await fetch(`${baseUrl}/emma/notifications/${notificationId}/read`, {
+      const res = await fetch(`${NOTIFICATIONS_BASE}/${notificationId}/read`, {
         method: "PATCH",
       });
       if (res.ok) {
@@ -144,7 +95,7 @@ export function useEmmaNotifications(options: UseEmmaNotificationsOptions = {}) 
 
   const markAllAsRead = async () => {
     try {
-      const res = await fetch(`${baseUrl}/emma/notifications/read-all`, {
+      const res = await fetch(`${NOTIFICATIONS_BASE}/read-all`, {
         method: "POST",
       });
       if (res.ok) {

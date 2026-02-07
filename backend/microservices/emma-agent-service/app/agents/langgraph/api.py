@@ -675,6 +675,19 @@ async def stream_react_query(
                 latency_ms = (time.time() - start_time) * 1000
                 final_answer = event["final_answer"]
 
+                # Emit strategy_applied event if meta agent was used
+                strategy_id = (event.get("metadata") or {}).get("_meta_strategy_id")
+                if strategy_id:
+                    yield {
+                        "type": "strategy_applied",
+                        "data": {
+                            "strategy_id": strategy_id,
+                            "strategy_name": (event.get("metadata") or {}).get(
+                                "_meta_strategy_name", ""
+                            ),
+                        },
+                    }
+
                 # Stream answer as tokens
                 words = final_answer.split(' ')
                 for i, word in enumerate(words):

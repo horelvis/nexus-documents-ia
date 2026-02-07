@@ -9,13 +9,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { IconBrain, IconLoader2 } from '@tabler/icons-react'
+import { IconBrain } from '@tabler/icons-react'
 import {
   SidebarProvider,
   SidebarInset,
 } from '@nexus/shared/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { EmmaChat } from '@/components/emma-chat'
+import { LoadingScreen } from '@/components/ui/loading-screen'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { PageHeader } from '@/components/layout/page-header'
 import { ConversationSidebar } from '@/components/conversation-sidebar'
@@ -101,19 +102,7 @@ export default function EmmaPage() {
 
   // Loading state
   if (!isLoaded) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
-              <IconBrain className="h-8 w-8 text-primary-foreground" />
-            </div>
-            <IconLoader2 className="absolute -bottom-1 -right-1 h-5 w-5 animate-spin text-primary" />
-          </div>
-          <p className="text-sm text-muted-foreground">Cargando Emma...</p>
-        </div>
-      </div>
-    )
+    return <LoadingScreen title="Emma" subtitle="Cargando asistente..." />
   }
 
   // Not authenticated

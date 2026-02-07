@@ -9,8 +9,9 @@
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { IconBrain, IconLoader2 } from '@tabler/icons-react'
+import { IconBrain } from '@tabler/icons-react'
 import { useAuth } from '@/contexts/auth-context'
+import { LoadingScreen } from '@/components/ui/loading-screen'
 import { ConnectorOnboarding } from '@/components/onboarding/ConnectorOnboarding'
 
 export default function OnboardingPage() {
@@ -33,11 +34,7 @@ export default function OnboardingPage() {
 
   // Loading state
   if (!isLoaded) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    )
+    return <LoadingScreen title="Emma" subtitle="Preparando configuración..." />
   }
 
   // Not authenticated

@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import AIMessage
 
+from app.core.config import settings
 from ..state import ReActState
 from ..reasoning_tracker import ReasoningTracker, StepType
 
@@ -163,15 +164,37 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             },
         }
 
+    # META AGENT: Try discovered strategy before falling through to react_loop
+    metadata = {
+        "classify_intent": intent,
+        "classify_confidence": confidence,
+        "classify_latency_ms": latency_ms,
+    }
+
+    if settings.meta_agent_online_selection:
+        try:
+            from app.services.meta_agent.online_selector import get_online_selector
+            selector = get_online_selector()
+            sector = (state.get("sector_config") or {}).get("name", state.get("sector"))
+            strategy_result = await selector.try_execute(
+                query, dict(state), intent, sector, confidence
+            )
+            if strategy_result:
+                strategy_result["reasoning_steps"] = (
+                    reasoning_steps + strategy_result.get("reasoning_steps", [])
+                )
+                strategy_result["metadata"] = {
+                    **metadata, **strategy_result.get("metadata", {})
+                }
+                return strategy_result
+        except Exception as e:
+            logger.debug(f"Meta strategy execution failed, falling back to react_loop: {e}")
+
     # Not fast-path → proceed to react_loop
     logger.info(f"Classify: intent={intent}, confidence={confidence:.2f} → react_loop")
 
     return {
         "fast_path_used": False,
         "reasoning_steps": reasoning_steps,
-        "metadata": {
-            "classify_intent": intent,
-            "classify_confidence": confidence,
-            "classify_latency_ms": latency_ms,
-        },
+        "metadata": metadata,
     }

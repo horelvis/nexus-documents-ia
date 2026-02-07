@@ -2591,3 +2591,73 @@ react_agent:
     2. Si NO son relevantes → reformula la búsqueda o usa otra herramienta
     3. Si necesitas análisis del contenido encontrado → usa `analyze_domain`
     4. Si ya tienes información RELEVANTE → usa `terminate` con tu respuesta
+
+
+# =============================================================================
+# SECCIÓN 11: META AGENT (ADAS) — Agent Design Automation
+# =============================================================================
+# Prompts for the ADAS-inspired meta agent that generates forward() code.
+# Used by the search loop to discover novel agent strategies.
+
+meta_agent:
+
+  judge_system: |
+    Evalúa la respuesta del agente Emma a la consulta del usuario.
+    Puntúa cada dimensión de 0.0 a 1.0:
+
+    1. answer_quality: ¿La respuesta es correcta, completa y bien estructurada?
+    2. source_accuracy: ¿Las fuentes citadas son reales y relevantes?
+    3. instruction_following: ¿Responde exactamente a lo que se preguntó?
+
+    Responde SOLO con JSON:
+    {"answer_quality": 0.X, "source_accuracy": 0.X, "instruction_following": 0.X, "reasoning": "..."}
+
+  generator_system: |
+    Eres un meta-agente que escribe agentes de IA en Python.
+    Tu tarea: generar una función `async def forward(query: str, ctx: AgentContext) -> AgentResult`.
+
+    ## Primitivas disponibles
+
+    ctx.llm.chat(messages: List[Dict], tools: List[Dict] = None) → LLMResponse
+      - .content: str (respuesta del LLM)
+      - .tool_calls: List[ToolCall] (si tools fue proporcionado)
+
+    ctx.tools.execute(name: str, args: Dict) → ToolResult
+      - .output: str (texto para el LLM)
+      - .sources: List[Dict] (fuentes citables)
+      - .success: bool
+
+    ctx.tools.list_names() → List[str]
+    ctx.state.query → str
+    ctx.state.sector → Optional[str]
+    ctx.log(message: str) → None
+
+    AgentResult(answer=str, sources=List[Dict])
+
+    ## Restricciones de seguridad
+    - NO uses import, exec, eval, open, getattr
+    - NO accedas a atributos que empiecen con _
+    - SOLO usa las primitivas de ctx
+    - La función DEBE retornar AgentResult
+
+    ## Presupuesto de recursos (MUY IMPORTANTE)
+    - Máximo 10 llamadas LLM (ctx.llm.chat)
+    - Máximo 30 llamadas a herramientas (ctx.tools.execute)
+    - Si excedes estos límites, la estrategia FALLA con ResourceLimitError
+    - NO iteres sobre resultados de búsqueda llamando herramientas por cada resultado
+    - Usa UNA búsqueda amplia en vez de múltiples búsquedas granulares
+    - Planifica tus llamadas: típicamente 2-4 herramientas + 1-2 LLM es suficiente
+
+    Genera SOLO el código Python (async def forward...), sin explicación.
+
+  mutate_system: |
+    Modifica la siguiente estrategia de agente para mejorar su puntuación.
+    Aplica UNA mutación: agregar búsqueda, cambiar prompt, agregar validación,
+    reordenar herramientas, o agregar razonamiento paso a paso.
+    IMPORTANTE: No excedas 10 llamadas LLM ni 30 llamadas a herramientas.
+    Genera SOLO el código Python modificado (async def forward...).
+
+  crossover_system: |
+    Combina los mejores aspectos de dos estrategias de agente.
+    Toma las fortalezas de cada una y genera una nueva función.
+    Genera SOLO el código Python combinado (async def forward...).

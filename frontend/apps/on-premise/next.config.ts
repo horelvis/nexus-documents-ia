@@ -21,6 +21,10 @@ const nextConfig: NextConfig = {
     console.log(`[Next.js Rewrites] Backend URL: ${backendUrl}`)
     console.log(`[Next.js Rewrites] KeyCloak URL: ${keycloakUrl}`)
 
+    // Emma Agent Service URL (internal HTTP, proxied through HTTPS frontend)
+    const emmaServiceUrl = process.env.EMMA_SERVICE_URL || "http://localhost:8009"
+    console.log(`[Next.js Rewrites] Emma Service URL: ${emmaServiceUrl}`)
+
     return [
       {
         source: "/api/v1/:path*",
@@ -30,6 +34,11 @@ const nextConfig: NextConfig = {
       {
         source: "/oidc/:path*",
         destination: `${keycloakUrl}/protocol/openid-connect/:path*`,
+      },
+      // Proxy Emma notification endpoints through HTTPS frontend → HTTP Emma Service (avoids mixed content)
+      {
+        source: "/emma/notifications/:path*",
+        destination: `${emmaServiceUrl}/emma/notifications/:path*`,
       },
     ]
   },

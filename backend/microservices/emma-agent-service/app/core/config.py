@@ -264,6 +264,21 @@ class Settings(BaseSettings):
     upload_max_total_chars: int = int(os.getenv("EMMA_UPLOAD_MAX_TOTAL_CHARS", "40000"))
 
     # ==========================================================================
+    # Meta Agent (ADAS) Configuration
+    # ==========================================================================
+    meta_agent_enabled: bool = os.getenv("META_AGENT_ENABLED", "false").lower() == "true"
+    meta_agent_online_selection: bool = os.getenv("META_AGENT_ONLINE_SELECTION", "false").lower() == "true"
+    meta_agent_epsilon: float = float(os.getenv("META_AGENT_EPSILON", "0.05"))
+    meta_agent_feedback_enabled: bool = os.getenv("META_AGENT_FEEDBACK_ENABLED", "false").lower() == "true"
+    meta_agent_max_search_iterations: int = int(os.getenv("META_AGENT_MAX_SEARCH_ITERATIONS", "10"))
+    meta_agent_candidates_per_iteration: int = int(os.getenv("META_AGENT_CANDIDATES_PER_ITERATION", "3"))
+    meta_agent_test_tenant_id: str = os.getenv("META_AGENT_TEST_TENANT_ID", "meta-agent-test")
+    meta_agent_judge_model: str = os.getenv("META_AGENT_JUDGE_MODEL", "qwen/qwen3-235b-a22b-2507")
+    meta_agent_execution_timeout: float = float(os.getenv("META_AGENT_EXECUTION_TIMEOUT", "120.0"))
+    meta_agent_max_llm_calls: int = int(os.getenv("META_AGENT_MAX_LLM_CALLS", "10"))
+    meta_agent_max_tool_calls: int = int(os.getenv("META_AGENT_MAX_TOOL_CALLS", "30"))
+
+    # ==========================================================================
     # Default Location for Social Channels
     # ==========================================================================
     default_location_city: str = os.getenv("DEFAULT_LOCATION_CITY", "Molina de Segura")

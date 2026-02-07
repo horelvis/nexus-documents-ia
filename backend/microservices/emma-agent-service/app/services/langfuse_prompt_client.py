@@ -205,6 +205,12 @@ class LangfusePromptClient:
             "emma_verified_completion_user": ("verified_generation", "completion_check", "user"),
             "emma_verified_factcheck_system": ("verified_generation", "fact_checking", "system"),
             "emma_verified_factcheck_user": ("verified_generation", "fact_checking", "user"),
+
+            # Meta Agent (ADAS)
+            "emma_meta_judge": ("meta_agent", "judge_system"),
+            "emma_meta_generator": ("meta_agent", "generator_system"),
+            "emma_meta_mutate": ("meta_agent", "mutate_system"),
+            "emma_meta_crossover": ("meta_agent", "crossover_system"),
         }
 
         # Check explicit mapping first
