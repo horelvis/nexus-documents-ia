@@ -2617,6 +2617,76 @@ class WeaviateService:
             logger.error(f"❌ Failed to list collections: {e}")
             raise
 
+    async def count_by_semantic_type(
+        self, tenant_id: str, semantic_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Count documents by semantic_type using Weaviate aggregate.
+
+        If semantic_type is given, returns the count for that type.
+        If None, returns a breakdown of all types.
+
+        Counts unique document_ids (not chunks) across all tenant collections.
+        """
+        import weaviate.classes.query as wq
+
+        # Find all collections for this tenant
+        collections = await self.get_tenant_collections(tenant_id)
+        if not collections:
+            return {"semantic_type": semantic_type, "count": 0} if semantic_type else {"type_counts": {}}
+
+        try:
+            all_doc_ids: Dict[str, set] = {}  # semantic_type → set of document_ids
+
+            for coll_name in collections:
+                # Skip non-document collections (summaries, knowledge, visual)
+                if any(suffix in coll_name.lower() for suffix in ("_summaries", "_knowledge", "_visual")):
+                    continue
+
+                try:
+                    collection = self.client.collections.get(coll_name)
+
+                    if semantic_type:
+                        response = collection.query.fetch_objects(
+                            filters=wq.Filter.by_property("tenant_id").equal(tenant_id)
+                            & wq.Filter.by_property("semantic_type").equal(semantic_type),
+                            limit=10000,
+                            return_properties=["document_id"],
+                        )
+                        if semantic_type not in all_doc_ids:
+                            all_doc_ids[semantic_type] = set()
+                        for obj in response.objects:
+                            doc_id = obj.properties.get("document_id", "")
+                            if doc_id:
+                                all_doc_ids[semantic_type].add(doc_id)
+                    else:
+                        response = collection.query.fetch_objects(
+                            filters=wq.Filter.by_property("tenant_id").equal(tenant_id),
+                            limit=10000,
+                            return_properties=["semantic_type", "document_id"],
+                        )
+                        for obj in response.objects:
+                            st = obj.properties.get("semantic_type", "") or ""
+                            doc_id = obj.properties.get("document_id", "")
+                            if not st or not doc_id:
+                                continue
+                            if st not in all_doc_ids:
+                                all_doc_ids[st] = set()
+                            all_doc_ids[st].add(doc_id)
+                except Exception as coll_err:
+                    logger.debug(f"Skipping collection {coll_name} for type count: {coll_err}")
+                    continue
+
+            if semantic_type:
+                count = len(all_doc_ids.get(semantic_type, set()))
+                return {"semantic_type": semantic_type, "count": count}
+            else:
+                type_counts = {st: len(ids) for st, ids in all_doc_ids.items()}
+                return {"type_counts": type_counts}
+
+        except Exception as e:
+            logger.error(f"count_by_semantic_type failed: {e}")
+            return {"error": str(e), "count": 0}
+
     async def get_tenant_collections(self, tenant_id: str) -> List[str]:
         """
         Get all collections belonging to a specific tenant.

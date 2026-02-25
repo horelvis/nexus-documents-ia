@@ -173,7 +173,12 @@ class WeaviateClient(BaseHTTPClient):
         query: str,
         limit: int = 10,
         alpha: float = 0.5,
-        filters: Optional[dict[str, Any]] = None
+        filters: Optional[dict[str, Any]] = None,
+        person_filter: Optional[str] = None,
+        domain_filter: Optional[str] = None,
+        semantic_type_filter: Optional[str] = None,
+        min_quality: Optional[float] = None,
+        folder_filter: Optional[str] = None,
     ) -> list[SearchResult]:
         """
         Hybrid search combining vector and keyword search.
@@ -184,18 +189,34 @@ class WeaviateClient(BaseHTTPClient):
             limit: Maximum results
             alpha: Balance between vector (1.0) and keyword (0.0)
             filters: Optional metadata filters
+            person_filter: Filter by associated person name
+            domain_filter: Filter by business domain
+            semantic_type_filter: Filter by semantic document type
+            min_quality: Minimum quality score threshold
+            folder_filter: Filter by folder path
 
         Returns:
             List of SearchResult
         """
-        payload = {
+        payload: dict[str, Any] = {
             "query": query,
             "tenant_id": tenant_id,
             "limit": limit,
-            "alpha": alpha
+            "alpha": alpha,
         }
         if filters:
             payload["filters"] = filters
+        if person_filter:
+            payload["person_filter"] = person_filter
+        if domain_filter:
+            payload["domain_filter"] = domain_filter
+        if semantic_type_filter:
+            payload["semantic_type_filter"] = semantic_type_filter
+        if min_quality is not None:
+            payload["min_quality"] = min_quality
+        if folder_filter:
+            payload["filters"] = payload.get("filters") or {}
+            payload["filters"]["folder_path"] = folder_filter
 
         try:
             # Use the global hybrid search endpoint
@@ -216,6 +237,10 @@ class WeaviateClient(BaseHTTPClient):
                         "title": item.get("title", ""),
                         "document_type": item.get("document_type", ""),
                         "folder_path": item.get("folder_path", ""),
+                        "domain": item.get("domain", ""),
+                        "semantic_type": item.get("semantic_type", ""),
+                        "quality_score": item.get("quality_score"),
+                        "associated_person": item.get("associated_person", ""),
                         **item.get("metadata", {})
                     }
                 ))
@@ -624,6 +649,23 @@ class WeaviateClient(BaseHTTPClient):
         except Exception as e:
             logger.warning(f"Get tenant stats failed: {e}")
             return {"document_count": 0, "error": str(e)}
+
+    async def count_by_semantic_type(
+        self, tenant_id: str, semantic_type: str | None = None
+    ) -> dict[str, Any]:
+        """Count documents by semantic_type via Weaviate aggregate."""
+        try:
+            params = {}
+            if semantic_type:
+                params["semantic_type"] = semantic_type
+            return await self.get_json(
+                f"/weaviate/tenants/{tenant_id}/count-by-type",
+                params=params,
+                headers=self._headers(),
+            )
+        except Exception as e:
+            logger.warning(f"count_by_semantic_type failed: {e}")
+            return {"count": 0, "error": str(e)}
 
     async def get_tenant_schema(self, tenant_id: str) -> dict[str, Any]:
         """Get schema information for tenant's collections."""

@@ -26,6 +26,20 @@ class DocumentACLUpdate(BaseModel):
     acl_role_ids: List[str] = []
     acl_everyone: bool = False
 
+@router.get("/tenants/{tenant_id}/count-by-type")
+async def count_by_semantic_type(
+    tenant_id: str,
+    semantic_type: Optional[str] = Query(default=None, description="Specific semantic type to count"),
+    _: bool = Depends(verify_api_key),
+):
+    """Count documents by semantic_type from Weaviate enrichment properties."""
+    try:
+        return await weaviate_service.count_by_semantic_type(tenant_id, semantic_type)
+    except Exception as e:
+        logger.error(f"count_by_semantic_type failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/collections/{collection_name}/documents", response_model=DocumentResponse)
 async def add_document(
     collection_name: str,
@@ -684,6 +698,34 @@ def _generate_folder_hierarchy(folder_path: str) -> list:
     return hierarchy
 
 
+
+def _extract_person_from_path(folder_path: str) -> str:
+    """
+    Heuristic: extract person name from folder path.
+
+    Many EDMS organise documents as /Empleados/Nombre Apellido/... or
+    /Clientes/Empresa/Persona/... . If the first folder segment matches a
+    known container keyword, return the second segment as person/entity name.
+
+    Examples:
+        "/Empleados/Javier Martinez/Contratos" → "Javier Martinez"
+        "/Clientes/ACME Corp/2024" → "ACME Corp"
+        "/Documentos/facturas" → ""
+    """
+    if not folder_path:
+        return ""
+    parts = [p for p in folder_path.replace("\\", "/").split("/") if p]
+    if len(parts) < 2:
+        return ""
+    _PERSON_CONTAINERS = {
+        "empleados", "employees", "personal", "personas", "rrhh",
+        "clientes", "clients", "customers", "proveedores", "suppliers",
+    }
+    if parts[0].lower() in _PERSON_CONTAINERS:
+        return parts[1]
+    return ""
+
+
 @router.post("/index/from-connector", response_model=ConnectorIndexResponse)
 async def index_from_connector(
     request: ConnectorIndexRequest,
@@ -811,11 +853,57 @@ async def index_from_connector(
                 f"folder_semantics={list(request.learned_context.folder_semantics.keys())}"
             )
 
+        # Determine document_type from available sources:
+        # 1. learned_context.semantic_type (e.g., "contract", "invoice")
+        # 2. MIME type mapping (e.g., application/pdf → "pdf")
+        # 3. Fallback: "document"
+        _MIME_TO_DOCTYPE = {
+            "application/pdf": "pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+            "application/msword": "doc",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+            "application/vnd.ms-excel": "xls",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+            "application/vnd.ms-powerpoint": "ppt",
+            "text/plain": "txt",
+            "text/html": "html",
+            "text/markdown": "markdown",
+            "text/csv": "csv",
+            "application/json": "json",
+            "application/xml": "xml",
+            "image/png": "image",
+            "image/jpeg": "image",
+        }
+        doc_type = "document"
+        if request.learned_context and request.learned_context.semantic_type:
+            doc_type = request.learned_context.semantic_type
+        elif request.mime_type:
+            doc_type = _MIME_TO_DOCTYPE.get(request.mime_type, "document")
+
+        # Infer semantic type from filename + text content using embeddings
+        # This gives a content-level classification (e.g., "factura", "contrato")
+        # distinct from the format-level doc_type (e.g., "pdf", "docx")
+        inferred_semantic_type = None
+        if not (request.learned_context and request.learned_context.semantic_type):
+            try:
+                from app.services.rag.semantic_type_classifier import classify_semantic_type
+                text_preview = result.extracted_text[:500] if result.extracted_text else ""
+                classification = await classify_semantic_type(request.filename, text_preview)
+                if classification:
+                    inferred_semantic_type, confidence = classification
+                    logger.info(
+                        f"🏷️ Classified semantic_type='{inferred_semantic_type}' "
+                        f"(confidence={confidence:.3f}) for {request.filename}"
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️ Semantic type classification failed: {e}")
+
         # Create document with chunks and learned context
         doc_create = DocumentCreate(
             id=request.document_id,
             title=request.filename,
             tenant_id=request.tenant_id,
+            document_type=doc_type,
             # Content field stores preview when using chunks, full text otherwise
             # When chunks are present, each chunk is stored as separate Weaviate object
             content=result.extracted_text[:2000] if result.chunks else (result.extracted_text or ""),  # Preview for chunked docs
@@ -826,6 +914,24 @@ async def index_from_connector(
             folder_path=folder_path,
             folder_hierarchy=folder_hierarchy,
             connector_id=connector_id,
+            # ACL fields for document-level access control
+            acl_user_ids=request.acl.get("shared_with_users", []) if request.acl else [],
+            acl_role_ids=request.acl.get("shared_with_groups", []) if request.acl else [],
+            acl_everyone=request.acl.get("is_tenant_public", True) if request.acl else True,
+            # Enrichment properties for multi-signal retrieval
+            # Fallback chain: learned_context → inferred → contextual_domain → empty
+            domain=(
+                (request.learned_context.domain if request.learned_context and request.learned_context.domain else None)
+                or result.contextual_domain
+                or ""
+            ),
+            semantic_type=(
+                (request.learned_context.semantic_type if request.learned_context and request.learned_context.semantic_type else None)
+                or inferred_semantic_type  # Content-level: "factura", "contrato", etc.
+                or ""  # No fallback to format-level doc_type — semantic_type must be a real type or empty
+            ),
+            quality_score=result.analysis.confidence if result.analysis else 0.0,
+            associated_person=_extract_person_from_path(folder_path),
             metadata={
                 **metadata,
                 "filename": request.filename,
@@ -835,8 +941,8 @@ async def index_from_connector(
                 "entities_count": result.knowledge_result.entities_count if result.knowledge_result else 0,
                 # NEW: Data Learning enrichment
                 "learned_context": learned_context_dict,
-                "semantic_type": request.learned_context.semantic_type if request.learned_context else None,
-                "domain": request.learned_context.domain if request.learned_context else None,
+                "semantic_type": (request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
+                "domain": (request.learned_context.domain if request.learned_context else None) or result.contextual_domain,
                 "folder_semantics": request.learned_context.folder_semantics if request.learned_context else {},
                 "property_weights": request.learned_context.property_weights if request.learned_context else {},
             },
@@ -845,9 +951,10 @@ async def index_from_connector(
                     "content": chunk.content,
                     "metadata": {
                         **chunk.metadata,
-                        # Enrich each chunk with learned context for retrieval
-                        "semantic_type": request.learned_context.semantic_type if request.learned_context else None,
-                        "domain": request.learned_context.domain if request.learned_context else None,
+                        # Enrich each chunk with learned context + pipeline inference
+                        "semantic_type": (request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
+                        "domain": (request.learned_context.domain if request.learned_context else None) or result.contextual_domain,
+                        "quality_score": result.analysis.confidence if result.analysis else 0.0,
                         # Folder hierarchy for chunk-level filtering
                         "folder_path": folder_path,
                         "folder_hierarchy": folder_hierarchy,
@@ -948,6 +1055,127 @@ async def get_document_full_content(
         raise
     except Exception as e:
         logger.error(f"❌ Failed to get document content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ========================================
+# Enrichment Backfill
+# ========================================
+
+@router.post("/collections/{collection_name}/backfill-semantic-types")
+async def backfill_semantic_types(
+    collection_name: str,
+    threshold: float = Query(default=0.68, ge=0.3, le=0.9, description="Min cosine similarity"),
+    force: bool = Query(default=False, description="Re-classify ALL objects (including already classified)"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Backfill semantic_type for all objects in a collection using embedding classification.
+
+    Two-stage classifier:
+    - Stage 1: Title keyword matching (fast, high-precision)
+    - Stage 2: BGE-M3 embedding similarity (fallback, higher threshold)
+
+    Set force=true to re-classify ALL objects including previously classified ones.
+    """
+    from app.services.rag.semantic_type_classifier import classify_semantic_type
+
+    _FORMAT_TYPES = {"pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
+                     "txt", "html", "markdown", "csv", "json", "xml",
+                     "image", "document", ""}
+
+    # Sentinel to distinguish "classified as None" from "not yet classified"
+    _NOT_CACHED = object()
+
+    try:
+        await weaviate_service.initialize()
+
+        if not weaviate_service.client.collections.exists(collection_name):
+            raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
+
+        collection = weaviate_service.client.collections.get(collection_name)
+
+        updated = 0
+        cleared = 0
+        skipped = 0
+        errors = 0
+        classifications: Dict[str, int] = {}  # type → count
+        # Cache: document_id → classification result (or None).
+        # All chunks of the same document share the same title, so we only
+        # need to classify once per document (~100 embeddings vs ~22K).
+        doc_cache: Dict[str, Any] = {}
+
+        for item in collection.iterator(
+            include_vector=False,
+            return_properties=["title", "content", "semantic_type", "document_id"]
+        ):
+            current_type = (item.properties.get("semantic_type") or "").strip()
+
+            # Skip if already has a meaningful semantic type (unless force)
+            if not force and current_type and current_type not in _FORMAT_TYPES:
+                skipped += 1
+                continue
+
+            title = item.properties.get("title", "") or ""
+            content = item.properties.get("content", "") or ""
+            doc_id = item.properties.get("document_id", "") or ""
+
+            # Check document-level cache to avoid redundant embeddings
+            cached = doc_cache.get(doc_id, _NOT_CACHED) if doc_id else _NOT_CACHED
+
+            if cached is _NOT_CACHED:
+                try:
+                    result = await classify_semantic_type(title, content[:500], threshold)
+                except Exception as e:
+                    logger.warning(f"Classification failed for {item.uuid}: {e}")
+                    errors += 1
+                    continue
+                if doc_id:
+                    doc_cache[doc_id] = result
+            else:
+                result = cached
+
+            if result:
+                inferred_type, confidence = result
+                try:
+                    collection.data.update(
+                        uuid=item.uuid,
+                        properties={"semantic_type": inferred_type}
+                    )
+                    updated += 1
+                    classifications[inferred_type] = classifications.get(inferred_type, 0) + 1
+                except Exception as e:
+                    logger.warning(f"Failed to update {item.uuid}: {e}")
+                    errors += 1
+            else:
+                # If force mode, clear any previous value (including format types like "pdf", "docx")
+                if force and current_type:
+                    try:
+                        collection.data.update(
+                            uuid=item.uuid,
+                            properties={"semantic_type": ""}
+                        )
+                        cleared += 1
+                    except Exception:
+                        pass
+                skipped += 1
+
+        return {
+            "collection": collection_name,
+            "updated": updated,
+            "cleared": cleared,
+            "skipped": skipped,
+            "errors": errors,
+            "classifications": classifications,
+            "threshold": threshold,
+            "force": force,
+            "unique_documents": len(doc_cache),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Backfill failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1063,6 +1291,11 @@ class HybridSearchRequest(BaseModel):
     limit: int = 10
     alpha: float = 0.5  # 0=keyword, 1=vector
     filters: Optional[Dict[str, Any]] = None
+    # Enrichment filters for multi-signal retrieval
+    person_filter: Optional[str] = None
+    domain_filter: Optional[str] = None
+    semantic_type_filter: Optional[str] = None
+    min_quality: Optional[float] = None
 
 
 @router.post("/collections/documents/hybrid", response_model=SearchResponse)
@@ -1082,7 +1315,7 @@ async def hybrid_search(
 
         collection = get_tenant_collection_name(request.tenant_id)
 
-        # Build search request
+        # Build search request with enrichment filters
         search_request = WeaviateSearchRequest(
             query=request.query,
             limit=request.limit,
@@ -1090,6 +1323,10 @@ async def hybrid_search(
             search_type="hybrid",
             filters=request.filters,
             alpha=request.alpha,
+            person_filter=request.person_filter,
+            domain_filter=request.domain_filter,
+            semantic_type_filter=request.semantic_type_filter,
+            min_quality=request.min_quality,
         )
 
         # Execute search
