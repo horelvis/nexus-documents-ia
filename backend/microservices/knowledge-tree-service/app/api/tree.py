@@ -2,8 +2,9 @@
 Tree API endpoints for Knowledge Tree Service.
 """
 
+import logging
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -58,6 +59,7 @@ class StructuralIndexRequest(BaseModel):
     learned_context: Dict[str, Any] = Field(default_factory=dict)
     weaviate_document_id: str | None = Field(default=None)
     connector_id: str | None = Field(default=None)
+    connector_type: str | None = Field(default=None, description="Connector type (alfresco, google_drive, onedrive, database)")
 
 
 class StructuralIndexResponse(BaseModel):
@@ -175,6 +177,14 @@ async def structural_query(request: StructuralQueryRequest, _: bool = Depends(ve
         if count == 0:
             count = await tenant_knowledge_service.get_document_count_by_year(request.tenant_id, year)
             count_type = "documents"
+    elif doc_type_match:
+        count = document_type_counts.get(doc_type_match, 0)
+        count_type = "documents"
+        matched_type = doc_type_match
+    elif folder_type_match:
+        count = container_type_counts.get(folder_type_match, 0)
+        count_type = "folders"
+        matched_type = folder_type_match
 
     entities: list[str] = []
     entities.extend([f.get("name", "") for f in top_folders if f.get("name")])
@@ -204,6 +214,37 @@ async def structural_query(request: StructuralQueryRequest, _: bool = Depends(ve
 async def index_structural(request: StructuralIndexRequest, _: bool = Depends(verify_api_key)):
     result = await structural_indexer.index(request.model_dump())
     return StructuralIndexResponse(**result)
+
+
+class BatchIndexRequest(BaseModel):
+    items: List[StructuralIndexRequest] = Field(..., description="Items to index (max 100)", max_length=100)
+
+
+class BatchIndexResponse(BaseModel):
+    success: int = 0
+    errors: int = 0
+    results: List[StructuralIndexResponse] = Field(default_factory=list)
+
+
+@tree_router.post("/index/batch", response_model=BatchIndexResponse)
+async def index_structural_batch(request: BatchIndexRequest, _: bool = Depends(verify_api_key)):
+    """Batch index multiple items sequentially. Avoids N HTTP round-trips during backfill."""
+    logger = logging.getLogger(__name__)
+    response = BatchIndexResponse()
+    for item in request.items:
+        try:
+            result = await structural_indexer.index(item.model_dump())
+            item_response = StructuralIndexResponse(**result)
+            response.results.append(item_response)
+            if item_response.success:
+                response.success += 1
+            else:
+                response.errors += 1
+        except Exception as e:
+            logger.warning(f"Batch index error for {item.document_id}: {e}")
+            response.errors += 1
+            response.results.append(StructuralIndexResponse(success=False, error=str(e)[:200]))
+    return response
 
 
 class GraphQueryRequest(BaseModel):
@@ -400,6 +441,7 @@ async def graph_structure(
                 "id": f"e:f:{fp}->d:{did}",
                 "source": f"f:{fp}",
                 "target": f"d:{did}",
+                "label": "HAS_DOCUMENT",
             })
 
         # Deduplicate folder->document edges
@@ -456,6 +498,7 @@ async def graph_structure(
                         "id": f"e:{key}",
                         "source": parent_id,
                         "target": child_id,
+                        "label": "CONTAINS",
                     })
 
     except Exception as e:
@@ -463,6 +506,91 @@ async def graph_structure(
         logging.getLogger(__name__).error(f"Graph structure query failed: {e}")
 
     return {"nodes": nodes, "edges": edges}
+
+
+class EntityDocumentRequest(BaseModel):
+    """Request to find documents linked to a named entity via the graph."""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    entity_name: str = Field(..., description="Entity name to search (e.g., person name)")
+    entity_type: str = Field(default="Persona", description="Graph node label (e.g., Persona, structural_folder)")
+
+
+class EntityDocumentResponse(BaseModel):
+    document_ids: List[str] = Field(default_factory=list)
+
+
+@tree_router.post("/graph/documents-by-entity", response_model=EntityDocumentResponse)
+async def documents_by_entity(
+    request: EntityDocumentRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Fast: get document IDs linked to a named entity in the structural graph."""
+    from app.services.age_client import age_client
+    from app.core.config import settings
+
+    await age_client.initialize()
+    graph = settings.age_graph_name
+
+    doc_ids: List[str] = []
+
+    # Sanitize entity name — escape single quotes, strip dangerous chars
+    safe_name = re.sub(r"['\";\\]", "", request.entity_name)
+
+    try:
+        # Search for documents associated with the entity via ASOCIADO_A or HAS_DOCUMENT
+        cypher = f"""
+            SELECT * FROM cypher('{graph}', $$
+                MATCH (d:structural_document)-[r]-(p:{request.entity_type})
+                WHERE p.name =~ '(?i).*{safe_name}.*'
+                  AND d.tenant_id = '{request.tenant_id}'
+                RETURN DISTINCT d.document_id as doc_id
+                LIMIT 50
+            $$) AS (doc_id agtype)
+        """
+        rows = await age_client.execute_cypher(cypher)
+        for row in rows:
+            did = str(row["doc_id"]).strip('"') if row.get("doc_id") else ""
+            if did:
+                doc_ids.append(did)
+
+        # Also try matching via associated_person property on documents
+        if not doc_ids:
+            cypher_fallback = f"""
+                SELECT * FROM cypher('{graph}', $$
+                    MATCH (d:structural_document)
+                    WHERE d.associated_person =~ '(?i).*{safe_name}.*'
+                      AND d.tenant_id = '{request.tenant_id}'
+                    RETURN DISTINCT d.document_id as doc_id
+                    LIMIT 50
+                $$) AS (doc_id agtype)
+            """
+            rows = await age_client.execute_cypher(cypher_fallback)
+            for row in rows:
+                did = str(row["doc_id"]).strip('"') if row.get("doc_id") else ""
+                if did:
+                    doc_ids.append(did)
+
+        # Also look for documents inside folders named like the person
+        if not doc_ids:
+            cypher_folder = f"""
+                SELECT * FROM cypher('{graph}', $$
+                    MATCH (f:structural_folder)-[:HAS_DOCUMENT]->(d:structural_document)
+                    WHERE f.name =~ '(?i).*{safe_name}.*'
+                      AND d.tenant_id = '{request.tenant_id}'
+                    RETURN DISTINCT d.document_id as doc_id
+                    LIMIT 50
+                $$) AS (doc_id agtype)
+            """
+            rows = await age_client.execute_cypher(cypher_folder)
+            for row in rows:
+                did = str(row["doc_id"]).strip('"') if row.get("doc_id") else ""
+                if did:
+                    doc_ids.append(did)
+
+    except Exception as e:
+        logging.getLogger(__name__).error(f"Documents-by-entity query failed: {e}")
+
+    return EntityDocumentResponse(document_ids=doc_ids)
 
 
 @tree_router.delete("/graph/clear")

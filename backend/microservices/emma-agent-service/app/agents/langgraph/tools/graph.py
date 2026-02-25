@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 class StructuralQueryInput(BaseModel):
     """Input for structural/graph queries."""
     query: str = Field(
-        description="Consulta estructural en lenguaje natural. "
-        "Ejemplos: 'cuántos contratos hay', 'lista de facturas del 2024', "
-        "'documentos del proyecto ACME', 'últimos 5 documentos modificados'."
+        description="Consulta estructural en lenguaje natural sobre la organización de documentos. "
+        "Ejemplos: 'cuántas carpetas tiene Javier', 'lista de empleados', "
+        "'documentos del proyecto ACME', 'estructura de carpetas del departamento X'."
     )
     max_results: int = Field(
         default=20,
@@ -49,10 +49,10 @@ class StructuralQueryTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Consulta estructural para contar, listar o filtrar documentos y entidades. "
-            "Usa esto para preguntas cuantitativas: '¿cuántos contratos?', "
-            "'lista de facturas de 2024', 'documentos del proyecto X'. "
-            "NO uses para búsqueda de contenido (usa search_documents para eso)."
+            "Consulta estructural sobre el repositorio: conteos, listas y estructura organizativa. "
+            "Usa esto para: '¿cuántas facturas hay?', '¿cuántos contratos tiene Javier?', "
+            "'lista de empleados', 'estructura del departamento X'. "
+            "IDEAL para preguntas de CANTIDAD (cuántos/cuántas) de cualquier tipo de documento."
         )
 
     @property
@@ -81,14 +81,14 @@ class StructuralQueryTool(EmmaTool):
             logger.error(f"structural_query failed: {e}")
             return ToolResult.from_error(
                 f"Error en consulta estructural: {e}",
-                suggestion="Intenta reformular la consulta o usa search_documents.",
+                suggestion="Intenta reformular la consulta o usa smart_search.",
             )
 
         if not result or result.get("route") == "ERROR":
             error_msg = result.get("context", "Unknown error") if result else "Empty response"
             return ToolResult.from_error(
                 f"No se pudo procesar la consulta estructural: {error_msg}",
-                suggestion="Intenta con search_documents para una búsqueda por contenido.",
+                suggestion="Intenta con smart_search para una búsqueda por contenido.",
             )
 
         # Format result based on route type

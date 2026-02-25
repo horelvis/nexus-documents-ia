@@ -430,10 +430,14 @@ class WeaviateService:
                     "vectorizer": "text2vec-transformers" if not self.embedding_model else "none"
                 }
             
-            # Create the collection using v4 API - simplified approach
+            # Create the collection using v4 API with explicit vector index
             collection = self.client.collections.create(
                 name=collection_name,
                 description=schema.get("description", f"Collection for documents: {collection_name}"),
+                vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
+                vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
+                    distance_metric=weaviate.classes.config.VectorDistances.COSINE,
+                ),
                 properties=[
                     weaviate.classes.config.Property(
                         name="title",
@@ -601,8 +605,31 @@ class WeaviateService:
                         data_type=weaviate.classes.config.DataType.BOOL,
                         description="True if accessible to all tenant users (backwards compatible default)"
                     ),
+                    # ========== Enrichment properties for multi-signal retrieval ==========
+                    weaviate.classes.config.Property(
+                        name="domain",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Business domain (e.g., legal, fiscal, medical)",
+                        skip_vectorization=True,
+                    ),
+                    weaviate.classes.config.Property(
+                        name="semantic_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Semantic document type (e.g., factura, contrato, nomina)",
+                        skip_vectorization=True,
+                    ),
+                    weaviate.classes.config.Property(
+                        name="quality_score",
+                        data_type=weaviate.classes.config.DataType.NUMBER,
+                        description="Document quality score 0.0-1.0 from DocumentIntelligence",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="associated_person",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Person associated via folder hierarchy or entity extraction",
+                        skip_vectorization=True,
+                    ),
                 ]
-                # Default vector configuration will be used automatically
             )
             result = {"class": collection_name, "status": "created"}
             logger.info(f"✅ Created collection: {collection_name}")
@@ -612,6 +639,42 @@ class WeaviateService:
             logger.error(f"❌ Failed to create collection {collection_name}: {e}")
             raise
     
+    # Names of enrichment properties added post-launch — used by migration
+    _ENRICHMENT_PROPERTIES = {
+        "domain": (weaviate.classes.config.DataType.TEXT, True),
+        "semantic_type": (weaviate.classes.config.DataType.TEXT, True),
+        "quality_score": (weaviate.classes.config.DataType.NUMBER, False),
+        "associated_person": (weaviate.classes.config.DataType.TEXT, True),
+    }
+
+    async def ensure_enrichment_properties(self, collection_name: str) -> None:
+        """
+        Idempotent migration: add enrichment properties to an existing collection.
+
+        Weaviate v4 supports `collection.config.add_property()` to add new
+        properties without recreating the collection. Existing objects get
+        the new property with a zero-value default.
+        """
+        try:
+            collection = self.client.collections.get(collection_name)
+            existing_props = {p.name for p in collection.config.get().properties}
+
+            for prop_name, (data_type, skip_vec) in self._ENRICHMENT_PROPERTIES.items():
+                if prop_name in existing_props:
+                    continue
+                logger.info(f"🔧 Adding enrichment property '{prop_name}' to {collection_name}")
+                kwargs = {
+                    "name": prop_name,
+                    "data_type": data_type,
+                }
+                if skip_vec:
+                    kwargs["skip_vectorization"] = True
+                collection.config.add_property(
+                    weaviate.classes.config.Property(**kwargs)
+                )
+        except Exception as e:
+            logger.warning(f"⚠️ Could not ensure enrichment properties on {collection_name}: {e}")
+
     async def ensure_collection_exists(self, collection_name: str) -> bool:
         """Ensure that a collection exists, create it if it doesn't"""
         try:
@@ -619,13 +682,15 @@ class WeaviateService:
             collections = await self.list_collections()
             if collection_name in collections or collection_name.capitalize() in collections:
                 logger.info(f"✅ Collection {collection_name} already exists")
+                # Migrate: ensure enrichment properties exist on older collections
+                await self.ensure_enrichment_properties(collection_name)
                 return True
-            
+
             # Create the collection if it doesn't exist
             logger.info(f"🔧 Creating collection: {collection_name}")
             await self.create_collection(collection_name)
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ Failed to ensure collection {collection_name} exists: {e}")
             return False
@@ -660,6 +725,10 @@ class WeaviateService:
             collection = self.client.collections.create(
                 name=collection_name,
                 description=f"Knowledge entities for tenant {tenant_id}",
+                vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
+                vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
+                    distance_metric=weaviate.classes.config.VectorDistances.COSINE,
+                ),
                 properties=[
                     # Entity identification
                     weaviate.classes.config.Property(
@@ -1018,6 +1087,10 @@ class WeaviateService:
             collection = self.client.collections.create(
                 name=collection_name,
                 description=f"Visual content embeddings for tenant {tenant_id}",
+                vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
+                vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
+                    distance_metric=weaviate.classes.config.VectorDistances.COSINE,
+                ),
                 properties=[
                     # Visual content identification
                     weaviate.classes.config.Property(
@@ -1533,6 +1606,11 @@ class WeaviateService:
                 "acl_user_ids": getattr(document, 'acl_user_ids', []) or [],
                 "acl_role_ids": getattr(document, 'acl_role_ids', []) or [],
                 "acl_everyone": getattr(document, 'acl_everyone', True),
+                # Enrichment properties for multi-signal retrieval
+                "domain": getattr(document, 'domain', '') or '',
+                "semantic_type": getattr(document, 'semantic_type', '') or '',
+                "quality_score": float(getattr(document, 'quality_score', 0.0) or 0.0),
+                "associated_person": getattr(document, 'associated_person', '') or '',
             }
 
             # Check if we have chunks to store individually
@@ -1571,6 +1649,11 @@ class WeaviateService:
                         "folder_path": chunk_metadata.get("folder_path") or base_properties["folder_path"],
                         "folder_hierarchy": chunk_metadata.get("folder_hierarchy") or base_properties["folder_hierarchy"],
                         "connector_id": chunk_metadata.get("connector_id") or base_properties["connector_id"],
+                        # Enrichment: propagate from chunk metadata or fall back to base
+                        "domain": chunk_metadata.get("domain", "") or base_properties.get("domain", ""),
+                        "semantic_type": chunk_metadata.get("semantic_type", "") or base_properties.get("semantic_type", ""),
+                        "quality_score": float(chunk_metadata.get("quality_score", 0.0) or base_properties.get("quality_score", 0.0)),
+                        "associated_person": chunk_metadata.get("associated_person", "") or base_properties.get("associated_person", ""),
                     }
 
                     # Generate embedding for chunk
@@ -1863,6 +1946,51 @@ class WeaviateService:
                 combined_filters = combined_filters & hierarchy_filter
                 logger.debug(f"📁 Filtering by folder_hierarchy_contains: {folder_hierarchy_contains}")
 
+            # ========== Enrichment filters for multi-signal retrieval ==========
+            # Check which enrichment properties exist in the schema to avoid
+            # GRPC errors on collections that haven't been migrated yet.
+            try:
+                _cfg = collection.config.get()
+                _schema_props = {p.name for p in _cfg.properties}
+            except Exception:
+                _schema_props = set()
+
+            domain_filter = getattr(search_request, 'domain_filter', None)
+            if domain_filter and "domain" in _schema_props:
+                combined_filters = combined_filters & Filter.by_property("domain").equal(domain_filter)
+                logger.debug(f"🏷️ Filtering by domain: {domain_filter}")
+
+            semantic_type_filter = getattr(search_request, 'semantic_type_filter', None)
+            if semantic_type_filter:
+                if "semantic_type" in _schema_props:
+                    combined_filters = combined_filters & Filter.by_property("semantic_type").equal(semantic_type_filter)
+                    logger.debug(f"🏷️ Filtering by semantic_type: {semantic_type_filter}")
+                else:
+                    logger.warning(f"⚠️ semantic_type_filter={semantic_type_filter} requested but 'semantic_type' not in schema props: {sorted(_schema_props)}")
+
+            person_filter = getattr(search_request, 'person_filter', None)
+            if person_filter:
+                # Match person against BOTH associated_person AND folder_path
+                # (associated_person is often empty; folder_path like "/Javier Martinez/" is reliable)
+                person_conditions = []
+                if "associated_person" in _schema_props:
+                    person_conditions.append(
+                        Filter.by_property("associated_person").like(f"*{person_filter}*")
+                    )
+                person_conditions.append(
+                    Filter.by_property("folder_path").like(f"*{person_filter}*")
+                )
+                if len(person_conditions) == 2:
+                    combined_filters = combined_filters & (person_conditions[0] | person_conditions[1])
+                else:
+                    combined_filters = combined_filters & person_conditions[0]
+                logger.debug(f"👤 Filtering by person (associated_person OR folder_path): {person_filter}")
+
+            min_quality = getattr(search_request, 'min_quality', None)
+            if min_quality is not None and "quality_score" in _schema_props:
+                combined_filters = combined_filters & Filter.by_property("quality_score").greater_or_equal(min_quality)
+                logger.debug(f"⭐ Filtering by min_quality: {min_quality}")
+
             # Execute search based on type using v4 API
             if search_request.search_type == "vector":
                 # Generate embedding for query using configured provider
@@ -1898,32 +2026,58 @@ class WeaviateService:
                     filters=combined_filters
                 )
             else:  # hybrid
+                # Detect if collection has a vector index — if not, skip vector
+                _has_vectors = _cfg.vector_index_type is not None if _cfg else False
+                if not _has_vectors:
+                    logger.warning(f"⚠️ Collection {collection_name} has no vector index. Re-sync connectors to enable hybrid search.")
+
                 # Hybrid search requires both vector and keyword
                 query_embedding = None
-                if self.embedding_model:
+                if _has_vectors and self.embedding_model:
                     try:
                         query_embedding = await generate_embedding(search_request.query)
                     except Exception as e:
                         logger.warning(f"⚠️ Could not generate query embedding for hybrid: {e}")
-                
+
                 if query_embedding:
+                    effective_alpha = search_request.alpha if search_request.alpha is not None else 0.7
                     response = collection.query.hybrid(
                         query=search_request.query,
                         vector=query_embedding,
                         limit=search_request.limit,
-                        alpha=0.7,
+                        alpha=effective_alpha,
                         return_metadata=weaviate.classes.query.MetadataQuery(score=True, explain_score=True),
                         filters=combined_filters
                     )
                 else:
-                    # Fall back to BM25 if no embeddings
+                    # Fall back to BM25 if no embeddings or no vector index
                     response = collection.query.bm25(
                         query=search_request.query,
                         limit=search_request.limit,
                         return_metadata=weaviate.classes.query.MetadataQuery(score=True),
                         filters=combined_filters
                     )
-            
+
+            # ── Filter-only fallback ──────────────────────────────────
+            # BM25 uses word tokenization without stemming, so "facturas"
+            # won't match "factura". When enrichment filters are active
+            # (semantic_type, person, domain) and the keyword search returns
+            # 0 results, retry with a filter-only fetch so that metadata
+            # filtering still returns relevant documents.
+            _has_enrichment = any([
+                getattr(search_request, 'semantic_type_filter', None),
+                getattr(search_request, 'person_filter', None),
+                getattr(search_request, 'domain_filter', None),
+            ])
+            if len(response.objects) == 0 and _has_enrichment:
+                logger.info("🔄 BM25 returned 0 with enrichment filters — retrying with filter-only fetch")
+                response = collection.query.fetch_objects(
+                    limit=search_request.limit,
+                    filters=combined_filters,
+                    return_metadata=weaviate.classes.query.MetadataQuery(creation_time=True),
+                )
+                logger.info(f"🔄 Filter-only fetch: {len(response.objects)} objects returned")
+
             # Process results using v4 response format
             documents = []
             for item in response.objects:
@@ -1963,6 +2117,11 @@ class WeaviateService:
                     folder_path=item.properties.get("folder_path", ""),
                     folder_hierarchy=item.properties.get("folder_hierarchy", []),
                     connector_id=item.properties.get("connector_id", ""),
+                    # Enrichment properties for multi-signal retrieval
+                    domain=item.properties.get("domain", ""),
+                    semantic_type=item.properties.get("semantic_type", ""),
+                    quality_score=item.properties.get("quality_score"),
+                    associated_person=item.properties.get("associated_person", ""),
                 )
                 documents.append(doc)
             
@@ -2823,6 +2982,7 @@ class WeaviateService:
             limit=limit,
             tenant_id=tenant_id,
             search_type="hybrid",
+            alpha=alpha,
             filters=filters,
         )
 
