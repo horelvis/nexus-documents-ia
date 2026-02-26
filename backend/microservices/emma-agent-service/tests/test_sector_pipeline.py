@@ -382,3 +382,127 @@ class TestConversationalPipeline:
         assert result["fast_path_used"] is True
         assert result["final_answer"] is not None
         assert result["success"] is True
+
+
+# =============================================================================
+# React Loop Helpers (covers react_loop.py lines 187-245)
+# =============================================================================
+
+
+class TestBuildToolContext:
+    """Verify _build_tool_context extracts the right fields."""
+
+    def test_context_has_required_fields(self, sector):
+        """Tool context should include tenant_id, sector, features, etc."""
+        name, _ = sector
+        from app.agents.langgraph.nodes.react_loop import _build_tool_context
+
+        state = make_react_state(query="test", sector_name=name)
+        ctx = _build_tool_context(state)
+        assert ctx["tenant_id"] is not None
+        assert ctx["sector"] == name
+        assert ctx["features"] is not None
+        assert "query" in ctx
+
+    def test_context_no_sector(self):
+        """Without sector, context should have sector=None."""
+        from app.agents.langgraph.nodes.react_loop import _build_tool_context
+
+        state = make_react_state(query="test", sector_name=None)
+        ctx = _build_tool_context(state)
+        assert ctx["sector"] is None
+
+
+class TestParseThinking:
+    """Verify _parse_thinking() extraction from LLM response."""
+
+    def test_parse_think_tags(self):
+        """<think>...</think> should be extracted as thinking."""
+        from app.agents.langgraph.nodes.react_loop import _parse_thinking
+
+        thinking, remaining = _parse_thinking(
+            "<think>I should search first</think>Let me find that."
+        )
+        assert thinking == "I should search first"
+        assert remaining == "Let me find that."
+
+    def test_parse_thinking_tags(self):
+        """<thinking>...</thinking> should also be extracted."""
+        from app.agents.langgraph.nodes.react_loop import _parse_thinking
+
+        thinking, remaining = _parse_thinking(
+            "<thinking>Analysis step</thinking>Here is the answer."
+        )
+        assert thinking == "Analysis step"
+        assert remaining == "Here is the answer."
+
+    def test_parse_pensamiento_tags(self):
+        """<pensamiento>...</pensamiento> (Spanish) should be extracted."""
+        from app.agents.langgraph.nodes.react_loop import _parse_thinking
+
+        thinking, remaining = _parse_thinking(
+            "<pensamiento>Debo buscar</pensamiento>Aquí está."
+        )
+        assert thinking == "Debo buscar"
+        assert remaining == "Aquí está."
+
+    def test_no_thinking_tags(self):
+        """Without thinking tags, thinking should be None."""
+        from app.agents.langgraph.nodes.react_loop import _parse_thinking
+
+        thinking, remaining = _parse_thinking("Just a plain response.")
+        assert thinking is None
+        assert remaining == "Just a plain response."
+
+
+class TestDetectStuck:
+    """Verify _detect_stuck() heuristics."""
+
+    def test_not_stuck_short_history(self):
+        """Less than window entries should never be stuck."""
+        from app.agents.langgraph.nodes.react_loop import _detect_stuck
+
+        history = [{"name": "smart_search", "args": {"query": "test"}}]
+        assert _detect_stuck(history, window=3) is False
+
+    def test_stuck_exact_match(self):
+        """Identical tool calls repeated window times → stuck."""
+        from app.agents.langgraph.nodes.react_loop import _detect_stuck
+
+        entry = {"name": "smart_search", "args": {"query": "facturas"}}
+        history = [entry, entry, entry]
+        assert _detect_stuck(history, window=3) is True
+
+    def test_stuck_same_tool_different_args(self):
+        """Same tool with different args repeated window times → near-stuck."""
+        from app.agents.langgraph.nodes.react_loop import _detect_stuck
+
+        history = [
+            {"name": "smart_search", "args": {"query": "facturas"}},
+            {"name": "smart_search", "args": {"query": "facturas 2024"}},
+            {"name": "smart_search", "args": {"query": "facturas enero"}},
+        ]
+        assert _detect_stuck(history, window=3) is True
+
+    def test_not_stuck_different_tools(self):
+        """Different tools should not be detected as stuck."""
+        from app.agents.langgraph.nodes.react_loop import _detect_stuck
+
+        history = [
+            {"name": "smart_search", "args": {"query": "test"}},
+            {"name": "structural_query", "args": {"query": "count"}},
+            {"name": "terminate", "args": {"response": "done"}},
+        ]
+        assert _detect_stuck(history, window=3) is False
+
+    def test_terminate_not_stuck(self):
+        """Repeated terminate calls should NOT be detected as near-stuck."""
+        from app.agents.langgraph.nodes.react_loop import _detect_stuck
+
+        history = [
+            {"name": "terminate", "args": {"response": "a"}},
+            {"name": "terminate", "args": {"response": "b"}},
+            {"name": "terminate", "args": {"response": "c"}},
+        ]
+        # terminate is excluded from near-stuck detection
+        assert _detect_stuck(history, window=3) is False

@@ -246,3 +246,106 @@ class TestToolExecution:
         )
         assert not result.success
         assert "Unknown tool" in result.output
+
+
+# =============================================================================
+# ToolResult & EmmaTool base class (covers base.py lines 40-55, 137-165)
+# =============================================================================
+
+
+class TestToolResultFactory:
+    """Verify ToolResult.from_error and construction."""
+
+    def test_from_error_basic(self):
+        """from_error should create a failed ToolResult."""
+        from app.agents.langgraph.tools.base import ToolResult
+
+        result = ToolResult.from_error("Something broke")
+        assert not result.success
+        assert "Something broke" in result.output
+        assert result.error == "Something broke"
+
+    def test_from_error_with_suggestion(self):
+        """from_error with suggestion should include it in output."""
+        from app.agents.langgraph.tools.base import ToolResult
+
+        result = ToolResult.from_error("No results", suggestion="Try broader query")
+        assert "Try broader query" in result.output
+        assert not result.success
+
+    def test_tool_result_defaults(self):
+        """Default ToolResult should be successful with empty sources."""
+        from app.agents.langgraph.tools.base import ToolResult
+
+        result = ToolResult(output="hello")
+        assert result.success is True
+        assert result.sources == []
+        assert result.data == {}
+        assert result.error is None
+
+
+class TestToolError:
+    """Verify ToolError exception class."""
+
+    def test_tool_error_attributes(self):
+        """ToolError should store tool_name and retryable."""
+        from app.agents.langgraph.tools.base import ToolError
+
+        err = ToolError("connection failed", tool_name="smart_search", retryable=True)
+        assert str(err) == "connection failed"
+        assert err.tool_name == "smart_search"
+        assert err.retryable is True
+
+    def test_tool_error_defaults(self):
+        """ToolError defaults should be empty name and not retryable."""
+        from app.agents.langgraph.tools.base import ToolError
+
+        err = ToolError("fail")
+        assert err.tool_name == ""
+        assert err.retryable is False
+
+
+class TestEmmaToolBase:
+    """Verify EmmaTool abstract base behavior via a concrete tool."""
+
+    def test_tool_repr(self):
+        """EmmaTool.__repr__ should include the tool name."""
+        registry = get_tool_registry()
+        tools = registry.get_tools_for_context(
+            tenant_id="test", sector=None, features={}
+        )
+        tool = tools[0]
+        assert tool.name in repr(tool)
+        assert "<EmmaTool:" in repr(tool)
+
+    @pytest.mark.asyncio
+    async def test_safe_execute_invalid_args(self):
+        """safe_execute with invalid args should return error ToolResult."""
+        registry = get_tool_registry()
+        tools = registry.get_tools_for_context(
+            tenant_id="test", sector=None, features={}
+        )
+        # Find smart_search tool (requires "query" argument)
+        smart = next(t for t in tools if t.name == "smart_search")
+        result = await smart.safe_execute(
+            {"not_a_valid_param": 123},
+            {"tenant_id": "test"},
+        )
+        assert not result.success
+        assert "Invalid arguments" in result.output
+
+    @pytest.mark.asyncio
+    async def test_safe_execute_validation_passes(self):
+        """safe_execute with valid args should call execute (which may fail on missing client)."""
+        registry = get_tool_registry()
+        tools = registry.get_tools_for_context(
+            tenant_id="test", sector=None, features={}
+        )
+        # terminate tool uses "answer" field name
+        terminate = next(t for t in tools if t.name == "terminate")
+        result = await terminate.safe_execute(
+            {"answer": "Test answer", "sources": []},
+            {"tenant_id": "test"},
+        )
+        assert result.success is True
+        assert "Test answer" in result.output

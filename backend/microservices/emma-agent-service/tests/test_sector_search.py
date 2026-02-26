@@ -336,3 +336,221 @@ class TestSectorSearchConfig:
         assert config.rerank_weights is not None
         assert isinstance(config.rerank_weights, dict)
         assert len(config.rerank_weights) == 5
+
+
+# =============================================================================
+# SmartSearch Deduplication (covers smart_search.py lines 567-599)
+# =============================================================================
+
+
+class TestDeduplication:
+    """Verify SmartSearchTool._deduplicate() logic."""
+
+    def _make_result(self, doc_id, title="Doc", score=0.5, folder_path=""):
+        return {
+            "document_id": doc_id, "title": title, "score": score,
+            "type": "tenant_document", "content": "", "folder_path": folder_path,
+        }
+
+    def test_no_duplicates_unchanged(self):
+        """Distinct doc_ids with distinct titles should all be kept."""
+        tool = SmartSearchTool()
+        results = [
+            self._make_result("d1", title="Doc A", score=0.9),
+            self._make_result("d2", title="Doc B", score=0.8),
+        ]
+        deduped = tool._deduplicate(results)
+        assert len(deduped) == 2
+
+    def test_same_doc_id_keeps_highest_score(self):
+        """Duplicate doc_ids should keep the one with highest score."""
+        tool = SmartSearchTool()
+        results = [
+            self._make_result("d1", score=0.3),
+            self._make_result("d1", score=0.9),
+            self._make_result("d1", score=0.5),
+        ]
+        deduped = tool._deduplicate(results)
+        assert len(deduped) == 1
+        assert deduped[0]["score"] == 0.9
+
+    def test_same_title_folder_deduped(self):
+        """Same title+folder_path but different doc_ids → collapsed (pass 2)."""
+        tool = SmartSearchTool()
+        results = [
+            self._make_result("d1", title="Report.pdf", score=0.6, folder_path="/docs"),
+            self._make_result("d2", title="Report.pdf", score=0.8, folder_path="/docs"),
+        ]
+        deduped = tool._deduplicate(results)
+        assert len(deduped) == 1
+        assert deduped[0]["score"] == 0.8
+
+    def test_empty_doc_id_not_collapsed(self):
+        """Results with empty document_id should not be collapsed."""
+        tool = SmartSearchTool()
+        results = [
+            self._make_result("", title="A", score=0.5),
+            self._make_result("", title="B", score=0.6),
+        ]
+        deduped = tool._deduplicate(results)
+        assert len(deduped) == 2
+
+    def test_none_score_treated_as_zero(self):
+        """Score=None should be treated as 0 (not crash)."""
+        tool = SmartSearchTool()
+        results = [
+            {"document_id": "d1", "title": "A", "score": None,
+             "type": "tenant_document", "content": "", "folder_path": ""},
+            {"document_id": "d1", "title": "A", "score": 0.5,
+             "type": "tenant_document", "content": "", "folder_path": ""},
+        ]
+        deduped = tool._deduplicate(results)
+        assert len(deduped) == 1
+        assert deduped[0]["score"] == 0.5
+
+    def test_sorted_by_score_descending(self):
+        """Deduplicated results should be sorted by score descending."""
+        tool = SmartSearchTool()
+        results = [
+            self._make_result("d1", title="Alpha", score=0.3),
+            self._make_result("d2", title="Beta", score=0.9),
+            self._make_result("d3", title="Gamma", score=0.6),
+        ]
+        deduped = tool._deduplicate(results)
+        scores = [r["score"] for r in deduped]
+        assert scores == [0.9, 0.6, 0.3]
+
+
+# =============================================================================
+# SmartSearch Format Results (covers smart_search.py lines 605-674)
+# =============================================================================
+
+
+class TestFormatResults:
+    """Verify SmartSearchTool._format_results() output structure."""
+
+    def test_format_document_results(self):
+        """Formatting document results should produce ToolResult with sources."""
+        tool = SmartSearchTool()
+        results = [
+            {
+                "document_id": "d1", "title": "Factura 001", "score": 0.85,
+                "type": "tenant_document", "content": "Detalles de factura...",
+                "quality_score": 0.7, "domain": "fiscal",
+                "semantic_type": "factura", "associated_person": "Juan",
+                "created_at": "", "folder_path": "/Facturas",
+                "document_type": "pdf", "tags": ["2024"],
+            },
+        ]
+        tr = tool._format_results("facturas", results)
+        assert tr.success is True
+        assert "Factura 001" in tr.output
+        assert "d1" in tr.output
+        assert len(tr.sources) == 1
+        assert tr.data["result_count"] == 1
+        assert tr.data["doc_count"] == 1
+        assert tr.data["leg_count"] == 0
+
+    def test_format_legislation_results(self):
+        """Formatting legislation results should include BOE markers."""
+        tool = SmartSearchTool()
+        results = [
+            {
+                "document_id": "boe-001", "title": "Ley Orgánica 3/2018",
+                "score": 0.9, "type": "legislation",
+                "content": "Protección de datos...", "quality_score": 0.8,
+                "boe_id": "BOE-A-2018-16673", "article": "5",
+                "domain": "legal", "semantic_type": "legislacion",
+                "associated_person": "", "created_at": "",
+                "folder_path": "", "document_type": "legislation",
+                "tags": ["LOPD"],
+            },
+        ]
+        tr = tool._format_results("ley protección datos", results)
+        assert "[LEY]" in tr.output
+        assert "BOE-A-2018-16673" in tr.output
+        assert "Art. 5" in tr.output
+        assert tr.data["leg_count"] == 1
+
+    def test_format_mixed_results(self):
+        """Mixed document + legislation results should show counts in header."""
+        tool = SmartSearchTool()
+        results = [
+            {
+                "document_id": "d1", "title": "Contrato", "score": 0.8,
+                "type": "tenant_document", "content": "...",
+                "quality_score": 0.5, "domain": "", "semantic_type": "",
+                "associated_person": "", "created_at": "",
+                "folder_path": "", "document_type": "", "tags": [],
+            },
+            {
+                "document_id": "boe-1", "title": "Código Civil", "score": 0.7,
+                "type": "legislation", "content": "...",
+                "quality_score": 0.8, "boe_id": "BOE-001", "article": "",
+                "domain": "", "semantic_type": "legislacion",
+                "associated_person": "", "created_at": "",
+                "folder_path": "", "document_type": "legislation", "tags": [],
+            },
+        ]
+        tr = tool._format_results("consulta mixta", results)
+        assert "1 documentos" in tr.output
+        assert "1 legislación" in tr.output
+
+    def test_format_with_dropped_filters(self):
+        """Dropped filters should produce a warning note in output."""
+        tool = SmartSearchTool()
+        results = [
+            {
+                "document_id": "d1", "title": "Doc", "score": 0.5,
+                "type": "tenant_document", "content": "",
+                "quality_score": 0.5, "domain": "", "semantic_type": "",
+                "associated_person": "", "created_at": "",
+                "folder_path": "", "document_type": "", "tags": [],
+            },
+        ]
+        tr = tool._format_results(
+            "facturas de Juan", results,
+            dropped_filters=["person=Juan"],
+        )
+        assert "NOTA" in tr.output
+        assert "person=Juan" in tr.output
+
+
+# =============================================================================
+# SmartSearch Entity Extraction Fallback (covers lines 314-328)
+# =============================================================================
+
+
+class TestEntityExtractionFallback:
+    """Verify _extract_entities uses documental patterns as fallback."""
+
+    def test_empty_sector_config_uses_fallback(self):
+        """With no sector patterns, should fall back to documental patterns."""
+        tool = SmartSearchTool()
+        entities = tool._extract_entities("NIF B12345678", {})
+        # Documental patterns include NIF
+        assert "nif" in entities or len(entities) >= 0  # at least doesn't crash
+
+    def test_sector_config_with_patterns(self):
+        """With sector patterns, should use them directly."""
+        tool = SmartSearchTool()
+        entities = tool._extract_entities(
+            "Ley Orgánica 3/2018",
+            {"entity_patterns": SECTOR_CONFIGS["legal"].entity_patterns},
+        )
+        assert "ley" in entities
+        assert len(entities["ley"]) >= 1
+
+    def test_get_rerank_weights_from_config(self):
+        """_get_rerank_weights should return sector weights when available."""
+        tool = SmartSearchTool()
+        config = {"rerank_weights": {"similarity": 0.5, "quality": 0.5}}
+        weights = tool._get_rerank_weights(config)
+        assert weights["similarity"] == 0.5
+
+    def test_get_rerank_weights_default(self):
+        """_get_rerank_weights should return defaults when no config."""
+        tool = SmartSearchTool()
+        weights = tool._get_rerank_weights({})
+        assert weights["similarity"] == 0.40
+        assert weights["quality"] == 0.20

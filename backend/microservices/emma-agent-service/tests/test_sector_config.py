@@ -219,3 +219,69 @@ class TestEntityPatterns:
     def test_documental_has_importe(self):
         patterns = SECTOR_CONFIGS["documental"].entity_patterns
         assert "importe" in patterns
+
+
+# =============================================================================
+# Sector Registry Singleton — edge cases (covers registry.py lines 194-212)
+# =============================================================================
+
+
+class TestRegistrySingleton:
+    """Cover the get_active_sector_config() singleton paths."""
+
+    def test_cached_returns_same_config(self, sector):
+        """Calling get_active_sector_config twice returns cached result."""
+        name, _ = sector
+        from tests.sector_helpers import reset_sector_singleton
+        reset_sector_singleton(name)
+        from app.agents.langgraph.sectors.registry import get_active_sector_config
+        first = get_active_sector_config()
+        second = get_active_sector_config()
+        assert first is second
+        assert first is not None
+        assert first.sector.value == name
+
+    def test_empty_sector_returns_none(self):
+        """Empty ACTIVE_SECTOR → generic mode (None)."""
+        from tests.sector_helpers import reset_sector_singleton
+        reset_sector_singleton("")
+        from app.agents.langgraph.sectors.registry import get_active_sector_config
+        result = get_active_sector_config()
+        assert result is None
+
+    def test_invalid_sector_returns_none(self):
+        """Invalid ACTIVE_SECTOR → fallback to None with error log."""
+        from tests.sector_helpers import reset_sector_singleton
+        reset_sector_singleton("invalid_sector_xyz")
+        from app.agents.langgraph.sectors.registry import get_active_sector_config
+        result = get_active_sector_config()
+        assert result is None
+
+    def test_valid_sector_returns_config(self):
+        """Valid ACTIVE_SECTOR → returns matching SectorConfig."""
+        from tests.sector_helpers import reset_sector_singleton
+        reset_sector_singleton("medical")
+        from app.agents.langgraph.sectors.registry import get_active_sector_config
+        result = get_active_sector_config()
+        assert result is not None
+        assert result.sector.value == "medical"
+        assert result.hybrid_alpha == 0.6
+
+
+# =============================================================================
+# Predictive Config
+# =============================================================================
+
+
+class TestPredictiveConfig:
+    """Validate predictive config presence for sectors that have it."""
+
+    def test_legal_has_predictive_config(self):
+        config = SECTOR_CONFIGS["legal"]
+        assert config.predictive_config is not None
+        assert "contract_breach" in config.predictive_config.factor_types
+
+    def test_predictive_config_has_disclaimer(self):
+        config = SECTOR_CONFIGS["legal"]
+        assert config.predictive_config.disclaimer
+        assert "profesional" in config.predictive_config.disclaimer.lower()
