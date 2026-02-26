@@ -37,3 +37,31 @@ _mock_modules = [
 for mod_name in _mock_modules:
     if mod_name not in sys.modules:
         sys.modules[mod_name] = MagicMock()
+
+
+# ── Sector-Parametrized Fixtures ─────────────────────────────────────────────
+import pytest
+from tests.sector_helpers import ALL_SECTORS, reset_sector_singleton, reset_tool_registry
+
+
+@pytest.fixture(params=ALL_SECTORS)
+def sector(request):
+    """Parametrized fixture: runs the test 3x (legal, medical, documental).
+
+    Yields (sector_name, SectorConfig) tuple.
+    Resets the sector singleton before and after each test to prevent leaks.
+    """
+    sector_name = request.param
+    reset_sector_singleton(sector_name)
+    from app.agents.langgraph.sectors.registry import SECTOR_CONFIGS
+    config = SECTOR_CONFIGS[sector_name]
+    yield sector_name, config
+    reset_sector_singleton("")
+
+
+@pytest.fixture
+def reset_singletons():
+    """Reset all global singletons after the test."""
+    yield
+    reset_sector_singleton("")
+    reset_tool_registry()
