@@ -211,7 +211,7 @@ Eliminada restricción de brevedad. El Social Agent ahora:
 
 | Archivo | Cambio |
 |---------|--------|
-| `emma-agent-service/app/agents/langgraph/nodes/specialists/social.py` | Prompt sin límite de oraciones, `quick_document_search` con detalles completos |
+| `emma-agent-service/app/agents/langgraph/nodes/specialists/social.py` | Prompt sin límite de oraciones, `quick_document_search` (ahora `smart_search`) con detalles completos |
 
 ### Antes vs Después
 

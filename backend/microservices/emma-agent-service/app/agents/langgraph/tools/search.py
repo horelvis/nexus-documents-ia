@@ -28,7 +28,9 @@ class SearchDocumentsInput(BaseModel):
     """Input for tenant document search."""
     query: str = Field(
         description="Consulta de búsqueda en lenguaje natural. "
-        "Sé específico: incluye nombres de documentos, fechas o temas clave."
+        "Sé específico: incluye nombres de documentos, fechas o temas clave. "
+        "Incluye el tipo de documento en la query (ej: 'factura Movistar', "
+        "'contrato laboral', 'nómina enero') — NO uses filtros para tipos semánticos."
     )
     limit: int = Field(
         default=8,
@@ -37,7 +39,9 @@ class SearchDocumentsInput(BaseModel):
     )
     filters: Optional[Dict[str, Any]] = Field(
         default=None,
-        description="Filtros opcionales: {document_type, date_from, date_to, tags}.",
+        description="Filtros exactos opcionales: {tags, folder_path, connector_id}. "
+        "IMPORTANTE: NO filtrar por document_type — es el formato de archivo (pdf, docx), "
+        "NO el tipo semántico (factura, contrato). Usa la query para buscar por tipo semántico.",
     )
 
 
@@ -60,6 +64,12 @@ class SearchDocumentsTool(EmmaTool):
     def parameters_schema(self) -> Type[BaseModel]:
         return SearchDocumentsInput
 
+    # File-format values that are valid for document_type exact filtering
+    _VALID_DOC_TYPE_FORMATS = {
+        "pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt",
+        "txt", "html", "markdown", "csv", "json", "xml", "image",
+    }
+
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
         from app.clients.weaviate_client import get_weaviate_client
 
@@ -70,6 +80,18 @@ class SearchDocumentsTool(EmmaTool):
         query = arguments["query"]
         limit = arguments.get("limit", 8)
         filters = arguments.get("filters")
+
+        # Guard: drop document_type filter if it's a semantic concept (not a file format)
+        # LLMs often confuse "factura" (semantic) with "pdf" (format)
+        if filters and "document_type" in filters:
+            dt_val = filters["document_type"]
+            if isinstance(dt_val, str) and dt_val.lower() not in self._VALID_DOC_TYPE_FORMATS:
+                # Fold the semantic type into the query instead of filtering
+                query = f"{dt_val} {query}"
+                del filters["document_type"]
+                logger.info(f"Moved semantic document_type '{dt_val}' from filter to query")
+            if not filters:
+                filters = None
 
         client = get_weaviate_client()
 
@@ -101,8 +123,20 @@ class SearchDocumentsTool(EmmaTool):
                 data={"result_count": 0},
             )
 
+        # Deduplicate: keep only the highest-scoring chunk per document
+        seen_doc_ids: Dict[str, Any] = {}
+        for r in results:
+            doc_id = r.document_id or r.metadata.get("document_id", "")
+            if doc_id and doc_id in seen_doc_ids:
+                # Keep the one with higher score
+                if r.score > seen_doc_ids[doc_id].score:
+                    seen_doc_ids[doc_id] = r
+            else:
+                seen_doc_ids[doc_id or id(r)] = r
+        results = sorted(seen_doc_ids.values(), key=lambda r: r.score, reverse=True)
+
         # Format results for the LLM
-        lines = [f"Se encontraron {len(results)} resultados para '{query}':\n"]
+        lines = [f"Se encontraron {len(results)} documentos para '{query}':\n"]
         sources = []
 
         for i, r in enumerate(results, 1):
@@ -254,7 +288,7 @@ class SearchLegislationTool(EmmaTool):
 class GetDocumentContentInput(BaseModel):
     """Input for fetching a specific document's content."""
     document_id: str = Field(
-        description="ID del documento a leer. Obtén el ID desde search_documents."
+        description="ID del documento a leer. Obtén el ID desde smart_search."
     )
     include_chunks: bool = Field(
         default=False,
@@ -273,7 +307,7 @@ class GetDocumentContentTool(EmmaTool):
     def description(self) -> str:
         return (
             "Lee el contenido completo de un documento específico por su ID. "
-            "Usa esto después de search_documents para leer un documento encontrado. "
+            "Usa esto después de smart_search para leer un documento encontrado. "
             "Útil para análisis detallado, revisión de contratos, o extracción de datos."
         )
 
@@ -309,7 +343,7 @@ class GetDocumentContentTool(EmmaTool):
         if not doc or (isinstance(doc, dict) and doc.get("error")):
             return ToolResult.from_error(
                 f"Documento no encontrado: {document_id}",
-                suggestion="Usa search_documents para buscar el documento correcto.",
+                suggestion="Usa smart_search para buscar el documento correcto.",
             )
 
         title = doc.get("title", "Sin título")

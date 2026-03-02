@@ -75,120 +75,6 @@ class TestReasoningTracker:
             assert steps[0]["metadata"]["result_count"] == 5
 
 
-class TestPlanNodeReasoning:
-    """Tests para el razonamiento en el nodo de planificación."""
-
-    @pytest.mark.asyncio
-    async def test_structural_query_detection(self):
-        """Test que detecta consultas estructurales y emite pasos."""
-        from app.agents.langgraph.nodes.plan import _is_structural_query
-
-        # Consultas estructurales
-        structural_queries = [
-            "¿Cuántos expedientes tengo del año 2006?",
-            "Lista todos los contratos de ACME",
-            "¿Tengo facturas de más de 10.000€?",
-            "Documentos del último mes",
-            "¿Cuántas nóminas hay del 2023?",
-        ]
-
-        for query in structural_queries:
-            is_structural, pattern = _is_structural_query(query)
-            print(f"✓ '{query[:40]}...' → structural={is_structural}, pattern='{pattern}'")
-            assert is_structural, f"Debería ser estructural: {query}"
-
-        # Consultas semánticas (no estructurales)
-        semantic_queries = [
-            "¿Qué dice el contrato sobre penalizaciones?",
-            "Explícame la cláusula de confidencialidad",
-            "Resume el documento de privacidad",
-        ]
-
-        for query in semantic_queries:
-            is_structural, pattern = _is_structural_query(query)
-            print(f"✗ '{query[:40]}...' → structural={is_structural}")
-            assert not is_structural, f"No debería ser estructural: {query}"
-
-    @pytest.mark.asyncio
-    async def test_plan_node_emits_reasoning_steps(self):
-        """Test que plan_node emite pasos de razonamiento."""
-        from app.agents.langgraph.nodes.plan import plan_node
-        from app.agents.langgraph.reasoning_tracker import ReasoningTracker
-
-        # Mock state para consulta estructural
-        state = {
-            "query": "¿Cuántos expedientes tengo del año 2006?",
-            "tenant_id": "test-tenant",
-            "retrieved_docs": [],
-            "metadata": {},
-        }
-
-        # Ejecutar con tracker
-        with ReasoningTracker.create() as tracker:
-            result = await plan_node(state)
-
-        # Verificar resultado
-        assert result["detected_domains"] == ["structural"]
-        assert result["execution_plan"] == ["general_agent"]
-        assert "reasoning_steps" in result
-
-        steps = result["reasoning_steps"]
-        print(f"\n📋 Pasos de razonamiento ({len(steps)}):")
-        for i, step in enumerate(steps, 1):
-            print(f"  {i}. [{step['type']}] {step['content']}")
-
-        assert len(steps) >= 3  # Al menos: análisis, detección, decisión
-
-
-class TestStructuralQueryReasoning:
-    """Tests para el razonamiento en consultas estructurales."""
-
-    @pytest.mark.asyncio
-    async def test_structural_query_with_mock_client(self):
-        """Test de structural_query con cliente mockeado."""
-        from app.agents.langgraph.nodes.specialists.general import structural_query
-        from app.agents.langgraph.reasoning_tracker import ReasoningTracker
-        from unittest.mock import AsyncMock, patch, MagicMock
-
-        # Mock del resultado
-        mock_result = MagicMock()
-        mock_result.route = "GRAPH_ONLY"
-        mock_result.confidence = 0.95
-        mock_result.context = "Encontrados 15 expedientes del año 2006"
-        mock_result.data = {
-            "count": 15,
-            "documents": [{"title": f"Expediente {i}"} for i in range(15)]
-        }
-
-        # Mock del cliente
-        mock_client = AsyncMock()
-        mock_client.structural_query = AsyncMock(return_value=mock_result)
-
-        with patch("app.agents.langgraph.nodes.specialists.general.get_weaviate_client", return_value=mock_client):
-            with ReasoningTracker.create() as tracker:
-                result = await structural_query(
-                    query="¿Cuántos expedientes tengo del año 2006?",
-                    tenant_id="test-tenant",
-                )
-
-                steps = tracker.get_steps()
-
-        # Verificar resultado
-        assert "response" in result
-        assert "reasoning_steps" in result
-        assert "15" in result["response"]
-
-        print(f"\n📋 Pasos de razonamiento de structural_query ({len(steps)}):")
-        for i, step in enumerate(steps, 1):
-            conf = step.get('confidence', 1.0)
-            print(f"  {i}. [{step['type']}] {step['content']} (conf: {conf:.0%})")
-
-        # Debe tener pasos de: análisis, conexión, routing, extracción, respuesta
-        step_types = [s["type"] for s in steps]
-        assert "query_analysis" in step_types
-        assert "connector" in step_types or "routing" in step_types
-
-
 class TestEndToEndReasoning:
     """Test end-to-end del flujo de razonamiento."""
 
@@ -283,10 +169,6 @@ if __name__ == "__main__":
 
     test.test_connector_step()
     print("✅ test_connector_step passed")
-
-    # Test de detección
-    asyncio.run(TestPlanNodeReasoning().test_structural_query_detection())
-    print("✅ test_structural_query_detection passed")
 
     # Tests end-to-end
     asyncio.run(TestEndToEndReasoning().test_full_flow_structural())

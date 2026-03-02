@@ -88,6 +88,10 @@ PROMPT_REGISTRY = {
     "emma_predictive_recommendation_system": (("predictive", "recommendation", "system"), "predictive"),
     "emma_predictive_recommendation_user": (("predictive", "recommendation", "user"), "predictive"),
 
+    # ReAct Agent (main reasoning loop)
+    "emma_react_system": (("react_agent", "system"), "react"),
+    "emma_react_next_step": (("react_agent", "next_step"), "react"),
+
     # Verified Generation
     "emma_verified_claim_system": (("verified_generation", "claim_generation", "system"), "verified_generation"),
     "emma_verified_claim_user_first": (("verified_generation", "claim_generation", "user_first"), "verified_generation"),
@@ -114,6 +118,86 @@ def resolve_yaml_path(data: dict, path: tuple) -> str | None:
         else:
             return None
     return value if isinstance(value, str) else None
+
+
+def diff_prompts(section_filter: str | None = None) -> tuple[list[str], list[str], list[str]]:
+    """
+    Compare PROMPT_REGISTRY against prompts that exist in Langfuse.
+
+    Returns:
+        (missing, present, extra) — missing from Langfuse, present in both,
+        extra in Langfuse (not in registry)
+    """
+    from langfuse import Langfuse
+
+    host = os.getenv("LANGFUSE_HOST", "http://langfuse:3000")
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+
+    if not public_key or not secret_key:
+        print("ERROR: LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set")
+        sys.exit(1)
+
+    langfuse = Langfuse(
+        public_key=public_key,
+        secret_key=secret_key,
+        host=host,
+    )
+    print(f"Connected to Langfuse at {host}\n")
+
+    # Fetch all prompts from Langfuse via API
+    remote_names: set[str] = set()
+    try:
+        import httpx
+
+        url = f"{host}/api/public/v2/prompts"
+        auth = (public_key, secret_key)
+        page = 1
+        while True:
+            resp = httpx.get(url, params={"page": page, "limit": 100}, auth=auth, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            prompts = data.get("data", [])
+            if not prompts:
+                break
+            for p in prompts:
+                remote_names.add(p["name"])
+            # Check pagination
+            meta = data.get("meta", {})
+            total_pages = meta.get("totalPages", 1)
+            if page >= total_pages:
+                break
+            page += 1
+    except ImportError:
+        # Fallback: try fetching each prompt individually
+        print("httpx not available, checking prompts one by one (slower)...\n")
+        for name in PROMPT_REGISTRY:
+            try:
+                langfuse.get_prompt(name=name)
+                remote_names.add(name)
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"Warning: Could not list prompts via API ({e}), checking one by one...\n")
+        for name in PROMPT_REGISTRY:
+            try:
+                langfuse.get_prompt(name=name)
+                remote_names.add(name)
+            except Exception:
+                pass
+
+    # Filter registry by section
+    registry_names = {
+        name
+        for name, (_, section) in PROMPT_REGISTRY.items()
+        if section_filter is None or section == section_filter
+    }
+
+    missing = sorted(registry_names - remote_names)
+    present = sorted(registry_names & remote_names)
+    extra = sorted(remote_names - set(PROMPT_REGISTRY.keys()))
+
+    return missing, present, extra
 
 
 def seed_prompts(
@@ -244,14 +328,20 @@ Sections available:
   verified_generation  Verified generation (7 prompts)
 
 Examples:
-  # Seed all prompts
+  # Check which prompts are missing from Langfuse
+  python scripts/seed_langfuse_prompts.py --diff
+
+  # Check only heartbeat section
+  python scripts/seed_langfuse_prompts.py --diff --section heartbeat
+
+  # Seed ONLY the missing prompts (safe — won't touch existing ones)
+  python scripts/seed_langfuse_prompts.py --seed-missing
+
+  # Seed all prompts (creates new versions for existing ones)
   python scripts/seed_langfuse_prompts.py
 
   # Seed only verified generation
   python scripts/seed_langfuse_prompts.py --section verified_generation
-
-  # Seed only predictive analysis
-  python scripts/seed_langfuse_prompts.py --section predictive
 
   # Dry run to preview
   python scripts/seed_langfuse_prompts.py --dry-run
@@ -261,9 +351,19 @@ Examples:
         "--section",
         choices=[
             "core", "actions", "sectors", "chat", "social",
-            "heartbeat", "predictive", "verified_generation",
+            "heartbeat", "predictive", "react", "verified_generation",
         ],
         help="Only seed prompts from this section",
+    )
+    parser.add_argument(
+        "--diff",
+        action="store_true",
+        help="Show which prompts are missing, present, or extra in Langfuse",
+    )
+    parser.add_argument(
+        "--seed-missing",
+        action="store_true",
+        help="Only seed prompts that are missing from Langfuse (use with --diff)",
     )
     parser.add_argument(
         "--dry-run",
@@ -298,6 +398,87 @@ Examples:
         print(f"ERROR: emma_prompts.yaml not found. Tried: {candidates}")
         sys.exit(1)
 
+    # ── Diff mode ──────────────────────────────────────────────
+    if args.diff or args.seed_missing:
+        print("Comparing PROMPT_REGISTRY against Langfuse...")
+        print("=" * 60)
+
+        missing, present, extra = diff_prompts(section_filter=args.section)
+
+        print(f"  PRESENT in Langfuse ({len(present)}):")
+        for name in present:
+            section = PROMPT_REGISTRY[name][1]
+            print(f"    ✅ {name}  [{section}]")
+
+        print(f"\n  MISSING from Langfuse ({len(missing)}):")
+        for name in missing:
+            section = PROMPT_REGISTRY[name][1]
+            print(f"    ❌ {name}  [{section}]")
+
+        if extra:
+            print(f"\n  EXTRA in Langfuse (not in registry) ({len(extra)}):")
+            for name in extra:
+                print(f"    ⚠️  {name}")
+
+        print()
+        print("=" * 60)
+        print(f"Summary: {len(present)} present, {len(missing)} missing, {len(extra)} extra")
+
+        if not missing:
+            print("\nAll prompts are synced! Nothing to do.")
+            return
+
+        if args.seed_missing and missing:
+            print(f"\nSeeding {len(missing)} missing prompts...")
+            print("-" * 60)
+
+            if not yaml_path or not yaml_path.exists():
+                print(f"ERROR: emma_prompts.yaml not found")
+                sys.exit(1)
+
+            data = load_yaml(yaml_path)
+
+            from langfuse import Langfuse
+            langfuse = Langfuse(
+                public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
+                secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),
+                host=os.getenv("LANGFUSE_HOST", "http://langfuse:3000"),
+            )
+
+            created = 0
+            errors = 0
+            for name in missing:
+                path, section = PROMPT_REGISTRY[name]
+                content = resolve_yaml_path(data, path)
+                if content is None:
+                    print(f"  SKIP  {name} — not found in YAML")
+                    continue
+
+                role = path[-1] if len(path) > 1 else "system"
+                try:
+                    langfuse.create_prompt(
+                        name=name,
+                        type="text",
+                        prompt=content,
+                        labels=[args.label],
+                        config={
+                            "section": section,
+                            "yaml_path": ".".join(path),
+                            "role": role,
+                        },
+                    )
+                    print(f"  OK  {name} ({len(content)} chars) [{args.label}]")
+                    created += 1
+                except Exception as e:
+                    print(f"  ERR  {name} — {e}")
+                    errors += 1
+
+            langfuse.flush()
+            print(f"\nSeeded: {created} created, {errors} errors")
+
+        return
+
+    # ── Normal seed mode ──────────────────────────────────────
     print(f"YAML source: {yaml_path}")
     print(f"Label: {args.label}")
     print("=" * 60)

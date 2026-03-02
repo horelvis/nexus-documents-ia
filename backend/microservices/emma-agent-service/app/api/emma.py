@@ -12,6 +12,9 @@ Endpoints:
 - POST /emma/sessions/{id}/continue - Continue a session
 - PATCH /emma/sessions/{id} - Update session metadata
 - DELETE /emma/sessions/{id} - Delete a session
+- GET /emma/memory/facts - List user memory facts
+- DELETE /emma/memory/facts - Clear all user facts (GDPR)
+- DELETE /emma/memory/facts/{id} - Delete a single fact
 
 Architecture:
 - Uses Emma agent with SIL fast path and domain routing
@@ -343,6 +346,19 @@ async def emma_query(
                 context=query.context,
             )
 
+            # Fire-and-forget: extract user facts from conversation
+            if query.user_id and settings.user_memory_enabled:
+                try:
+                    from app.services.memory.fact_extractor import extract_and_save_facts
+                    asyncio.create_task(extract_and_save_facts(
+                        tenant_id=query.tenant_id,
+                        user_id=query.user_id,
+                        user_message=query.query,
+                        assistant_response=langgraph_result.answer or "",
+                    ))
+                except Exception as e:
+                    logger.debug(f"Fact extraction dispatch failed: {e}")
+
             return EmmaQueryResponse(
                 success=langgraph_result.success,
                 answer=langgraph_result.answer,
@@ -489,7 +505,7 @@ async def _generate_langgraph_sse(
             data = event.get("data", {})
 
             if event_type == "started":
-                yield f"event: start\ndata: {json.dumps({'message': 'Iniciando análisis con LangGraph...', 'progress': 0, 'thread_id': data.get('thread_id')})}\n\n"
+                yield f"event: start\ndata: {json.dumps({'message': 'Iniciando análisis...', 'progress': 0, 'thread_id': data.get('thread_id')})}\n\n"
 
             elif event_type == "retrieve_complete":
                 doc_count = data.get("doc_count", 0)
@@ -540,6 +556,64 @@ async def _generate_langgraph_sse(
                 agent_name = data.get("agent", "unknown")
                 yield f"event: progress\ndata: {json.dumps({'message': f'{agent_name} finalizado', 'stage': 'agent_complete', 'progress': 70})}\n\n"
 
+            # ReAct loop reasoning steps (Think-Act-Observe cycle)
+            # Filter out internal steps that aren't meaningful to the user
+            elif event_type == "thinking":
+                content = data.get("content", "")
+                # Skip very short or numeric-only content (garbage from LLM)
+                if content and len(content.strip()) > 3 and not content.strip().isdigit():
+                    step_counter += 1
+                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'thinking', 'content': content, 'slmIsThinking': True})}\n\n"
+
+            elif event_type == "tool_call":
+                content = data.get("content", "")
+                if content:
+                    step_counter += 1
+                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'tool_call', 'content': content, 'slmIsThinking': True})}\n\n"
+
+            elif event_type == "tool_result":
+                content = data.get("content", "")
+                if content:
+                    step_counter += 1
+                    source = data.get("source", "")
+                    label = f"[{source}] {content}" if source else content
+                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'observation', 'content': label, 'slmIsThinking': True})}\n\n"
+
+            elif event_type == "reasoning_step":
+                step_type = data.get("step_type", "thinking")
+                content = data.get("content", "")
+                # Skip internal routing markers (fast-path, terminate, etc.)
+                if step_type == "response":
+                    pass  # Internal marker — not useful for the user
+                elif content and len(content.strip()) > 3 and not content.strip().isdigit():
+                    step_counter += 1
+                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': step_type, 'content': content, 'slmIsThinking': True})}\n\n"
+
+            # Swarm events (parallel sub-agent execution)
+            elif event_type == "swarm_started":
+                num_workers = data.get("num_workers", 0)
+                step_counter += 1
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'swarm_decompose', 'content': f'Descomponiendo en {num_workers} tareas paralelas...', 'slmIsThinking': True})}\n\n"
+                yield f"event: swarm_started\ndata: {json.dumps(data)}\n\n"
+
+            elif event_type == "worker_started":
+                worker_id = data.get("worker_id", 0)
+                sub_task = data.get("sub_task", "")[:80]
+                step_counter += 1
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'swarm_worker', 'content': f'Agente {worker_id}: {sub_task}', 'slmIsThinking': True})}\n\n"
+
+            elif event_type == "worker_complete":
+                worker_id = data.get("worker_id", 0)
+                latency = data.get("latency_ms", 0)
+                step_counter += 1
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'swarm_worker_done', 'content': f'Agente {worker_id} completado ({latency:.0f}ms)', 'slmIsThinking': True})}\n\n"
+
+            elif event_type == "swarm_synthesizing":
+                successful_count = data.get("successful_workers", 0)
+                step_counter += 1
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'swarm_synthesize', 'content': f'Sintetizando resultados de {successful_count} agentes...', 'slmIsThinking': True})}\n\n"
+                yield f"event: progress\ndata: {json.dumps({'message': 'Sintetizando resultados...', 'stage': 'synthesizing', 'progress': 80})}\n\n"
+
             elif event_type == "token":
                 # Stream tokens for real-time text display
                 token_text = data.get("text", data.get("token", ""))
@@ -549,6 +623,9 @@ async def _generate_langgraph_sse(
                         first_token_sent = True
                         yield f"event: first_token\ndata: {json.dumps({'text': token_text})}\n\n"
                     yield f"event: token\ndata: {json.dumps({'text': token_text, 'token': token_text})}\n\n"
+                    # Yield to event loop between tokens for HTTP chunk flushing
+                    await asyncio.sleep(0)
+                    continue  # Skip the general sleep below (already yielded)
 
             elif event_type == "complete":
                 # Final result
@@ -559,6 +636,40 @@ async def _generate_langgraph_sse(
                 )
                 yield f"event: progress\ndata: {json.dumps({'message': 'Generando respuesta...', 'stage': 'synthesizing', 'progress': 90, 'slmIsThinking': False})}\n\n"
                 yield f"event: complete\ndata: {json.dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'tools_used': data.get('agents_used', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id), 'domains': data.get('domains', []), 'final_result': data, 'suggestions': suggestions})}\n\n"
+
+                # Fire-and-forget: extract user facts from conversation
+                if query.user_id and settings.user_memory_enabled:
+                    try:
+                        from app.services.memory.fact_extractor import extract_and_save_facts
+                        asyncio.create_task(extract_and_save_facts(
+                            tenant_id=query.tenant_id,
+                            user_id=query.user_id,
+                            user_message=query.query,
+                            assistant_response=data.get("answer", ""),
+                        ))
+                    except Exception as e:
+                        logger.debug(f"Fact extraction dispatch failed: {e}")
+
+                # Fire-and-forget: save conversation turn for session continuity
+                try:
+                    persistence = get_emma_persistence_service()
+                    doc_ctx = {}
+                    if query.context:
+                        for key in ("document_id", "uploaded_file_ids", "indexed_document_ids"):
+                            if query.context.get(key):
+                                doc_ctx[key] = query.context[key]
+                    asyncio.create_task(persistence.save_message(
+                        session_id=thread_id,
+                        user_id=query.user_id or "",
+                        tenant_id=query.tenant_id,
+                        user_message=query.query,
+                        assistant_response=data.get("answer", ""),
+                        sources=data.get("sources"),
+                        tools_used=data.get("agents_used"),
+                        document_context=doc_ctx or None,
+                    ))
+                except Exception as e:
+                    logger.warning(f"Failed to save conversation: {e}")
 
             elif event_type == "error":
                 yield f"event: error\ndata: {json.dumps({'error': data.get('error', 'Unknown error')})}\n\n"
@@ -1253,3 +1364,90 @@ async def delete_session(
         raise HTTPException(status_code=500, detail="Failed to delete session")
 
     return {"success": True, "message": "Session deleted"}
+
+
+# =============================================================================
+# User Memory (Cross-Session Facts) Endpoints
+# =============================================================================
+
+class UserFactResponse(BaseModel):
+    """A single user memory fact."""
+    id: Optional[str] = None
+    category: str
+    fact_key: str
+    fact_value: str
+    confidence: float = 1.0
+    source: str = "declared"
+
+
+class UserFactsListResponse(BaseModel):
+    """Response listing user memory facts."""
+    facts: List[UserFactResponse]
+    count: int
+
+
+@router.get("/memory/facts", response_model=UserFactsListResponse)
+async def list_user_facts(
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    List all active memory facts for a user.
+
+    Returns facts Emma has learned about the user across conversations,
+    such as name, department, preferences, and interests.
+    """
+    from app.services.memory.user_facts import get_user_facts_service
+
+    service = get_user_facts_service()
+    facts = await service.get_user_facts(tenant_id, user_id)
+
+    return UserFactsListResponse(
+        facts=[UserFactResponse(**f) for f in facts],
+        count=len(facts),
+    )
+
+
+@router.delete("/memory/facts")
+async def clear_user_facts(
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Delete ALL memory facts for a user (GDPR right-to-erasure).
+
+    This permanently removes all facts Emma has learned about the user.
+    After this call, Emma will not remember anything from previous conversations.
+    """
+    from app.services.memory.user_facts import get_user_facts_service
+
+    service = get_user_facts_service()
+    count = await service.clear_user_facts(tenant_id, user_id)
+
+    return {"success": True, "deleted_count": count, "message": f"Cleared {count} facts"}
+
+
+@router.delete("/memory/facts/{fact_id}")
+async def delete_user_fact(
+    fact_id: str,
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Delete a single memory fact by ID.
+
+    Soft-deletes the fact (marks as inactive). The fact will no longer
+    be included in Emma's context for future conversations.
+    """
+    from app.services.memory.user_facts import get_user_facts_service
+
+    service = get_user_facts_service()
+    deleted = await service.delete_fact(tenant_id, user_id, fact_id)
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Fact {fact_id} not found or already deleted")
+
+    return {"success": True, "message": "Fact deleted"}

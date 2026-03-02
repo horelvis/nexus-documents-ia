@@ -28,6 +28,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Lint**: `cd frontend && npm run lint`
 - **Install**: `cd frontend && npm install`
 
+### Onboarding (New Tenant)
+- **Full docs**: [`docs/on-premise/ONBOARDING.md`](docs/on-premise/ONBOARDING.md)
+- **Onboarding mode**: `cd backend/docker && ./onboarding.sh start` (GPU → Docling, vLLM off)
+- **Index all**: `./onboarding.sh sync-all` then `./onboarding.sh status` to monitor
+- **Download BOE**: `./onboarding.sh boe` (13 presets, ~47 Spanish laws)
+- **Go live**: `./onboarding.sh finish` (GPU → vLLM, Emma operational)
+- **Compose override**: `docker-compose.onboarding.yml` (Docling GPU + disable RAG hierarchical)
+
 ### Full Stack
 - Backend services: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
 - Frontend: `cd frontend && npm run dev`
@@ -97,9 +105,65 @@ Note: `context_tree` and `graph_expand` run in **parallel**. `graph_expand` popu
 - **RLM Processor**: Recursive pipeline for large docs (>16K tokens), Redis cached
 - **Verified Generation**: Claim-by-claim verification with SSE streaming
 - **LLM Providers**: vLLM (primary), OpenAI, Anthropic, Google (fallbacks)
+- **SmartSearch**: Unified multi-store search replacing `search_documents` + `search_legislation` (see below)
 - **Social Agent**: Conversational agent for social channels (see below)
 - **Emma Reactive**: Event-driven proactive system (see below)
 - **Prompt Management**: Dynamic prompts, rules, guardrails (see below)
+
+### SmartSearch — Unified Multi-Store Search
+
+The `smart_search` tool replaces the separate `search_documents` and `search_legislation` tools. It orchestrates 3 data stores automatically so the LLM doesn't have to choose which tool to call.
+
+**Pipeline** (~200ms total):
+```
+Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
+    → Graph Expansion (~20-50ms) → Parallel Search (asyncio.gather ~100ms)
+    → Merge + Dedup → Multi-Signal Re-Rank (~1ms) → Format for LLM
+```
+
+**3 Data Stores**:
+| Store | What | How |
+|-------|------|-----|
+| Weaviate | Tenant documents (hybrid search) | `WeaviateClient.hybrid_search()` with enrichment filters |
+| PublicKnowledge | BOE legislation (hybrid search) | `WeaviateClient.search_public_knowledge()` |
+| Apache AGE | Entity relationships (knowledge graph) | `KnowledgeTreeClient.get_documents_by_person()` |
+
+**Enrichment Properties** (first-class Weaviate properties, not JSONB):
+- `domain` — Business domain (legal, fiscal, medical)
+- `semantic_type` — Document type (factura, contrato, nomina)
+- `quality_score` — Quality 0.0-1.0 from DocumentIntelligence
+- `associated_person` — Person from folder hierarchy or entity extraction
+
+**5-Signal Re-Ranking** (sector-tunable weights):
+| Signal | Default | Legal | Medical | Documental |
+|--------|---------|-------|---------|------------|
+| similarity | 0.40 | 0.35 | 0.40 | 0.35 |
+| quality | 0.20 | 0.15 | 0.25 | 0.15 |
+| graph | 0.20 | 0.30 | 0.15 | 0.20 |
+| recency | 0.10 | 0.05 | 0.10 | 0.15 |
+| entity | 0.10 | 0.15 | 0.10 | 0.15 |
+
+**Config**: `SMART_SEARCH_RERANK_ENABLED=true`, `SMART_SEARCH_GRAPH_ENABLED=true`
+
+**Key files**:
+- `emma-agent-service/app/agents/langgraph/tools/smart_search.py` — SmartSearchTool implementation
+- `emma-agent-service/app/agents/langgraph/tools/registry.py` — Tool registration
+- `emma-agent-service/app/agents/langgraph/sectors/config.py` — `rerank_weights` per sector
+- `weaviate-service/app/services/weaviate_service.py` — Enrichment properties + filters
+- `knowledge-tree-service/app/api/tree.py` — `/graph/documents-by-entity` endpoint
+
+**ReAct Agent Tools** (9 total):
+| Tool | Purpose |
+|------|---------|
+| `smart_search` | Unified document + legislation search (auto-detects scope) |
+| `get_document_content` | Read full document by ID |
+| `structural_query` | Count, list, filter via Apache AGE graph |
+| `analyze_domain` | Specialist domain analysis |
+| `web_search` | Internet search (DuckDuckGo) |
+| `search_jurisprudence` | CENDOJ jurisprudence search |
+| `list_sources` | Discover available data sources |
+| `query_connector` | Query external connectors (SharePoint, etc.) |
+| `terminate` | Signal completion with response |
 
 ### Prompt Management System
 
@@ -124,6 +188,49 @@ Dynamic prompt management with Langfuse integration:
 - `emma-agent-service/app/services/langfuse_prompt_client.py` — Langfuse client
 - `backend/app/api/v1/prompts.py` — Main API CRUD endpoints
 
+### User Memory (Cross-Session Persistent Facts)
+
+> **Full docs**: [`docs/architecture/USER_MEMORY.md`](docs/architecture/USER_MEMORY.md)
+
+Persistent user facts (name, department, preferences) that survive session expiry and are injected into LLM prompts for personalization.
+
+**Architecture**: Fire-and-forget write after each response → regex/LLM extraction → PostgreSQL UPSERT + Redis cache invalidation. Read at state init → Redis cache (1h TTL) → PostgreSQL fallback → format → inject into system prompt.
+
+**Components**:
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| UserFactsService | `emma-agent-service/app/services/memory/user_facts.py` | CRUD + Redis cache singleton |
+| FactExtractor | `emma-agent-service/app/services/memory/fact_extractor.py` | Two-stage: regex (~1ms) + optional LLM (~200ms) |
+| MemoryService | `emma-agent-service/app/services/memory/service.py` | Unified memory interface (wraps all memory stores) |
+| DB Model | `backend/app/db/emma_memory_models.py` | `emma_user_memory_facts` table |
+| Migration | `backend/alembic/versions/d4e5f6g7h8i9_add_user_memory_facts.py` | Table + partial unique index |
+
+**LangGraph injection** (2 points):
+- `classify_node`: Fast-path greeting with `user_memory` in system prompt → "¡Hola, Carlos! ¿Cómo va todo en Legal?"
+- `react_loop_node`: `user_memory` appended to ReAct system prompt for context-aware tool use
+
+**Fact categories**: `identity` (name, age), `work` (department, role, company), `preference` (language, style), `interest` (inferred topics)
+
+**API Endpoints** (Emma Agent Service, port 8009):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/emma/memory/facts` | GET | List active facts (`?user_id=X&tenant_id=Y`) |
+| `/emma/memory/facts` | DELETE | Hard-delete ALL facts (GDPR right-to-erasure) |
+| `/emma/memory/facts/{id}` | DELETE | Soft-delete single fact |
+
+**GDPR**: `DELETE /facts` = hard DELETE (permanent). `DELETE /facts/{id}` = soft-delete. Natural language: "olvida todo lo que sabes" triggers hard DELETE.
+
+**Configuration**:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `USER_MEMORY_ENABLED` | `true` | Master switch |
+| `USER_MEMORY_LLM_EXTRACTION` | `false` | Enable LLM-based fact inference |
+| `USER_MEMORY_MAX_FACTS` | `50` | Max active facts per user |
+| `USER_MEMORY_CACHE_TTL` | `3600` | Redis cache TTL (seconds) |
+
 ### Social Agent (Slack, Telegram, WhatsApp)
 
 The `social_agent` provides conversational, emoji-rich responses for social channel interactions.
@@ -140,7 +247,7 @@ context = {
 | Feature | Tool | When Used |
 |---------|------|-----------|
 | Weather/News | `web_search` (DuckDuckGo) | Proactively for clima/tiempo/noticias queries |
-| Document Search | `quick_document_search` | When user asks about their files |
+| Document Search | `quick_document_search` (proactive) | When user asks about their files (regex-detected, calls hybrid_search with enrichment filters) |
 | Conversational | — | Greetings, identity, general chat |
 
 **Proactive Tool Calling**: Since Qwen 7B doesn't reliably call tools, `social_node` detects weather/news queries via regex patterns and calls `web_search` **proactively** before LLM generation. Results are injected into context.
@@ -295,26 +402,21 @@ BOE API → Download & Parse → IndexingPipeline (chunks) → PublicKnowledge (
 - `educacion` (3): LOMLOE, LOE, LOU
 - `proteccion_datos` (1): LOPDGDD
 
-**Client Onboarding** — Download all legislation:
+**Client Onboarding** — Use the onboarding script (recommended) or manual curl:
 ```bash
+# Recommended: use the onboarding script
+cd backend/docker && ./onboarding.sh boe           # All 13 presets
+cd backend/docker && ./onboarding.sh boe laboral    # Single preset
+
+# Manual alternative:
 API_KEY=$(grep MICROSERVICES_API_KEY backend/docker/.env | cut -d= -f2)
-
-# Option 1: Download all presets (recommended for full onboarding)
-for preset in laboral fiscal mercantil civil administrativo compliance \
-              propiedad_intelectual comercio_consumidores emprendimiento \
-              inmobiliario contabilidad educacion proteccion_datos; do
-  curl -X POST "http://localhost:8007/boe/download/preset" \
-    -H "Content-Type: application/json" \
-    -H "X-API-Key: $API_KEY" \
-    -d "{\"preset\": \"$preset\", \"index_to_weaviate\": true}"
-done
-
-# Option 2: Download single preset
 curl -X POST "http://localhost:8007/boe/download/preset" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $API_KEY" \
   -d '{"preset": "laboral", "index_to_weaviate": true}'
 ```
+
+> See [`docs/on-premise/ONBOARDING.md`](docs/on-premise/ONBOARDING.md) for the complete onboarding guide.
 
 **Legal Graph Management**:
 ```bash

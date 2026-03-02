@@ -32,7 +32,7 @@ async def health_check(_: bool = Depends(verify_api_key)) -> HealthResponse:
         status="healthy",
         service=settings.service_name,
         version=settings.service_version,
-        backend="apache-tika",
+        backend=extraction_service.primary_backend_name,
     )
 
 

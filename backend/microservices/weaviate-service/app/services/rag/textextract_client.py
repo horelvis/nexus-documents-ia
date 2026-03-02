@@ -70,7 +70,7 @@ class TextExtractClient:
         self,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        timeout: float = 120.0,
+        timeout: float = 600.0,
     ):
         self.base_url = base_url or os.environ.get(
             "TEXT_EXTRACTION_SERVICE_URL",

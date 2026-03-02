@@ -68,3 +68,10 @@ class SectorConfig:
     collection_suffix: Optional[str] = None
     men_domain: str = "general"
     predictive_config: Optional[PredictiveConfig] = None
+    rerank_weights: Dict[str, float] = field(default_factory=lambda: {
+        "similarity": 0.40,
+        "quality": 0.20,
+        "graph": 0.20,
+        "recency": 0.10,
+        "entity": 0.10,
+    })

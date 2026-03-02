@@ -197,8 +197,12 @@ def configure_trusted_hosts(app) -> None:
             "nouxcubeia.app",
             "www.nouxcubeia.app",
             "api.nouxcubeia.app",
+            "nouxcubeai.ddns.net",
             "nouxcube.local.es",
             "www.nouxcube.local.es",
+            # Docker internal service names (used by Next.js rewrites, nginx proxy, etc.)
+            "api",
+            "localhost",
             *[h for h in configured_hosts if h],
         ]
         trusted_hosts = sorted(set(trusted_hosts))

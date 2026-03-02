@@ -5,7 +5,7 @@ Allows live queries to external connectors (SharePoint, Alfresco,
 Google Drive, etc.) when indexed documents don't have the answer.
 
 The agent's reasoning flow:
-1. search_documents → no results
+1. smart_search → no results
 2. list_sources → discovers active connectors
 3. query_connector → live query to external system
 
@@ -43,7 +43,7 @@ class QueryConnectorTool(EmmaTool):
     def description(self) -> str:
         return (
             "Consulta un conector externo en tiempo real (SharePoint, Alfresco, "
-            "Google Drive). Usa esto como fallback cuando search_documents no "
+            "Google Drive). Usa esto como fallback cuando smart_search no "
             "encuentra resultados y sabes que hay conectores activos."
         )
 
@@ -72,13 +72,13 @@ class QueryConnectorTool(EmmaTool):
             logger.debug("Connector manager not available")
             return ToolResult.from_error(
                 "El sistema de conectores no está disponible en este entorno.",
-                suggestion="Usa search_documents para buscar en documentos indexados.",
+                suggestion="Usa smart_search para buscar en documentos indexados.",
             )
         except Exception as e:
             logger.error(f"query_connector failed: {e}")
             return ToolResult.from_error(
                 f"Error consultando conector {connector_id}: {e}",
-                suggestion="Verifica el ID del conector o intenta con search_documents.",
+                suggestion="Verifica el ID del conector o intenta con smart_search.",
             )
 
         if not result:

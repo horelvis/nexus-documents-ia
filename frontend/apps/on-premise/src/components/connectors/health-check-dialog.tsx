@@ -145,7 +145,7 @@ export function HealthCheckDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconHeart className="h-5 w-5" />
@@ -440,8 +440,8 @@ export function HealthCheckDialog({
                     </CardHeader>
                     <CardContent>
                       {details.table_name && (
-                        <div>
-                          <p className="text-sm">
+                        <div className="min-w-0">
+                          <p className="text-sm truncate" title={details.table_name}>
                             Tabla: <span className="font-mono font-medium">{details.table_name}</span>
                           </p>
                         </div>
@@ -501,7 +501,7 @@ export function HealthCheckDialog({
 
               <div className="text-xs text-muted-foreground space-y-1">
                 {details.url && (
-                  <p>
+                  <p className="truncate" title={details.url}>
                     <strong>URL:</strong> {details.url}
                   </p>
                 )}

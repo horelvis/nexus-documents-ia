@@ -210,14 +210,29 @@ class SemanticChunker:
         if not text or not text.strip():
             return []
 
+        # Check if text is already structured Markdown (from Docling)
+        is_markdown = metadata.get("extraction_format") == "markdown"
+
+        # Step 0: Clean Tika extraction artifacts — skip for Markdown
+        # Docling output is already clean; running the cleaner would destroy
+        # Markdown headers and table formatting.
+        if not is_markdown:
+            original_len = len(text)
+            text = self._clean_tika_text(text)
+            if len(text) < original_len * 0.9:
+                logger.info(
+                    f"Text cleaned: {original_len} → {len(text)} chars "
+                    f"({100 - len(text) * 100 // original_len}% reduction)"
+                )
+
         # Detect document type if not provided
         if document_type is None:
             document_type = self._detect_document_type(text)
 
-        logger.debug(f"Chunking document type: {document_type}")
+        logger.debug(f"Chunking document type: {document_type}, is_markdown: {is_markdown}")
 
         # Step 1: Detect sections
-        sections = self._detect_sections(text, document_type)
+        sections = self._detect_sections(text, document_type, is_markdown=is_markdown)
         logger.debug(f"Detected {len(sections)} sections")
 
         # Step 2: Process each section
@@ -261,12 +276,121 @@ class SemanticChunker:
                     chunks.append(sub_chunk)
                     chunk_index += 1
 
-        # Update total chunks count
-        for chunk in chunks:
+        # Consolidate tiny chunks: merge fragments < MIN_CHUNK_CHARS with neighbors.
+        # This fixes PDFs where Tika extracts character-level text runs from
+        # complex layouts (tables, columns, rotated text) producing chunks of 1-5 chars.
+        MIN_CHUNK_CHARS = 30
+        if chunks:
+            consolidated: List[DocumentChunk] = []
+            buffer = ""  # accumulates tiny fragments
+
+            for chunk in chunks:
+                content = chunk.content.strip()
+                if len(content) < MIN_CHUNK_CHARS:
+                    # Accumulate tiny fragment
+                    buffer = (buffer + " " + content).strip() if buffer else content
+                else:
+                    if buffer:
+                        # Prepend accumulated fragments to this chunk
+                        chunk.content = buffer + " " + content
+                        chunk.token_count = self._estimate_tokens(chunk.content)
+                        buffer = ""
+                    consolidated.append(chunk)
+
+            # Flush remaining buffer into last chunk
+            if buffer and consolidated:
+                consolidated[-1].content += " " + buffer
+                consolidated[-1].token_count = self._estimate_tokens(consolidated[-1].content)
+            elif buffer:
+                # Edge case: all chunks were tiny — create one merged chunk
+                consolidated.append(DocumentChunk(
+                    content=buffer,
+                    metadata=metadata,
+                    section_title="",
+                    chunk_index=0,
+                    token_count=self._estimate_tokens(buffer),
+                ))
+
+            if len(consolidated) < len(chunks):
+                logger.info(
+                    f"Consolidated {len(chunks)} chunks → {len(consolidated)} "
+                    f"(merged {len(chunks) - len(consolidated)} fragments < {MIN_CHUNK_CHARS} chars)"
+                )
+            chunks = consolidated
+
+        # Re-index and update total chunks count
+        for i, chunk in enumerate(chunks):
+            chunk.chunk_index = i
             chunk.total_chunks = len(chunks)
 
         logger.info(f"Created {len(chunks)} chunks from document")
         return chunks
+
+    # ── Pre-chunking text cleaning ──────────────────────────────────
+    # Tika extracts text from complex PDFs (invoices, multi-column layouts)
+    # with character-level line breaks:  "l.\n\n 7\n8\n\n0\n4\n\n. S\ne\n\ncc\nió\n\nn"
+    # This makes chunks semantically useless. We reconstruct readable text.
+
+    def _clean_tika_text(self, text: str) -> str:
+        """Clean Tika extraction artifacts from complex PDF layouts.
+
+        Tika produces character-level fragments separated by newlines when
+        parsing multi-column/table PDFs. This method detects and reconstructs
+        readable text from these patterns.
+        """
+        # Step 1: Split into lines and detect fragmented regions
+        # A "fragmented region" is 3+ consecutive non-blank lines where
+        # the majority have <= 3 visible characters.
+        lines = text.split("\n")
+        cleaned_lines: list[str] = []
+        i = 0
+
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # Check if we're entering a fragmented region
+            if len(stripped) <= 3 and stripped:
+                # Look ahead to see if this is a sustained pattern
+                fragment_buf: list[str] = [stripped]
+                j = i + 1
+                blank_run = 0
+                while j < len(lines):
+                    s = lines[j].strip()
+                    if not s:
+                        blank_run += 1
+                        if blank_run > 2:
+                            break  # Too many blanks = real paragraph break
+                        j += 1
+                        continue
+                    blank_run = 0
+                    if len(s) <= 3:
+                        fragment_buf.append(s)
+                        j += 1
+                    else:
+                        # Longer line — include it and stop
+                        fragment_buf.append(s)
+                        j += 1
+                        break
+
+                if len(fragment_buf) >= 3:
+                    # This IS a fragmented region — join into continuous text
+                    cleaned_lines.append("".join(fragment_buf))
+                    i = j
+                    continue
+
+            cleaned_lines.append(line)
+            i += 1
+
+        text = "\n".join(cleaned_lines)
+
+        # Step 2: Collapse excessive whitespace
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"\t+", " ", text)
+        text = re.sub(r"^\s*[.\-–—,;:]\s*$", "", text, flags=re.MULTILINE)
+        text = re.sub(r" {2,}", " ", text)
+
+        return text.strip()
 
     def _detect_document_type(self, text: str) -> DocumentType:
         """Detect document type from content"""
@@ -311,13 +435,20 @@ class SemanticChunker:
         self,
         text: str,
         document_type: DocumentType,
+        is_markdown: bool = False,
     ) -> List[Section]:
         """Detect sections in document based on structure"""
         sections: List[Section] = []
 
-        # Choose patterns based on document type
+        # Choose patterns based on document type.
+        # When the text is already Markdown (from Docling), prioritize the
+        # 'markdown' pattern so ## headers are detected as section boundaries
+        # instead of relying solely on regex heuristics for CLÁUSULA/ARTÍCULO.
         if document_type in [DocumentType.LEGAL_CONTRACT, DocumentType.LEGAL_BRIEF]:
-            patterns = ['legal_es', 'legal_en', 'numbered', 'roman']
+            if is_markdown:
+                patterns = ['markdown', 'legal_es', 'legal_en', 'numbered']
+            else:
+                patterns = ['legal_es', 'legal_en', 'numbered', 'roman']
         elif document_type == DocumentType.TECHNICAL_MANUAL:
             patterns = ['markdown', 'numbered']
         else:

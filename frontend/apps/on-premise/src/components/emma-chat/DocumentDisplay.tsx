@@ -147,9 +147,11 @@ export function DocumentDisplay({
                         {config.label}
                       </Badge>
                     )}
-                    {doc.relevanceScore && (
+                    {doc.relevanceScore != null && (
                       <Badge variant="secondary" className="text-[10px] shrink-0">
-                        {Math.round(doc.relevanceScore * 100)}%
+                        {doc.relevanceScore < 1
+                          ? `${Math.round(doc.relevanceScore * 100)}%`
+                          : `${doc.relevanceScore.toFixed(1)}%`}
                       </Badge>
                     )}
                   </div>

@@ -1,0 +1,52 @@
+# Docker Compose override for ONBOARDING MODE
+# =============================================================================
+# Purpose: Maximize indexing throughput for initial tenant onboarding
+#
+# What this adds/overrides:
+#   - docling-gpu: GPU-accelerated Docling (5-10x faster PDF processing)
+#   - weaviate-service: RAG_HIERARCHICAL_ENABLED=false (skip LLM summaries)
+#
+# vLLM is stopped/started by the onboarding.sh script, not via compose override,
+# because 4 services have depends_on: vllm: condition: service_healthy.
+#
+# Usage: ./onboarding.sh start | status | sync-all | finish
+# =============================================================================
+
+services:
+  # Docling GPU variant — uses GPU when vLLM is stopped
+  # Network alias "docling" ensures textextract-service connects seamlessly
+  docling-gpu:
+    image: ghcr.io/docling-project/docling-serve:latest
+    environment:
+      - DOCLING_SERVE_ENABLE_UI=false
+      - DOCLING_SERVE_MAX_SYNC_WAIT=300
+      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=4
+      - OMP_NUM_THREADS=8
+      - NVIDIA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+        limits:
+          memory: 12g
+    networks:
+      backend-network:
+        aliases:
+          - docling
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    profiles:
+      - docling-gpu
+
+  # Disable LLM-dependent features during indexing
+  weaviate-service:
+    environment:
+      - RAG_HIERARCHICAL_ENABLED=false

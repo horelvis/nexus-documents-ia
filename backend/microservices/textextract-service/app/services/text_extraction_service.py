@@ -1,5 +1,9 @@
 """
-Service responsible for extracting text using Apache Tika.
+Service responsible for extracting text from documents.
+
+Supports pluggable backends (Tika, Docling) with automatic fallback.
+Validation, MIME detection, and language detection remain in this service —
+only the HTTP extraction calls are delegated to backend implementations.
 """
 from __future__ import annotations
 
@@ -7,11 +11,13 @@ import os
 from dataclasses import dataclass
 from typing import Dict, Optional
 
-import httpx
 from langdetect import detect, LangDetectException
 from loguru import logger
 
 from app.core.config import settings
+from app.services.backends.base import ExtractionBackend
+from app.services.backends.tika_backend import TikaBackend
+from app.services.backends.docling_backend import DoclingBackend
 
 
 @dataclass
@@ -29,13 +35,49 @@ class TextExtractionError(Exception):
     """Raised when extraction fails."""
 
 
+def _build_backend(name: str) -> ExtractionBackend:
+    """Instantiate a backend by name."""
+    if name == "tika":
+        return TikaBackend(tika_url=settings.tika_url, timeout=settings.tika_timeout)
+    if name == "docling":
+        return DoclingBackend(docling_url=settings.docling_url, timeout=settings.docling_timeout)
+    raise ValueError(f"Unknown extraction backend: {name!r}")
+
+
 class TextExtractionService:
-    """Text extraction service using Apache Tika."""
+    """
+    Text extraction service with pluggable backends.
+
+    Backend selection logic:
+    - Primary backend is determined by EXTRACTION_BACKEND env var (default: tika)
+    - If EXTRACTION_FALLBACK_ENABLED=true and primary is not tika,
+      Tika is used as the fallback backend
+    - On primary failure, automatically retries with fallback
+    """
 
     def __init__(self) -> None:
         self.allowed_extensions = {ext.lower() for ext in settings.allowed_extensions}
-        self.tika_url = settings.tika_url
-        self.timeout = settings.tika_timeout
+
+        # Build primary backend
+        self._primary = _build_backend(settings.extraction_backend)
+
+        # Build fallback (Tika) only when primary is NOT Tika and fallback is enabled
+        self._fallback: Optional[ExtractionBackend] = None
+        if (
+            settings.extraction_fallback_enabled
+            and settings.extraction_backend != "tika"
+        ):
+            self._fallback = _build_backend("tika")
+
+        logger.info(
+            "Extraction backends: primary={}, fallback={}",
+            self._primary.name,
+            self._fallback.name if self._fallback else "none",
+        )
+
+    @property
+    def primary_backend_name(self) -> str:
+        return self._primary.name
 
     def _detect_language(self, text: str) -> Optional[str]:
         if not settings.enable_language_detection:
@@ -183,7 +225,7 @@ class TextExtractionService:
         strategy: str = "auto",  # ignored, kept for API compatibility
     ) -> ExtractionResult:
         """
-        Extract text from the provided document bytes using Apache Tika.
+        Extract text from the provided document bytes.
 
         IMPORTANT: MIME type is detected from file content (magic bytes), NOT from
         filename extension. This handles misleading filenames like "GESTOR.docx.pdf".
@@ -200,11 +242,9 @@ class TextExtractionService:
         ext = ext.lower()
 
         # PRIORITY 1: Detect MIME type from file content (magic bytes)
-        # This is the authoritative source - ignores misleading filename extensions
         detected_mime = self._detect_mime_from_content(file_bytes)
 
         if detected_mime:
-            # We detected the actual content type - use it regardless of extension
             expected_ext = self._mime_to_ext(detected_mime)
             if ext and expected_ext and ext != expected_ext:
                 logger.info(
@@ -213,7 +253,6 @@ class TextExtractionService:
                 )
             content_type = detected_mime
         else:
-            # Could not detect from content - fall back to extension validation
             if ext and ext not in self.allowed_extensions:
                 raise TextExtractionError(f"Unsupported extension '{ext}'.")
             content_type = self._get_content_type(filename)
@@ -221,66 +260,66 @@ class TextExtractionService:
         if len(file_bytes) > settings.max_file_size_mb * 1024 * 1024:
             raise TextExtractionError("File size exceeds the configured limit.")
 
+        # Try primary backend, then fallback
+        backend_result = None
+        used_backend = self._primary.name
+
         try:
-            # Call Apache Tika for text extraction
-            with httpx.Client(timeout=self.timeout) as client:
-                # Extract text
-                text_response = client.put(
-                    f"{self.tika_url}/tika",
-                    content=file_bytes,
-                    headers={
-                        "Content-Type": content_type,
-                        "Accept": "text/plain",
-                    },
-                )
-                text_response.raise_for_status()
-                extracted_text = text_response.text.strip()
-
-                # Extract metadata
-                metadata_response = client.put(
-                    f"{self.tika_url}/meta",
-                    content=file_bytes,
-                    headers={
-                        "Content-Type": content_type,
-                        "Accept": "application/json",
-                    },
-                )
-                metadata = {}
-                if metadata_response.status_code == 200:
-                    try:
-                        metadata = metadata_response.json()
-                    except Exception:
-                        pass
-
-            language = self._detect_language(extracted_text) if extracted_text else None
-
-            logger.info(
-                f"Extracted {len(extracted_text)} characters from {filename} using Tika"
+            backend_result = self._primary.extract(file_bytes, content_type, filename)
+        except Exception as primary_exc:
+            logger.warning(
+                "Primary backend ({}) failed for {}: {}",
+                self._primary.name,
+                filename,
+                primary_exc,
             )
+            if self._fallback:
+                logger.info(
+                    "Falling back to {} for {}",
+                    self._fallback.name,
+                    filename,
+                )
+                try:
+                    backend_result = self._fallback.extract(
+                        file_bytes, content_type, filename,
+                    )
+                    used_backend = self._fallback.name
+                except Exception as fallback_exc:
+                    logger.error(
+                        "Fallback backend ({}) also failed for {}: {}",
+                        self._fallback.name,
+                        filename,
+                        fallback_exc,
+                    )
+                    raise TextExtractionError(
+                        f"All backends failed. Primary ({self._primary.name}): {primary_exc}; "
+                        f"Fallback ({self._fallback.name}): {fallback_exc}"
+                    ) from fallback_exc
+            else:
+                raise TextExtractionError(
+                    f"{self._primary.name} extraction failed: {primary_exc}"
+                ) from primary_exc
 
-            return ExtractionResult(
-                text=extracted_text,
-                language=language,
-                metadata={
-                    "file_extension": ext or "",
-                    "tika_content_type": metadata.get("Content-Type", content_type),
-                    "tika_creator": metadata.get("dc:creator") or metadata.get("Author"),
-                    "tika_title": metadata.get("dc:title") or metadata.get("title"),
-                    "tika_created": metadata.get("dcterms:created") or metadata.get("Creation-Date"),
-                },
-                num_characters=len(extracted_text),
-                content_type=content_type,
-            )
+        extracted_text = backend_result.text
+        language = self._detect_language(extracted_text) if extracted_text else None
 
-        except httpx.TimeoutException as exc:
-            logger.error(f"Tika timeout extracting {filename}: {exc}")
-            raise TextExtractionError(f"Tika timeout: {exc}") from exc
-        except httpx.HTTPStatusError as exc:
-            logger.error(f"Tika HTTP error extracting {filename}: {exc}")
-            raise TextExtractionError(f"Tika error: {exc.response.status_code}") from exc
-        except Exception as exc:
-            logger.exception(f"Failed to extract text from {filename}")
-            raise TextExtractionError(str(exc)) from exc
+        logger.info(
+            "Extracted {} chars from {} using {}",
+            len(extracted_text),
+            filename,
+            used_backend,
+        )
+
+        return ExtractionResult(
+            text=extracted_text,
+            language=language,
+            metadata={
+                "file_extension": ext or "",
+                **backend_result.metadata,
+            },
+            num_characters=len(extracted_text),
+            content_type=content_type,
+        )
 
 
 # Shared service instance

@@ -80,28 +80,34 @@ class LLMRouter:
         """
         Parse fallback chain from settings.
 
+        LLM_PROVIDER is always first (primary). Remaining providers from
+        LLM_FALLBACK_CHAIN follow in order, with the primary deduplicated.
+
         Returns:
             List of providers in fallback order
         """
         from app.core.config import settings
 
+        # Primary provider always comes first
+        primary_name = settings.llm_provider.lower()
+        try:
+            primary = LLMProvider(primary_name)
+        except ValueError:
+            logger.warning(f"Unknown primary provider: {primary_name}, defaulting to vllm")
+            primary = LLMProvider.VLLM
+
+        # Parse remaining chain, excluding primary (already first)
         chain_str = settings.llm_fallback_chain
-        providers = []
+        providers = [primary]
 
         for provider_name in chain_str.split(","):
             provider_name = provider_name.strip().lower()
             try:
-                providers.append(LLMProvider(provider_name))
+                provider = LLMProvider(provider_name)
+                if provider != primary:
+                    providers.append(provider)
             except ValueError:
                 logger.warning(f"Unknown provider in fallback chain: {provider_name}")
-
-        # If no valid providers, default to primary only
-        if not providers:
-            primary = settings.llm_provider.lower()
-            try:
-                providers = [LLMProvider(primary)]
-            except ValueError:
-                providers = [LLMProvider.VLLM]
 
         return providers
 

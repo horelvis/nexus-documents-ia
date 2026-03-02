@@ -63,9 +63,11 @@ export function DocumentDisplay({
                     {doc.name}
                   </CardTitle>
                 </div>
-                {doc.relevanceScore && (
+                {doc.relevanceScore != null && (
                   <Badge variant="secondary" className="text-xs">
-                    {Math.round(doc.relevanceScore * 100)}%
+                    {doc.relevanceScore < 1
+                      ? `${Math.round(doc.relevanceScore * 100)}%`
+                      : `${doc.relevanceScore.toFixed(1)}%`}
                   </Badge>
                 )}
               </div>

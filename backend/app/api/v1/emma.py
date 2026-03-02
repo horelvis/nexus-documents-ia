@@ -679,6 +679,90 @@ async def emma_cendoj_status(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# User Memory Endpoints (proxy to emma-agent-service /emma/memory/*)
+# ============================================================================
+
+@router.get("/memory/facts")
+async def emma_memory_facts(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    List all memory facts Emma has learned about the current user.
+
+    Returns cross-session facts like name, department, and preferences.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/memory/facts",
+                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Memory facts list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/memory/facts")
+async def emma_memory_facts_clear(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Delete ALL memory facts for the current user (GDPR right-to-erasure).
+
+    Permanently removes all facts Emma has learned across conversations.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.delete(
+                f"{EMMA_SERVICE_URL}/emma/memory/facts",
+                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Memory facts clear error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/memory/facts/{fact_id}")
+async def emma_memory_fact_delete(
+    fact_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Delete a single memory fact by ID.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.delete(
+                f"{EMMA_SERVICE_URL}/emma/memory/facts/{fact_id}",
+                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Memory fact delete error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.patch("/cendoj/status")
 async def emma_cendoj_status_update(
     request: Request,

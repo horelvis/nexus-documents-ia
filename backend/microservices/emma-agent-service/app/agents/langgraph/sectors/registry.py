@@ -68,6 +68,10 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         system_prompt_key="sectors.legal",
         men_domain="legal",
         predictive_config=PREDICTIVE_CONFIGS.get("legal"),
+        rerank_weights={
+            "similarity": 0.35, "quality": 0.15, "graph": 0.30,
+            "recency": 0.05, "entity": 0.15,
+        },
     ),
 
     # -----------------------------------------------------------------
@@ -107,6 +111,10 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         system_prompt_key="sectors.medical",
         men_domain="technical",
         predictive_config=PREDICTIVE_CONFIGS.get("medical"),
+        rerank_weights={
+            "similarity": 0.40, "quality": 0.25, "graph": 0.15,
+            "recency": 0.10, "entity": 0.10,
+        },
     ),
 
     # -----------------------------------------------------------------
@@ -128,6 +136,11 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         chunk_size=1000,
         chunk_overlap=100,
         entity_patterns={
+            "persona": [
+                # Spanish/international proper names: "Javier Martinez", "María García López",
+                # "Ana de la Fuente" (with common prepositions)
+                r"(?:[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+(?:de(?:\s+la)?|del|y)\s+)*(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)",
+            ],
             "nif": [
                 r"(?:[A-Z]\d{7}[A-Z0-9])",
                 r"(?:\d{8}[A-Z])",
@@ -149,6 +162,10 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         system_prompt_key="sectors.documental",
         men_domain="general",
         predictive_config=PREDICTIVE_CONFIGS.get("documental"),
+        rerank_weights={
+            "similarity": 0.35, "quality": 0.15, "graph": 0.20,
+            "recency": 0.15, "entity": 0.15,
+        },
     ),
 }
 

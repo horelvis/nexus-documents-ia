@@ -1,6 +1,6 @@
 """
 Main application entry point for the text extraction microservice.
-Uses Apache Tika for document text extraction.
+Supports pluggable backends: Apache Tika (default) and IBM Docling.
 """
 from contextlib import asynccontextmanager
 import sys
@@ -34,7 +34,13 @@ logger.add(
 async def lifespan(_: FastAPI):
     """Application lifespan manager."""
     logger.info("Starting {} v{}", settings.service_name, settings.service_version)
-    logger.info("Using Apache Tika at {}", settings.tika_url)
+    logger.info(
+        "Extraction backend: {} | fallback: {} | Tika: {} | Docling: {}",
+        settings.extraction_backend,
+        "tika" if (settings.extraction_fallback_enabled and settings.extraction_backend != "tika") else "none",
+        settings.tika_url,
+        settings.docling_url if settings.extraction_backend == "docling" else "not configured",
+    )
     logger.info("Allowed extensions: {}", ", ".join(settings.allowed_extensions))
     yield
     logger.info("Shutting down {}", settings.service_name)
@@ -43,7 +49,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.service_name,
     version=settings.service_version,
-    description="Document text extraction microservice powered by Apache Tika.",
+    description="Document text extraction microservice with pluggable backends (Tika, Docling).",
     lifespan=lifespan,
 )
 
@@ -66,7 +72,8 @@ async def root():
     return {
         "service": settings.service_name,
         "version": settings.service_version,
-        "backend": "apache-tika",
+        "backend": settings.extraction_backend,
+        "fallback_enabled": settings.extraction_fallback_enabled,
         "docs": "/docs",
         "health": "/health",
     }
@@ -79,7 +86,7 @@ async def health_check():
         status="healthy",
         service=settings.service_name,
         version=settings.service_version,
-        backend="apache-tika",
+        backend=settings.extraction_backend,
     )
 
 

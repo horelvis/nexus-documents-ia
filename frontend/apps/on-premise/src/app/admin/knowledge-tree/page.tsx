@@ -72,23 +72,44 @@ interface GraphLink extends SimulationLinkDatum<GraphNode> {
 // Color palettes
 // ============================================================================
 
-const FOLDER_COLORS: Record<string, string> = {
-  expedientes: "#6366f1",
-  "exp.conf": "#8b5cf6",
-  registros: "#06b6d4",
+// Dynamic color palette — colors are assigned to folder/doc types at runtime
+// so any new type automatically gets a distinct color.
+const COLOR_PALETTE = [
+  "#6366f1", // Indigo
+  "#06b6d4", // Cyan
+  "#8b5cf6", // Purple
+  "#22c55e", // Green
+  "#f59e0b", // Amber
+  "#ec4899", // Pink
+  "#14b8a6", // Teal
+  "#f97316", // Orange
+  "#3b82f6", // Blue
+  "#ef4444", // Red
+  "#a855f7", // Violet
+  "#0ea5e9", // Sky
+  "#84cc16", // Lime
+  "#e879f9", // Fuchsia
+  "#fb923c", // Light orange
+]
+
+const SPECIAL_FOLDER_COLORS: Record<string, string> = {
   virtual: "#64748b",
   unknown: "#94a3b8",
 }
 
-const DOC_COLORS: Record<string, string> = {
-  adjuntos: "#3b82f6",
-  escrituras: "#f59e0b",
-  contratos: "#a855f7",
-  facturas: "#22c55e",
-  nominas: "#ec4899",
-  plantillas: "#14b8a6",
-  generados: "#f97316",
-  unknown: "#6b7280",
+// Stable color assignment: same type always gets same color across renders
+const typeColorCache = new Map<string, string>()
+let nextColorIdx = 0
+
+function getTypeColor(type: string): string {
+  if (SPECIAL_FOLDER_COLORS[type]) return SPECIAL_FOLDER_COLORS[type]
+  let color = typeColorCache.get(type)
+  if (!color) {
+    color = COLOR_PALETTE[nextColorIdx % COLOR_PALETTE.length]
+    nextColorIdx++
+    typeColorCache.set(type, color)
+  }
+  return color
 }
 
 const LAW_DOMAIN_COLORS: Record<string, string> = {
@@ -111,9 +132,9 @@ function getNodeColor(node: GraphNode): string {
     return LAW_DOMAIN_COLORS[node.domain || "general"] || LAW_DOMAIN_COLORS.general
   }
   if (node.nodeType === "folder") {
-    return FOLDER_COLORS[node.folderType || "unknown"] || FOLDER_COLORS.unknown
+    return getTypeColor(node.folderType || "unknown")
   }
-  return DOC_COLORS[node.semanticType || "unknown"] || DOC_COLORS.unknown
+  return getTypeColor(node.semanticType || "unknown")
 }
 
 function getNodeRadius(node: GraphNode): number {
@@ -138,6 +159,12 @@ function ForceGraph({
   links: GraphLink[]
   viewMode: GraphViewMode
 }) {
+  // Derive legend entries from actual data (dynamic types)
+  const folderTypes = Array.from(new Set(nodes.filter(n => n.nodeType === "folder").map(n => n.folderType || "unknown")))
+    .filter(t => t !== "virtual" && t !== "unknown")
+  const docTypes = Array.from(new Set(nodes.filter(n => n.nodeType === "document").map(n => n.semanticType || "unknown")))
+    .filter(t => t !== "unknown")
+
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const simulationRef = useRef<ReturnType<typeof forceSimulation<GraphNode>> | null>(null)
@@ -169,36 +196,35 @@ function ForceGraph({
 
     ;(svgRef.current as any).__zoomBehavior = zoomBehavior
 
-    // Links
+    // Links — same visual style as legal graph (labeled, visible)
     const linkGroup = g
       .append("g")
       .attr("class", "links")
       .selectAll("line")
       .data(links)
       .join("line")
-      .attr("stroke", (d: any) => d.label ? "#475569" : "#334155")
+      .attr("stroke", "#475569")
       .attr("stroke-opacity", (d: any) => d.label ? 0.4 : 0.15)
       .attr("stroke-width", (d: any) => d.label ? 1.5 : 0.5)
       .attr("stroke-dasharray", (d: any) => {
         if (d.label === "DEROGATES") return "4 2"
         if (d.label === "MODIFIES") return "2 2"
+        if (d.label === "HAS_DOCUMENT") return "2 2"
         return "none"
       })
 
-    // Edge labels (only for legal graph)
-    if (viewMode === "legal") {
-      g.append("g")
-        .attr("class", "edge-labels")
-        .selectAll("text")
-        .data(links.filter((l) => l.label))
-        .join("text")
-        .text((d) => d.label || "")
-        .attr("font-size", 7)
-        .attr("fill", "#64748b")
-        .attr("text-anchor", "middle")
-        .attr("pointer-events", "none")
-        .attr("font-family", "system-ui, sans-serif")
-    }
+    // Edge labels (both structural and legal)
+    g.append("g")
+      .attr("class", "edge-labels")
+      .selectAll("text")
+      .data(links.filter((l) => l.label))
+      .join("text")
+      .text((d) => d.label || "")
+      .attr("font-size", 7)
+      .attr("fill", "#64748b")
+      .attr("text-anchor", "middle")
+      .attr("pointer-events", "none")
+      .attr("font-family", "system-ui, sans-serif")
 
     // Nodes
     const nodeGroup = g
@@ -250,12 +276,12 @@ function ForceGraph({
         linkGroup
           .attr("stroke-opacity", (d: any) => d.label ? 0.4 : 0.15)
           .attr("stroke-width", (d: any) => d.label ? 1.5 : 0.5)
-          .attr("stroke", (d: any) => d.label ? "#475569" : "#334155")
+          .attr("stroke", "#475569")
         setHoveredNode(null)
       })
 
-    // Labels
-    const labelNodes = viewMode === "legal" ? nodes : nodes.filter((n) => n.nodeType === "folder")
+    // Labels — show all nodes (same as legal)
+    const labelNodes = nodes
     const labelGroup = g
       .append("g")
       .attr("class", "labels")
@@ -298,14 +324,9 @@ function ForceGraph({
         .on("end", dragended) as any
     )
 
-    // Simulation
-    const chargeStrength = viewMode === "legal" ? -300 : ((d: any) => d.nodeType === "folder" ? -200 : -30)
-    const linkDistance = viewMode === "legal" ? 100 : ((l: any) => {
-      const src = l.source as GraphNode
-      const tgt = l.target as GraphNode
-      if (src.nodeType === "folder" && tgt.nodeType === "folder") return 60
-      return 30
-    })
+    // Simulation — same force config for both views
+    const chargeStrength = -300
+    const linkDistance = 100
 
     const simulation = forceSimulation<GraphNode>(nodes)
       .force(
@@ -331,11 +352,9 @@ function ForceGraph({
         labelGroup.attr("x", (d: any) => d.x).attr("y", (d: any) => d.y)
 
         // Update edge labels position
-        if (viewMode === "legal") {
-          g.selectAll(".edge-labels text")
-            .attr("x", (d: any) => ((d.source.x || 0) + (d.target.x || 0)) / 2)
-            .attr("y", (d: any) => ((d.source.y || 0) + (d.target.y || 0)) / 2)
-        }
+        g.selectAll(".edge-labels text")
+          .attr("x", (d: any) => ((d.source.x || 0) + (d.target.x || 0)) / 2)
+          .attr("y", (d: any) => ((d.source.y || 0) + (d.target.y || 0)) / 2)
       })
 
     simulationRef.current = simulation
@@ -373,8 +392,6 @@ function ForceGraph({
     }
   }, [])
 
-  const legendColors = viewMode === "legal" ? LAW_DOMAIN_COLORS : null
-
   return (
     <div ref={containerRef} className="relative w-full h-full bg-[#0f1117]">
       <svg
@@ -410,21 +427,29 @@ function ForceGraph({
           </>
         ) : (
           <>
-            <div className="text-gray-400 font-medium mb-1">Carpetas</div>
-            {Object.entries(FOLDER_COLORS).filter(([k]) => k !== "unknown").map(([key, color]) => (
-              <div key={key} className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-                <span className="text-gray-300 capitalize">{key}</span>
-              </div>
-            ))}
-            <div className="border-t border-gray-700 my-1" />
-            <div className="text-gray-400 font-medium mb-1">Documentos</div>
-            {Object.entries(DOC_COLORS).filter(([k]) => k !== "unknown").map(([key, color]) => (
-              <div key={key} className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
-                <span className="text-gray-300 capitalize">{key}</span>
-              </div>
-            ))}
+            {folderTypes.length > 0 && (
+              <>
+                <div className="text-gray-400 font-medium mb-1">Carpetas</div>
+                {folderTypes.map((type) => (
+                  <div key={type} className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: getTypeColor(type) }} />
+                    <span className="text-gray-300 capitalize">{type.replace(/_/g, " ")}</span>
+                  </div>
+                ))}
+              </>
+            )}
+            {docTypes.length > 0 && (
+              <>
+                <div className="border-t border-gray-700 my-1" />
+                <div className="text-gray-400 font-medium mb-1">Documentos</div>
+                {docTypes.map((type) => (
+                  <div key={type} className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: getTypeColor(type) }} />
+                    <span className="text-gray-300 capitalize">{type.replace(/_/g, " ")}</span>
+                  </div>
+                ))}
+              </>
+            )}
           </>
         )}
       </div>
@@ -535,6 +560,7 @@ export default function KnowledgeTreePage() {
           id: e.id,
           source: e.source,
           target: e.target,
+          label: e.label,
         }))
 
         setGraphNodes(nodes)

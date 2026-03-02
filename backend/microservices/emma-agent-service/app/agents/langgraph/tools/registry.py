@@ -13,7 +13,7 @@ Tools are filtered per-request based on:
 Usage:
     registry = get_tool_registry()
     tools = registry.get_tools_for_context(tenant_id, sector, features)
-    result = await registry.execute("search_documents", args, context)
+    result = await registry.execute("smart_search", args, context)
 """
 
 import asyncio
@@ -54,7 +54,8 @@ class ToolRegistry:
             return
 
         from .terminate import TerminateTool
-        from .search import SearchDocumentsTool, SearchLegislationTool, GetDocumentContentTool
+        from .smart_search import SmartSearchTool
+        from .search import GetDocumentContentTool
         from .graph import StructuralQueryTool
         from .specialists import AnalyzeDomainTool
         from .web import WebSearchTool
@@ -63,8 +64,7 @@ class ToolRegistry:
         from .cendoj import CendojSearchTool
 
         tools: List[EmmaTool] = [
-            SearchDocumentsTool(),
-            SearchLegislationTool(),
+            SmartSearchTool(),         # Replaces SearchDocuments + SearchLegislation
             GetDocumentContentTool(),
             StructuralQueryTool(),
             AnalyzeDomainTool(),
@@ -101,8 +101,7 @@ class ToolRegistry:
 
         Filtering rules:
         - terminate: always included
-        - search_documents: always included (core capability)
-        - search_legislation: included if sector has legal agents or no sector (generic)
+        - smart_search: always included (unified documents + legislation)
         - get_document_content: always included
         - structural_query: always included (enables count/list/filter queries)
         - analyze_domain: included if sector has specialist agents
@@ -119,31 +118,25 @@ class ToolRegistry:
 
         # Check sector agent availability
         has_specialists = True  # Default: all sectors have at least general analysis
-        has_legislation = True  # Default: legislation is broadly useful
 
         if sector:
             from ..sectors.registry import SECTOR_CONFIGS
             sector_config = SECTOR_CONFIGS.get(sector)
             if sector_config:
                 sector_agents = set(sector_config.agents)
-                # Legislation is most useful for legal sector but available for all
-                has_legislation = True
-                # Specialists require at least one domain agent
                 has_specialists = len(sector_agents) > 0
 
         for tool in self._tools.values():
             name = tool.name
 
             # Always include these
-            if name in ("terminate", "search_documents", "get_document_content",
+            if name in ("terminate", "smart_search", "get_document_content",
                         "structural_query", "list_sources"):
                 available.append(tool)
                 continue
 
             # Conditional tools
-            if name == "search_legislation" and has_legislation:
-                available.append(tool)
-            elif name == "analyze_domain" and has_specialists:
+            if name == "analyze_domain" and has_specialists:
                 available.append(tool)
             elif name == "web_search" and features.get("web_search_enabled", False):
                 available.append(tool)
@@ -151,7 +144,7 @@ class ToolRegistry:
                 available.append(tool)
             elif name == "query_connector" and features.get("connectors_enabled", False):
                 available.append(tool)
-            elif name not in ("search_legislation", "analyze_domain",
+            elif name not in ("analyze_domain",
                               "web_search", "search_jurisprudence", "query_connector"):
                 # Unknown tool — include by default
                 available.append(tool)

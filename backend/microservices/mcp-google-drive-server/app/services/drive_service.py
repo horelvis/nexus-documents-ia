@@ -66,6 +66,7 @@ class DriveFile(BaseModel):
     web_view_link: Optional[str] = None
     parents: Optional[List[str]] = None
     path: Optional[str] = None
+    folder_path: Optional[str] = None
     owners: Optional[List[str]] = None
 
 
@@ -140,6 +141,20 @@ class DriveService:
             owners=owners,
         )
 
+    async def _get_folder_name(self, client: httpx.AsyncClient, folder_id: str) -> str:
+        """Resolve a folder ID to its name. Returns 'Drive' for root."""
+        if folder_id == "root":
+            return "Drive"
+        try:
+            resp = await client.get(
+                f"{DRIVE_API_BASE}/files/{folder_id}",
+                params={"fields": "name"},
+            )
+            resp.raise_for_status()
+            return resp.json().get("name", "Drive")
+        except Exception:
+            return "Drive"
+
     async def list_files(
         self,
         folder_id: str,
@@ -150,14 +165,20 @@ class DriveService:
         """
         List all files in a folder (and optionally subfolders).
 
-        Uses BFS to traverse folder tree.
+        Uses BFS to traverse folder tree, tracking folder paths
+        so each file gets the full hierarchy of its parent folder.
         """
         client = await self._get_client()
         files: List[DriveFile] = []
-        folders_to_process = [folder_id]
+
+        # Resolve root folder name for path tracking
+        root_name = await self._get_folder_name(client, folder_id)
+
+        # BFS queue: (folder_id, folder_path)
+        folders_to_process: List[Tuple[str, str]] = [(folder_id, f"/{root_name}")]
 
         while folders_to_process and len(files) < max_results:
-            current_folder = folders_to_process.pop(0)
+            current_folder, current_path = folders_to_process.pop(0)
 
             query = f"'{current_folder}' in parents and trashed=false"
 
@@ -179,14 +200,18 @@ class DriveService:
                 for item in data.get("files", []):
                     if item["mimeType"] == "application/vnd.google-apps.folder":
                         if include_subfolders:
-                            folders_to_process.append(item["id"])
+                            folders_to_process.append(
+                                (item["id"], f"{current_path}/{item['name']}")
+                            )
                     else:
                         # Filter by file type if specified
                         if file_types:
                             ext = SUPPORTED_MIME_TYPES.get(item["mimeType"])
                             if ext and ext not in file_types:
                                 continue
-                        files.append(self._parse_file(item))
+                        df = self._parse_file(item)
+                        df.folder_path = current_path
+                        files.append(df)
 
                 page_token = data.get("nextPageToken")
                 if not page_token:

@@ -1,8 +1,8 @@
 """
-LangGraph RAG API Integration
+LangGraph ReAct Agent API Integration
 
-API layer for executing LangGraph-based RAG queries.
-Can be integrated into existing Emma endpoints via feature flag.
+API layer for executing LangGraph-based ReAct agent queries.
+Integrated into Emma endpoints via feature flag.
 
 Usage:
     from app.agents.langgraph.api import execute_langgraph_query, is_langgraph_enabled
@@ -13,12 +13,6 @@ Usage:
         result = await emma.execute(query, context)
 
 Feature Flag: LANGGRAPH_RAG_ENABLED (default: false)
-
-Migration Strategy:
-1. Set LANGGRAPH_RAG_ENABLED=true to route to LangGraph
-2. Monitor performance and errors
-3. Gradually roll out by tenant
-4. Eventually make LangGraph the default
 """
 
 import asyncio
@@ -31,11 +25,8 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.execution_context import set_execution_context, clear_execution_context
-from .graph import (
-    execute_rag_query, get_rag_graph,
-    execute_react_query, get_react_graph,
-)
-from .state import RAGState, ReActState, ExecutionConfig, create_initial_state, create_initial_react_state
+from .graph import execute_react_query, get_react_graph
+from .state import ReActState, ExecutionConfig, create_initial_react_state
 
 logger = logging.getLogger(__name__)
 
@@ -252,286 +243,6 @@ async def execute_langgraph_query(
         clear_execution_context()
 
 
-async def stream_langgraph_query(
-    query: str,
-    tenant_id: str,
-    user_id: Optional[str] = None,
-    user_role_ids: Optional[List[str]] = None,
-    is_admin: bool = False,
-    thread_id: Optional[str] = None,
-    conversation_history: Optional[List[Dict[str, Any]]] = None,
-    context: Optional[Dict[str, Any]] = None,
-) -> AsyncGenerator[Dict[str, Any], None]:
-    """
-    Stream a RAG query execution using LangGraph.
-
-    Yields events as the graph executes, allowing real-time
-    progress updates to the frontend.
-
-    Event Types:
-        - started: Query execution started
-        - retrieve_complete: Document retrieval finished
-        - plan_complete: Execution plan created
-        - structural_step: Reasoning step during structural query (traceability)
-        - agent_started: Agent started execution
-        - agent_complete: Agent finished execution
-        - synthesize_started: Synthesis started
-        - complete: Final answer ready
-        - error: Error occurred
-
-    Args:
-        query: User's query
-        tenant_id: Tenant ID
-        user_id: Optional user ID
-        user_role_ids: Optional role IDs
-        is_admin: Admin flag
-        thread_id: Optional thread ID
-
-    Yields:
-        Event dictionaries with type and data
-
-    Example:
-        >>> async for event in stream_langgraph_query(query, tenant_id):
-        ...     if event["type"] == "complete":
-        ...         print(event["data"]["answer"])
-    """
-    start_time = time.time()
-    thread_id = thread_id or str(uuid.uuid4())
-
-    # Validate tenant_id to prevent Weaviate schema errors
-    if not tenant_id or not tenant_id.strip():
-        logger.error("❌ tenant_id is required for streaming query")
-        yield {
-            "type": "error",
-            "data": {
-                "error": "tenant_id is required",
-                "thread_id": thread_id,
-            }
-        }
-        return
-
-    # Set execution context for tools
-    document_id = (context or {}).get("document_id")
-    set_execution_context(
-        tenant_id=tenant_id,
-        user_id=user_id,
-        user_role_ids=user_role_ids,
-        is_admin=is_admin,
-        document_id=document_id,
-    )
-
-    yield {
-        "type": "started",
-        "data": {
-            "thread_id": thread_id,
-            "query": query,
-        }
-    }
-
-    # Track emitted events to avoid duplicates
-    # LangGraph's stream_mode="values" emits cumulative state after each node
-    emitted_events = {
-        "retrieve_complete": False,
-        "plan_complete": False,
-        "rlm_complete": False,  # Track RLM completion
-        "agents_started": set(),  # Track which agents we've sent started events for
-        "agents_completed": set(),  # Track which agents we've sent completed events for
-        "reasoning_step_count": 0,  # Track emitted step count (index-based)
-    }
-
-    try:
-        from langchain_core.messages import HumanMessage, AIMessage
-
-        langchain_history = None
-        if conversation_history:
-            langchain_history = []
-            for msg in conversation_history:
-                role = msg.get("role", "")
-                content = msg.get("content", "")
-                if role == "user":
-                    langchain_history.append(HumanMessage(content=content))
-                elif role == "assistant":
-                    langchain_history.append(AIMessage(content=content))
-
-        from app.services.upload_context_service import upload_context_service
-
-        hydrated_context = upload_context_service.hydrate_context(context or {})
-
-        # Create initial state
-        initial_state = create_initial_state(
-            query=query,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            user_role_ids=user_role_ids,
-            is_admin=is_admin,
-            thread_id=thread_id,
-            conversation_history=langchain_history,
-            request_context=hydrated_context,
-        )
-
-        # Get graph
-        graph = get_rag_graph()
-
-        # Stream execution
-        config = {"configurable": {"thread_id": thread_id}}
-
-        # Use astream_events for detailed progress
-        async for event in graph.astream(initial_state, config, stream_mode="values"):
-            # Emit retrieve_complete only once
-            if not emitted_events["retrieve_complete"] and "retrieved_docs" in event and event.get("retrieved_docs"):
-                emitted_events["retrieve_complete"] = True
-                yield {
-                    "type": "retrieve_complete",
-                    "data": {
-                        "doc_count": len(event["retrieved_docs"]),
-                    }
-                }
-
-            # Emit plan_complete only once
-            if not emitted_events["plan_complete"] and "execution_plan" in event and event.get("execution_plan"):
-                emitted_events["plan_complete"] = True
-
-                # Reasoning steps already emitted by the generic handler above
-
-                metadata = event.get("metadata", {})
-                yield {
-                    "type": "plan_complete",
-                    "data": {
-                        "domains": event.get("detected_domains", []),
-                        "agents": event.get("execution_plan", []),
-                        "reasoning": event.get("plan_reasoning", ""),
-                        "is_structural": metadata.get("is_structural_query", False),
-                    }
-                }
-
-            # Emit all reasoning_steps incrementally (covers retrieve, graph_expand, rlm_plan/map/reduce, synthesize)
-            reasoning_steps = event.get("reasoning_steps", [])
-            for step in reasoning_steps[emitted_events["reasoning_step_count"]:]:
-                emitted_events["reasoning_step_count"] += 1
-                yield {
-                    "type": "structural_step",
-                    "data": {
-                        "step_type": step.get("type", "reasoning"),
-                        "content": step.get("content", ""),
-                        "confidence": step.get("confidence", 1.0),
-                        "entities": step.get("entities", []),
-                    }
-                }
-
-            # Emit RLM agent_started when rlm_activated first appears
-            if not emitted_events["rlm_complete"] and event.get("rlm_activated"):
-                if "rlm_agent" not in emitted_events["agents_started"]:
-                    emitted_events["agents_started"].add("rlm_agent")
-                    yield {
-                        "type": "agent_started",
-                        "data": {
-                            "agent": "rlm_agent",
-                        }
-                    }
-
-                # Emit rlm_agent complete when rlm_reduce populates agent_results
-                if event.get("agent_results", {}).get("rlm_agent") and "rlm_agent" not in emitted_events["agents_completed"]:
-                    emitted_events["rlm_complete"] = True
-                    emitted_events["agents_completed"].add("rlm_agent")
-                    rlm_meta = event.get("metadata", {})
-                    yield {
-                        "type": "agent_complete",
-                        "data": {
-                            "agent": "rlm_agent",
-                            "tools_used": ["rlm_recursive_processing"],
-                            "chunks": rlm_meta.get("rlm_chunks", 0),
-                            "total_tokens": event.get("rlm_total_tokens", 0),
-                        }
-                    }
-
-            # Emit agent_started only once per agent
-            if "current_agent" in event and event.get("current_agent"):
-                agent = event["current_agent"]
-                if agent not in emitted_events["agents_started"]:
-                    emitted_events["agents_started"].add(agent)
-                    yield {
-                        "type": "agent_started",
-                        "data": {
-                            "agent": agent,
-                        }
-                    }
-
-            # Emit agent_complete only once per agent
-            if "agent_results" in event:
-                for agent, result in event.get("agent_results", {}).items():
-                    if agent not in emitted_events["agents_completed"]:
-                        emitted_events["agents_completed"].add(agent)
-
-                        # Emit structural reasoning steps if available
-                        if isinstance(result, dict) and result.get("reasoning_steps"):
-                            for step in result["reasoning_steps"]:
-                                yield {
-                                    "type": "structural_step",
-                                    "data": {
-                                        "step_type": step.get("type", "reasoning"),
-                                        "content": step.get("content", ""),
-                                        "entities": step.get("entities", []),
-                                        "confidence": step.get("confidence", 1.0),
-                                    }
-                                }
-
-                        yield {
-                            "type": "agent_complete",
-                            "data": {
-                                "agent": agent,
-                                "tools_used": result.get("tools_used", []) if isinstance(result, dict) else [],
-                            }
-                        }
-
-            # Emit complete only once (when final_answer appears)
-            if "final_answer" in event and event.get("final_answer"):
-                latency_ms = (time.time() - start_time) * 1000
-                final_answer = event["final_answer"]
-
-                # Stream the answer as tokens before sending complete
-                # This provides real-time text streaming to the frontend
-                words = final_answer.split(' ')
-                for i, word in enumerate(words):
-                    # Add space before word (except first)
-                    token = f" {word}" if i > 0 else word
-                    yield {
-                        "type": "token",
-                        "data": {
-                            "text": token,
-                            "token": token,
-                        }
-                    }
-
-                # Now emit complete (answer already streamed via tokens)
-                yield {
-                    "type": "complete",
-                    "data": {
-                        "success": event.get("success", True),
-                        "answer": final_answer,
-                        "sources": event.get("sources", []),
-                        "thread_id": thread_id,
-                        "agents_used": list(event.get("agent_results", {}).keys()),
-                        "domains": event.get("detected_domains", []),
-                        "latency_ms": latency_ms,
-                    }
-                }
-                # Break after complete to avoid any further duplicate processing
-                break
-
-    except Exception as e:
-        logger.error(f"Stream error: {e}")
-        yield {
-            "type": "error",
-            "data": {
-                "error": str(e),
-                "thread_id": thread_id,
-            }
-        }
-
-    finally:
-        clear_execution_context()
-
-
 # =============================================================================
 # ReAct Agent Streaming
 # =============================================================================
@@ -597,6 +308,7 @@ async def stream_react_query(
 
     # Track emitted events for deduplication (index-based)
     emitted_step_count = 0
+    emitted_swarm_event_count = 0
 
     try:
         from langchain_core.messages import HumanMessage, AIMessage
@@ -618,7 +330,7 @@ async def stream_react_query(
         except Exception:
             hydrated_context = context or {}
 
-        initial_state = create_initial_react_state(
+        initial_state = await create_initial_react_state(
             query=query,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -670,16 +382,25 @@ async def stream_react_query(
                         },
                     }
 
+            # Drain swarm pending events incrementally (same pattern as reasoning_steps)
+            swarm_events = event.get("swarm_pending_events", [])
+            for swarm_evt in swarm_events[emitted_swarm_event_count:]:
+                emitted_swarm_event_count += 1
+                evt_type = swarm_evt.get("type", "swarm_event")
+                evt_data = swarm_evt.get("data", {})
+                yield {"type": evt_type, "data": evt_data}
+
             # Check for final answer
             if event.get("final_answer") and event.get("is_complete"):
                 latency_ms = (time.time() - start_time) * 1000
                 final_answer = event["final_answer"]
 
-                # Stream answer as tokens
+                # Stream answer as tokens (with event loop yield for HTTP flush)
                 words = final_answer.split(' ')
                 for i, word in enumerate(words):
                     token = f" {word}" if i > 0 else word
                     yield {"type": "token", "data": {"text": token, "token": token}}
+                    await asyncio.sleep(0)
 
                 # Emit complete
                 yield {
@@ -723,8 +444,7 @@ async def maybe_use_langgraph(
     If LangGraph is not enabled for this tenant, returns None
     so the caller can fall back to Emma.
 
-    When enabled, routes through the ReAct agent graph (default behavior).
-    The old RAG graph is kept as automatic fallback if ReAct fails.
+    When enabled, routes through the ReAct agent graph.
 
     Args:
         query: User's query

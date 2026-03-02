@@ -8,14 +8,14 @@
 // Runtime config - reads from environment variables
 function getEnvConfig() {
   // Read from environment variables with fallbacks
-  const issuer = process.env.NEXT_PUBLIC_SSO_AUTHORITY || 'http://nouxcube.local.es:8085/realms/nouxcube'
+  const issuer = process.env.NEXT_PUBLIC_SSO_AUTHORITY || 'https://nouxcubeai.ddns.net:8085/realms/nouxcube'
   const clientId = process.env.NEXT_PUBLIC_SSO_CLIENT_ID || 'nouxcube-frontend'
 
   const defaults = {
     issuer,
     clientId,
-    redirectUri: process.env.NEXT_PUBLIC_SSO_REDIRECT_URI || 'http://nouxcube.local.es:3001/auth/callback',
-    postLogoutRedirectUri: process.env.NEXT_PUBLIC_SSO_POST_LOGOUT_REDIRECT_URI || 'http://nouxcube.local.es:3001',
+    redirectUri: process.env.NEXT_PUBLIC_SSO_REDIRECT_URI || 'https://nouxcubeai.ddns.net/auth/callback',
+    postLogoutRedirectUri: process.env.NEXT_PUBLIC_SSO_POST_LOGOUT_REDIRECT_URI || 'https://nouxcubeai.ddns.net',
   }
 
   // In browser, use window origin for redirect URIs if not specified
@@ -67,14 +67,13 @@ export const OIDC_CONFIG = {
     return `${this.issuer}/protocol/openid-connect/auth`
   },
 
-  // Token, userinfo, logout — fetched from browser, so use local proxy to avoid mixed content
-  // Next.js rewrites /oidc/* → KeyCloak /protocol/openid-connect/* (HTTPS→HTTP server-side)
+  // Token, userinfo, logout — called directly to KeyCloak (HTTPS, no proxy needed)
   get tokenEndpoint() {
-    return typeof window !== 'undefined' ? `${window.location.origin}/oidc/token` : `${this.issuer}/protocol/openid-connect/token`
+    return `${this.issuer}/protocol/openid-connect/token`
   },
 
   get userinfoEndpoint() {
-    return typeof window !== 'undefined' ? `${window.location.origin}/oidc/userinfo` : `${this.issuer}/protocol/openid-connect/userinfo`
+    return `${this.issuer}/protocol/openid-connect/userinfo`
   },
 
   get endSessionEndpoint() {

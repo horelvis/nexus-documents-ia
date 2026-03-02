@@ -1,5 +1,8 @@
 'use client'
 
+// This page reads searchParams — skip static prerendering
+export const dynamic = 'force-dynamic'
+
 /**
  * OAuth Success Page
  *

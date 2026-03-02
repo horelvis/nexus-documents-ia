@@ -249,10 +249,7 @@ export function SyncDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="overflow-y-auto"
-        style={{ width: '500px', maxWidth: '500px', maxHeight: '90vh' }}
-      >
+      <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconCloudDownload className="h-5 w-5" />

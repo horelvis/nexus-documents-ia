@@ -40,6 +40,24 @@ export function ReasoningCollapsible({
 }: ReasoningCollapsibleProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [userInteracted, setUserInteracted] = useState(false) // Track if user manually toggled
+  const prevStepCount = useRef(0)
+
+  // Auto-expand when new steps arrive (unless user manually toggled)
+  useEffect(() => {
+    if (steps.length > prevStepCount.current && steps.length > 0 && !userInteracted) {
+      setIsExpanded(true)
+    }
+    prevStepCount.current = steps.length
+  }, [steps.length, userInteracted])
+
+  // Auto-collapse after steps stabilize (reasoning done) — 1.5s debounce
+  useEffect(() => {
+    if (steps.length === 0 || userInteracted) return
+    const timer = setTimeout(() => {
+      setIsExpanded(false)
+    }, 1500)
+    return () => clearTimeout(timer)
+  }, [steps.length, userInteracted])
 
   // Don't render if no steps
   if (steps.length === 0) return null
@@ -65,7 +83,7 @@ export function ReasoningCollapsible({
             Plan de ejecución
           </span>
           {steps.length > 0 && (
-            <span className="text-[10px] font-mono text-foreground/60 block">
+            <span className="text-[11px] font-mono text-foreground/80 block truncate">
               {steps[steps.length - 1].content}
             </span>
           )}

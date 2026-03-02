@@ -61,7 +61,7 @@ class WebSearchTool(EmmaTool):
         if not client.enabled:
             return ToolResult.from_error(
                 "La búsqueda web no está habilitada en este entorno.",
-                suggestion="Usa search_documents o search_legislation.",
+                suggestion="Usa smart_search para buscar en documentos y legislación.",
             )
 
         try:

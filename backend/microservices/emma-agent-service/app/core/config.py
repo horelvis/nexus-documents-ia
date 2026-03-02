@@ -118,6 +118,17 @@ class Settings(BaseSettings):
     react_tool_description_max_chars: int = int(os.getenv("REACT_TOOL_DESCRIPTION_MAX_CHARS", "200"))
     react_global_timeout_seconds: float = float(os.getenv("REACT_GLOBAL_TIMEOUT_SECONDS", "120"))
 
+    # Swarm Agent (parallel sub-agent execution)
+    swarm_enabled: bool = os.getenv("SWARM_ENABLED", "false").lower() == "true"
+    swarm_max_workers: int = int(os.getenv("SWARM_MAX_WORKERS", "5"))
+    swarm_worker_max_steps: int = int(os.getenv("SWARM_WORKER_MAX_STEPS", "2"))
+    swarm_worker_timeout_seconds: float = float(os.getenv("SWARM_WORKER_TIMEOUT_SECONDS", "45"))
+    swarm_complexity_threshold: int = int(os.getenv("SWARM_COMPLEXITY_THRESHOLD", "3"))
+
+    # SmartSearch — unified multi-store search with graph-enhanced re-ranking
+    smart_search_rerank_enabled: bool = os.getenv("SMART_SEARCH_RERANK_ENABLED", "true").lower() == "true"
+    smart_search_graph_enabled: bool = os.getenv("SMART_SEARCH_GRAPH_ENABLED", "true").lower() == "true"
+
     # LLM Fallback
     llm_retry_delay_seconds: float = float(os.getenv("LLM_RETRY_DELAY_SECONDS", "0.5"))
 
@@ -249,6 +260,14 @@ class Settings(BaseSettings):
     # Heartbeat Delivery
     heartbeat_insight_ttl_seconds: int = int(os.getenv("HEARTBEAT_INSIGHT_TTL_SECONDS", "604800"))
     heartbeat_max_insights_stored: int = int(os.getenv("HEARTBEAT_MAX_INSIGHTS_STORED", "100"))
+
+    # ==========================================================================
+    # User Memory (cross-session persistent facts)
+    # ==========================================================================
+    user_memory_enabled: bool = os.getenv("USER_MEMORY_ENABLED", "true").lower() == "true"
+    user_memory_llm_extraction: bool = os.getenv("USER_MEMORY_LLM_EXTRACTION", "false").lower() == "true"
+    user_memory_max_facts: int = int(os.getenv("USER_MEMORY_MAX_FACTS", "50"))
+    user_memory_cache_ttl: int = int(os.getenv("USER_MEMORY_CACHE_TTL", "3600"))
 
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

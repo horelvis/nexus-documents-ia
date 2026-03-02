@@ -367,10 +367,17 @@ async def sso_login(
         if hasattr(provider, "verify_token"):
             identity = await provider.verify_token(access_token)
             # Convert AuthenticatedIdentity to dict for uniform handling
+            # Prefer constructing from parts — handles KeyCloak sending only surname as name claim
+            if identity.given_name and identity.family_name:
+                _name = f"{identity.given_name} {identity.family_name}"
+            elif identity.given_name:
+                _name = identity.given_name
+            else:
+                _name = identity.name or identity.family_name or ""
             user_info = {
                 "sub": identity.external_id,
                 "email": identity.email,
-                "name": identity.name or f"{identity.given_name or ''} {identity.family_name or ''}".strip(),
+                "name": _name.strip(),
                 "groups": identity.groups or [],
             }
         elif hasattr(provider, "validate_token"):
@@ -382,10 +389,18 @@ async def sso_login(
             import jwt
             try:
                 decoded = jwt.decode(access_token, options={"verify_signature": False})
+                given = decoded.get("given_name", "")
+                family = decoded.get("family_name", "")
+                if given and family:
+                    _decoded_name = f"{given} {family}"
+                elif given:
+                    _decoded_name = given
+                else:
+                    _decoded_name = decoded.get("name") or family or ""
                 user_info = {
                     "sub": decoded.get("sub"),
                     "email": decoded.get("email") or decoded.get("preferred_username"),
-                    "name": decoded.get("name") or decoded.get("given_name", "") + " " + decoded.get("family_name", ""),
+                    "name": _decoded_name.strip(),
                     "groups": decoded.get("groups", []),
                 }
             except jwt.InvalidTokenError as e:
@@ -451,6 +466,9 @@ async def sso_login(
             user.sso_external_id = sso_external_id
         if not user.sso_provider:
             user.sso_provider = provider.provider_type.value
+        # JIT-update full_name on each login (handles KeyCloak name fixes)
+        if full_name and full_name != user.full_name:
+            user.full_name = full_name
         user.sso_groups = groups
         user.last_login_at = datetime.utcnow()
         await db.commit()

@@ -344,7 +344,7 @@ async def run_index_pending_job(
             stats["success"] = True
             return stats
 
-        concurrency = min(batch_size, 8)
+        concurrency = min(batch_size, 20)
         logger.info(f"[{connector_id}] Found {len(pending_docs)} pending documents (concurrency={concurrency})")
 
         semaphore = asyncio.Semaphore(concurrency)
@@ -406,22 +406,64 @@ async def run_index_pending_job(
         await pool.release(conn)
 
 
+# Extensions that textextract-service can process (whitelist)
+_INDEXABLE_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".txt", ".md", ".csv", ".ppt", ".pptx",
+    ".xlsx", ".xls", ".html", ".odt", ".rtf", ".epub", ".xml", ".json",
+    ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".gif",
+}
+
+
 async def _index_single_document(
     conn: asyncpg.Connection,
     doc: asyncpg.Record,
     config,
-    access_token: str,
+    access_token: str = "",  # Deprecated: token is now refreshed per-document
 ) -> bool:
     """Index a single document: download from OneDrive, send to Weaviate."""
     doc_id = doc["id"]
     processing_start = time.time()
+
+    # Early skip: avoid downloading files that textextract cannot process
+    ext = (doc.get("file_extension") or "").lower()
+    if ext and not ext.startswith("."):
+        ext = f".{ext}"
+    if ext and ext not in _INDEXABLE_EXTENSIONS:
+        logger.info(f"Skipping unsupported extension '{ext}' for {doc['title']}")
+        await conn.execute(
+            """UPDATE indexed_documents SET
+                indexing_status = 'skipped',
+                indexing_error = $1
+            WHERE id = $2""",
+            f"Unsupported file type: {ext}",
+            doc_id,
+        )
+        return False
+
+    # Early skip: files larger than textextract max (50MB)
+    _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+    size_bytes = doc.get("size_bytes") or 0
+    if size_bytes > _MAX_FILE_SIZE:
+        size_mb = size_bytes / (1024 * 1024)
+        logger.info(f"Skipping oversized file ({size_mb:.0f}MB) for {doc['title']}")
+        await conn.execute(
+            """UPDATE indexed_documents SET
+                indexing_status = 'skipped',
+                indexing_error = $1
+            WHERE id = $2""",
+            f"File too large: {size_mb:.0f}MB > 50MB limit",
+            doc_id,
+        )
+        return False
 
     await conn.execute(
         "UPDATE indexed_documents SET indexing_status = 'processing' WHERE id = $1",
         doc_id,
     )
 
-    onedrive = OneDriveService(access_token, config)
+    # Always get a fresh token — prevents 401 errors during long-running jobs
+    fresh_token = await oauth_service.ensure_fresh_token(config)
+    onedrive = OneDriveService(fresh_token, config)
     try:
         # Step 1: Download content from OneDrive
         # OneDrive files are native formats — no export conversion needed
@@ -446,6 +488,7 @@ async def _index_single_document(
                 "external_url": doc["external_url"],
                 "external_path": doc["external_path"],
                 "connector_id": str(doc["connector_id"]),
+                "connector_type": "onedrive",
                 "source_created_at": doc["source_created_at"].isoformat() if doc["source_created_at"] else None,
                 "source_modified_at": doc["source_modified_at"].isoformat() if doc["source_modified_at"] else None,
             },

@@ -17,6 +17,7 @@ from .conversation import ConversationMemory, get_conversation_memory
 from .preferences import PreferencesStore, get_preferences_store
 from .types import ConversationContext, UserPreferences, MessageRole
 from .learning_service import PreferenceLearningService, UserInteraction, get_learning_service
+from .user_facts import UserFactsService, get_user_facts_service
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,8 @@ class MemoryService:
         self,
         conversation_memory: Optional[ConversationMemory] = None,
         preferences_store: Optional[PreferencesStore] = None,
-        learning_service: Optional[PreferenceLearningService] = None
+        learning_service: Optional[PreferenceLearningService] = None,
+        user_facts_service: Optional[UserFactsService] = None,
     ):
         """
         Initialize memory service.
@@ -45,10 +47,12 @@ class MemoryService:
             conversation_memory: ConversationMemory instance (uses singleton if None)
             preferences_store: PreferencesStore instance (uses singleton if None)
             learning_service: PreferenceLearningService instance (uses singleton if None)
+            user_facts_service: UserFactsService instance (uses singleton if None)
         """
         self._conversation = conversation_memory or get_conversation_memory()
         self._preferences = preferences_store or get_preferences_store()
         self._learning = learning_service or get_learning_service()
+        self._user_facts = user_facts_service or get_user_facts_service()
         self._initialized = False
         self._learning_enabled = True  # Feature flag for learning
 
@@ -76,6 +80,7 @@ class MemoryService:
         """Close all memory store connections."""
         await self._conversation.close()
         await self._preferences.close()
+        await self._user_facts.close()
         self._initialized = False
 
     # =========================================================================
@@ -331,6 +336,14 @@ class MemoryService:
                 context["learning_applied"] = True
             except Exception as e:
                 logger.warning(f"⚠️ Failed to get learning context: {e}")
+
+        # Enrich with persistent user facts
+        try:
+            user_facts = await self._user_facts.get_user_facts(tenant_id, user_id)
+            if user_facts:
+                context["user_facts"] = user_facts
+        except Exception as e:
+            logger.debug(f"User facts load skipped: {e}")
 
         return context
 

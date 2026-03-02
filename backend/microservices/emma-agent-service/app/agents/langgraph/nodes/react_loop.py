@@ -42,16 +42,23 @@ from ..tools.registry import get_tool_registry
 
 logger = logging.getLogger(__name__)
 
-# Cached system prompt
-_react_system_prompt_cache: Optional[str] = None
+async def _load_react_system_prompt() -> str:
+    """Load the ReAct system prompt from Langfuse (primary) → YAML → fallback.
 
+    Uses the same TTL-cached pattern as swarm prompts via LangfusePromptClient.
+    """
+    # Try Langfuse first (TTL-cached, ~0ms on hit)
+    try:
+        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+        client = get_langfuse_prompt_client()
+        cached = await client.get_prompt("emma_react_system")
+        if cached and cached.content:
+            logger.debug(f"📥 ReAct prompt loaded from Langfuse (v{cached.version})")
+            return cached.content
+    except Exception as e:
+        logger.debug(f"Langfuse prompt fetch skipped: {e}")
 
-def _load_react_system_prompt() -> str:
-    """Load the ReAct system prompt from YAML or use fallback."""
-    global _react_system_prompt_cache
-    if _react_system_prompt_cache is not None:
-        return _react_system_prompt_cache
-
+    # YAML fallback
     candidates = [
         Path("/app/config/prompts/emma_prompts.yaml"),
         Path(__file__).parent.parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
@@ -64,14 +71,12 @@ def _load_react_system_prompt() -> str:
                     data = yaml.safe_load(f) or {}
                 react_config = data.get("react_agent", {})
                 if react_config and "system" in react_config:
-                    _react_system_prompt_cache = react_config["system"]
-                    return _react_system_prompt_cache
+                    return react_config["system"]
             except Exception as e:
-                logger.warning(f"Failed to load react system prompt: {e}")
+                logger.warning(f"Failed to load react system prompt from YAML: {e}")
 
-    # Fallback system prompt
-    _react_system_prompt_cache = _REACT_SYSTEM_FALLBACK
-    return _react_system_prompt_cache
+    # Hardcoded fallback
+    return _REACT_SYSTEM_FALLBACK
 
 
 _REACT_SYSTEM_FALLBACK = """\
@@ -103,8 +108,8 @@ Antes de actuar, identifica qué necesita el usuario exactamente.
 
 ### Paso 2: BUSCAR
 - Datos cuantitativos (cuántos, lista de...) → `structural_query`
-- Contenido de documentos → `search_documents`
-- Legislación española → `search_legislation`
+- Documentos o legislación → `smart_search` (detecta automáticamente qué buscar; usa scope='documents', 'legislation' o 'auto')
+- Contenido completo de un documento → `get_document_content`
 - Información externa → `web_search`
 - Fuentes disponibles → `list_sources`
 
@@ -116,7 +121,7 @@ Después de cada búsqueda, EVALÚA antes de responder:
 
 Si los resultados NO son relevantes:
 - REFORMULA la búsqueda con términos diferentes o más específicos
-- Prueba una herramienta DIFERENTE (ej: si `structural_query` devuelve vacío, usa `search_documents`)
+- Prueba una herramienta DIFERENTE (ej: si `structural_query` devuelve vacío, usa `smart_search`)
 - Si buscas un artículo específico de una ley y no aparece, busca por el nombre completo de la ley
 - Si ninguna búsqueda funciona, usa `web_search` como último recurso
 
@@ -144,7 +149,7 @@ NO respondas con resultados que no corresponden a lo que se preguntó.
 """
 
 
-def _build_system_message(state: ReActState) -> SystemMessage:
+async def _build_system_message(state: ReActState) -> SystemMessage:
     """Build the system message with tools description and sector context."""
     registry = get_tool_registry()
     tools_desc = registry.get_tools_description(
@@ -154,7 +159,7 @@ def _build_system_message(state: ReActState) -> SystemMessage:
         max_desc_chars=settings.react_tool_description_max_chars,
     )
 
-    prompt = _load_react_system_prompt()
+    prompt = await _load_react_system_prompt()
     prompt = prompt.replace("{tools_description}", tools_desc)
 
     sector = state.get("sector", "")
@@ -170,6 +175,11 @@ def _build_system_message(state: ReActState) -> SystemMessage:
     doc_id = (state.get("metadata") or {}).get("document_id")
     if doc_id:
         prompt += f"\n\nDocumento en contexto: {doc_id}"
+
+    # Inject persistent user memory (cross-session facts)
+    user_memory = state.get("user_memory")
+    if user_memory:
+        prompt += f"\n\n{user_memory}"
 
     return SystemMessage(content=prompt)
 
@@ -314,7 +324,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     if not has_system and cached_sys_content:
         llm_messages.append({"role": "system", "content": cached_sys_content})
     elif not has_system:
-        sys_msg = _build_system_message(state)
+        sys_msg = await _build_system_message(state)
         cached_sys_content = sys_msg.content
         llm_messages.append({"role": "system", "content": cached_sys_content})
 
@@ -416,7 +426,17 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
 
     # ─── No tool calls → agent wants to respond directly ───
     if not response.has_tool_calls:
-        logger.info(f"ReAct loop: step {step} — no tool calls, completing")
+        intent = (state.get("metadata") or {}).get("classify_intent", "")
+        if step == 0 and intent in ("document_query", "legal_query", "analysis"):
+            # SILENT FAILURE: LLM skipped tool calling on first step for a query
+            # that should have triggered a search. Log as warning for observability.
+            logger.warning(
+                f"⚠️ ReAct step 0 — NO tool calls for intent '{intent}'. "
+                f"LLM responded directly without searching. "
+                f"Query: '{state.get('query', '')[:80]}'"
+            )
+        else:
+            logger.info(f"ReAct loop: step {step} — no tool calls, completing")
 
         # Clean content of any raw tool_call tags from small models
         content = re.sub(r"</?tool_call>", "", content).strip()
@@ -431,6 +451,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             "metadata": {
                 f"react_step_{step}_latency_ms": latency_ms,
                 "react_total_steps": step + 1,
+                "react_no_tools_step0": step == 0,
                 "_tool_schemas_cache": tool_schemas,
                 "_system_message_cache": cached_sys_content,
             },

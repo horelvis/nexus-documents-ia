@@ -1,5 +1,6 @@
 """Pydantic schemas for Weaviate operations"""
-from pydantic import BaseModel, Field
+import json
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -23,6 +24,30 @@ class DocumentCreate(BaseModel):
     folder_path: Optional[str] = Field(default="", description="Full folder path (e.g., /Contracts/ACME/2024)")
     folder_hierarchy: List[str] = Field(default_factory=list, description="Array of folder levels for filtering")
     connector_id: Optional[str] = Field(default="", description="Connector that indexed this document")
+    # Enrichment properties for multi-signal retrieval
+    domain: Optional[str] = Field(default="", description="Business domain (e.g., legal, fiscal, medical)")
+    semantic_type: Optional[str] = Field(default="", description="Semantic document type (e.g., factura, contrato)")
+    quality_score: Optional[float] = Field(default=0.0, description="Quality score 0.0-1.0")
+    associated_person: Optional[str] = Field(default="", description="Associated person name")
+    # ACL properties for document-level access control
+    acl_user_ids: List[str] = Field(default_factory=list, description="User UUIDs with explicit access")
+    acl_role_ids: List[str] = Field(default_factory=list, description="Role UUIDs with access")
+    acl_everyone: bool = Field(default=True, description="If True, all tenant users can access")
+
+    @field_validator("acl_user_ids", "acl_role_ids", mode="before")
+    @classmethod
+    def _coerce_str_to_list(cls, v):
+        """Handle JSON-stringified lists from JSONB columns (e.g. '[]' → [])."""
+        if isinstance(v, str):
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+            return []
+        return v
+
     # Chunks for batch insertion
     chunks: List[Dict[str, Any]] = Field(default_factory=list, description="Document chunks with content and metadata")
 
@@ -60,6 +85,11 @@ class DocumentResponse(BaseModel):
     folder_path: Optional[str] = None
     folder_hierarchy: List[str] = Field(default_factory=list)
     connector_id: Optional[str] = None
+    # Enrichment properties for multi-signal retrieval
+    domain: Optional[str] = None
+    semantic_type: Optional[str] = None
+    quality_score: Optional[float] = None
+    associated_person: Optional[str] = None
 
 
 class SearchRequest(BaseModel):
@@ -73,6 +103,7 @@ class SearchRequest(BaseModel):
     is_admin: bool = Field(default=False, description="Admin users bypass ACL checks and see all tenant documents")
     filters: Optional[Dict[str, Any]] = None
     search_type: str = Field(default="hybrid", pattern="^(vector|keyword|hybrid)$")
+    alpha: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Hybrid search alpha: 0=keyword, 1=vector. Defaults to 0.7 if not set.")
     min_similarity: float = Field(default=0.0, ge=0.0, le=1.0)
     # Channel filtering options
     include_channels: bool = Field(default=True, description="Include documents from information channels")
@@ -80,6 +111,11 @@ class SearchRequest(BaseModel):
     # Folder hierarchy filtering for path-based RAG queries
     folder_path: Optional[str] = Field(default=None, description="Filter to exact folder path (e.g., /Contracts/ACME)")
     folder_hierarchy_contains: Optional[str] = Field(default=None, description="Filter to documents in folder or any subfolder")
+    # Enrichment filters for multi-signal retrieval
+    domain_filter: Optional[str] = Field(default=None, description="Filter by business domain (e.g., legal, fiscal)")
+    semantic_type_filter: Optional[str] = Field(default=None, description="Filter by semantic type (e.g., factura, contrato)")
+    person_filter: Optional[str] = Field(default=None, description="Filter by associated person name")
+    min_quality: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Minimum quality score threshold")
 
     class Config:
         json_schema_extra = {

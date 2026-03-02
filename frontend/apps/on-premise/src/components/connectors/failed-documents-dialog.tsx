@@ -253,10 +253,7 @@ export function FailedDocumentsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="overflow-hidden flex flex-col"
-        style={{ width: '700px', maxWidth: '90vw', maxHeight: '85vh' }}
-      >
+      <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconAlertTriangle className="h-5 w-5 text-red-500" />

@@ -151,6 +151,37 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # Docling - AI Document Understanding (opt-in via --profile docling)
+  # =============================================================================
+  # IBM Docling extracts structured Markdown from documents, preserving
+  # headers, tables, lists, and reading order with 97.9% table accuracy.
+  # CPU-only image (GPU reserved for vLLM). ~4.4GB image, ~8GB RAM.
+  # Start with: docker compose --profile docling up -d
+  # Then set EXTRACTION_BACKEND=docling in .env and restart textextract-service
+  docling:
+    image: ghcr.io/docling-project/docling-serve-cpu:latest
+    environment:
+      - DOCLING_SERVE_ENABLE_UI=false
+      - DOCLING_SERVE_MAX_SYNC_WAIT=300
+      - DOCLING_SERVE_ENG_LOC_NUM_WORKERS=2
+      - OMP_NUM_THREADS=4
+    deploy:
+      resources:
+        limits:
+          memory: 8g
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    profiles:
+      - docling
+
+  # =============================================================================
   # TextExtract Service - Text Extraction API
   # =============================================================================
   textextract-service:
@@ -170,9 +201,48 @@ services:
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - TIKA_URL=http://tika:9998
+      # Extraction backend: "tika" (default) or "docling" (AI document understanding)
+      # Docling requires: docker compose --profile docling up -d
+      - EXTRACTION_BACKEND=${EXTRACTION_BACKEND:-tika}
+      - DOCLING_URL=${DOCLING_URL:-http://docling:5001}
+      - EXTRACTION_FALLBACK_ENABLED=${EXTRACTION_FALLBACK_ENABLED:-true}
     volumes:
       - ../microservices/textextract-service/app:/app/app:ro
       - easyocr_models:/root/.EasyOCR
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  # =============================================================================
+  # LangExtract Service - Entity Extraction (LLM-powered NER)
+  # =============================================================================
+  # Extracts named entities from documents during indexing:
+  #   - PERSON, ORGANIZATION, DATE, AMOUNT, LOCATION (via LLM)
+  #   - DNI, NIE, CIF (via regex, always local)
+  # Used by weaviate-service indexing pipeline to populate Knowledge Graph.
+  langextract-service:
+    build:
+      context: ../microservices/langextract-service
+      dockerfile: Dockerfile
+    depends_on:
+      vllm:
+        condition: service_healthy
+    networks:
+      - backend-network
+    env_file:
+      - .env
+    environment:
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      # Override LLM provider to use local vLLM (reuses Qwen3-14B already in the stack)
+      - LLM_PROVIDER=vllm
+      - LLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - LLM_API_BASE=http://vllm:8000/v1
+    volumes:
+      - ../microservices/langextract-service/app:/app/app:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -188,8 +258,7 @@ services:
     build:
       context: ../microservices/weaviate-service
       dockerfile: Dockerfile
-    ports:
-      - "8007:8000"
+    # Port exposed via tls-proxy (nginx) on host :8007
     depends_on:
       weaviate:
         condition: service_healthy
@@ -199,6 +268,8 @@ services:
         condition: service_healthy
       textextract-service:
         condition: service_started
+      langextract-service:
+        condition: service_healthy
     networks:
       - backend-network
     env_file:
@@ -209,6 +280,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
+      - LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
       # OCR: disabled during bulk indexing (Tika handles text extraction)
       - ENHANCED_OCR_ENABLED=false
       # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
@@ -300,8 +372,7 @@ services:
       dockerfile: Dockerfile
       args:
         DOCKER_GID: ${DOCKER_GID:-988}
-    ports:
-      - "8009:8009"
+    # Port exposed via tls-proxy (nginx) on host :8009
     depends_on:
       weaviate-service:
         condition: service_healthy
@@ -376,6 +447,12 @@ services:
       - WEB_SEARCH_MAX_RESULTS=${WEB_SEARCH_MAX_RESULTS:-5}
       - WEB_SEARCH_REGION=${WEB_SEARCH_REGION:-es-es}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      # Swarm Agent (parallel sub-agent execution)
+      - SWARM_ENABLED=${SWARM_ENABLED:-false}
+      - SWARM_MAX_WORKERS=${SWARM_MAX_WORKERS:-5}
+      - SWARM_WORKER_MAX_STEPS=${SWARM_WORKER_MAX_STEPS:-2}
+      - SWARM_WORKER_TIMEOUT_SECONDS=${SWARM_WORKER_TIMEOUT_SECONDS:-45}
+      - SWARM_COMPLEXITY_THRESHOLD=${SWARM_COMPLEXITY_THRESHOLD:-3}
       # Suppress warnings
       - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:pydantic
     volumes:
@@ -408,6 +485,7 @@ services:
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
       - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
       - REDIS_HOST=redis
@@ -420,6 +498,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      knowledge-tree-service:
         condition: service_healthy
     networks:
       - backend-network
@@ -617,8 +697,10 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    # Port 8000 exposed via tls-proxy (HTTPS, for browsers)
+    # Port 8002 exposed directly (HTTP, for Next.js server-side rewrites)
     ports:
-      - "8000:8000"
+      - "8002:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -667,7 +749,7 @@ services:
       - ENABLE_WEAVIATE=${ENABLE_WEAVIATE:-true}
       - DEPLOYMENT_MODE=on_premise
       # OIDC/KeyCloak Configuration
-      - OIDC_ISSUER=${OIDC_ISSUER:-http://nouxcube.local.es:8085/realms/nouxcube}
+      - OIDC_ISSUER=${OIDC_ISSUER:-https://nouxcubeai.ddns.net:8085/realms/nouxcube}
       - OIDC_INTERNAL_ISSUER=${OIDC_INTERNAL_ISSUER:-http://keycloak:8080/realms/nouxcube}
       - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:-nouxcube-backend}
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:-nouxcube-backend-secret-change-in-production}
@@ -691,12 +773,121 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # Frontend On-Premise - Next.js production build
+  # =============================================================================
+  frontend:
+    build:
+      context: ../../frontend
+      dockerfile: apps/on-premise/Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://nouxcubeai.ddns.net:8000/api/v1}
+        - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-https://nouxcubeai.ddns.net:8000/api/v1}
+        - NEXT_PUBLIC_API_STREAMING_URL=${NEXT_PUBLIC_API_STREAMING_URL:-https://nouxcubeai.ddns.net:8000}
+        - NEXT_PUBLIC_WEAVIATE_SERVICE_URL=${NEXT_PUBLIC_WEAVIATE_SERVICE_URL:-https://nouxcubeai.ddns.net:8007}
+        - NEXT_PUBLIC_EMMA_SERVICE_URL=${NEXT_PUBLIC_EMMA_SERVICE_URL:-https://nouxcubeai.ddns.net:8009}
+        - NEXT_PUBLIC_SSO_AUTHORITY=${NEXT_PUBLIC_SSO_AUTHORITY:-https://nouxcubeai.ddns.net:8085/realms/nouxcube}
+        - NEXT_PUBLIC_SSO_CLIENT_ID=${NEXT_PUBLIC_SSO_CLIENT_ID:-nouxcube-frontend}
+        - NEXT_PUBLIC_SSO_REDIRECT_URI=${NEXT_PUBLIC_SSO_REDIRECT_URI:-https://nouxcubeai.ddns.net/auth/callback}
+        - NEXT_PUBLIC_SSO_POST_LOGOUT_REDIRECT_URI=${NEXT_PUBLIC_SSO_POST_LOGOUT_REDIRECT_URI:-https://nouxcubeai.ddns.net}
+        - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-https://nouxcubeai.ddns.net}
+        - NEXT_PUBLIC_BACKEND_URL=http://api:8000
+        - NEXT_PUBLIC_LANGFUSE_URL=${NEXT_PUBLIC_LANGFUSE_URL:-https://nouxcubeai.ddns.net:3002}
+    volumes:
+      # Override baked routes-manifest to proxy /api/v1/* → api:8000 (not localhost:8002)
+      - ./nginx/frontend-routes-manifest.json:/app/apps/on-premise/.next/routes-manifest.json:ro
+    environment:
+      # Server-side runtime var — overrides the baked-in NEXT_PUBLIC_BACKEND_URL
+      # so Next.js rewrites() proxy to the correct Docker-internal API address.
+      - BACKEND_URL=http://api:8000
+    # Port 3001 exposed via tls-proxy (HTTPS for browsers)
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # =============================================================================
+  # TLS Proxy - HTTPS termination for browser-accessible services
+  # =============================================================================
+  # Nginx reverse proxy that adds TLS in front of:
+  #   - Main API        (host :8000 → api:8000)
+  #   - Emma Agent      (host :8009 → emma-agent-service:8009) + WebSocket
+  #   - Weaviate Service(host :8007 → weaviate-service:8000)
+  # Internal Docker communication stays HTTP (no cert trust needed).
+  tls-proxy:
+    image: nginx:1.27-alpine
+    entrypoint: ["/bin/sh", "/docker-entrypoint-custom.sh"]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8000:8000"
+      - "8007:8007"
+      - "8009:8009"
+    volumes:
+      - ./nginx/tls-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/tls-proxy-entrypoint.sh:/docker-entrypoint-custom.sh:ro
+      - ../../frontend/apps/on-premise/certificates:/etc/nginx/certs:ro
+      - certbot_webroot:/var/www/certbot
+    depends_on:
+      frontend:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      emma-agent-service:
+        condition: service_healthy
+      weaviate-service:
+        condition: service_healthy
+    networks:
+      - backend-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # Certbot - Let's Encrypt certificate automation (sidecar)
+  # =============================================================================
+  # Only runs with: docker compose --profile letsencrypt up -d
+  # Without the profile, tls-proxy uses existing self-signed certs (dev mode).
+  #
+  # Flow: certbot obtains/renews certs via HTTP-01 challenge (nginx port 80),
+  #       copies them to the shared certificates directory, and signals nginx
+  #       to reload via a trigger file.
+  certbot:
+    image: certbot/certbot:latest
+    entrypoint: ["/bin/sh", "/opt/certbot/entrypoint.sh"]
+    volumes:
+      - certbot_conf:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+      # Read-write mount to deploy certs where tls-proxy and KeyCloak read them
+      - ../../frontend/apps/on-premise/certificates:/certs
+      # Scripts
+      - ./nginx/certbot-entrypoint.sh:/opt/certbot/entrypoint.sh:ro
+      - ./nginx/certbot-deploy-hook.sh:/opt/certbot/deploy-hook.sh:ro
+    environment:
+      - CERTBOT_DOMAIN=${CERTBOT_DOMAIN:-nouxcubeai.ddns.net}
+      - CERTBOT_EMAIL=${CERTBOT_EMAIL:-admin@example.com}
+      - CERTBOT_STAGING=${CERTBOT_STAGING:-false}
+    depends_on:
+      tls-proxy:
+        condition: service_started
+    networks:
+      - backend-network
+    restart: unless-stopped
+    profiles:
+      - letsencrypt
+
+  # =============================================================================
   # KeyCloak - OAuth/OIDC Server for SSO
   # =============================================================================
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
     ports:
-      - "8085:8080"
+      - "8085:8443"
     environment:
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
@@ -704,9 +895,12 @@ services:
       - KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak
       - KC_DB_USERNAME=${KEYCLOAK_DB_USER:-keycloak}
       - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak}
-      # Keycloak 26 hostname configuration
-      # KC_HOSTNAME sets the public hostname that will be used in all URLs (including tokens)
-      - KC_HOSTNAME=http://nouxcube.local.es:8085
+      # Keycloak 26 hostname configuration (HTTPS)
+      - KC_HOSTNAME=https://nouxcubeai.ddns.net:8085
+      # TLS certificates
+      - KC_HTTPS_CERTIFICATE_FILE=/opt/keycloak/conf/cert.pem
+      - KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/keycloak/conf/key.pem
+      # Keep HTTP enabled for internal Docker health checks and JWKS fetching
       - KC_HTTP_ENABLED=true
       - KC_PROXY_HEADERS=xforwarded
       - KC_HEALTH_ENABLED=true
@@ -715,6 +909,8 @@ services:
       - KC_SPI_THEME_LOGIN_DEFAULT=bufete-lexnova
     volumes:
       - ./keycloak/themes/bufete-lexnova:/opt/keycloak/themes/bufete-lexnova:ro
+      - ../../frontend/apps/on-premise/certificates/cert.pem:/opt/keycloak/conf/cert.pem:ro
+      - ../../frontend/apps/on-premise/certificates/key.pem:/opt/keycloak/conf/key.pem:ro
     depends_on:
       keycloak-db:
         condition: service_healthy
@@ -803,7 +999,7 @@ services:
       - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
       - PRESENTATION_STORAGE_SERVICE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
       - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
-      - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-http://nouxcube.local.es:8000}
+      - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-https://nouxcubeai.ddns.net:8000}
       - PRESENTATION_LOCAL_STORAGE_PATH=/app/storage
       - DEFAULT_LANGUAGE=${PRESENTATION_DEFAULT_LANGUAGE:-es-ES}
       - DEFAULT_TEMPLATE=${PRESENTATION_DEFAULT_TEMPLATE:-corporate}
@@ -843,7 +1039,7 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-nexus_user}:${POSTGRES_PASSWORD:-nexus_password}@db:5432/langfuse
       # Auth
       - NEXTAUTH_SECRET=${LANGFUSE_NEXTAUTH_SECRET:-changeme-langfuse-secret-key-32chars}
-      - NEXTAUTH_URL=${LANGFUSE_NEXTAUTH_URL:-http://nouxcube.local.es:3002}
+      - NEXTAUTH_URL=${LANGFUSE_NEXTAUTH_URL:-http://nouxcubeai.ddns.net:3002}
       - SALT=${LANGFUSE_SALT:-changeme-langfuse-salt-key}
       # Telemetry (optional, can disable)
       - TELEMETRY_ENABLED=false
@@ -880,3 +1076,5 @@ volumes:
   keycloak_data:
   local_storage_data:
   easyocr_models:
+  certbot_conf:
+  certbot_webroot:

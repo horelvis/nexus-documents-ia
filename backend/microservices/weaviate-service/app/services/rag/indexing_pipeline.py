@@ -475,6 +475,12 @@ class IndexingPipeline:
             )
 
         # Add extraction metadata
+        # Propagate extraction_format (e.g. "markdown" from Docling) for downstream
+        # consumers like SemanticChunker that adjust behavior based on format.
+        extraction_backend = extract_result.metadata.get("extraction_backend", "tika")
+        if extraction_method == "tika":
+            extraction_method = extraction_backend
+
         enriched_metadata = {
             **metadata,
             "filename": filename,
@@ -741,11 +747,11 @@ class IndexingPipeline:
                 contextual_laws = [l.to_citation() for l in context_result.applicable_laws]
                 contextual_prefix = context_result.context_prefix
 
-                # Apply context to chunks - modify chunk text with context prefix
+                # Apply context to chunks - modify chunk content with context prefix
                 for chunk in chunks:
-                    # Prepend context to chunk text for embedding
-                    original_text = chunk.text
-                    chunk.text = f"{contextual_prefix} {original_text}"
+                    # Prepend context to chunk content for embedding
+                    original_text = chunk.content
+                    chunk.content = f"{contextual_prefix} {original_text}"
 
                     # Enrich chunk metadata with contextual info
                     chunk.metadata["contextual_domain"] = contextual_domain
@@ -1293,7 +1299,7 @@ class IndexingPipeline:
                     "collection": metadata.get("_collection_name", ""),
                     "title": metadata.get("title", ""),
                     "filename": metadata.get("filename", ""),
-                    "chunks_count": result.chunks_count,
+                    "chunks_count": len(result.chunks),
                     "tags": metadata.get("tags", []),
                 },
             )

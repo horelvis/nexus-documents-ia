@@ -285,7 +285,23 @@ class DeliveryManager:
             "low": "ℹ️",
         }.get(urgency_value, "📋")
 
-        subject = f"{urgency_emoji} Emma Insight: {insight.title}"
+        # Translate insight types to Spanish for subject line
+        insight_type_labels = {
+            "contract_expiration": "Vencimiento de contrato",
+            "compliance_alert": "Alerta de cumplimiento",
+            "risk_alert": "Alerta de riesgo",
+            "anomaly_detected": "Anomalía detectada",
+            "task_reminder": "Recordatorio de tarea",
+            "deadline_approaching": "Fecha límite próxima",
+            "document_update": "Actualización de documento",
+            "activity_summary": "Resumen de actividad",
+        }
+        type_label = insight_type_labels.get(
+            insight.insight_type,
+            insight.insight_type.replace("_", " ").title(),
+        )
+
+        subject = f"{urgency_emoji} Emma — {type_label}: {insight.title}"
 
         # Call background worker for each recipient
         for email in recipients:
@@ -304,6 +320,10 @@ class DeliveryManager:
                                 "insight_type": insight.insight_type,
                                 "priority_score": insight.priority_score,
                                 "related_documents": insight.related_documents,
+                                "suggested_actions": [
+                                    a.action if hasattr(a, "action") else str(a)
+                                    for a in (insight.suggested_actions or [])
+                                ],
                                 "tenant_id": tenant_id,
                             },
                         },

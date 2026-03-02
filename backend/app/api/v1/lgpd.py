@@ -31,7 +31,7 @@ class LGPDDeletionRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "confirmation_email": "user@example.com",
                 "confirmation_text": "DELETE",
@@ -53,7 +53,7 @@ class LGPDDataSummaryResponse(BaseModel):
     lgpd_rights: Dict[str, Any]
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "user_id": "12345678-1234-1234-1234-123456789012",
                 "email": "user@example.com",
@@ -92,7 +92,7 @@ class LGPDDeletionResponse(BaseModel):
     lgpd_compliance: Dict[str, Any]
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "user_id": "12345678-1234-1234-1234-123456789012",
                 "deletion_id": "87654321-4321-4321-4321-210987654321",

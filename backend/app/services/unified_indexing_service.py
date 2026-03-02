@@ -32,6 +32,7 @@ Usage:
 import asyncio
 import base64
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -395,9 +396,29 @@ class UnifiedIndexingService:
             batch_size=index_batch_size,
         )
 
+        # Phase 3: Index folder hierarchy to knowledge graph (all connector types)
+        folder_stats = {"skipped": True}
+        try:
+            connector = await self._get_connector(db, connector_id)
+            if connector:
+                adapter = (
+                    ConnectorAdapterFactory.get_adapter(connector)
+                    if ConnectorAdapterFactory.is_supported(connector.connector_type)
+                    else None
+                )
+                folder_stats = await self._index_folders_to_knowledge_tree(
+                    connector=connector,
+                    db=db,
+                    adapter=adapter,
+                )
+        except Exception as e:
+            logger.warning(f"[{connector_id}] Folder indexing phase failed: {e}")
+            folder_stats = {"error": str(e)}
+
         return {
             "sync": sync_result.to_dict(),
             "index": index_result.to_dict(),
+            "folder_indexing": folder_stats,
             "success": True,
         }
 
@@ -537,6 +558,13 @@ class UnifiedIndexingService:
                 indexed_doc.content_hash = hashlib.sha256(content).hexdigest()
 
                 await db.commit()
+
+                # Index to structural knowledge graph (non-blocking)
+                await self._index_to_knowledge_tree(
+                    indexed_doc=indexed_doc,
+                    connector=connector,
+                    learned_context=learned_context,
+                )
 
                 logger.info(
                     f"Indexed {indexed_doc.title} → Weaviate ID: {indexed_doc.weaviate_id}"
@@ -796,6 +824,260 @@ class UnifiedIndexingService:
                     "success": False,
                     "error": str(e),
                 }
+
+    async def _index_to_knowledge_tree(
+        self,
+        indexed_doc: IndexedDocument,
+        connector: Connector,
+        learned_context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Index document to the structural knowledge graph via Knowledge Tree Service.
+
+        Non-blocking: all errors are caught and logged. Document indexing
+        never fails due to graph errors.
+        """
+        kt_url = os.getenv("KNOWLEDGE_TREE_SERVICE_URL")
+        if not kt_url:
+            return
+
+        try:
+            payload = {
+                "document_id": str(indexed_doc.id),
+                "tenant_id": str(indexed_doc.tenant_id),
+                "file_path": indexed_doc.external_path or indexed_doc.title,
+                "connector_metadata": indexed_doc.source_metadata or {},
+                "learned_context": learned_context or {},
+                "weaviate_document_id": str(indexed_doc.weaviate_id) if indexed_doc.weaviate_id else None,
+                "connector_id": str(connector.id),
+                "connector_type": connector.connector_type,
+            }
+
+            headers = {"Content-Type": "application/json"}
+            api_key = getattr(settings, "MICROSERVICES_API_KEY", None)
+            if api_key:
+                headers["X-API-Key"] = api_key
+
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                response = await client.post(
+                    f"{kt_url}/tree/index",
+                    headers=headers,
+                    json=payload,
+                )
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.debug(
+                        f"Indexed to knowledge tree: {indexed_doc.title} → "
+                        f"{result.get('node_type', 'unknown')}"
+                    )
+                else:
+                    logger.warning(
+                        f"Knowledge tree indexing returned {response.status_code} "
+                        f"for {indexed_doc.title}: {response.text[:200]}"
+                    )
+        except Exception as e:
+            logger.warning(f"Knowledge tree indexing failed for {indexed_doc.title}: {e}")
+
+    async def _index_folders_to_knowledge_tree(
+        self,
+        connector: Connector,
+        db: AsyncSession,
+        adapter: Optional["ConnectorAdapter"] = None,
+    ) -> Dict[str, Any]:
+        """
+        Index folder hierarchy to the structural knowledge graph.
+
+        Two-tier universal strategy:
+        - Tier 1 (all connectors): Derive folders from indexed_documents.external_path
+        - Tier 2 (Alfresco only): Enrich with connector-specific metadata (aspects, properties)
+
+        Non-blocking: all errors are caught and logged.
+
+        Returns:
+            Stats dict with tier1/tier2/success/errors/total counts.
+        """
+        kt_url = os.getenv("KNOWLEDGE_TREE_SERVICE_URL")
+        if not kt_url:
+            return {"skipped": True, "reason": "KNOWLEDGE_TREE_SERVICE_URL not set"}
+
+        stats = {"tier1_success": 0, "tier1_errors": 0, "tier2_success": 0, "tier2_errors": 0, "total": 0}
+
+        headers = {"Content-Type": "application/json"}
+        api_key = getattr(settings, "MICROSERVICES_API_KEY", None)
+        if api_key:
+            headers["X-API-Key"] = api_key
+
+        # --- Tier 1: Derive folders from indexed document paths (universal) ---
+        try:
+            tier1_folders = await self._derive_folders_from_paths(db, connector)
+            stats["total"] += len(tier1_folders)
+
+            if tier1_folders:
+                logger.info(
+                    f"[{connector.id}] Tier 1: Indexing {len(tier1_folders)} folders "
+                    f"derived from document paths"
+                )
+
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                    for folder_payload in tier1_folders:
+                        try:
+                            response = await client.post(
+                                f"{kt_url}/tree/index",
+                                headers=headers,
+                                json=folder_payload,
+                            )
+                            if response.status_code == 200:
+                                stats["tier1_success"] += 1
+                            else:
+                                stats["tier1_errors"] += 1
+                                logger.debug(
+                                    f"Tier 1 folder index failed ({response.status_code}): "
+                                    f"{folder_payload.get('file_path')}"
+                                )
+                        except Exception as e:
+                            stats["tier1_errors"] += 1
+                            logger.debug(f"Tier 1 folder index error: {e}")
+
+        except Exception as e:
+            logger.warning(f"[{connector.id}] Tier 1 folder derivation failed: {e}")
+            stats["tier1_errors"] += 1
+
+        # --- Tier 2: Alfresco enrichment (connector-specific metadata) ---
+        if (
+            connector.connector_type == "alfresco"
+            and adapter is not None
+            and hasattr(adapter, "list_all_folders_recursive")
+        ):
+            try:
+                folders = await adapter.list_all_folders_recursive(max_depth=10)
+                stats["total"] += len(folders)
+                logger.info(
+                    f"[{connector.id}] Tier 2: Enriching with {len(folders)} "
+                    f"Alfresco folders (aspects, properties)"
+                )
+
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                    for folder in folders:
+                        try:
+                            connector_metadata = {
+                                "alfresco_node_type": folder.get("nodeType"),
+                                "alfresco_aspects": folder.get("aspectNames", []),
+                                "alfresco_parent_id": folder.get("parentId"),
+                                "alfresco_creator": folder.get("creator"),
+                                "alfresco_properties": folder.get("customProperties", {}),
+                                "is_folder": True,
+                                "folder_name": folder.get("name"),
+                            }
+
+                            payload = {
+                                "document_id": folder.get("id", ""),
+                                "tenant_id": str(connector.tenant_id),
+                                "file_path": folder.get("path", ""),
+                                "connector_metadata": connector_metadata,
+                                "learned_context": {},
+                                "connector_id": str(connector.id),
+                                "connector_type": connector.connector_type,
+                            }
+
+                            response = await client.post(
+                                f"{kt_url}/tree/index",
+                                headers=headers,
+                                json=payload,
+                            )
+                            if response.status_code == 200:
+                                stats["tier2_success"] += 1
+                            else:
+                                stats["tier2_errors"] += 1
+                                logger.debug(
+                                    f"Tier 2 folder index failed ({response.status_code}): "
+                                    f"{folder.get('name')}"
+                                )
+                        except Exception as e:
+                            stats["tier2_errors"] += 1
+                            logger.debug(f"Tier 2 folder index error for {folder.get('name')}: {e}")
+
+            except Exception as e:
+                logger.warning(f"[{connector.id}] Tier 2 Alfresco enrichment failed: {e}")
+                stats["tier2_errors"] += 1
+
+        total_success = stats["tier1_success"] + stats["tier2_success"]
+        total_errors = stats["tier1_errors"] + stats["tier2_errors"]
+        logger.info(
+            f"[{connector.id}] Folder indexing complete: "
+            f"{total_success}/{stats['total']} success, {total_errors} errors "
+            f"(tier1={stats['tier1_success']}, tier2={stats['tier2_success']})"
+        )
+        return stats
+
+    async def _derive_folders_from_paths(
+        self,
+        db: AsyncSession,
+        connector: Connector,
+    ) -> List[Dict[str, Any]]:
+        """
+        Derive folder hierarchy from indexed document paths (Tier 1 — universal).
+
+        Queries DISTINCT external_path from indexed_documents, extracts all
+        intermediate folder segments, deduplicates, and returns payloads
+        sorted by depth (shallowest first → parents created before children).
+
+        Returns:
+            List of folder payload dicts ready for POST /tree/index.
+        """
+        # Get distinct paths for this connector
+        result = await db.execute(
+            select(IndexedDocument.external_path)
+            .where(
+                and_(
+                    IndexedDocument.connector_id == connector.id,
+                    IndexedDocument.indexing_status == "indexed",
+                    IndexedDocument.external_path.isnot(None),
+                    IndexedDocument.external_path != "",
+                )
+            )
+            .distinct()
+        )
+        paths = [row[0] for row in result.fetchall()]
+
+        if not paths:
+            return []
+
+        # Extract all intermediate folders from document paths
+        folder_paths: set = set()
+        for path in paths:
+            normalized = path.replace("\\", "/")
+            parts = [p for p in normalized.split("/") if p]
+            # Remove filename (last segment) — keep only folder segments
+            folder_parts = parts[:-1]
+            # Add all intermediate paths: /a, /a/b, /a/b/c
+            for i in range(1, len(folder_parts) + 1):
+                folder_path = "/" + "/".join(folder_parts[:i])
+                folder_paths.add(folder_path)
+
+        if not folder_paths:
+            return []
+
+        # Sort by depth (shallowest first) to create parents before children
+        sorted_folders = sorted(folder_paths, key=lambda p: p.count("/"))
+
+        # Build payloads
+        payloads = []
+        for folder_path in sorted_folders:
+            folder_name = folder_path.rsplit("/", 1)[-1]
+            payloads.append({
+                "document_id": f"folder:{folder_path}",
+                "tenant_id": str(connector.tenant_id),
+                "file_path": folder_path,
+                "connector_metadata": {
+                    "is_folder": True,
+                    "folder_name": folder_name,
+                },
+                "learned_context": {},
+                "connector_id": str(connector.id),
+                "connector_type": connector.connector_type,
+            })
+
+        return payloads
 
     async def _get_connector(
         self,

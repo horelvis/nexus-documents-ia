@@ -46,9 +46,17 @@ if not ENCRYPTION_KEY and not settings.DEBUG:
 
 # CORS security - strict origins for production
 PRODUCTION_CORS_ORIGINS = [
+    # SaaS domain
     "https://nouxcubeia.app",
     "https://www.nouxcubeia.app",
     "https://api.nouxcubeia.app",
+    # On-premise (DDNS)
+    "https://nouxcubeai.ddns.net",
+    "https://nouxcubeai.ddns.net:8000",   # API (tls-proxy)
+    "https://nouxcubeai.ddns.net:8009",   # Emma agent (tls-proxy)
+    "https://nouxcubeai.ddns.net:8007",   # Weaviate (tls-proxy)
+    "https://nouxcubeai.ddns.net:8085",   # KeyCloak
+    # Legacy local domain
     "https://nouxcube.local.es",
     "https://www.nouxcube.local.es",
     "https://nouxcube.local.es:3000",
@@ -82,7 +90,10 @@ def get_cors_origins() -> List[str]:
     else:
         # In production, use configured origins or fallback to secure defaults
         configured_origins = [str(origin) for origin in settings.BACKEND_CORS_ORIGINS]
-        return configured_origins if configured_origins else PRODUCTION_CORS_ORIGINS
+        origins = configured_origins if configured_origins else PRODUCTION_CORS_ORIGINS
+        # Strip trailing slashes — Pydantic v2 AnyHttpUrl adds "/" but browsers
+        # send Origin without it, and Starlette does exact string comparison.
+        return [o.rstrip("/") for o in origins]
 
 
 def get_dynamic_cors_origins() -> List[str]:

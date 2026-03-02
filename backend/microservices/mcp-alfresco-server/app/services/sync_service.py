@@ -580,7 +580,7 @@ async def run_index_pending_job(
             stats["success"] = True
             return stats
 
-        concurrency = min(batch_size, 8)
+        concurrency = min(batch_size, 20)
         logger.info(f"[{connector_id}] Found {len(pending_docs)} pending documents (concurrency={concurrency})")
 
         semaphore = asyncio.Semaphore(concurrency)
@@ -640,6 +640,14 @@ async def run_index_pending_job(
         await pool.release(conn)
 
 
+# Extensions that textextract-service can process (whitelist)
+_INDEXABLE_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".txt", ".md", ".csv", ".ppt", ".pptx",
+    ".xlsx", ".xls", ".html", ".odt", ".rtf", ".epub", ".xml", ".json",
+    ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp", ".gif",
+}
+
+
 async def _index_single_document(
     conn: asyncpg.Connection,
     doc: asyncpg.Record,
@@ -652,6 +660,38 @@ async def _index_single_document(
     """
     doc_id = doc["id"]
     processing_start = time.time()
+
+    # Early skip: avoid downloading files that textextract cannot process
+    ext = (doc.get("file_extension") or "").lower()
+    if ext and not ext.startswith("."):
+        ext = f".{ext}"
+    if ext and ext not in _INDEXABLE_EXTENSIONS:
+        logger.info(f"Skipping unsupported extension '{ext}' for {doc['title']}")
+        await conn.execute(
+            """UPDATE indexed_documents SET
+                indexing_status = 'skipped',
+                indexing_error = $1
+            WHERE id = $2""",
+            f"Unsupported file type: {ext}",
+            doc_id,
+        )
+        return False
+
+    # Early skip: files larger than textextract max (50MB)
+    _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+    size_bytes = doc.get("size_bytes") or 0
+    if size_bytes > _MAX_FILE_SIZE:
+        size_mb = size_bytes / (1024 * 1024)
+        logger.info(f"Skipping oversized file ({size_mb:.0f}MB) for {doc['title']}")
+        await conn.execute(
+            """UPDATE indexed_documents SET
+                indexing_status = 'skipped',
+                indexing_error = $1
+            WHERE id = $2""",
+            f"File too large: {size_mb:.0f}MB > 50MB limit",
+            doc_id,
+        )
+        return False
 
     # Mark as processing
     await conn.execute(

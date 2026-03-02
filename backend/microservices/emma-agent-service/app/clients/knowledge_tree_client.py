@@ -3,7 +3,7 @@ HTTP client for knowledge-tree-service.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .base import BaseHTTPClient, HTTPClientConfig
 from app.core.config import settings
@@ -74,6 +74,24 @@ class KnowledgeTreeClient(BaseHTTPClient):
         except Exception as e:
             logger.warning(f"Knowledge tree graph query failed: {e}")
             return {"results": [], "paths": []}
+
+    async def get_documents_by_person(
+        self, tenant_id: str, person_name: str, entity_type: str = "Persona"
+    ) -> List[str]:
+        """Get document IDs linked to a person via the knowledge graph."""
+        payload = {
+            "tenant_id": tenant_id,
+            "entity_name": person_name,
+            "entity_type": entity_type,
+        }
+        try:
+            result = await self.post_json(
+                "/tree/graph/documents-by-entity", json=payload, headers=self._headers()
+            )
+            return result.get("document_ids", [])
+        except Exception as e:
+            logger.warning(f"Documents-by-person query failed: {e}")
+            return []
 
 
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None

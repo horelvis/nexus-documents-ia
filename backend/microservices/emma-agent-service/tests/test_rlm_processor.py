@@ -250,35 +250,3 @@ async def test_aggregate_stops_at_max_depth():
     assert len(result) > 0
 
 
-# ─── Test 6: Graph routing ──────────────────────────────────────────────────
-
-def test_graph_routing_rlm_not_activated():
-    """When rlm_activated=False, route to plan."""
-    from app.agents.langgraph.graph import _route_from_rlm_plan
-
-    state = {"rlm_activated": False}
-    assert _route_from_rlm_plan(state) == "plan"
-
-
-def test_graph_routing_rlm_activated_no_cache():
-    """When rlm_activated=True but no cache hit, route to rlm_map."""
-    from app.agents.langgraph.graph import _route_from_rlm_plan
-
-    state = {"rlm_activated": True, "agent_results": {}}
-    assert _route_from_rlm_plan(state) == "rlm_map"
-
-
-def test_graph_routing_rlm_cache_hit():
-    """When rlm_activated=True with cache hit, route to synthesize."""
-    from app.agents.langgraph.graph import _route_from_rlm_plan
-
-    state = {"rlm_activated": True, "agent_results": {"rlm_agent": {"output": "cached"}}}
-    assert _route_from_rlm_plan(state) == "synthesize"
-
-
-def test_graph_routing_rlm_missing():
-    """When rlm_activated not in state, route to plan."""
-    from app.agents.langgraph.graph import _route_from_rlm_plan
-
-    state = {}
-    assert _route_from_rlm_plan(state) == "plan"

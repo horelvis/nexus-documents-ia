@@ -141,14 +141,14 @@ export default function EmmaPage() {
         </PageHeader>
 
         {/* Main Content Area - Emma Chat */}
-        <main className="flex-1 min-h-0 overflow-hidden">
+        <div className="flex-1 min-h-0 overflow-hidden">
           <EmmaChat
             className="h-full"
             messages={conversationMessages}
             onMessagesChange={handleMessagesChange}
             conversationId={activeConversationId}
           />
-        </main>
+        </div>
       </SidebarInset>
 
       {/* Conversation History Sidebar (Sheet) */}

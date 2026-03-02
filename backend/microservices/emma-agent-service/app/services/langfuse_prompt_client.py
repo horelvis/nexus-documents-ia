@@ -197,6 +197,14 @@ class LangfusePromptClient:
             "emma_predictive_recommendation_system": ("predictive", "recommendation", "system"),
             "emma_predictive_recommendation_user": ("predictive", "recommendation", "user"),
 
+            # ReAct Agent (main reasoning loop)
+            "emma_react_system": ("react_agent", "system"),
+            "emma_react_next_step": ("react_agent", "next_step"),
+
+            # Swarm Agent (parallel sub-agent execution)
+            "emma_swarm_decompose": ("swarm", "decompose_system"),
+            "emma_swarm_synthesize": ("swarm", "synthesize_system"),
+
             # Verified Generation
             "emma_verified_claim_system": ("verified_generation", "claim_generation", "system"),
             "emma_verified_claim_user_first": ("verified_generation", "claim_generation", "user_first"),
@@ -468,6 +476,9 @@ class LangfusePromptClient:
                 "emma_agent_docgen",
                 "emma_social_system",
                 "emma_heartbeat_evaluator",
+                # Swarm Agent
+                "emma_swarm_decompose",
+                "emma_swarm_synthesize",
                 # Predictive Analysis (system prompts)
                 "emma_predictive_factor_system",
                 "emma_predictive_outcome_system",

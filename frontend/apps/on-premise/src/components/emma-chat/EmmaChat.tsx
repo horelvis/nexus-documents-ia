@@ -1291,7 +1291,7 @@ export function EmmaChat({
 
       {/* Empty state */}
       {!hasMessages && (
-        <div className="flex-1 flex flex-col items-center justify-center p-8">
+        <div className="flex-1 flex flex-col items-center justify-center p-8 min-h-[60vh]">
           <div className="text-center space-y-4 max-w-md">
             <img
               src="/emma-welcome.png"

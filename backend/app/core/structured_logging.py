@@ -3,6 +3,7 @@ Structured logging system for ELK stack integration
 """
 import json
 import logging
+import os
 import sys
 import threading
 from datetime import datetime
@@ -51,6 +52,7 @@ class StructuredLogger:
 
         # File handler for production
         if not settings.DEBUG:
+            os.makedirs('logs', exist_ok=True)
             file_handler = logging.FileHandler('logs/nexus.log')
             file_handler.setFormatter(formatter)
             self.logger.addHandler(file_handler)
