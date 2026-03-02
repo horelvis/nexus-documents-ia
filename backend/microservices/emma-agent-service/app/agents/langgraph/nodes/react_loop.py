@@ -501,7 +501,6 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     # If terminate found, execute it and return immediately
     if terminate_tc:
         answer = terminate_tc.arguments.get("answer", "")
-        sources = terminate_tc.arguments.get("sources", [])
 
         result = await registry.execute(terminate_tc.name, terminate_tc.arguments, context=tool_context)
 
@@ -515,10 +514,17 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             "content": "Terminate: agent produced final answer",
         })
 
+        # Prefer tool-accumulated sources (from state) over LLM-constructed ones.
+        # The LLM often misattributes metadata (e.g., assigns boe_id from legislation
+        # to tenant documents). Tool results have correct source_type/boe_id.
+        accumulated_sources = state.get("sources", [])
+        terminate_sources = terminate_tc.arguments.get("sources", []) or result.sources
+        final_sources = accumulated_sources if accumulated_sources else terminate_sources
+
         return {
             "is_complete": True,
             "final_answer": answer or result.output,
-            "sources": sources or result.sources,
+            "sources": final_sources,
             "messages": new_messages,
             "current_step": step + 1,
             "tool_calls_history": tool_calls_history,

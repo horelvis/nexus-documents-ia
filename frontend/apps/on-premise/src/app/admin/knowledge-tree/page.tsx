@@ -32,6 +32,8 @@ import {
   IconZoomOut,
   IconFocusCentered,
   IconScale,
+  IconSearch,
+  IconX,
 } from "@tabler/icons-react"
 import {
   SidebarProvider,
@@ -40,6 +42,8 @@ import {
   Alert,
   AlertDescription,
   Button,
+  Input,
+  Badge,
 } from "@nexus/shared/ui"
 import { useApiClient } from "@/lib/api-client"
 import { useAuth } from "@/contexts/auth-context"
@@ -154,10 +158,12 @@ function ForceGraph({
   nodes,
   links,
   viewMode,
+  highlightedNodeIds,
 }: {
   nodes: GraphNode[]
   links: GraphLink[]
   viewMode: GraphViewMode
+  highlightedNodeIds?: Set<string> | null
 }) {
   // Derive legend entries from actual data (dynamic types)
   const folderTypes = Array.from(new Set(nodes.filter(n => n.nodeType === "folder").map(n => n.folderType || "unknown")))
@@ -204,7 +210,14 @@ function ForceGraph({
       .data(links)
       .join("line")
       .attr("stroke", "#475569")
-      .attr("stroke-opacity", (d: any) => d.label ? 0.4 : 0.15)
+      .attr("stroke-opacity", (d: any) => {
+        if (highlightedNodeIds && highlightedNodeIds.size > 0) {
+          const srcId = typeof d.source === "object" ? d.source.id : d.source
+          const tgtId = typeof d.target === "object" ? d.target.id : d.target
+          return (highlightedNodeIds.has(srcId) && highlightedNodeIds.has(tgtId)) ? 0.5 : 0.03
+        }
+        return d.label ? 0.4 : 0.15
+      })
       .attr("stroke-width", (d: any) => d.label ? 1.5 : 0.5)
       .attr("stroke-dasharray", (d: any) => {
         if (d.label === "DEROGATES") return "4 2"
@@ -238,7 +251,12 @@ function ForceGraph({
       .attr("stroke", (d) => d.nodeType === "document" ? "none" : "rgba(255,255,255,0.3)")
       .attr("stroke-width", (d) => d.nodeType === "document" ? 0 : 1.5)
       .attr("cursor", "pointer")
-      .attr("opacity", (d) => d.nodeType === "document" ? 0.7 : 0.9)
+      .attr("opacity", (d) => {
+        if (highlightedNodeIds && highlightedNodeIds.size > 0) {
+          return highlightedNodeIds.has(d.id) ? 1 : 0.12
+        }
+        return d.nodeType === "document" ? 0.7 : 0.9
+      })
       .on("mouseenter", function (event, d) {
         select(this)
           .attr("opacity", 1)
@@ -270,7 +288,12 @@ function ForceGraph({
         setTooltipPos({ x: event.clientX, y: event.clientY })
       })
       .on("mouseleave", function () {
-        nodeGroup.attr("opacity", (d: any) => d.nodeType === "document" ? 0.7 : 0.9)
+        nodeGroup.attr("opacity", (d: any) => {
+            if (highlightedNodeIds && highlightedNodeIds.size > 0) {
+              return highlightedNodeIds.has(d.id) ? 1 : 0.12
+            }
+            return d.nodeType === "document" ? 0.7 : 0.9
+          })
           .attr("stroke", (d: any) => d.nodeType === "document" ? "none" : "rgba(255,255,255,0.3)")
           .attr("stroke-width", (d: any) => d.nodeType === "document" ? 0 : 1.5)
         linkGroup
@@ -294,12 +317,20 @@ function ForceGraph({
         const r = getNodeRadius(d)
         return Math.max(6, Math.min(11, r * 0.8))
       })
-      .attr("fill", "#e2e8f0")
+      .attr("fill", (d) => {
+        if (highlightedNodeIds && highlightedNodeIds.size > 0) {
+          return highlightedNodeIds.has(d.id) ? "#ffffff" : "#334155"
+        }
+        return "#e2e8f0"
+      })
       .attr("text-anchor", "middle")
       .attr("dy", (d) => getNodeRadius(d) + 12)
       .attr("pointer-events", "none")
       .attr("font-family", "system-ui, sans-serif")
-      .attr("font-weight", (d) => d.nodeType === "law" ? "600" : "400")
+      .attr("font-weight", (d) => {
+        if (highlightedNodeIds && highlightedNodeIds.size > 0 && highlightedNodeIds.has(d.id)) return "600"
+        return d.nodeType === "law" ? "600" : "400"
+      })
 
     // Drag
     function dragstarted(event: any, d: any) {
@@ -362,7 +393,7 @@ function ForceGraph({
     return () => {
       simulation.stop()
     }
-  }, [nodes, links, viewMode])
+  }, [nodes, links, viewMode, highlightedNodeIds])
 
   const handleZoomIn = useCallback(() => {
     if (!svgRef.current) return
@@ -510,8 +541,17 @@ export default function KnowledgeTreePage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState("")
+  const [isSearching, setIsSearching] = useState(false)
+  const [highlightedNodeIds, setHighlightedNodeIds] = useState<Set<string> | null>(null)
+  const [searchResultCount, setSearchResultCount] = useState<number | null>(null)
+  // Store full graph for restoring after search clear
+  const fullGraphRef = useRef<{ nodes: GraphNode[]; links: GraphLink[] } | null>(null)
+
   useEffect(() => {
     if (isLoaded && isAuthenticated) {
+      clearSearch()
       loadData()
     }
   }, [isLoaded, isAuthenticated, viewMode])
@@ -565,6 +605,7 @@ export default function KnowledgeTreePage() {
 
         setGraphNodes(nodes)
         setGraphLinks(links)
+        fullGraphRef.current = { nodes, links }
       } else {
         // Legal graph
         const structureRes = await apiClient.get<GraphStructure>("/weaviate/legal/graph/structure")
@@ -602,12 +643,112 @@ export default function KnowledgeTreePage() {
 
         setGraphNodes(nodes)
         setGraphLinks(links)
+        fullGraphRef.current = { nodes, links }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar el grafo")
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // ── Search ────────────────────────────────────────────────────────────────
+  const handleSearch = async () => {
+    const q = searchQuery.trim()
+    if (!q) return
+
+    setIsSearching(true)
+    setError(null)
+
+    try {
+      if (viewMode === "legal") {
+        // Backend search: returns filtered subgraph with neighbors
+        const res = await apiClient.get<GraphStructure & { query?: { matched_count?: number } }>(
+          `/weaviate/legal/graph/search?q=${encodeURIComponent(q)}&include_neighbors=true&limit=50`
+        )
+
+        if (res.error) {
+          setError(res.error)
+          return
+        }
+
+        if (res.data && res.data.nodes.length > 0) {
+          const nodes: GraphNode[] = res.data.nodes.map((n) => ({
+            id: n.id,
+            label: n.label,
+            nodeType: "law" as const,
+            domain: n.domain,
+            status: n.status,
+            title: n.title,
+          }))
+          const links: GraphLink[] = res.data.edges.map((e) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            label: e.label,
+          }))
+          setGraphNodes(nodes)
+          setGraphLinks(links)
+          setHighlightedNodeIds(null) // all visible nodes are results
+          setSearchResultCount((res.data as any).query?.matched_count ?? nodes.length)
+        } else {
+          setSearchResultCount(0)
+        }
+      } else {
+        // Client-side search: highlight matching nodes in the full graph
+        const full = fullGraphRef.current
+        if (!full) return
+
+        const qLower = q.toLowerCase()
+        const matchedIds = new Set<string>()
+
+        for (const node of full.nodes) {
+          const label = node.label.toLowerCase()
+          const folderType = (node.folderType || "").toLowerCase()
+          const semanticType = (node.semanticType || "").toLowerCase()
+          if (label.includes(qLower) || folderType.includes(qLower) || semanticType.includes(qLower)) {
+            matchedIds.add(node.id)
+          }
+        }
+
+        // Add neighbors of matched nodes
+        const neighborIds = new Set<string>()
+        for (const link of full.links) {
+          const srcId = typeof link.source === "object" ? (link.source as GraphNode).id : link.source as string
+          const tgtId = typeof link.target === "object" ? (link.target as GraphNode).id : link.target as string
+          if (matchedIds.has(srcId)) neighborIds.add(tgtId)
+          if (matchedIds.has(tgtId)) neighborIds.add(srcId)
+        }
+
+        const allHighlighted = new Set([...matchedIds, ...neighborIds])
+        setHighlightedNodeIds(allHighlighted)
+        setSearchResultCount(matchedIds.size)
+
+        // Restore full graph data in case it was replaced by previous legal search
+        setGraphNodes(full.nodes)
+        setGraphLinks(full.links)
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Error en la búsqueda")
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const clearSearch = () => {
+    setSearchQuery("")
+    setHighlightedNodeIds(null)
+    setSearchResultCount(null)
+    // Restore full graph if we had replaced it (legal search)
+    if (fullGraphRef.current && viewMode === "legal") {
+      setGraphNodes(fullGraphRef.current.nodes)
+      setGraphLinks(fullGraphRef.current.links)
+    }
+  }
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") handleSearch()
+    if (e.key === "Escape") clearSearch()
   }
 
   if (!isLoaded) {
@@ -697,8 +838,46 @@ export default function KnowledgeTreePage() {
             )}
           </div>
 
-          <div className="ml-auto">
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={loadData} disabled={isLoading}>
+          {/* Search */}
+          <div className="ml-auto flex items-center gap-1.5">
+            <div className="relative flex items-center">
+              <IconSearch className="absolute left-2 h-3 w-3 text-gray-500 pointer-events-none" />
+              <input
+                type="text"
+                placeholder={viewMode === "legal" ? "Buscar ley..." : "Buscar nodo..."}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                className="h-7 w-40 rounded-md border border-border bg-background pl-7 pr-7 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+              {searchQuery && (
+                <button
+                  onClick={clearSearch}
+                  className="absolute right-1.5 text-gray-500 hover:text-foreground"
+                >
+                  <IconX className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={handleSearch}
+              disabled={isSearching || !searchQuery.trim()}
+            >
+              {isSearching ? (
+                <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <IconSearch className="h-3.5 w-3.5" />
+              )}
+            </Button>
+            {searchResultCount !== null && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                {searchResultCount} resultado{searchResultCount !== 1 ? "s" : ""}
+              </Badge>
+            )}
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { clearSearch(); loadData() }} disabled={isLoading}>
               <IconRefresh className={`h-3.5 w-3.5 ${isLoading ? "animate-spin" : ""}`} />
             </Button>
           </div>
@@ -736,7 +915,7 @@ export default function KnowledgeTreePage() {
               </div>
             </div>
           ) : (
-            <ForceGraph nodes={graphNodes} links={graphLinks} viewMode={viewMode} />
+            <ForceGraph nodes={graphNodes} links={graphLinks} viewMode={viewMode} highlightedNodeIds={highlightedNodeIds} />
           )}
         </main>
       </SidebarInset>

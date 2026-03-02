@@ -1483,6 +1483,42 @@ async def legal_graph_structure():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/legal/graph/search")
+async def legal_graph_search(
+    q: str = None,
+    domain: str = None,
+    boe_id: str = None,
+    include_neighbors: bool = True,
+    limit: int = 20,
+):
+    """Search the legal graph for laws matching criteria."""
+    try:
+        params = {"include_neighbors": str(include_neighbors).lower(), "limit": limit}
+        if q:
+            params["q"] = q
+        if domain:
+            params["domain"] = domain
+        if boe_id:
+            params["boe_id"] = boe_id
+
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{WEAVIATE_SERVICE_URL}/legal/graph/search",
+                params=params,
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Legal graph search timeout")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Legal graph search proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/legal/stats")
 async def legal_graph_stats():
     """Get legal knowledge graph statistics."""

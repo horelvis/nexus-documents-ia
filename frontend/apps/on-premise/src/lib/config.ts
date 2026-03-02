@@ -69,6 +69,8 @@ export const API_CONFIG = {
     EMMA_VERIFIED_SESSION_PDF: (sessionId: string) => `/emma/verified/session/${sessionId}/pdf`,
     EMMA_VERIFIED_SESSION_DOCX: (sessionId: string) => `/emma/verified/session/${sessionId}/docx`,
     EMMA_PREDICTIVE_STREAM: '/emma/predictive/analyze/stream',
+    EMMA_MEMORY_FACTS: '/emma/memory/facts',
+    EMMA_WELCOME: '/emma/welcome',
 
     // Connectors
     CONNECTORS: '/connectors',

@@ -1451,3 +1451,133 @@ async def delete_user_fact(
         raise HTTPException(status_code=404, detail=f"Fact {fact_id} not found or already deleted")
 
     return {"success": True, "message": "Fact deleted"}
+
+
+# ============================================================================
+# Proactive Welcome Message
+# ============================================================================
+
+@router.get("/welcome")
+async def get_welcome_message(
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    user_name: str = Query("", description="User display name"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Generate a personalized, proactive welcome message for the user.
+
+    Gathers user context (memory facts, recent sessions) and uses the LLM
+    to produce a short, contextual greeting that references the user's
+    recent activity or interests.
+
+    Returns:
+        {message: str, personalized: bool}
+    """
+    import redis.asyncio as aioredis
+
+    # Check Redis cache first (1h TTL per user)
+    cache_key = f"emma:welcome:{tenant_id}:{user_id}"
+    redis_client = None
+    try:
+        redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        cached = await redis_client.get(cache_key)
+        if cached:
+            await redis_client.aclose()
+            return {"message": cached, "personalized": True}
+    except Exception:
+        redis_client = None
+
+    # Gather context
+    context_parts = []
+
+    # 1. User memory facts
+    try:
+        from app.services.memory.user_facts import get_user_facts_service
+        facts_service = get_user_facts_service()
+        facts = await facts_service.get_user_facts(tenant_id, user_id)
+        if facts:
+            fact_lines = [f"- {f['fact_key']}: {f['fact_value']}" for f in facts if f.get('fact_value')]
+            if fact_lines:
+                context_parts.append("Datos del usuario:\n" + "\n".join(fact_lines))
+    except Exception as e:
+        logger.debug(f"Welcome: facts load skipped: {e}")
+
+    # 2. Recent sessions (last 3)
+    try:
+        persistence = get_emma_persistence_service()
+        sessions_result = await persistence.get_user_sessions(
+            user_id=user_id, tenant_id=tenant_id,
+            include_archived=False, limit=3, offset=0,
+        )
+        sessions = sessions_result.get("sessions", [])
+        if sessions:
+            session_lines = []
+            for s in sessions:
+                title = s.get("title", "")
+                first_msg = s.get("first_message_preview", "")
+                last_msg = s.get("last_message_preview", "")
+                # Build a meaningful description of what the session was about
+                parts = []
+                if title and title.lower() not in ("nueva conversación", "hola", "hola emma"):
+                    parts.append(f"Tema: {title}")
+                if first_msg:
+                    parts.append(f"Pregunta: {first_msg}")
+                if last_msg and last_msg != first_msg:
+                    parts.append(f"Última respuesta: {last_msg}")
+                if parts:
+                    session_lines.append("- " + " | ".join(parts))
+            if session_lines:
+                context_parts.append("Conversaciones recientes:\n" + "\n".join(session_lines))
+    except Exception as e:
+        logger.debug(f"Welcome: sessions load skipped: {e}")
+
+    # If no context at all, return simple greeting
+    first_name = user_name.split()[0] if user_name else ""
+    if not context_parts:
+        fallback = f"¡Hola{' ' + first_name if first_name else ''}! ¿En qué puedo ayudarte hoy?"
+        return {"message": fallback, "personalized": False}
+
+    # 3. Generate via LLM
+    try:
+        from app.agents.llm_router import get_llm_router
+
+        system_prompt = (
+            "Eres Emma, asistente de inteligencia empresarial. "
+            "Genera un saludo de bienvenida BREVE (1-2 frases, máximo 30 palabras). "
+            "Usa el nombre de pila del usuario (NO el apellido). "
+            "Sé proactiva: menciona algo de su actividad reciente o sugiere continuar con algo. "
+            "Tono cálido y profesional. No uses emojis excesivos (máximo 1). "
+            "Responde SOLO con el saludo, sin explicaciones."
+        )
+
+        user_prompt = f"Nombre del usuario: {user_name or 'desconocido'}\n\n"
+        user_prompt += "\n\n".join(context_parts)
+        logger.info(f"Welcome context for {user_name}: {context_parts}")
+
+        router = await get_llm_router()
+        response = await router.chat(
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.7,
+            max_tokens=80,
+        )
+
+        welcome_msg = response.content.strip().strip('"')
+
+        # Cache for 1 hour
+        if redis_client and welcome_msg:
+            try:
+                await redis_client.setex(cache_key, 3600, welcome_msg)
+                await redis_client.aclose()
+            except Exception:
+                pass
+
+        return {"message": welcome_msg, "personalized": True}
+
+    except Exception as e:
+        logger.warning(f"Welcome LLM generation failed: {e}")
+        fallback = f"¡Hola{' ' + first_name if first_name else ''}! ¿En qué puedo ayudarte hoy?"
+        return {"message": fallback, "personalized": False}

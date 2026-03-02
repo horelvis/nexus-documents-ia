@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth-context'
+import { useApiClient } from '@/lib/api-client'
+import { API_CONFIG } from '@/lib/config'
 import { useEmmaService, classifyError, EmmaStreamEvent } from '@/lib/services/emma.service'
 import { queryVerifiedStream, mapEventToClaim, VerifiedStreamEvent } from '@/lib/services/verified-generation.service'
 import { queryPredictiveStream, PredictiveStreamEvent } from '@/lib/services/predictive-analysis.service'
@@ -47,6 +49,31 @@ export function EmmaChat({
 }: EmmaChatProps) {
   const { user, tenantId, isAuthenticated, login } = useAuth()
   const { queryEmmaStream, uploadTempDocument } = useEmmaService()
+  const apiClient = useApiClient()
+
+  // Proactive welcome message from Emma (LLM-generated with user context)
+  const [welcomeMessage, setWelcomeMessage] = useState<string>('')
+  const [welcomeLoaded, setWelcomeLoaded] = useState(false)
+
+  useEffect(() => {
+    async function loadWelcome() {
+      try {
+        const res = await apiClient.get<{ message: string; personalized: boolean }>(
+          API_CONFIG.ENDPOINTS.EMMA_WELCOME
+        )
+        if (res.data?.message) {
+          setWelcomeMessage(res.data.message)
+        }
+      } catch {
+        // Silently ignore — will show default welcome
+      } finally {
+        setWelcomeLoaded(true)
+      }
+    }
+    if (isAuthenticated && user?.id) {
+      loadWelcome()
+    }
+  }, [isAuthenticated, user?.id])
 
   // Use internal state if no external messages provided (uncontrolled mode)
   const [internalMessages, setInternalMessages] = useState<EmmaMessage[]>([])
@@ -314,7 +341,7 @@ export function EmmaChat({
             deep_reasoning: deepReasoning,
             context: {
               user_id: user.id,
-              user_name: user.full_name || user.email?.split('@')[0],
+              user_name: user.full_name || user.email?.split('@')[0] || '',
               user_email: user.email,
               ...attachmentContext,
             },
@@ -596,12 +623,13 @@ export function EmmaChat({
               // Extract sources from API response (includes graph_link for BOE legislation)
               const apiSources = ((data.final_result as any)?.sources || (data as any).sources || [])
                 .map((src: any) => ({
-                  name: src.title || src.name || src.id || 'Fuente',
-                  id: src.id,
+                  name: src.title || src.name || src.document_id || src.id || 'Fuente',
+                  id: src.document_id || src.id,
                   url: src.url,
                   boe_id: src.boe_id,
                   graph_link: src.graph_link,
                   source_type: src.source_type || src.type,
+                  fileType: src.file_type || src.mime_type,
                   relevanceScore: src.score || src.relevance,
                 }))
                 .filter((s: any) => s.name && s.name !== 'Fuente')
@@ -1289,7 +1317,7 @@ export function EmmaChat({
         </div>
       )}
 
-      {/* Empty state */}
+      {/* Empty state — proactive welcome from Emma */}
       {!hasMessages && (
         <div className="flex-1 flex flex-col items-center justify-center p-8 min-h-[60vh]">
           <div className="text-center space-y-4 max-w-md">
@@ -1298,11 +1326,21 @@ export function EmmaChat({
               alt="Emma"
               className="w-24 h-24 mx-auto rounded-full object-cover object-top shadow-lg"
             />
-            <h2 className="text-2xl font-semibold">Hola, soy Emma</h2>
-            <p className="text-muted-foreground">
-              Tu asistente de inteligencia empresarial. Puedo ayudarte a buscar,
-              analizar y entender tus documentos.
-            </p>
+
+            {/* Dynamic LLM-generated welcome or loading state */}
+            {welcomeLoaded && welcomeMessage ? (
+              <p className="text-lg text-foreground">{welcomeMessage}</p>
+            ) : welcomeLoaded ? (
+              <>
+                <h2 className="text-2xl font-semibold">Hola, soy Emma</h2>
+                <p className="text-muted-foreground">
+                  Tu asistente de inteligencia empresarial. Puedo ayudarte a buscar,
+                  analizar y entender tus documentos.
+                </p>
+              </>
+            ) : (
+              <p className="text-muted-foreground animate-pulse">Preparando tu sesión...</p>
+            )}
 
             {/* Example prompts */}
             <div className="space-y-2 pt-4">

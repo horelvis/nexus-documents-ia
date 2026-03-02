@@ -631,6 +631,54 @@ async def emma_heartbeat_insights(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/heartbeat/insights/{insight_id}/dismiss")
+async def emma_heartbeat_dismiss(
+    insight_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Dismiss a proactive insight."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/heartbeat/insights/{insight_id}/dismiss",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Heartbeat dismiss error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/heartbeat/insights/{insight_id}/acted")
+async def emma_heartbeat_acted(
+    insight_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Mark a proactive insight as acted upon."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/heartbeat/insights/{insight_id}/acted",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Heartbeat acted error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/heartbeat/digest")
 async def emma_heartbeat_digest(
     tenant_id: str = Depends(get_current_tenant_id_async),
@@ -677,6 +725,42 @@ async def emma_cendoj_status(
     except Exception as e:
         logger.error(f"❌ CENDOJ status error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Proactive Welcome Message (proxy to emma-agent-service /emma/welcome)
+# ============================================================================
+
+@router.get("/welcome")
+async def emma_welcome(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Get a personalized, proactive welcome message for the current user.
+
+    Uses LLM + user context (memory facts, recent sessions) to generate
+    a contextual greeting like "Hola Horelvis, ¿seguimos con los contratos?"
+    """
+    try:
+        user_name = current_user.full_name or current_user.email.split("@")[0]
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/welcome",
+                params={
+                    "tenant_id": tenant_id,
+                    "user_id": str(current_user.id),
+                    "user_name": user_name,
+                },
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code == 200:
+                return response.json()
+            logger.warning(f"Emma welcome error: {response.status_code}")
+            return {"message": f"¡Hola! ¿En qué puedo ayudarte hoy?", "personalized": False}
+    except Exception as e:
+        logger.debug(f"Welcome proxy error: {e}")
+        return {"message": f"¡Hola! ¿En qué puedo ayudarte hoy?", "personalized": False}
 
 
 # ============================================================================

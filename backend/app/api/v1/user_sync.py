@@ -17,7 +17,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import RedirectResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -745,12 +745,17 @@ async def list_my_indexed_documents(
 ):
     """
     List documents indexed from user's connectors.
+    Shows all tenant documents (owned by user OR public to tenant).
     """
-    # Build query - only show documents owned by current user
     query = (
         select(IndexedDocument)
-        .where(IndexedDocument.owner_id == current_user.id)
         .where(IndexedDocument.tenant_id == UUID(tenant_id))
+        .where(
+            or_(
+                IndexedDocument.owner_id == current_user.id,
+                IndexedDocument.is_tenant_public == True,
+            )
+        )
     )
 
     if connector_id:

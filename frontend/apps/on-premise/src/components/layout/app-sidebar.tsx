@@ -22,6 +22,8 @@ import {
   IconDashboard,
   IconBinaryTree,
   IconMessageCircle,
+  IconFileText,
+  IconBell,
 } from '@tabler/icons-react'
 import {
   Sidebar,
@@ -77,9 +79,19 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       icon: IconPlug,
     },
     {
+      title: 'Documentos',
+      href: '/documents',
+      icon: IconFileText,
+    },
+    {
       title: 'Data Learning',
       href: '/data-learning',
       icon: IconSchool,
+    },
+    {
+      title: 'Alertas',
+      href: '/insights',
+      icon: IconBell,
     },
     {
       title: 'Configuración',

@@ -4,12 +4,12 @@ import path from "path"
 const nextConfig: NextConfig = {
   transpilePackages: ["@nexus/shared", "framer-motion"],
 
-  // Force single React instance across pnpm monorepo
+  // Force single React instance across monorepo (works with both npm and pnpm)
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
-      react: path.resolve(__dirname, "node_modules/react"),
-      "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
+      react: path.dirname(require.resolve("react/package.json")),
+      "react-dom": path.dirname(require.resolve("react-dom/package.json")),
     }
     return config
   },

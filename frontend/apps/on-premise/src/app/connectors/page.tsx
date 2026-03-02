@@ -14,7 +14,6 @@ import {
   IconLoader2,
   IconPlug,
   IconRefresh,
-  IconCircleCheck,
   IconCircleX,
   IconChevronLeft,
   IconTrash,
@@ -29,9 +28,6 @@ import {
   SidebarInset,
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Button,
   Badge,
   Alert,
@@ -44,10 +40,6 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -271,15 +263,8 @@ export default function ConnectorsPage() {
               </Alert>
             )}
 
-            {/* Tabs for Admin / User view */}
-            <Tabs defaultValue="admin" className="space-y-4">
-              <TabsList>
-                <TabsTrigger value="admin">Gestión</TabsTrigger>
-                <TabsTrigger value="user">Fuentes Activas</TabsTrigger>
-              </TabsList>
-
-              {/* Admin Tab - Connector Management */}
-              <TabsContent value="admin" className="space-y-4">
+            {/* Connector Management */}
+            <div className="space-y-4">
                 {isLoading ? (
                   <div className="flex items-center justify-center py-12">
                     <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
@@ -452,63 +437,7 @@ export default function ConnectorsPage() {
                     ))}
                   </div>
                 )}
-              </TabsContent>
-
-              {/* User Tab - View Active Data Sources (read-only) */}
-              <TabsContent value="user" className="space-y-4">
-                {isLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <IconLoader2 className="h-8 w-8 animate-spin text-primary" />
-                  </div>
-                ) : connectors.filter(c => c.is_active && c.sync_enabled).length === 0 ? (
-                  <Card>
-                    <CardContent className="py-12">
-                      <div className="text-center">
-                        <IconPlug className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
-                        <p className="text-muted-foreground mb-2">No hay fuentes de datos activas</p>
-                        <p className="text-sm text-muted-foreground">
-                          Contacta a tu administrador para configurar conectores
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ) : (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-lg">Fuentes de Datos Activas</CardTitle>
-                      <CardDescription>
-                        Estos conectores están sincronizando documentos automáticamente
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        {connectors
-                          .filter(c => c.is_active && c.sync_enabled)
-                          .map((connector) => (
-                            <div key={connector.id} className="flex items-start gap-4 p-4 rounded-lg border bg-muted/30">
-                              <ConnectorIcon type={connector.connector_type} size="lg" />
-                              <div className="flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium">{connector.name}</span>
-                                  {getHealthBadge(connector.health_status)}
-                                </div>
-                                <div className="text-sm text-muted-foreground">
-                                  {connectorNames[connector.connector_type]}
-                                </div>
-                                <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                                  <IconRefresh className="h-3 w-3" />
-                                  <span>Sincroniza cada {connector.sync_interval_hours}h</span>
-                                </div>
-                              </div>
-                              <IconCircleCheck className="h-5 w-5 text-green-500 flex-shrink-0" />
-                            </div>
-                          ))}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
-            </Tabs>
+            </div>
           </div>
         </main>
       </SidebarInset>

@@ -402,6 +402,9 @@ class EmmaPersistenceService:
                 for row in rows:
                     # Extract first user message and last assistant message for preview
                     messages = row['messages'] or []
+                    # asyncpg may return jsonb as str if no codec is set
+                    if isinstance(messages, str):
+                        messages = json.loads(messages)
                     first_user_msg = None
                     last_assistant_msg = None
 

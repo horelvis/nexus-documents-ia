@@ -100,8 +100,11 @@ export function DocumentDisplay({
   }
 
   // Check if document is a legal/legislation source
+  // Only trust source_type for classification. boe_id alone is unreliable
+  // because the LLM may misattribute BOE metadata to tenant documents.
   const isLegalSource = (doc: DocumentInfo) => {
-    return doc.source_type === 'public_knowledge' || doc.boe_id || doc.graph_link
+    const st = doc.source_type?.toLowerCase() || ''
+    return st === 'public_knowledge' || st === 'legislation'
   }
 
   return (
