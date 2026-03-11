@@ -187,7 +187,7 @@ response = await router.chat(messages=messages, role=ModelRole.CHAT)     # Quali
 | `get_document_content` | Read full document by ID |
 | `structural_query` | Count, list, filter via Apache AGE graph |
 | `analyze_domain` | Specialist domain analysis (legal, fiscal, labor, etc.) |
-| `web_search` | Internet search (DuckDuckGo) |
+| `web_search` | Internet search (Tavily primary, DuckDuckGo fallback) |
 | `search_jurisprudence` | CENDOJ jurisprudence search |
 | `list_sources` | Discover available data sources |
 | `query_connector` | Query external connectors (SharePoint, etc.) |
@@ -493,7 +493,9 @@ Emma Reactive extends Emma beyond request-response into a **proactive, event-dri
 | `app/core/checkpointer.py` | PostgresSaver + Store singletons (shared pool) |
 | `app/services/memory/user_facts.py` | User memory CRUD (Store primary, legacy fallback) |
 | `app/services/emma_persistence_service.py` | Session metadata (slim mode with checkpointer) |
-| `config/prompts/emma_prompts.yaml` | All LLM prompts (Langfuse fallback) |
+| `app/services/prompt_registry.py` | Unified prompt registry (54 entries, single source of truth) |
+| `app/services/langfuse_prompt_client.py` | Langfuse client with production label pinning |
+| `config/prompts/emma_prompts.yaml` | LLM prompts YAML fallback (Langfuse is primary) |
 
 ### Frontend
 

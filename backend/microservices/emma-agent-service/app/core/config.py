@@ -47,14 +47,29 @@ class Settings(BaseSettings):
     agents_enabled: bool = os.getenv("AGENTS_ENABLED", "true").lower() == "true"
     llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
 
-    # vLLM configuration (PRIMARY - Qwen2.5-7B-Instruct AWQ 4-bit)
+    # SGLang configuration — Single-Model Dual-Phase (Qwen3.5-9B)
+    # One model, two behavioral phases controlled by temperature + thinking:
+    # PLANNER phase: temp=0.3, no thinking → fast routing, tool calling, classification
+    # CHAT phase: temp=0.6, thinking on → reasoning, synthesis, final responses
+    # Runtime: SGLang v0.5.9 | Set VLLM_DUAL_MODEL=true for separate planner model
     vllm_enabled: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
+    vllm_dual_model: bool = os.getenv("VLLM_DUAL_MODEL", "false").lower() == "true"
+
+    # Chat model (Qwen3.5-9B) — quality generation
     vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-14B-AWQ")
+    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B")
     vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "16384"))
     vllm_temperature: float = float(os.getenv("VLLM_TEMPERATURE", "0.6"))
-    vllm_enable_thinking: bool = os.getenv("VLLM_ENABLE_THINKING", "true").lower() == "true"
+    vllm_enable_thinking: bool = os.getenv("VLLM_ENABLE_THINKING", "false").lower() == "true"
     vllm_thinking_budget: int = int(os.getenv("VLLM_THINKING_BUDGET", "4096"))
+
+    # Planner parameters — always used for ModelRole.PLANNER regardless of dual_model
+    # dual_model=true: separate SGLang instance at vllm_planner_url
+    # dual_model=false: same model, these temp/max_tokens override chat defaults
+    vllm_planner_url: str = os.getenv("VLLM_PLANNER_URL", os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1"))
+    vllm_planner_model: str = os.getenv("VLLM_PLANNER_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B"))
+    vllm_planner_max_tokens: int = int(os.getenv("VLLM_PLANNER_MAX_TOKENS", "4096"))
+    vllm_planner_temperature: float = float(os.getenv("VLLM_PLANNER_TEMPERATURE", "0.3"))
 
     # Ollama configuration (LEGACY)
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
@@ -110,7 +125,7 @@ class Settings(BaseSettings):
     tenant_isolation_enabled: bool = os.getenv("TENANT_ISOLATION_ENABLED", "true").lower() == "true"
 
     # ReAct Agent Loop
-    react_max_observe_length: int = int(os.getenv("REACT_MAX_OBSERVE_LENGTH", "8000"))
+    react_max_observe_length: int = int(os.getenv("REACT_MAX_OBSERVE_LENGTH", "5000"))
     react_stuck_detection_window: int = int(os.getenv("REACT_STUCK_DETECTION_WINDOW", "5"))
     react_max_completion_tokens: int = int(os.getenv("REACT_MAX_COMPLETION_TOKENS", "4096"))
     react_tool_timeout_seconds: float = float(os.getenv("REACT_TOOL_TIMEOUT_SECONDS", "60"))
@@ -128,6 +143,54 @@ class Settings(BaseSettings):
     # SmartSearch — unified multi-store search with graph-enhanced re-ranking
     smart_search_rerank_enabled: bool = os.getenv("SMART_SEARCH_RERANK_ENABLED", "true").lower() == "true"
     smart_search_graph_enabled: bool = os.getenv("SMART_SEARCH_GRAPH_ENABLED", "true").lower() == "true"
+
+    # GraphRAG — Multi-hop subgraph extraction (Phase 5, replaces flat graph expansion)
+    graphrag_enabled: bool = os.getenv("GRAPHRAG_ENABLED", "true").lower() == "true"
+    graphrag_max_hops: int = int(os.getenv("GRAPHRAG_MAX_HOPS", "2"))
+    graphrag_max_nodes: int = int(os.getenv("GRAPHRAG_MAX_NODES", "30"))
+    graphrag_include_legal: bool = os.getenv("GRAPHRAG_INCLUDE_LEGAL", "true").lower() == "true"
+    graphrag_token_budget: int = int(os.getenv("GRAPHRAG_TOKEN_BUDGET", "1500"))
+
+    # SmartSearch — Cross-Encoder Reranking (neural, FlashRank CPU)
+    smart_search_cross_encoder_enabled: bool = os.getenv("SMART_SEARCH_CROSS_ENCODER_ENABLED", "true").lower() == "true"
+    smart_search_cross_encoder_model: str = os.getenv("SMART_SEARCH_CROSS_ENCODER_MODEL", "ms-marco-MiniLM-L-12-v2")
+    smart_search_cross_encoder_weight: float = float(os.getenv("SMART_SEARCH_CROSS_ENCODER_WEIGHT", "0.6"))
+
+    # CRAG Quality Gates — prevent hallucination and premature termination
+    react_quality_gate_enabled: bool = os.getenv("REACT_QUALITY_GATE_ENABLED", "true").lower() == "true"
+
+    # Retrieval Guard — post-retrieval quality assessment (anti-hallucination)
+    # LOW requires top_score below threshold AND entity mismatch (both must fail)
+    retrieval_guard_low_top_score: float = float(os.getenv("RETRIEVAL_GUARD_LOW_TOP_SCORE", "0.25"))
+
+    # Context Compression — compress old tool observations to fit token budget
+    react_context_compress_enabled: bool = os.getenv("REACT_CONTEXT_COMPRESS_ENABLED", "true").lower() == "true"
+    react_context_compress_threshold: int = int(os.getenv("REACT_CONTEXT_COMPRESS_THRESHOLD", "6000"))
+    react_context_compress_preserve_recent: int = int(os.getenv("REACT_CONTEXT_COMPRESS_PRESERVE_RECENT", "2"))
+
+    # Query Clarification — detect ambiguous queries before search
+    react_query_clarification_enabled: bool = os.getenv("REACT_QUERY_CLARIFICATION_ENABLED", "false").lower() == "true"
+
+    # Memory Recall — planner scans document memories before retrieval (MemoRAG)
+    memory_recall_enabled: bool = os.getenv("MEMORY_RECALL_ENABLED", "true").lower() == "true"
+    memory_recall_max_memories: int = int(os.getenv("MEMORY_RECALL_MAX_MEMORIES", "20"))
+    memory_recall_max_clue_tokens: int = int(os.getenv("MEMORY_RECALL_MAX_CLUE_TOKENS", "300"))
+    memory_recall_fallback_enabled: bool = os.getenv("MEMORY_RECALL_FALLBACK_ENABLED", "true").lower() == "true"
+
+    # MemoRAG — global memory model (pgvector)
+    memorag_enabled: bool = os.getenv("MEMORAG_ENABLED", "true").lower() == "true"
+    memorag_table_name: str = os.getenv("MEMORAG_TABLE_NAME", "memorag_memory")
+    memorag_embedding_dim: int = int(os.getenv("MEMORAG_EMBEDDING_DIM", "1024"))
+    memorag_memory_version: int = int(os.getenv("MEMORAG_MEMORY_VERSION", "1"))
+    memorag_chunk_size: int = int(os.getenv("MEMORAG_CHUNK_SIZE", "1800"))
+    memorag_chunk_overlap: int = int(os.getenv("MEMORAG_CHUNK_OVERLAP", "200"))
+    memorag_max_chunks: int = int(os.getenv("MEMORAG_MAX_CHUNKS", "50"))
+    memorag_min_text_chars: int = int(os.getenv("MEMORAG_MIN_TEXT_CHARS", "200"))
+    memorag_recall_top_k: int = int(os.getenv("MEMORAG_RECALL_TOP_K", "20"))
+    memorag_embed_text_max_chars: int = int(os.getenv("MEMORAG_EMBED_TEXT_MAX_CHARS", "3000"))
+    memorag_embedding_task_document: str = os.getenv("MEMORAG_EMBEDDING_TASK_DOCUMENT", "retrieval.document")
+    memorag_embedding_task_query: str = os.getenv("MEMORAG_EMBEDDING_TASK_QUERY", "retrieval.query")
+    memorag_keyword_fallback_enabled: bool = os.getenv("MEMORAG_KEYWORD_FALLBACK_ENABLED", "true").lower() == "true"
 
     # LLM Fallback
     llm_retry_delay_seconds: float = float(os.getenv("LLM_RETRY_DELAY_SECONDS", "0.5"))
@@ -158,8 +221,12 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Prompt Management (Langfuse Prompts + Custom)
     # ==========================================================================
-    # Feature flag to use Langfuse for prompt storage instead of YAML
-    use_langfuse_prompts: bool = os.getenv("USE_LANGFUSE_PROMPTS", "false").lower() == "true"
+    # Langfuse is the PRIMARY prompt source; YAML is the fallback.
+    # Set to false only for offline/air-gapped deployments without Langfuse.
+    use_langfuse_prompts: bool = os.getenv("USE_LANGFUSE_PROMPTS", "true").lower() == "true"
+    # Label used when fetching prompts from Langfuse (pins to promoted versions).
+    # Empty string = fetch latest (no label filter).
+    langfuse_prompt_label: str = os.getenv("LANGFUSE_PROMPT_LABEL", "production")
     # Local cache TTL for Langfuse prompts (seconds)
     langfuse_prompt_cache_ttl: int = int(os.getenv("LANGFUSE_PROMPT_CACHE_TTL", "300"))
     # Enable few-shot example retrieval
@@ -187,6 +254,10 @@ class Settings(BaseSettings):
     # Database (for session persistence)
     database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db")
 
+    # LangGraph Checkpointer (PostgresSaver)
+    # Enables: conversation continuity, time travel, HITL interrupts
+    langgraph_checkpointer_enabled: bool = os.getenv("LANGGRAPH_CHECKPOINTER_ENABLED", "true").lower() == "true"
+
     # PostgreSQL for Apache AGE (graph queries via weaviate-service)
     postgres_host: str = os.getenv("POSTGRES_SERVER", os.getenv("POSTGRES_HOST", "db"))
     postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
@@ -213,9 +284,11 @@ class Settings(BaseSettings):
     # Verified Generation Configuration
     # ==========================================================================
     verified_cache_ttl_seconds: int = int(os.getenv("VERIFIED_CACHE_TTL_SECONDS", "3600"))
-    verified_claim_temperature: float = float(os.getenv("VERIFIED_CLAIM_TEMPERATURE", "0.3"))
+    verified_claim_temperature: float = float(os.getenv("VERIFIED_CLAIM_TEMPERATURE", "0.0"))
     verified_duplicate_threshold: float = float(os.getenv("VERIFIED_DUPLICATE_THRESHOLD", "0.65"))
     verified_evidence_excerpt_limit: int = int(os.getenv("VERIFIED_EVIDENCE_EXCERPT_LIMIT", "2000"))
+    verified_section_size: int = int(os.getenv("VERIFIED_SECTION_SIZE", "16000"))
+    verified_section_overlap: int = int(os.getenv("VERIFIED_SECTION_OVERLAP", "500"))
 
     # ==========================================================================
     # Web Search (Tavily primary, DuckDuckGo fallback)
@@ -269,6 +342,24 @@ class Settings(BaseSettings):
     user_memory_max_facts: int = int(os.getenv("USER_MEMORY_MAX_FACTS", "50"))
     user_memory_cache_ttl: int = int(os.getenv("USER_MEMORY_CACHE_TTL", "3600"))
 
+    # ==========================================================================
+    # Document Generation & Email Tools (ReAct)
+    # ==========================================================================
+    document_generation_enabled: bool = os.getenv("DOCUMENT_GENERATION_ENABLED", "true").lower() == "true"
+    email_tool_enabled: bool = os.getenv("EMAIL_TOOL_ENABLED", "true").lower() == "true"
+    email_max_per_conversation: int = int(os.getenv("EMAIL_MAX_PER_CONVERSATION", "5"))
+    generated_doc_ttl_seconds: int = int(os.getenv("GENERATED_DOC_TTL_SECONDS", "3600"))
+
+    # SMTP Configuration (shared with main backend)
+    mail_server: str = os.getenv("MAIL_SERVER", "smtp.gmail.com")
+    mail_port: int = int(os.getenv("MAIL_PORT", "465"))
+    mail_username: str = os.getenv("MAIL_USERNAME", "")
+    mail_password: str = os.getenv("MAIL_PASSWORD", "")
+    mail_from: str = os.getenv("MAIL_FROM", "")
+    mail_from_name: str = os.getenv("MAIL_FROM_NAME", "NouxCubeIA")
+    mail_ssl_tls: bool = os.getenv("MAIL_SSL_TLS", "true").lower() == "true"
+    mail_starttls: bool = os.getenv("MAIL_STARTTLS", "false").lower() == "true"
+
     # Logging
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     request_logging_enabled: bool = os.getenv(
@@ -279,8 +370,10 @@ class Settings(BaseSettings):
     # Temporary upload handling (non-indexed files)
     upload_tmp_dir: str = os.getenv("EMMA_UPLOAD_TMP_DIR", "/tmp/emma_uploads")
     upload_ttl_seconds: int = int(os.getenv("EMMA_UPLOAD_TTL_SECONDS", "3600"))
-    upload_max_chars_per_doc: int = int(os.getenv("EMMA_UPLOAD_MAX_CHARS_PER_DOC", "15000"))
-    upload_max_total_chars: int = int(os.getenv("EMMA_UPLOAD_MAX_TOTAL_CHARS", "40000"))
+    # Hard limit per uploaded file — rejects (not truncates) files exceeding this.
+    # 2M chars covers extreme Tika inflation (~10x for PDFs with embedded metadata).
+    # The stop-and-go pipeline handles sectioning downstream.
+    upload_max_chars_per_doc: int = int(os.getenv("EMMA_UPLOAD_MAX_CHARS_PER_DOC", "2000000"))
 
     # ==========================================================================
     # Default Location for Social Channels

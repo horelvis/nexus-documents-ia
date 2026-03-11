@@ -22,6 +22,7 @@ import yaml
 from jinja2 import Environment, BaseLoader, TemplateSyntaxError, Undefined
 
 from app.core.config import settings
+from app.services.prompt_registry import PROMPT_REGISTRY, get_yaml_path_map
 
 logger = logging.getLogger(__name__)
 
@@ -144,76 +145,8 @@ class LangfusePromptClient:
         """
         yaml_data = self._load_yaml()
 
-        # Map Langfuse prompt names to YAML paths
-        name_mapping = {
-            # Core prompts
-            "emma_context_root": ("context_root",),
-            "emma_synthesis": ("system_prompts", "synthesis"),
-            "emma_planning": ("system_prompts", "planning"),
-
-            # Action instructions
-            "emma_action_generate": ("action_instructions", "generate"),
-            "emma_action_retrieve": ("action_instructions", "retrieve"),
-            "emma_action_analyze": ("action_instructions", "analyze"),
-            "emma_action_search": ("action_instructions", "search"),
-            "emma_action_compare": ("action_instructions", "compare"),
-
-            # Sector prompts
-            "emma_sector_legal": ("sectors", "legal", "system_prompt"),
-            "emma_sector_medical": ("sectors", "medical", "system_prompt"),
-            "emma_sector_documental": ("sectors", "documental", "system_prompt"),
-
-            # Sector generation prompts
-            "emma_sector_legal_generation": ("sectors", "legal", "generation_prompt"),
-            "emma_sector_medical_generation": ("sectors", "medical", "generation_prompt"),
-            "emma_sector_documental_generation": ("sectors", "documental", "generation_prompt"),
-
-            # Chat prompts
-            "emma_chat_base": ("chat_prompts", "base"),
-            "emma_chat_analyze": ("chat_prompts", "analyze"),
-            "emma_chat_compare": ("chat_prompts", "compare"),
-            "emma_chat_summarize": ("chat_prompts", "summarize"),
-            "emma_chat_search": ("chat_prompts", "search"),
-            "emma_chat_extract": ("chat_prompts", "extract"),
-            "emma_chat_explain": ("chat_prompts", "explain"),
-
-            # Social channel
-            "emma_social_system": ("social_channels", "system_prompt"),
-            "emma_social_conversational": ("social_channels", "conversational_prompt"),
-
-            # Heartbeat
-            "emma_heartbeat_evaluator": ("heartbeat", "evaluation_system"),
-
-            # Predictive Analysis
-            "emma_predictive_factor_system": ("predictive", "factor_extraction", "system"),
-            "emma_predictive_factor_user_first": ("predictive", "factor_extraction", "user_first"),
-            "emma_predictive_factor_user_next": ("predictive", "factor_extraction", "user_next"),
-            "emma_predictive_completion_system": ("predictive", "completion_check", "system"),
-            "emma_predictive_completion_user": ("predictive", "completion_check", "user"),
-            "emma_predictive_outcome_system": ("predictive", "outcome_evaluation", "system"),
-            "emma_predictive_outcome_user": ("predictive", "outcome_evaluation", "user"),
-            "emma_predictive_weight_system": ("predictive", "factor_weighting", "system"),
-            "emma_predictive_weight_user": ("predictive", "factor_weighting", "user"),
-            "emma_predictive_recommendation_system": ("predictive", "recommendation", "system"),
-            "emma_predictive_recommendation_user": ("predictive", "recommendation", "user"),
-
-            # ReAct Agent (main reasoning loop)
-            "emma_react_system": ("react_agent", "system"),
-            "emma_react_next_step": ("react_agent", "next_step"),
-
-            # Swarm Agent (parallel sub-agent execution)
-            "emma_swarm_decompose": ("swarm", "decompose_system"),
-            "emma_swarm_synthesize": ("swarm", "synthesize_system"),
-
-            # Verified Generation
-            "emma_verified_claim_system": ("verified_generation", "claim_generation", "system"),
-            "emma_verified_claim_user_first": ("verified_generation", "claim_generation", "user_first"),
-            "emma_verified_claim_user_next": ("verified_generation", "claim_generation", "user_next"),
-            "emma_verified_completion_system": ("verified_generation", "completion_check", "system"),
-            "emma_verified_completion_user": ("verified_generation", "completion_check", "user"),
-            "emma_verified_factcheck_system": ("verified_generation", "fact_checking", "system"),
-            "emma_verified_factcheck_user": ("verified_generation", "fact_checking", "user"),
-        }
+        # Use unified prompt registry for YAML path lookup
+        name_mapping = get_yaml_path_map()
 
         # Check explicit mapping first
         if name in name_mapping:
@@ -261,13 +194,19 @@ class LangfusePromptClient:
         Args:
             name: Prompt name in Langfuse (e.g., "emma_agent_labor")
             version: Specific version to fetch (default: latest)
-            label: Label to fetch (e.g., "production", "staging")
+            label: Label to fetch (e.g., "production", "staging").
+                   Defaults to settings.langfuse_prompt_label (typically "production").
             variables: Template variables for Jinja2 rendering
             fallback: Fallback content if prompt not found anywhere
 
         Returns:
             CachedPrompt with content and metadata, or None if not found
         """
+        # Pin to production label by default — prevents draft/test prompts
+        # from accidentally becoming active.
+        if label is None and settings.langfuse_prompt_label:
+            label = settings.langfuse_prompt_label
+
         cache_key = f"{name}:{version or 'latest'}:{label or 'default'}"
 
         # Check cache first
@@ -527,9 +466,6 @@ class LangfusePromptClient:
 
         for key in yaml_data.get("system_prompts", {}).keys():
             yaml_prompts.add(f"emma_{key}")
-
-        for key in yaml_data.get("chat_prompts", {}).keys():
-            yaml_prompts.add(f"emma_chat_{key}")
 
         for section in ("autogen_agents", "planning_agents"):
             for agent_name in yaml_data.get(section, {}).keys():

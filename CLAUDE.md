@@ -229,7 +229,7 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 | `get_document_content` | Read full document by ID |
 | `structural_query` | Count, list, filter via Apache AGE graph |
 | `analyze_domain` | Specialist domain analysis |
-| `web_search` | Internet search (DuckDuckGo) |
+| `web_search` | Internet search (Tavily primary, DuckDuckGo fallback) |
 | `search_jurisprudence` | CENDOJ jurisprudence search |
 | `list_sources` | Discover available data sources |
 | `query_connector` | Query external connectors (SharePoint, etc.) |
@@ -240,22 +240,44 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 > **Full docs**: [`docs/architecture/PROMPT_MANAGEMENT.md`](docs/architecture/PROMPT_MANAGEMENT.md)
 > **Langfuse Setup**: [`docs/guides/LANGFUSE_SETUP.md`](docs/guides/LANGFUSE_SETUP.md)
 
-Dynamic prompt management with Langfuse integration:
+Langfuse is the **primary** prompt source (`USE_LANGFUSE_PROMPTS=true` by default). YAML is the fallback.
 
 | Component | Description | API Endpoint |
 |-----------|-------------|--------------|
 | **Langfuse** | Prompt versioning, A/B testing, rollback | Web UI: http://localhost:3002 (admin@nouxcube.com / LangfuseAdmin2024!) |
+| **Prompt Registry** | Single source of truth for all 54 prompt names | `prompt_registry.py` |
 | **Rules** | Dynamic prompt injection by context | `/prompts/rules` |
 | **Guardrails** | Post-LLM validation (PII, keywords) | `/prompts/guardrails` |
 | **Few-Shot** | Semantic example retrieval | `/prompts/few-shot` |
 
+**3-tier fallback**: Langfuse (label=`"production"`) → YAML (`config/prompts/emma_prompts.yaml`) → hardcoded constant
+
 **Architecture**: Emma Service (8009) → HTTP Proxy → Main API (8000) → PostgreSQL
 
+**Seed script** (safe by default):
+```bash
+# Seed only MISSING prompts (default — won't overwrite existing):
+docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py
+
+# Force overwrite all prompts (creates new Langfuse versions):
+docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py --force
+
+# Show diff between registry and Langfuse:
+docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py --diff
+
+# Dry run:
+docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py --dry-run
+```
+
+**Production label pinning**: All `get_prompt()` calls default to `label="production"` (`LANGFUSE_PROMPT_LABEL`). Admin edits in Langfuse UI become "latest" but NOT "production" until explicitly promoted. This prevents draft/test prompts from accidentally going live.
+
 **Key files**:
+- `emma-agent-service/app/services/prompt_registry.py` — Unified registry (54 entries, both seed + client import from here)
+- `emma-agent-service/app/services/langfuse_prompt_client.py` — Langfuse client with production label pinning
+- `emma-agent-service/scripts/seed_langfuse_prompts.py` — Safe-by-default seed script
 - `emma-agent-service/app/api/prompts.py` — API endpoints (proxy to Main API)
 - `emma-agent-service/app/services/rule_engine.py` — Rule evaluation
 - `emma-agent-service/app/services/guardrail_service.py` — Output validation
-- `emma-agent-service/app/services/langfuse_prompt_client.py` — Langfuse client
 - `backend/app/api/v1/prompts.py` — Main API CRUD endpoints
 
 ### User Memory (Cross-Session Persistent Facts)
@@ -321,7 +343,7 @@ context = {
 **Capabilities**:
 | Feature | Tool | When Used |
 |---------|------|-----------|
-| Weather/News | `web_search` (DuckDuckGo) | Proactively for clima/tiempo/noticias queries |
+| Weather/News | `web_search` (Tavily/DuckDuckGo) | Proactively for clima/tiempo/noticias queries |
 | Document Search | `quick_document_search` (proactive) | When user asks about their files (regex-detected, calls hybrid_search with enrichment filters) |
 | Conversational | — | Greetings, identity, general chat |
 
@@ -331,7 +353,7 @@ context = {
 - `agents/langgraph/nodes/specialists/social.py` — Social agent node with proactive web search
 - `agents/langgraph/nodes/specialists/base.py` — Special user_content for social_agent
 - `agents/langgraph/nodes/plan.py` — Early exit for social_channel_mode (before identity fast-path)
-- `services/web_search.py` — DuckDuckGo async client
+- `services/web_search.py` — Tavily + DuckDuckGo async client
 
 **Response style**:
 - Brief (2-3 sentences max, chat-style)
@@ -554,10 +576,13 @@ docker compose exec weaviate-service bash -c \
 - Environment variables for all secrets
 
 ### LLM Prompts (IMPORTANT)
-- **Always prefer Langfuse** for LLM prompts — use `_resolve_prompts()` (or `get_langfuse_prompt_client().get_prompt()`) with hardcoded/YAML fallbacks
-- Pattern: Langfuse prompt (primary, versioned, A/B testable) → YAML fallback (`config/prompts/`) → hardcoded constant
+- **Langfuse is the primary prompt source** (`USE_LANGFUSE_PROMPTS=true` by default), YAML is the fallback
+- All prompt names are defined in `app/services/prompt_registry.py` (54 entries) — add new prompts there
+- `get_prompt()` defaults to `label="production"` — admin edits in Langfuse UI must be promoted to "production" to take effect
+- Pattern: Langfuse (label=`"production"`) → YAML fallback (`config/prompts/`) → hardcoded constant
 - Never hardcode prompts directly in LLM calls without a Langfuse lookup layer
 - Langfuse prompt keys follow convention: `emma_{feature}_{system|user}` (e.g., `emma_verified_faithfulness_system`)
+- Seed script is safe by default: `python scripts/seed_langfuse_prompts.py` only creates missing prompts (use `--force` to overwrite)
 - See `verified.py` `_resolve_prompts()` for reference implementation
 
 ### Testing
