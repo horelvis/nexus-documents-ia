@@ -43,7 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 
 from app.core.config import settings
-from app.api import emma_router, learning_router, uploads_router, verified_router, predictive_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router
+from app.api import emma_router, learning_router, uploads_router, verified_router, predictive_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router, diagnostics_router, generated_documents_router
 from app.clients import get_weaviate_client
 
 # Configure logging
@@ -76,24 +76,11 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning(f"Weaviate Service health check: {health}")
 
-        # Preload Semantic Routers (downloads HuggingFace model if needed)
-        try:
-            from app.agents.orchestration import preload_semantic_routers, _SEMANTIC_ROUTER_AVAILABLE
-            if _SEMANTIC_ROUTER_AVAILABLE and preload_semantic_routers:
-                preload_semantic_routers()
-            else:
-                logger.warning("Semantic Router not available, skipping preload")
-        except Exception as router_error:
-            logger.warning(f"Semantic Router preload failed: {router_error}")
-
-        # Initialize Emma AI
+        # Initialize Emma AI — LangGraph is the primary orchestration engine.
+        # Legacy orchestration routers (SemanticPatternRouter, NexusRouter) are
+        # no longer preloaded; LangGraph's IntentRouter handles classification.
         if settings.agents_enabled:
-            try:
-                from app.services.emma_service import emma_service
-                await emma_service.initialize()
-                logger.info("Emma AI initialized (Emma orchestration with LLM-based reasoning)")
-            except Exception as emma_error:
-                logger.warning(f"Emma AI initialization skipped: {emma_error}")
+            logger.info("Emma AI ready (LangGraph orchestration)")
 
     except Exception as e:
         logger.error(f"Service initialization failed: {e}")
@@ -119,6 +106,13 @@ async def lifespan(app: FastAPI):
         await close_weaviate_client()
         await close_text_extraction_client()
         logger.info("HTTP clients closed")
+    except Exception:
+        pass
+
+    # Close LangGraph checkpointer
+    try:
+        from app.core.checkpointer import close_checkpointer
+        await close_checkpointer()
     except Exception:
         pass
 
@@ -164,13 +158,14 @@ async def log_requests(request: Request, call_next):
 
     start_time = time.time()
 
-    if request.url.path != "/health":
+    skip_log = request.url.path == "/health" or request.url.path.startswith("/diagnostics")
+    if not skip_log:
         logger.info(f"{request.method} {request.url.path}")
 
     response = await call_next(request)
     process_time = time.time() - start_time
 
-    if request.url.path != "/health":
+    if not skip_log:
         logger.info(f"{response.status_code} completed in {process_time:.3f}s")
 
     return response
@@ -189,6 +184,8 @@ app.include_router(notifications_router, prefix="/emma", tags=["notifications"])
 app.include_router(channels_router, tags=["channels"])
 app.include_router(heartbeat_router, prefix="/emma", tags=["heartbeat"])
 app.include_router(prompts_router, tags=["prompts"])
+app.include_router(diagnostics_router, prefix="/diagnostics", tags=["diagnostics"])
+app.include_router(generated_documents_router, tags=["generated-documents"])
 
 
 # Health check

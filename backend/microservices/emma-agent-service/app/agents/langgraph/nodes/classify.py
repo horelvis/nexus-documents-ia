@@ -55,6 +55,7 @@ async def _generate_conversational_response(
     Falls back to a simple greeting if the LLM call fails.
     """
     from app.agents.llm_router import get_llm_router
+    from app.agents.llm_client import ModelRole
 
     system_msg = _CONVERSATIONAL_SYSTEM_PROMPT
     if user_name:
@@ -76,6 +77,7 @@ async def _generate_conversational_response(
             messages=messages,
             temperature=0.7,
             max_tokens=150,
+            role=ModelRole.PLANNER,
         )
         answer = (response.content or "").strip()
         if answer:
@@ -139,6 +141,12 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
     Fast-path intents (conversational, identity) return immediately.
     All other intents proceed to the ReAct loop for dynamic tool use.
 
+    When PostgresSaver checkpointer is active, merge_lists fields
+    (reasoning_steps, swarm_worker_results, swarm_pending_events)
+    accumulate across invocations.  We emit a ``_checkpoint_offsets``
+    marker in metadata so downstream consumers know how many items
+    came from the checkpoint vs the current turn.
+
     Returns:
         State updates including fast_path_used, fast_path_answer,
         reasoning_steps, and metadata.
@@ -146,6 +154,13 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
     start = time.time()
     query = state.get("query", "")
     reasoning_steps = []
+
+    # Record checkpoint baseline counts so downstream can distinguish
+    # old (accumulated) items from new (current-turn) items.
+    _checkpoint_offsets = {
+        "reasoning_steps": len(state.get("reasoning_steps", [])),
+        "swarm_worker_results": len(state.get("swarm_worker_results", [])),
+    }
 
     # Empty query guard
     if not query or not query.strip():
@@ -156,7 +171,7 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             "final_answer": "¿Puedes formular tu consulta?",
             "success": True,
             "reasoning_steps": [{"type": "routing", "content": "Empty query — fast path"}],
-            "metadata": {"classify_intent": "empty", "classify_latency_ms": 0},
+            "metadata": {"classify_intent": "empty", "classify_latency_ms": 0, "_checkpoint_offsets": _checkpoint_offsets},
         }
 
     # Intent classification (reuses existing hybrid router)
@@ -211,8 +226,51 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
                 "classify_intent": intent,
                 "classify_confidence": confidence,
                 "classify_latency_ms": latency_ms,
+                "_checkpoint_offsets": _checkpoint_offsets,
             },
         }
+
+    # Query clarification — detect ambiguous queries before wasting a search cycle
+    if settings.react_query_clarification_enabled:
+        try:
+            from ..clarification import detect_ambiguity
+
+            # Build minimal history from state messages
+            conv_history: List[Dict[str, str]] = []
+            for msg in state.get("messages", [])[:-1]:
+                role = "user" if msg.type == "human" else "assistant"
+                content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                if content:
+                    conv_history.append({"role": role, "content": content})
+
+            is_ambiguous, clarification_msg, clarification_options = detect_ambiguity(
+                query=query, intent=intent, history=conv_history,
+            )
+
+            if is_ambiguous:
+                reasoning_steps.append({
+                    "type": StepType.ROUTING.value,
+                    "content": f"Query clarification: ambiguous query detected",
+                })
+                return {
+                    "fast_path_used": True,
+                    "fast_path_answer": clarification_msg,
+                    "is_complete": True,
+                    "final_answer": clarification_msg,
+                    "success": True,
+                    "messages": [AIMessage(content=clarification_msg)],
+                    "reasoning_steps": reasoning_steps,
+                    "metadata": {
+                        "classify_intent": intent,
+                        "classify_confidence": confidence,
+                        "classify_latency_ms": latency_ms,
+                        "query_clarification": True,
+                        "clarification_options": clarification_options,
+                        "_checkpoint_offsets": _checkpoint_offsets,
+                    },
+                }
+        except Exception as e:
+            logger.debug(f"Query clarification check failed (non-blocking): {e}")
 
     # Assess complexity for swarm routing
     use_swarm = _assess_complexity(query, intent, confidence)
@@ -229,5 +287,6 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             "classify_confidence": confidence,
             "classify_latency_ms": latency_ms,
             "use_swarm": use_swarm,
+            "_checkpoint_offsets": _checkpoint_offsets,
         },
     }

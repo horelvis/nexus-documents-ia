@@ -25,7 +25,8 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.execution_context import set_execution_context, clear_execution_context
-from .graph import execute_react_query, get_react_graph
+from .graph import execute_react_query
+# get_react_graph is now async — import at call site
 from .state import ReActState, ExecutionConfig, create_initial_react_state
 
 logger = logging.getLogger(__name__)
@@ -40,9 +41,9 @@ def is_langgraph_enabled() -> bool:
     Check if LangGraph RAG is enabled.
 
     Controlled via environment variable LANGGRAPH_RAG_ENABLED.
-    Defaults to false for backward compatibility.
+    Defaults to true — LangGraph is the primary orchestration engine.
     """
-    return os.getenv("LANGGRAPH_RAG_ENABLED", "false").lower() == "true"
+    return os.getenv("LANGGRAPH_RAG_ENABLED", "true").lower() == "true"
 
 
 def get_langgraph_tenants() -> List[str]:
@@ -211,12 +212,20 @@ async def execute_langgraph_query(
             f"steps={result.get('metadata', {}).get('total_steps', 0)}, latency={latency_ms:.1f}ms"
         )
 
+        # Extract tool names from reasoning steps for frontend detection
+        reasoning = result.get("reasoning_steps", [])
+        tools_used = list(dict.fromkeys(
+            step["content"].split("(")[0]
+            for step in reasoning
+            if step.get("type") == "tool_call" and "(" in step.get("content", "")
+        ))
+
         return LangGraphQueryResponse(
             success=result.get("success", False),
             answer=result.get("answer", ""),
             sources=result.get("sources", []),
             thread_id=result.get("thread_id", thread_id),
-            agents_used=[],
+            agents_used=tools_used,
             domains=[],
             fast_path=result.get("fast_path", False),
             latency_ms=latency_ms,
@@ -256,11 +265,18 @@ async def stream_react_query(
     thread_id: Optional[str] = None,
     conversation_history: Optional[List[Dict[str, Any]]] = None,
     context: Optional[Dict[str, Any]] = None,
+    enable_thinking: Optional[bool] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """Stream a ReAct agent query execution.
 
     Yields events as the ReAct loop iterates, providing real-time
     visibility into the agent's Think-Act-Observe cycle.
+
+    Conversation continuity is handled by the PostgresSaver checkpointer
+    (Phase 1b).  Previous messages are restored from the checkpoint when
+    ``graph.astream()`` is called with the same ``thread_id``.  The
+    ``conversation_history`` parameter is kept for backwards-compatibility
+    but ignored when the checkpointer is active.
 
     Event Types:
         - started: Query execution started
@@ -279,8 +295,9 @@ async def stream_react_query(
         user_role_ids: Optional role IDs
         is_admin: Admin flag
         thread_id: Optional thread ID
-        conversation_history: Previous messages
+        conversation_history: Previous messages (ignored when checkpointer active)
         context: Request context
+        enable_thinking: Per-request thinking override (UI deep_reasoning toggle)
 
     Yields:
         Event dicts with type and data
@@ -306,29 +323,30 @@ async def stream_react_query(
         "data": {"thread_id": thread_id, "query": query, "graph_type": "react"},
     }
 
-    # Track emitted events for deduplication (index-based)
-    emitted_step_count = 0
-    emitted_swarm_event_count = 0
+    # Track whether real tokens were streamed (via stream writer in nodes)
+    received_real_tokens = False
 
     try:
-        from langchain_core.messages import HumanMessage, AIMessage
-
-        langchain_history = None
-        if conversation_history:
-            langchain_history = []
-            for msg in conversation_history:
-                role = msg.get("role", "")
-                content = msg.get("content", "")
-                if role == "user":
-                    langchain_history.append(HumanMessage(content=content))
-                elif role == "assistant":
-                    langchain_history.append(AIMessage(content=content))
-
         try:
             from app.services.upload_context_service import upload_context_service
             hydrated_context = upload_context_service.hydrate_context(context or {})
         except Exception:
             hydrated_context = context or {}
+
+        # conversation_history conversion kept for backwards-compatibility
+        # (non-checkpointed callers). create_initial_react_state() decides
+        # whether to include it based on checkpointer availability.
+        langchain_history = None
+        if conversation_history:
+            from langchain_core.messages import HumanMessage as HM, AIMessage as AM
+            langchain_history = []
+            for msg in conversation_history:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
+                if role == "user":
+                    langchain_history.append(HM(content=content))
+                elif role == "assistant":
+                    langchain_history.append(AM(content=content))
 
         initial_state = await create_initial_react_state(
             query=query,
@@ -339,13 +357,54 @@ async def stream_react_query(
             thread_id=thread_id,
             conversation_history=langchain_history,
             request_context=hydrated_context,
+            enable_thinking=enable_thinking,
         )
 
-        graph = get_react_graph()
-        config = {"configurable": {"thread_id": thread_id}}
+        from .graph import get_react_graph
+        graph = await get_react_graph()
 
-        # Stream graph execution — each node output is yielded
-        async for event in graph.astream(initial_state, config, stream_mode="values"):
+        # LangGraph config with thread_id for checkpointer scoping
+        langgraph_config = {"configurable": {"thread_id": thread_id}}
+
+        # When checkpointer is active, the checkpoint may contain
+        # reasoning_steps from previous turns (merge_lists accumulates).
+        # Offset the dedup counter so we only emit NEW steps from this turn.
+        emitted_step_count = 0
+        try:
+            checkpoint_state = await graph.aget_state(langgraph_config)
+            if checkpoint_state and checkpoint_state.values:
+                emitted_step_count = len(
+                    checkpoint_state.values.get("reasoning_steps", [])
+                )
+        except Exception:
+            pass  # No checkpoint yet (first turn) — start at 0
+
+        # Dual stream mode:
+        # - "values": State snapshots after each node (reasoning_steps, final_answer)
+        # - "custom": Real-time events from get_stream_writer() in nodes
+        #   (swarm worker_started/worker_complete, synthesis tokens)
+        last_values_event = None
+
+        async for mode, event in graph.astream(
+            initial_state, config=langgraph_config, stream_mode=["values", "custom"]
+        ):
+            if mode == "custom":
+                # Real-time events from nodes via get_stream_writer()
+                evt_type = event.get("type", "custom_event")
+                evt_data = event.get("data", {})
+
+                if evt_type == "token":
+                    # Real LLM token from synthesis streaming
+                    received_real_tokens = True
+                    yield {"type": "token", "data": evt_data}
+                else:
+                    # Swarm events: worker_started, worker_complete, swarm_synthesizing
+                    yield {"type": evt_type, "data": evt_data}
+
+                continue
+
+            # mode == "values": State snapshot after a node completed
+            last_values_event = event
 
             # Emit reasoning steps incrementally (index-based dedup)
             reasoning_steps = event.get("reasoning_steps", [])
@@ -382,25 +441,21 @@ async def stream_react_query(
                         },
                     }
 
-            # Drain swarm pending events incrementally (same pattern as reasoning_steps)
-            swarm_events = event.get("swarm_pending_events", [])
-            for swarm_evt in swarm_events[emitted_swarm_event_count:]:
-                emitted_swarm_event_count += 1
-                evt_type = swarm_evt.get("type", "swarm_event")
-                evt_data = swarm_evt.get("data", {})
-                yield {"type": evt_type, "data": evt_data}
-
             # Check for final answer
             if event.get("final_answer") and event.get("is_complete"):
                 latency_ms = (time.time() - start_time) * 1000
                 final_answer = event["final_answer"]
+                event_metadata = event.get("metadata", {})
 
-                # Stream answer as tokens (with event loop yield for HTTP flush)
-                words = final_answer.split(' ')
-                for i, word in enumerate(words):
-                    token = f" {word}" if i > 0 else word
-                    yield {"type": "token", "data": {"text": token, "token": token}}
-                    await asyncio.sleep(0)
+                # Fake-stream tokens only if no real tokens were streamed
+                # (real tokens come from synthesize_swarm via stream writer).
+                # Skip for clarification responses (rendered as structured cards).
+                if not received_real_tokens and not event_metadata.get("query_clarification"):
+                    words = final_answer.split(' ')
+                    for i, word in enumerate(words):
+                        token = f" {word}" if i > 0 else word
+                        yield {"type": "token", "data": {"text": token, "token": token}}
+                        await asyncio.sleep(0)
 
                 # Emit complete
                 yield {
@@ -414,6 +469,7 @@ async def stream_react_query(
                         "latency_ms": latency_ms,
                         "total_steps": event.get("current_step", 0),
                         "graph_type": "react",
+                        "metadata": event_metadata,
                     },
                 }
                 break

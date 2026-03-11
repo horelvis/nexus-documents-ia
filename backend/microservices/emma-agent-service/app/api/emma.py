@@ -152,7 +152,7 @@ class EmmaQuery(BaseModel):
     enable_sil: bool = Field(True, description="Enable SIL fast path for structural queries")
     enable_domain_routing: bool = Field(True, description="Enable domain-specific prompts")
     enable_streaming: bool = Field(False, description="Enable streaming (use /stream endpoint instead)")
-    deep_reasoning: bool = Field(default=True, description="Enable deep reasoning mode (slower but more thorough)")
+    deep_reasoning: Optional[bool] = Field(default=None, description="Enable deep reasoning / thinking mode. None=use global default, True=force thinking, False=disable thinking")
 
     class Config:
         json_schema_extra = {
@@ -311,6 +311,10 @@ async def emma_query(
             detail="Emma is not enabled. Set EMMA_ENABLED=true",
         )
 
+    # Resolve user_id: frontend sends it inside context, not as top-level field
+    if not query.user_id and query.context:
+        query.user_id = query.context.get("user_id")
+
     # Build context
     thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
 
@@ -448,6 +452,71 @@ async def emma_query(
             raise HTTPException(status_code=500, detail=str(e))
 
 
+import re as _re
+
+
+def _humanize_tool_call(raw_content: str) -> tuple:
+    """Parse tool_name(args...) → (action_type, human_text, detail)."""
+    # Extract tool name and args from format: tool_name(key=value, ...)
+    m = _re.match(r'(\w+)\((.*)\)', raw_content, _re.DOTALL)
+    if not m:
+        return ("thinking", raw_content[:100], raw_content)
+
+    tool_name = m.group(1)
+    args_str = m.group(2)
+
+    # Parse key=value args
+    def _extract_arg(name: str) -> str:
+        am = _re.search(rf'{name}=([^,\)]+)', args_str)
+        return am.group(1).strip().strip("'\"") if am else ""
+
+    query = _extract_arg("query")
+    scope = _extract_arg("scope")
+
+    mapping = {
+        "smart_search": ("searching", f'Buscando "{query}" en {scope or "documentos"}...'),
+        "get_document_content": ("reading", "Leyendo documento..."),
+        "structural_query": ("querying", f'Consultando: "{query}"' if query else "Ejecutando consulta estructural..."),
+        "analyze_domain": ("analyzing", f'Analizando dominio {_extract_arg("domain") or ""}...'.rstrip(". ") + "..."),
+        "web_search": ("browsing", f'Buscando en internet: "{query}"'),
+        "search_jurisprudence": ("searching", f'Buscando jurisprudencia: "{query}"'),
+        "list_sources": ("listing", "Consultando fuentes disponibles..."),
+        "query_connector": ("connecting", f'Consultando {_extract_arg("connector") or "conector externo"}...'),
+        "terminate": ("preparing", "Preparando respuesta..."),
+    }
+
+    action_type, human_text = mapping.get(tool_name, ("thinking", f"Ejecutando {tool_name}..."))
+    return (action_type, human_text, raw_content)
+
+
+def _humanize_observation(raw_content: str, source: str) -> tuple:
+    """Parse observation text → (action_type, human_text, detail)."""
+    full = f"[{source}] {raw_content}" if source else raw_content
+
+    # Pattern: [smart_search] Se encontraron N resultados...
+    m = _re.search(r'Se encontraron (\d+) resultado', raw_content)
+    if m:
+        return ("search_result", f"{m.group(1)} documentos encontrados", full)
+
+    # Pattern: [get_document_content] **Documento: Title.pdf**
+    m = _re.search(r'\*\*Documento:\s*(.+?)\*\*', raw_content)
+    if m:
+        return ("doc_read", f"Documento leído: {m.group(1)}", full)
+
+    # Pattern: [smart_search] No se encontraron resultados
+    if "No se encontraron" in raw_content or "0 resultado" in raw_content:
+        return ("search_result", "Sin resultados relevantes", full)
+
+    # Fallback: first meaningful line, max 80 chars
+    first_line = raw_content.strip().split('\n')[0][:80]
+    if source == "structural_query":
+        return ("querying", first_line, full)
+    if source == "web_search":
+        return ("browsing", first_line, full)
+
+    return ("search_result", first_line, full)
+
+
 async def _generate_langgraph_sse(
     query: EmmaQuery,
     stream_func,
@@ -473,14 +542,15 @@ async def _generate_langgraph_sse(
     try:
         step_counter = 0
         first_token_sent = False
-        conversation_history = None
+        # Session loaded for document context restoration and TTL extension.
+        # Conversation history is NO LONGER loaded here — PostgresSaver
+        # checkpointer restores previous messages automatically from its
+        # checkpoint when graph.astream() is called with the same thread_id.
         try:
             persistence = get_emma_persistence_service()
             # Extend TTL for active session
             await persistence.touch_session(thread_id, query.tenant_id)
             session = await persistence.get_session(thread_id)
-            if session and session.get("messages"):
-                conversation_history = session.get("messages")
             # Restore document context from previous session into current query
             if session:
                 saved_ctx = (session.get("metadata") or {}).get("document_context")
@@ -491,15 +561,15 @@ async def _generate_langgraph_sse(
                             ctx[key] = saved_ctx[key]
                     query.context = ctx
         except Exception as e:
-            logger.warning(f"Failed to load conversation history for {thread_id}: {e}")
+            logger.warning(f"Failed to load session context for {thread_id}: {e}")
 
         async for event in stream_func(
             query=query.query,
             tenant_id=query.tenant_id,
             user_id=query.user_id,
             thread_id=thread_id,
-            conversation_history=conversation_history,
             context=query.context,
+            enable_thinking=getattr(query, "deep_reasoning", None),
         ):
             event_type = event.get("type", "")
             data = event.get("data", {})
@@ -510,7 +580,7 @@ async def _generate_langgraph_sse(
             elif event_type == "retrieve_complete":
                 doc_count = data.get("doc_count", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'retrieval', 'content': f'Documentos recuperados: {doc_count}', 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'search_result', 'content': f'{doc_count} documentos recuperados', 'slmIsThinking': True})}\n\n"
                 yield f"event: progress\ndata: {json.dumps({'message': f'Recuperados {doc_count} documentos', 'stage': 'retrieval', 'progress': 20})}\n\n"
 
             elif event_type == "plan_complete":
@@ -520,10 +590,10 @@ async def _generate_langgraph_sse(
 
                 # Emit reasoning steps for traceability
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'domain_detection', 'content': f'Dominios detectados: {", ".join(domains)}', 'confidence': 1.0, 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Dominios detectados: {", ".join(domains)}', 'slmIsThinking': True})}\n\n"
 
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'agent_selection', 'content': f'Agentes seleccionados: {", ".join(agents)}', 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'preparing', 'content': f'Agentes seleccionados: {", ".join(agents)}', 'slmIsThinking': True})}\n\n"
 
                 # Emit plan ready
                 yield f"event: slm_plan\ndata: {json.dumps({'stage': 'slm_plan_ready', 'slmIsThinking': False, 'slmPlan': {'route': 'MULTI_AGENT' if len(agents) > 1 else agents[0] if agents else 'general_agent', 'confidence': 0.9, 'agents': agents, 'domains': domains, 'reasoning': reasoning}})}\n\n"
@@ -545,12 +615,12 @@ async def _generate_langgraph_sse(
                 }.get(agent_name, agent_name)
 
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'agent_execution', 'content': f'Ejecutando {agent_display}...', 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Ejecutando {agent_display}...', 'slmIsThinking': True})}\n\n"
 
             elif event_type == "structural_step":
                 # Reasoning step from structural query tool
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': data.get('step_type', 'structural'), 'content': data.get('content', ''), 'slmIsThinking': True, 'slmThinkingStep': {'step': step_counter, 'type': data.get('step_type'), 'content': data.get('content'), 'entities': data.get('entities', []), 'confidence': data.get('confidence', 1.0)}})}\n\n"
+                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'querying', 'content': data.get('content', ''), 'detail': data.get('content', ''), 'slmIsThinking': True})}\n\n"
 
             elif event_type == "agent_complete":
                 agent_name = data.get("agent", "unknown")
@@ -560,24 +630,27 @@ async def _generate_langgraph_sse(
             # Filter out internal steps that aren't meaningful to the user
             elif event_type == "thinking":
                 content = data.get("content", "")
-                # Skip very short or numeric-only content (garbage from LLM)
-                if content and len(content.strip()) > 3 and not content.strip().isdigit():
+                # Skip short or meaningless content
+                if content and len(content.strip()) > 20 and not content.strip().isdigit():
+                    # Truncate to first sentence, max 100 chars
+                    first_sentence = _re.split(r'[.\n]', content.strip())[0][:100]
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'thinking', 'content': content, 'slmIsThinking': True})}\n\n"
+                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'thinking', 'content': first_sentence, 'detail': content, 'slmIsThinking': True})}\n\n"
 
             elif event_type == "tool_call":
                 content = data.get("content", "")
                 if content:
+                    action_type, human_text, detail = _humanize_tool_call(content)
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'tool_call', 'content': content, 'slmIsThinking': True})}\n\n"
+                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'slmIsThinking': True})}\n\n"
 
             elif event_type == "tool_result":
                 content = data.get("content", "")
                 if content:
-                    step_counter += 1
                     source = data.get("source", "")
-                    label = f"[{source}] {content}" if source else content
-                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'observation', 'content': label, 'slmIsThinking': True})}\n\n"
+                    action_type, human_text, detail = _humanize_observation(content, source)
+                    step_counter += 1
+                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'slmIsThinking': True})}\n\n"
 
             elif event_type == "reasoning_step":
                 step_type = data.get("step_type", "thinking")
@@ -586,8 +659,21 @@ async def _generate_langgraph_sse(
                 if step_type == "response":
                     pass  # Internal marker — not useful for the user
                 elif content and len(content.strip()) > 3 and not content.strip().isdigit():
+                    # Map legacy step_type to semantic type
+                    semantic_type = {
+                        "query_analysis": "searching", "routing": "preparing",
+                        "tool_call": "searching", "tool_execution": "searching",
+                        "observation": "search_result", "reflection": "thinking",
+                        "search": "searching", "data_extraction": "reading",
+                        "validation": "analyzing", "retrieval": "search_result",
+                        "domain_detection": "analyzing", "agent_selection": "preparing",
+                        "agent_execution": "analyzing", "structural": "querying",
+                        "entity_detection": "searching", "intent_detection": "analyzing",
+                        "route_decision": "preparing", "connection": "connecting",
+                        "connector": "connecting", "transformation": "analyzing",
+                    }.get(step_type, step_type)
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': step_type, 'content': content, 'slmIsThinking': True})}\n\n"
+                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': semantic_type, 'content': content, 'slmIsThinking': True})}\n\n"
 
             # Swarm events (parallel sub-agent execution)
             elif event_type == "swarm_started":
@@ -628,14 +714,22 @@ async def _generate_langgraph_sse(
                     continue  # Skip the general sleep below (already yielded)
 
             elif event_type == "complete":
-                # Final result
-                suggestions = _generate_contextual_suggestions(
-                    query.query,
-                    data.get("answer", ""),
-                    data.get("agents_used", [])
-                )
-                yield f"event: progress\ndata: {json.dumps({'message': 'Generando respuesta...', 'stage': 'synthesizing', 'progress': 90, 'slmIsThinking': False})}\n\n"
-                yield f"event: complete\ndata: {json.dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'tools_used': data.get('agents_used', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id), 'domains': data.get('domains', []), 'final_result': data, 'suggestions': suggestions})}\n\n"
+                metadata = data.get("metadata", {})
+
+                # Check if this is a clarification response
+                if metadata.get("query_clarification"):
+                    clarification_options = metadata.get("clarification_options", [])
+                    yield f"event: clarification\ndata: {json.dumps({'question': data.get('answer', ''), 'options': clarification_options})}\n\n"
+                    yield f"event: complete\ndata: {json.dumps({'success': True, 'answer': data.get('answer', ''), 'query_clarification': True, 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id)})}\n\n"
+                else:
+                    # Normal completion — final result
+                    suggestions = _generate_contextual_suggestions(
+                        query.query,
+                        data.get("answer", ""),
+                        data.get("agents_used", [])
+                    )
+                    yield f"event: progress\ndata: {json.dumps({'message': 'Generando respuesta...', 'stage': 'synthesizing', 'progress': 90, 'slmIsThinking': False})}\n\n"
+                    yield f"event: complete\ndata: {json.dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'tools_used': data.get('agents_used', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id), 'domains': data.get('domains', []), 'final_result': data, 'suggestions': suggestions})}\n\n"
 
                 # Fire-and-forget: extract user facts from conversation
                 if query.user_id and settings.user_memory_enabled:
@@ -725,6 +819,10 @@ async def emma_query_stream(
             status_code=503,
             detail="Emma is not enabled. Set EMMA_ENABLED=true",
         )
+
+    # Resolve user_id: frontend sends it inside context, not as top-level field
+    if not query.user_id and query.context:
+        query.user_id = query.context.get("user_id")
 
     # Check if LangGraph is enabled → uses ReAct agent graph (default behavior)
     from app.agents.langgraph import (
@@ -1429,7 +1527,7 @@ async def clear_user_facts(
     return {"success": True, "deleted_count": count, "message": f"Cleared {count} facts"}
 
 
-@router.delete("/memory/facts/{fact_id}")
+@router.delete("/memory/facts/{fact_id:path}")
 async def delete_user_fact(
     fact_id: str,
     user_id: str = Query(..., description="User ID"),
@@ -1451,6 +1549,83 @@ async def delete_user_fact(
         raise HTTPException(status_code=404, detail=f"Fact {fact_id} not found or already deleted")
 
     return {"success": True, "message": "Fact deleted"}
+
+
+# ============================================================================
+# Document Memory Generation (MemoRAG)
+# ============================================================================
+
+class GenerateMemoryRequest(BaseModel):
+    tenant_id: str
+    document_id: str
+    document_text: str = Field(..., description="Full or partial document text")
+    filename: str = Field("", description="Document filename")
+    domain: str = Field("", description="Business domain")
+    semantic_type: str = Field("", description="Document type")
+
+
+@router.post("/memory/generate")
+async def generate_document_memory(
+    request: GenerateMemoryRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Generate and store a document memory using the planner LLM.
+
+    Called by weaviate-service after document indexing. The planner model
+    generates a compact summary + key entities + key topics, then stores
+    the result in the knowledge graph via knowledge-tree-service.
+
+    This is a fire-and-forget call — indexing should not block on this.
+    """
+    from app.services.memory.memory_generator import generate_and_store_memory
+
+    result = await generate_and_store_memory(
+        tenant_id=request.tenant_id,
+        document_id=request.document_id,
+        document_text=request.document_text,
+        filename=request.filename,
+        domain=request.domain,
+        semantic_type=request.semantic_type,
+    )
+    return result
+
+
+# ============================================================================
+# MemoRAG Memorize (Global Memory Model)
+# ============================================================================
+
+class MemorizeRequest(BaseModel):
+    tenant_id: str
+    document_id: str
+    document_text: str = Field(..., description="Full or partial document text")
+    filename: str = Field("", description="Document filename")
+    domain: str = Field("", description="Business domain")
+    semantic_type: str = Field("", description="Document type")
+
+
+@router.post("/memorag/memorize")
+async def memorag_memorize(
+    request: MemorizeRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Memorize a document into the MemoRAG global memory store.
+
+    Called by weaviate-service after document indexing.
+    """
+    from app.services.memorag import get_memorag_service
+
+    service = get_memorag_service()
+    result = await service.memorize(
+        tenant_id=request.tenant_id,
+        document_id=request.document_id,
+        document_text=request.document_text,
+        filename=request.filename,
+        domain=request.domain,
+        semantic_type=request.semantic_type,
+    )
+    return result
 
 
 # ============================================================================
@@ -1541,6 +1716,7 @@ async def get_welcome_message(
     # 3. Generate via LLM
     try:
         from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
 
         system_prompt = (
             "Eres Emma, asistente de inteligencia empresarial. "
@@ -1563,6 +1739,7 @@ async def get_welcome_message(
             ],
             temperature=0.7,
             max_tokens=80,
+            role=ModelRole.PLANNER,
         )
 
         welcome_msg = response.content.strip().strip('"')

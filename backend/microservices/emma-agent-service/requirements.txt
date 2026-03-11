@@ -24,10 +24,11 @@ openai>=1.0.0  # For vLLM OpenAI-compatible API
 # LangGraph - Multi-Agent RAG Orchestration
 # State-based graph execution for multi-agent workflows
 # Documentation: https://langchain-ai.github.io/langgraph/
-langgraph>=0.2.0
-langchain>=0.3.0
-langchain-core>=0.3.0
-langchain-openai>=0.2.0
+langgraph>=1.0.0
+langgraph-checkpoint-postgres>=3.0.0
+psycopg-binary>=3.2.0  # Bundled libpq — avoids needing libpq-dev in Docker image
+# langchain-core is a transitive dependency of langgraph (message types only)
+# psycopg + psycopg-pool are transitive deps of langgraph-checkpoint-postgres
 
 # Semantic Router - Fast intent classification
 semantic-router>=0.0.50
@@ -69,6 +70,9 @@ loguru>=0.7.0
 # Development
 pytest>=7.4.0
 pytest-asyncio>=0.21.0
+
+# Cross-Encoder Reranking (CPU-optimized ONNX, no GPU needed)
+flashrank>=0.2.0
 
 # Web Search
 # Primary: Tavily (optimized for LLM/RAG, 1000 free searches/month)

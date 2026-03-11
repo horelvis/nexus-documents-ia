@@ -6,9 +6,13 @@ parallel execution for complex multi-faceted queries.
 
 Graph Structure:
     START -> classify -> [fast_path -> END]
-                       -> react_loop <-> (continue) -> synthesize -> END     (simple)
-                       -> decompose -> Send[swarm_worker x N] ->             (complex)
+                       -> rewrite -> memory_recall -> react_loop <-> -> synthesize -> END     (simple)
+                       -> rewrite -> memory_recall -> decompose -> Send[swarm_worker x N] ->  (complex)
                          synthesize_swarm -> END
+
+The rewrite node contextualizes follow-up queries using conversation history
+(ConversationalRetrievalChain / Self-RAG pattern), preventing hallucination
+from ambiguous references like "cuales son?" or "si".
 
 The swarm path is activated when classify detects a complex multi-faceted
 query and SWARM_ENABLED=true. LangGraph's Send() API spawns N parallel
@@ -16,14 +20,20 @@ workers, each running a focused mini-ReAct loop.
 
 Design Decisions:
 1. Use StateGraph for explicit state management
-2. MemorySaver for conversation persistence
+2. PostgresSaver checkpointer for conversation continuity, time travel, and HITL.
+   Thread-scoped state accumulates across invocations via add_messages reducer.
+   emma_persistence_service remains for UI metadata (titles, archive, pin).
 3. Conditional edges for dynamic routing
-4. Send() fan-out for parallel swarm workers
-5. Graceful error handling with timeouts
+4. Send() fan-out for parallel swarm workers with slim state (only fields
+   the worker actually reads, not the full ~30-field state)
+5. Graceful error handling with timeouts + RetryPolicy for transient LLM failures
+6. Query rewrite node for conversational context resolution
 
 References:
 - https://langchain-ai.github.io/langgraph/concepts/low_level/
 - https://langchain-ai.github.io/langgraph/tutorials/multi_agent/
+- https://python.langchain.com/docs/use_cases/question_answering/conversational_retrieval/
+- https://arxiv.org/abs/2310.11511 (Self-RAG)
 """
 
 import asyncio
@@ -32,8 +42,7 @@ import time
 from typing import Any, Dict, Optional
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.types import Send
+from langgraph.types import RetryPolicy, Send
 
 from .state import ReActState
 
@@ -47,27 +56,36 @@ logger = logging.getLogger(__name__)
 _react_graph: Optional[StateGraph] = None
 
 
-def create_react_graph(enable_checkpointing: bool = True) -> StateGraph:
+def create_react_graph() -> StateGraph:
     """Create the ReAct agent StateGraph.
 
-    Graph with 6 nodes — two execution paths through the same graph:
+    Graph with 8 nodes — two execution paths through the same graph:
 
         START -> classify -> [fast_path -> END]
-                           -> react_loop <-> -> synthesize -> END              (simple queries)
-                           -> decompose -> Send[swarm_worker x N] ->          (complex queries)
+                           -> rewrite -> memory_recall -> react_loop <-> -> synthesize -> END     (simple)
+                           -> rewrite -> memory_recall -> decompose -> Send[swarm_worker x N] ->  (complex)
                              synthesize_swarm -> END
+
+    The rewrite node contextualizes follow-up queries using conversation
+    history (ConversationalRetrievalChain pattern). It runs a fast PLANNER
+    LLM call (~100-200ms) that rewrites ambiguous queries like "cuales son?"
+    into self-contained queries like "¿Cuáles son los contratos caducados?".
+    Passes through transparently when no history or no rewrite needed.
 
     The swarm path is activated when classify detects a complex multi-faceted
     query and SWARM_ENABLED=true. LangGraph's Send() API spawns N parallel
     workers, each running a focused mini-ReAct loop.
 
-    Args:
-        enable_checkpointing: Whether to enable MemorySaver for conversation persistence
+    Retry policy: Nodes that make LLM calls get RetryPolicy(max_attempts=2)
+    to handle transient failures (network timeouts, vLLM cold starts).
+    Non-LLM nodes (synthesize) don't need retries.
 
     Returns:
         Compiled StateGraph
     """
     from .nodes.classify import classify_node
+    from .nodes.rewrite import rewrite_node
+    from .nodes.memory_recall import memory_recall_node
     from .nodes.react_loop import react_loop_node
     from .nodes.synthesize_react import synthesize_react_node
     from .nodes.decompose import decompose_node
@@ -78,27 +96,47 @@ def create_react_graph(enable_checkpointing: bool = True) -> StateGraph:
 
     workflow = StateGraph(ReActState)
 
-    # Core nodes (3 original)
-    workflow.add_node("classify", classify_node)
-    workflow.add_node("react_loop", react_loop_node)
-    workflow.add_node("synthesize", synthesize_react_node)
+    # Retry policy for nodes that call LLMs — handles transient failures
+    # (network timeouts, vLLM/SGLang cold starts, OpenRouter rate limits).
+    # 2 attempts with 1s backoff is enough for transient issues without
+    # adding excessive latency on permanent failures.
+    llm_retry = RetryPolicy(max_attempts=2, initial_interval=1.0, backoff_factor=2.0)
+
+    # Core nodes (5: classify + rewrite + memory_recall + react_loop + synthesize)
+    workflow.add_node("classify", classify_node, retry_policy=llm_retry)
+    workflow.add_node("rewrite", rewrite_node, retry_policy=llm_retry)
+    workflow.add_node("memory_recall", memory_recall_node, retry_policy=llm_retry)
+    workflow.add_node("react_loop", react_loop_node)  # Has internal retry logic
+    workflow.add_node("synthesize", synthesize_react_node)  # No LLM call, no retry
 
     # Swarm nodes (+3)
-    workflow.add_node("decompose", decompose_node)
-    workflow.add_node("swarm_worker", swarm_worker_node)
-    workflow.add_node("synthesize_swarm", synthesize_swarm_node)
+    workflow.add_node("decompose", decompose_node, retry_policy=llm_retry)
+    workflow.add_node("swarm_worker", swarm_worker_node)  # Has internal timeout
+    workflow.add_node("synthesize_swarm", synthesize_swarm_node, retry_policy=llm_retry)
 
     # Entry point
     workflow.set_entry_point("classify")
 
-    # classify -> fast_path END | react_loop | decompose
+    # classify -> fast_path END | rewrite (for non-fast-path queries)
     workflow.add_conditional_edges(
         "classify",
         _route_from_classify,
         {
+            "rewrite": "rewrite",
+            "end": END,
+        },
+    )
+
+    # rewrite -> memory_recall (always, rewrite is a pass-through when no history)
+    workflow.add_edge("rewrite", "memory_recall")
+
+    # memory_recall -> react_loop | decompose (based on use_swarm flag from classify)
+    workflow.add_conditional_edges(
+        "memory_recall",
+        _route_from_memory_recall,
+        {
             "react": "react_loop",
             "decompose": "decompose",
-            "end": END,
         },
     )
 
@@ -126,22 +164,20 @@ def create_react_graph(enable_checkpointing: bool = True) -> StateGraph:
     workflow.add_edge("synthesize", END)
     workflow.add_edge("synthesize_swarm", END)
 
-    # Compile
-    if enable_checkpointing:
-        memory = MemorySaver()
-        compiled = workflow.compile(checkpointer=memory)
-        logger.info("ReAct graph compiled with checkpointing (swarm-enabled)")
-    else:
-        compiled = workflow.compile()
-        logger.info("ReAct graph compiled without checkpointing (swarm-enabled)")
-
-    return compiled
+    # Compilation deferred to get_react_graph() which injects the checkpointer.
+    # We return the uncompiled workflow here.
+    return workflow
 
 
 def _route_from_classify(state: ReActState) -> str:
-    """Route from classify node: fast-path, swarm decompose, or react loop."""
+    """Route from classify node: fast-path END or rewrite (always)."""
     if state.get("fast_path_used") or state.get("is_complete"):
         return "end"
+    return "rewrite"
+
+
+def _route_from_memory_recall(state: ReActState) -> str:
+    """Route from memory_recall: swarm decompose or react loop."""
     if state.get("use_swarm"):
         return "decompose"
     return "react"
@@ -152,6 +188,14 @@ def _route_from_decompose(state: ReActState):
 
     If decompose set use_swarm=False (parse failure, empty result), fall back
     to react_loop. Otherwise, spawn N parallel swarm workers via Send().
+
+    Send() receives a slim state with only the fields the worker actually
+    reads (11 fields), instead of copying the full ~30-field state. This
+    reduces memory when spawning N workers in parallel.
+
+    Worker reads: swarm_current_task, swarm_worker_id, query, tenant_id,
+    sector, sector_config, features, user_id, user_role_ids, is_admin,
+    thread_id, metadata.
 
     Returns:
         list[Send] for parallel workers, or str for fallback routing
@@ -164,10 +208,31 @@ def _route_from_decompose(state: ReActState):
     if not sub_tasks:
         return [Send("react_loop", state)]
 
+    # Slim state: only fields swarm_worker_node actually reads.
+    # merge_lists fields must be initialized as empty lists so reducers
+    # can accumulate results from parallel workers correctly.
+    worker_base = {
+        # Fields the worker reads
+        "query": state.get("query", ""),
+        "tenant_id": state.get("tenant_id", ""),
+        "user_id": state.get("user_id"),
+        "user_role_ids": state.get("user_role_ids"),
+        "is_admin": state.get("is_admin", False),
+        "sector": state.get("sector"),
+        "sector_config": state.get("sector_config"),
+        "features": state.get("features", {}),
+        "thread_id": state.get("thread_id", ""),
+        "metadata": state.get("metadata", {}),
+        # merge_lists accumulator fields (initialized empty)
+        "swarm_worker_results": [],
+        "swarm_pending_events": [],
+        "reasoning_steps": [],
+    }
+
     # Dynamic fan-out: spawn N parallel workers
     return [
         Send("swarm_worker", {
-            **state,
+            **worker_base,
             "swarm_current_task": task,
             "swarm_worker_id": i,
         })
@@ -182,11 +247,34 @@ def _route_from_react(state: ReActState) -> str:
     return "continue"
 
 
-def get_react_graph(force_new: bool = False) -> StateGraph:
-    """Get or create the global ReAct graph instance (singleton)."""
+async def get_react_graph(force_new: bool = False):
+    """Get or create the global compiled ReAct graph instance (singleton).
+
+    Async because checkpointer initialization requires awaiting PostgresSaver.setup().
+    Falls back to no-checkpointer compilation if disabled or unavailable.
+    """
     global _react_graph
     if _react_graph is None or force_new:
-        _react_graph = create_react_graph()
+        workflow = create_react_graph()
+
+        # Try to get PostgresSaver checkpointer + Store
+        checkpointer = None
+        store = None
+        try:
+            from app.core.checkpointer import get_checkpointer, get_store
+            checkpointer = await get_checkpointer()
+            store = await get_store()
+        except Exception as e:
+            logger.warning(f"Checkpointer/Store unavailable, compiling without: {e}")
+
+        _react_graph = workflow.compile(checkpointer=checkpointer, store=store)
+        parts = []
+        if checkpointer:
+            parts.append("PostgresSaver")
+        if store:
+            parts.append("Store")
+        mode = f"with {' + '.join(parts)}" if parts else "without persistence"
+        logger.info(f"ReAct graph compiled (swarm-enabled, {mode})")
     return _react_graph
 
 
@@ -267,20 +355,28 @@ async def execute_react_query(
         max_steps=max_steps,
     )
 
-    # Get graph
-    graph = get_react_graph()
+    # Get graph (async — initializes checkpointer on first call)
+    graph = await get_react_graph()
 
-    # Execute
-    config_dict = {"configurable": {"thread_id": thread_id or initial_state["thread_id"]}}
+    # LangGraph config with thread_id for checkpointer scoping.
+    # Each thread_id maintains its own checkpoint sequence (conversation).
+    langgraph_config = {"configurable": {"thread_id": thread_id or "ephemeral"}}
 
     try:
         from app.core.config import settings as _settings
         result = await asyncio.wait_for(
-            graph.ainvoke(initial_state, config_dict),
+            graph.ainvoke(initial_state, config=langgraph_config),
             timeout=_settings.react_global_timeout_seconds,
         )
 
         latency_ms = (time.time() - start_time) * 1000
+
+        # Strip checkpoint-accumulated items from reasoning_steps —
+        # only return steps from the current turn.
+        all_steps = result.get("reasoning_steps", [])
+        offsets = (result.get("metadata") or {}).get("_checkpoint_offsets", {})
+        step_offset = offsets.get("reasoning_steps", 0)
+        current_turn_steps = all_steps[step_offset:]
 
         return {
             "success": result.get("success", False),
@@ -293,7 +389,7 @@ async def execute_react_query(
                 **(result.get("metadata") or {}),
                 "graph_type": "react",
                 "total_steps": result.get("current_step", 0),
-                "reasoning_steps": result.get("reasoning_steps", []),
+                "reasoning_steps": current_turn_steps,
             },
         }
 

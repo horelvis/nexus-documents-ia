@@ -101,12 +101,21 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
 
     Returns:
         State updates: final_answer, sources, success, is_complete,
-        messages, reasoning_steps, swarm_pending_events, metadata
+        messages, reasoning_steps, metadata.
+        Swarm events emitted via get_stream_writer() (not state).
     """
     start = time.time()
-    results = state.get("swarm_worker_results", [])
+    all_results = state.get("swarm_worker_results", [])
     query = state.get("query", "")
     reasoning_steps = []
+
+    # When checkpointer is active, swarm_worker_results accumulates across
+    # turns via merge_lists.  Use the checkpoint offset (set by classify_node)
+    # to only process results from the current invocation.
+    offset = (state.get("metadata") or {}).get("_checkpoint_offsets", {}).get(
+        "swarm_worker_results", 0
+    )
+    results = all_results[offset:]
 
     successful = [r for r in results if r.get("success")]
     failed = [r for r in results if not r.get("success")]
@@ -173,8 +182,7 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
             },
         }
 
-    # Multiple workers — LLM synthesis
-    # Emit synthesizing event
+    # Multiple workers — LLM synthesis with real token streaming
     reasoning_steps.append({
         "type": StepType.THINKING.value,
         "content": (
@@ -183,13 +191,19 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
         ),
     })
 
-    synth_event = {
-        "type": "swarm_synthesizing",
-        "data": {
-            "successful_workers": len(successful),
-            "total_workers": len(results),
-        },
-    }
+    # Emit swarm_synthesizing event via stream writer (real-time to frontend)
+    try:
+        from langgraph.config import get_stream_writer
+        writer = get_stream_writer()
+        writer({
+            "type": "swarm_synthesizing",
+            "data": {
+                "successful_workers": len(successful),
+                "total_workers": len(results),
+            },
+        })
+    except Exception:
+        writer = None  # Fallback: no streaming (e.g., invoke() without stream_mode)
 
     # Build synthesis prompt
     results_formatted = _format_worker_results(successful)
@@ -216,20 +230,46 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
             worker_results_formatted=results_formatted,
         )
 
-    # LLM synthesis call
-    messages = [
+    # LLM synthesis — stream tokens in real-time via stream writer
+    llm_messages = [
         {"role": "system", "content": prompt_content},
         {"role": "user", "content": f"Sintetiza los resultados para la consulta: {query}"},
     ]
 
+    synthesized_answer = ""
+    streamed_tokens = False
+
     try:
         from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
         router = await get_llm_router()
-        response = await router.chat(
-            messages=messages,
-            max_tokens=settings.react_max_completion_tokens,
-        )
-        synthesized_answer = response.content or ""
+        llm_kwargs = {
+            "messages": llm_messages,
+            "max_tokens": settings.react_max_completion_tokens,
+            "role": ModelRole.CHAT,
+        }
+        per_request_thinking = state.get("enable_thinking")
+        if per_request_thinking is not None:
+            llm_kwargs["enable_thinking"] = per_request_thinking
+
+        # Stream tokens in real-time if writer is available
+        if writer:
+            chunks = []
+            async for event in router.chat_stream(**llm_kwargs):
+                if event.event_type == "content" and event.content:
+                    chunks.append(event.content)
+                    writer({"type": "token", "data": {"text": event.content}})
+                elif event.event_type == "thinking" and event.thinking:
+                    pass  # Skip thinking tokens from output
+                elif event.event_type == "error" and event.error:
+                    logger.warning(f"Synthesize swarm stream error: {event.error}")
+
+            synthesized_answer = "".join(chunks)
+            streamed_tokens = True
+        else:
+            # Fallback: non-streaming call (e.g., graph.invoke() without stream_mode)
+            response = await router.chat(**llm_kwargs)
+            synthesized_answer = response.content or ""
 
         # Clean thinking tags from synthesis
         import re
@@ -258,7 +298,8 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
 
     logger.info(
         f"Synthesize swarm: {len(successful)}/{len(results)} workers, "
-        f"{len(unique_sources)} sources, {latency_ms:.0f}ms"
+        f"{len(unique_sources)} sources, {latency_ms:.0f}ms, "
+        f"streamed={streamed_tokens}"
     )
 
     return {
@@ -268,12 +309,12 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
         "success": True,
         "messages": [AIMessage(content=synthesized_answer)],
         "reasoning_steps": reasoning_steps,
-        "swarm_pending_events": [synth_event],
         "metadata": {
             "swarm_workers_total": len(results),
             "swarm_workers_successful": len(successful),
             "swarm_workers_failed": len(failed),
             "synthesize_latency_ms": latency_ms,
             "source_count": len(unique_sources),
+            "streamed_tokens": streamed_tokens,
         },
     }

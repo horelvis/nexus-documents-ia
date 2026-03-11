@@ -1,9 +1,9 @@
 """
 Emma Session Persistence Service
 
-Provides durable storage for Emma AI chat sessions in PostgreSQL.
+Provides durable storage for Emma AI chat session metadata in PostgreSQL.
 
-Architecture:
+Architecture (Phase 1c — dual persistence with PostgresSaver):
     ┌─────────────────────────────────────────────────────────────────────┐
     │                     Session Flow                                     │
     │                                                                      │
@@ -11,19 +11,29 @@ Architecture:
     │         │                                                            │
     │         ▼                                                            │
     │   ┌──────────────────┐                                               │
-    │   │      REDIS       │  ◄── Hot cache (sub-ms reads, 1-hour TTL)    │
-    │   │  emma:v2:thread: │      - Active session state                   │
-    │   └────────┬─────────┘      - Knowledge source context               │
-    │            │                                                         │
-    │            │  (async, non-blocking)                                  │
-    │            ▼                                                         │
+    │   │  PostgresSaver   │  ◄── Conversation state (LangGraph)           │
+    │   │  (checkpoints)   │      - Full messages + graph state            │
+    │   └──────────────────┘      - Thread-scoped, auto-restored           │
+    │                                                                      │
     │   ┌──────────────────┐                                               │
-    │   │   POSTGRESQL     │  ◄── Permanent storage                        │
-    │   │  emma_sessions   │      - Full conversation history              │
-    │   │  (JSONB messages)│      - Searchable, auditable                  │
+    │   │   POSTGRESQL     │  ◄── UI metadata (slim)                       │
+    │   │  emma_sessions   │      - Title, timestamps, archive/pin         │
+    │   │  (metadata only) │      - Document context, last message preview │
+    │   └──────────────────┘                                               │
+    │                                                                      │
+    │   ┌──────────────────┐                                               │
+    │   │      REDIS       │  ◄── Session TTL tracking                     │
+    │   │  emma:thread:    │      - Active session keepalive               │
     │   └──────────────────┘                                               │
     │                                                                      │
     └─────────────────────────────────────────────────────────────────────┘
+
+When LANGGRAPH_CHECKPOINTER_ENABLED=true (default), full conversation
+history is stored by PostgresSaver.  This service stores only UI metadata
+(title, archive/pin, document_context, message_count, previews).
+
+When checkpointer is disabled (fallback), this service stores full messages
+in the JSONB column as before.
 
 Usage:
     persistence = get_emma_persistence_service()
@@ -41,9 +51,6 @@ Usage:
 
     # List user's sessions
     sessions = await persistence.get_user_sessions(user_id, tenant_id)
-
-    # Continue an old session (load from PostgreSQL to Redis)
-    await persistence.load_session_to_redis(session_id)
 """
 
 import json
@@ -123,10 +130,10 @@ class EmmaPersistenceService:
 
     async def touch_session(self, session_id: str, tenant_id: str) -> None:
         """
-        Extend TTL of all Redis keys associated with a session.
+        Extend TTL of Redis keys associated with a session.
 
-        Call this at the start of every query to prevent active sessions
-        from expiring mid-conversation.
+        When checkpointer is active, only the session metadata key is touched
+        (conversation state lives in PostgresSaver, not Redis).
 
         Args:
             session_id: Session/thread identifier
@@ -134,10 +141,10 @@ class EmmaPersistenceService:
         """
         try:
             r = await self._get_redis()
-            keys = [
-                f"{THREAD_KEY_PREFIX}{session_id}",
-                f"emma:conv:{tenant_id}:{session_id}",
-            ]
+            keys = [f"{THREAD_KEY_PREFIX}{session_id}"]
+            # Legacy conv key only needed without checkpointer
+            if not settings.langgraph_checkpointer_enabled:
+                keys.append(f"emma:conv:{tenant_id}:{session_id}")
             for key in keys:
                 if await r.exists(key):
                     await r.expire(key, THREAD_TTL_SECONDS)
@@ -159,13 +166,20 @@ class EmmaPersistenceService:
         document_context: Optional[Dict[str, Any]] = None
     ) -> bool:
         """
-        Save a conversation turn (user + assistant) to PostgreSQL.
+        Save a conversation turn to PostgreSQL.
+
+        When PostgresSaver checkpointer is active, only UI metadata is stored
+        (title, message_count, timestamps, document_context, last_message_preview).
+        Full conversation history lives in the PostgresSaver checkpoint tables.
+
+        When checkpointer is disabled (fallback), full messages are stored in
+        the JSONB column as before.
 
         This method is designed to be called via asyncio.create_task()
         after each Emma response, so it doesn't block the user.
 
         Args:
-            session_id: Thread/session identifier (matches Redis key)
+            session_id: Thread/session identifier
             user_id: User's UUID
             tenant_id: Tenant's UUID
             user_message: The user's query
@@ -174,6 +188,7 @@ class EmmaPersistenceService:
             tools_used: Optional list of tools that were called
             knowledge_source: "documents" | "graph" | "general"
             session_metadata: Additional session_metadata to merge
+            document_context: Document context to persist (file IDs, etc.)
 
         Returns:
             True if saved successfully, False otherwise
@@ -181,6 +196,7 @@ class EmmaPersistenceService:
         try:
             pool = await self._get_pool()
             now = datetime.now(timezone.utc)
+            use_checkpointer = settings.langgraph_checkpointer_enabled
 
             async with pool.acquire() as conn:
                 # Check if session exists
@@ -193,7 +209,7 @@ class EmmaPersistenceService:
                     session_id
                 )
 
-                # Build new messages
+                # Build message objects (full or slim depending on checkpointer)
                 user_msg = {
                     "role": "user",
                     "content": user_message,
@@ -215,14 +231,6 @@ class EmmaPersistenceService:
 
                 if session:
                     # Update existing session
-                    # asyncpg may return jsonb as str if no codec is set
-                    existing_messages = session['messages'] or []
-                    if isinstance(existing_messages, str):
-                        existing_messages = json.loads(existing_messages)
-                    existing_messages.append(user_msg)
-                    existing_messages.append(assistant_msg)
-
-                    # Merge session_metadata
                     existing_session_metadata = session['session_metadata'] or {}
                     if isinstance(existing_session_metadata, str):
                         existing_session_metadata = json.loads(existing_session_metadata)
@@ -233,29 +241,59 @@ class EmmaPersistenceService:
                     if document_context:
                         existing_session_metadata["document_context"] = document_context
 
-                    await conn.execute(
-                        """
-                        UPDATE emma_sessions
-                        SET messages = $2,
-                            message_count = $3,
-                            session_metadata = $4,
-                            last_message_at = $5,
-                            updated_at = $5
-                        WHERE id = $1
-                        """,
-                        session['id'],
-                        json.dumps(existing_messages),
-                        len(existing_messages),
-                        json.dumps(existing_session_metadata),
-                        now
-                    )
+                    if use_checkpointer:
+                        # Slim mode: only update metadata + message_count + preview
+                        # Full messages are in PostgresSaver checkpoint tables.
+                        new_count = (session['message_count'] or 0) + 2
+                        # Store last message preview for session list display
+                        existing_session_metadata["last_user_message"] = user_message[:150]
+                        existing_session_metadata["last_assistant_preview"] = assistant_response[:150]
 
-                    logger.debug(f"Updated session {session_id}: {len(existing_messages)} messages")
+                        await conn.execute(
+                            """
+                            UPDATE emma_sessions
+                            SET message_count = $2,
+                                session_metadata = $3,
+                                last_message_at = $4,
+                                updated_at = $4
+                            WHERE id = $1
+                            """,
+                            session['id'],
+                            new_count,
+                            json.dumps(existing_session_metadata),
+                            now
+                        )
+                        logger.debug(f"Updated session {session_id}: count={new_count} (slim, checkpointer)")
+
+                    else:
+                        # Legacy mode: store full messages in JSONB
+                        existing_messages = session['messages'] or []
+                        if isinstance(existing_messages, str):
+                            existing_messages = json.loads(existing_messages)
+                        existing_messages.append(user_msg)
+                        existing_messages.append(assistant_msg)
+
+                        await conn.execute(
+                            """
+                            UPDATE emma_sessions
+                            SET messages = $2,
+                                message_count = $3,
+                                session_metadata = $4,
+                                last_message_at = $5,
+                                updated_at = $5
+                            WHERE id = $1
+                            """,
+                            session['id'],
+                            json.dumps(existing_messages),
+                            len(existing_messages),
+                            json.dumps(existing_session_metadata),
+                            now
+                        )
+                        logger.debug(f"Updated session {session_id}: {len(existing_messages)} messages (legacy)")
 
                 else:
                     # Create new session
                     new_id = uuid_module.uuid4()
-                    messages = [user_msg, assistant_msg]
 
                     # Auto-generate title from first user message
                     title = user_message[:100]
@@ -268,6 +306,17 @@ class EmmaPersistenceService:
                         new_metadata["last_knowledge_source"] = knowledge_source
                     if document_context:
                         new_metadata["document_context"] = document_context
+
+                    if use_checkpointer:
+                        # Slim mode: empty messages array, store previews in metadata
+                        new_metadata["last_user_message"] = user_message[:150]
+                        new_metadata["last_assistant_preview"] = assistant_response[:150]
+                        messages_json = json.dumps([])
+                        message_count = 2  # Track count even though messages are in checkpointer
+                    else:
+                        # Legacy mode: full messages
+                        messages_json = json.dumps([user_msg, assistant_msg])
+                        message_count = 2
 
                     await conn.execute(
                         """
@@ -283,8 +332,8 @@ class EmmaPersistenceService:
                         UUID(tenant_id),
                         session_id,
                         title,
-                        json.dumps(messages),
-                        len(messages),
+                        messages_json,
+                        message_count,
                         False,  # is_archived
                         False,  # is_pinned
                         json.dumps(new_metadata),
@@ -384,12 +433,14 @@ class EmmaPersistenceService:
                 total = count_row['total']
 
                 # Get sessions (ordered by pinned first, then last_message_at)
+                # Slim query: only load messages when needed for preview extraction
                 rows = await conn.fetch(
                     f"""
                     SELECT
                         id, session_id, title, message_count,
                         is_pinned, is_archived,
-                        messages, last_message_at, created_at
+                        messages, session_metadata,
+                        last_message_at, created_at
                     FROM emma_sessions
                     WHERE {where_clause}
                     ORDER BY is_pinned DESC, last_message_at DESC
@@ -400,28 +451,34 @@ class EmmaPersistenceService:
 
                 sessions = []
                 for row in rows:
-                    # Extract first user message and last assistant message for preview
-                    messages = row['messages'] or []
-                    # asyncpg may return jsonb as str if no codec is set
-                    if isinstance(messages, str):
-                        messages = json.loads(messages)
-                    first_user_msg = None
-                    last_assistant_msg = None
+                    # Try metadata previews first (checkpointer mode),
+                    # fall back to scanning messages JSONB (legacy mode)
+                    meta = row['session_metadata'] or {}
+                    if isinstance(meta, str):
+                        meta = json.loads(meta)
 
-                    for msg in messages:
-                        if msg.get('role') == 'user' and first_user_msg is None:
-                            first_user_msg = msg.get('content', '')[:150]
-                            if len(msg.get('content', '')) > 150:
-                                first_user_msg += "..."
-                        if msg.get('role') == 'assistant':
-                            last_assistant_msg = msg.get('content', '')[:150]
-                            if len(msg.get('content', '')) > 150:
-                                last_assistant_msg += "..."
+                    first_user_msg = meta.get("last_user_message")
+                    last_assistant_msg = meta.get("last_assistant_preview")
+
+                    # Fallback: extract from messages JSONB (legacy sessions)
+                    if first_user_msg is None or last_assistant_msg is None:
+                        messages = row['messages'] or []
+                        if isinstance(messages, str):
+                            messages = json.loads(messages)
+                        for msg in messages:
+                            if msg.get('role') == 'user' and first_user_msg is None:
+                                first_user_msg = msg.get('content', '')[:150]
+                                if len(msg.get('content', '')) > 150:
+                                    first_user_msg += "..."
+                            if msg.get('role') == 'assistant':
+                                last_assistant_msg = msg.get('content', '')[:150]
+                                if len(msg.get('content', '')) > 150:
+                                    last_assistant_msg += "..."
 
                     sessions.append({
                         "id": str(row['id']),
                         "session_id": row['session_id'],
-                        "title": row['title'],
+                        "title": row['title'] or (first_user_msg or "")[:100],
                         "message_count": row['message_count'],
                         "is_pinned": row['is_pinned'],
                         "is_archived": row['is_archived'],
@@ -564,8 +621,12 @@ class EmmaPersistenceService:
         """
         Load a session from PostgreSQL to Redis for continuing.
 
-        This is called when a user wants to continue an old conversation.
-        Loads the messages into Redis so Emma v2 can access them.
+        When PostgresSaver checkpointer is active, conversation continuity
+        is handled by the checkpointer — this method is a no-op that returns
+        True (session is always "loaded" via the checkpoint).
+
+        In legacy mode (no checkpointer), loads messages into Redis so
+        Emma v2 can access them.
 
         Args:
             session_id: Session to load
@@ -573,6 +634,12 @@ class EmmaPersistenceService:
         Returns:
             True if loaded successfully, False otherwise
         """
+        # With checkpointer, conversation continuity is automatic —
+        # the graph restores state from the checkpoint on ainvoke().
+        if settings.langgraph_checkpointer_enabled:
+            logger.debug(f"Session {session_id}: checkpointer active, no Redis load needed")
+            return True
+
         try:
             session = await self.get_session(session_id)
             if not session:

@@ -23,8 +23,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Frontend
 - **Requires**: Node.js 18+ (`nvm use 18` or `nvm use 20`)
-- **Dev**: `cd frontend && npm run dev` (Turbopack, port 3000)
+- **Dev (all apps)**: `cd frontend && npm run dev` (Turbopack, all packages)
+- **Dev (on-premise only)**: `cd frontend && npm run dev:on-premise` (port 3001, HTTPS)
 - **Build**: `cd frontend && npm run build`
+- **Build (on-premise only)**: `cd frontend && npm run build:on-premise`
 - **Lint**: `cd frontend && npm run lint`
 - **Install**: `cd frontend && npm install`
 
@@ -38,7 +40,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Full Stack
 - Backend services: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
-- Frontend: `cd frontend && npm run dev`
+- Frontend: `cd frontend && npm run dev:on-premise` (on-premise only, port 3001)
 - API docs: `http://localhost:8000/docs`
 
 ## Architecture Overview
@@ -49,7 +51,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
 - **Database**: PostgreSQL + Weaviate (vectors) + Elasticsearch (full-text)
 - **Storage**: Google Cloud Storage
-- **AI/ML**: vLLM (Qwen3-4B GPU inference) + LangGraph multi-agent orchestration
+- **AI/ML**: vLLM (dual-model: Qwen3.5-4B planner + Qwen3.5-9B chat) + LangGraph multi-agent orchestration
 
 ### Microservices
 
@@ -62,7 +64,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Elasticsearch Service | 8008 | Full-text search, hybrid search |
 | Background Worker | 8100 | Celery async task processing |
 | Emma Reactive Worker | — | Event listener + trigger engine (Redis Streams consumer) |
-| vLLM Server | internal | GPU inference (OpenAI-compatible API) |
+| vLLM Chat | internal | GPU inference — quality generation (Qwen3.5-9B) |
+| vLLM Planner | internal | GPU inference — fast tool calling (Qwen3.5-4B, dual-model only) |
 
 ### Modular Architecture (SaaS vs On-Premise)
 
@@ -89,13 +92,24 @@ One sector active per deployment via `ACTIVE_SECTOR` env var. Changing sector re
 
 ### Emma Agent Service (LangGraph)
 
-**Flow**: `coordinator → [context_tree || graph_expand] → retrieve → [rlm/plan] → [agents] → synthesize → END`
+**Flow** (ReAct Agent — 8 nodes, two paths):
+```
+START → classify → [fast_path → END]
+                 → rewrite → memory_recall → react_loop ⟲ → synthesize → END           (simple)
+                 → rewrite → memory_recall → decompose → Send[swarm_worker × N] →       (complex)
+                   synthesize_swarm → END
+```
 
-Note: `context_tree` and `graph_expand` run in **parallel**. `graph_expand` populates `expanded_boe_ids` (from QA matches and Apache AGE graph) that `retrieve` uses to filter PublicKnowledge searches.
+**Persistence** (LangGraph Level 3):
+- **AsyncPostgresSaver** checkpointer — conversation continuity across turns (thread-scoped)
+- **AsyncPostgresStore** — cross-thread user memory (facts, preferences)
+- Both share a single psycopg3 `AsyncConnectionPool` (min=1, max=5)
+- Config: `LANGGRAPH_CHECKPOINTER_ENABLED=true` (default), uses `DATABASE_URL`
+- Key file: `emma-agent-service/app/core/checkpointer.py`
 
 **Structure**:
-- `agents/langgraph/graph.py` — StateGraph definition
-- `agents/langgraph/nodes/` — All pipeline nodes (coordinator, retrieve, intent_router, rlm_processor, plan, synthesize, specialists/)
+- `agents/langgraph/graph.py` — StateGraph definition (compiled with checkpointer + Store)
+- `agents/langgraph/nodes/` — All pipeline nodes (classify, rewrite, memory_recall, react_loop, synthesize_react, decompose, swarm_worker, synthesize_swarm)
 - `agents/langgraph/sectors/` — Sector configuration
 - `services/verified_generation/` — Claim-by-claim verification with SSE
 - `config/prompts/emma_prompts.yaml` — All prompts
@@ -104,11 +118,67 @@ Note: `context_tree` and `graph_expand` run in **parallel**. `graph_expand` popu
 - **Intent Router**: FastEmbed semantic (~3ms) → LLM fallback (~200ms) → default document_query
 - **RLM Processor**: Recursive pipeline for large docs (>16K tokens), Redis cached
 - **Verified Generation**: Claim-by-claim verification with SSE streaming
-- **LLM Providers**: vLLM (primary), OpenAI, Anthropic, Google (fallbacks)
+- **LLM Router**: Dual-model architecture with automatic fallback (see below)
 - **SmartSearch**: Unified multi-store search replacing `search_documents` + `search_legislation` (see below)
 - **Social Agent**: Conversational agent for social channels (see below)
 - **Emma Reactive**: Event-driven proactive system (see below)
 - **Prompt Management**: Dynamic prompts, rules, guardrails (see below)
+
+### LLM Router — Dual-Model Architecture
+
+MemoRAG-inspired dual-model routing where a fast planner model handles tool calling/routing and a quality chat model handles final response generation.
+
+**Architecture**:
+```
+                    ┌─────────────────────────────────────┐
+                    │            LLMRouter                │
+                    │                                     │
+User Query ──────►  │  role=PLANNER → vLLM (4B, fast)    │
+                    │  role=CHAT    → vLLM (9B, quality)  │
+                    │                                     │
+                    │  Fallback chain per role+provider    │
+                    └─────────────────────────────────────┘
+```
+
+**Role Assignment**:
+| Role | Model | Used By | Purpose |
+|------|-------|---------|---------|
+| `PLANNER` | Qwen3.5-4B-AWQ (~3-4GB) | classify, memory_recall, react_loop, decompose, swarm_worker, intent_router, verified eval, heartbeat, fact_extractor | Tool calling, JSON extraction, routing |
+| `CHAT` | Qwen3.5-9B-AWQ (~8-10GB) | synthesize, synthesize_swarm, rlm_processor, writer_agent, specialists, prediction_synthesizer | User-facing text generation |
+
+**Usage**:
+```python
+from app.agents.llm_router import get_llm_router
+from app.agents.llm_client import ModelRole
+
+router = await get_llm_router()
+# Tool calling (fast 4B model)
+response = await router.chat(messages, tools=tools, role=ModelRole.PLANNER)
+# Text generation (quality 9B model)
+response = await router.chat(messages, role=ModelRole.CHAT)
+```
+
+**Backwards Compatible**: `VLLM_DUAL_MODEL=false` (default) — both roles use the same model/endpoint. All existing callers default to `ModelRole.CHAT`.
+
+**Activation**: Set `VLLM_DUAL_MODEL=true` in `.env` and start with `docker compose --profile dual-model up -d`.
+
+**Environment Variables**:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VLLM_DUAL_MODEL` | `false` | Enable dual-model routing |
+| `VLLM_PLANNER_URL` | `VLLM_BASE_URL` | Planner vLLM endpoint |
+| `VLLM_PLANNER_MODEL` | `Qwen/Qwen3.5-4B-AWQ` | Planner model name |
+| `VLLM_PLANNER_MAX_TOKENS` | `4096` | Planner max output tokens |
+| `VLLM_PLANNER_TEMPERATURE` | `0.3` | Planner temperature |
+| `VLLM_PLANNER_GPU_UTIL` | `0.20` | Planner GPU memory fraction |
+| `VLLM_PLANNER_TOOL_PARSER` | `qwen3_coder` | Planner tool call parser (Qwen3.5 uses XML) |
+
+**Key files**:
+- `emma-agent-service/app/agents/llm_router.py` — LLMRouter with `(provider, role)` client pool
+- `emma-agent-service/app/agents/llm_client.py` — `ModelRole` enum, `create_llm_config_for_provider(role=)`
+- `emma-agent-service/app/core/config.py` — Dual-model settings
+- `docker-compose.onpremise.yml` — `vllm-planner` service (profiles: [dual-model])
 
 ### SmartSearch — Unified Multi-Store Search
 
@@ -194,17 +264,22 @@ Dynamic prompt management with Langfuse integration:
 
 Persistent user facts (name, department, preferences) that survive session expiry and are injected into LLM prompts for personalization.
 
-**Architecture**: Fire-and-forget write after each response → regex/LLM extraction → PostgreSQL UPSERT + Redis cache invalidation. Read at state init → Redis cache (1h TTL) → PostgreSQL fallback → format → inject into system prompt.
+**Architecture (Phase 2 — LangGraph Store)**:
+- **PRIMARY**: AsyncPostgresStore (cross-thread memory, shared psycopg3 pool with checkpointer)
+- **FALLBACK**: asyncpg + Redis (legacy, used when Store unavailable)
+- Store namespace: `("user_facts", tenant_id, user_id)` → key: `"category/fact_key"`
+- Write: fire-and-forget after each response → regex/LLM extraction → Store `aput()` (or legacy UPSERT)
+- Read: Store `asearch()` (or legacy Redis cache → PostgreSQL) → format → inject into system prompt
 
 **Components**:
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| UserFactsService | `emma-agent-service/app/services/memory/user_facts.py` | CRUD + Redis cache singleton |
+| UserFactsService | `emma-agent-service/app/services/memory/user_facts.py` | Store-primary CRUD with legacy fallback |
 | FactExtractor | `emma-agent-service/app/services/memory/fact_extractor.py` | Two-stage: regex (~1ms) + optional LLM (~200ms) |
 | MemoryService | `emma-agent-service/app/services/memory/service.py` | Unified memory interface (wraps all memory stores) |
-| DB Model | `backend/app/db/emma_memory_models.py` | `emma_user_memory_facts` table |
-| Migration | `backend/alembic/versions/d4e5f6g7h8i9_add_user_memory_facts.py` | Table + partial unique index |
+| Checkpointer/Store | `emma-agent-service/app/core/checkpointer.py` | Shared psycopg3 pool, singleton init |
+| DB Model | `backend/app/db/emma_memory_models.py` | `emma_user_memory_facts` table (legacy) |
 
 **LangGraph injection** (2 points):
 - `classify_node`: Fast-path greeting with `user_memory` in system prompt → "¡Hola, Carlos! ¿Cómo va todo en Legal?"
@@ -218,9 +293,9 @@ Persistent user facts (name, department, preferences) that survive session expir
 |----------|--------|-------------|
 | `/emma/memory/facts` | GET | List active facts (`?user_id=X&tenant_id=Y`) |
 | `/emma/memory/facts` | DELETE | Hard-delete ALL facts (GDPR right-to-erasure) |
-| `/emma/memory/facts/{id}` | DELETE | Soft-delete single fact |
+| `/emma/memory/facts/{id:path}` | DELETE | Delete single fact (Store key contains `/`) |
 
-**GDPR**: `DELETE /facts` = hard DELETE (permanent). `DELETE /facts/{id}` = soft-delete. Natural language: "olvida todo lo que sabes" triggers hard DELETE.
+**GDPR**: `DELETE /facts` = hard DELETE (permanent). `DELETE /facts/{id}` = Store `adelete()` (or legacy soft-delete). Natural language: "olvida todo lo que sabes" triggers hard DELETE.
 
 **Configuration**:
 
@@ -477,6 +552,13 @@ docker compose exec weaviate-service bash -c \
 - Tenant-based authorization for data access
 - Never log secrets (API keys, tokens, passwords)
 - Environment variables for all secrets
+
+### LLM Prompts (IMPORTANT)
+- **Always prefer Langfuse** for LLM prompts — use `_resolve_prompts()` (or `get_langfuse_prompt_client().get_prompt()`) with hardcoded/YAML fallbacks
+- Pattern: Langfuse prompt (primary, versioned, A/B testable) → YAML fallback (`config/prompts/`) → hardcoded constant
+- Never hardcode prompts directly in LLM calls without a Langfuse lookup layer
+- Langfuse prompt keys follow convention: `emma_{feature}_{system|user}` (e.g., `emma_verified_faithfulness_system`)
+- See `verified.py` `_resolve_prompts()` for reference implementation
 
 ### Testing
 - Isolated PostgreSQL via Docker Compose
