@@ -7,7 +7,7 @@
   ![License](https://img.shields.io/badge/license-MIT-blue.svg)
   ![Python](https://img.shields.io/badge/python-3.9+-green.svg)
   ![Next.js](https://img.shields.io/badge/Next.js-15-black.svg)
-  ![vLLM](https://img.shields.io/badge/vLLM-Qwen3-purple.svg)
+  ![SGLang](https://img.shields.io/badge/SGLang-Qwen3.5-purple.svg)
 </div>
 
 ---
@@ -27,10 +27,10 @@
 
 | Feature | Description |
 |---------|-------------|
-| **Emma AI Assistant** | Intelligent assistant with multi-agent orchestration (Anthropic Skill Custom) |
+| **Emma AI Assistant** | Intelligent assistant with LangGraph ReAct agent + Swarm parallel execution |
 | **Emma Reactive** | Event-driven proactive AI — triggers, notifications, multi-channel (Telegram, WhatsApp, Slack, Email) |
-| **SLM Router** | Small Language Model query planning with TOON notation |
-| **Multimodal RAG Pipeline** | 7-layer retrieval with hybrid search, reranking, and validated generation |
+| **SmartSearch** | Unified multi-store search (Weaviate + BOE legislation + knowledge graph) |
+| **Multimodal RAG Pipeline** | 7-layer retrieval with hybrid search, cross-encoder reranking, and verified generation |
 | **Cross-Modal Search** | Text queries find images, diagrams, and tables in documents |
 | **Legal Knowledge Base** | Spanish BOE legislation indexed for automatic legal context |
 | **Enterprise Connectors** | Alfresco, SharePoint, Database (PostgreSQL/MySQL) |
@@ -40,7 +40,7 @@
 | Benefit | Description |
 |---------|-------------|
 | **Data Sovereignty** | All data stays on your infrastructure |
-| **No API Costs** | Local GPU inference with vLLM (Qwen3) |
+| **No API Costs** | Local GPU inference with SGLang (Qwen3.5-9B) |
 | **Air-Gapped Ready** | Works without internet connectivity |
 | **Compliance** | Full control for GDPR, HIPAA, internal policies |
 | **Customization** | Complete access to code and models |
@@ -81,10 +81,10 @@ curl http://localhost:8000/health
 │  │   Frontend  │     │  API Gateway│     │     AI Services             │    │
 │  │  Next.js 15 │────▶│   FastAPI   │────▶│  ┌─────────────────────┐   │    │
 │  │  Shadcn/UI  │     │   :8000     │     │  │    Emma AI          │   │    │
-│  └─────────────┘     └─────────────┘     │  │  (Agent Framework)  │   │    │
+│  └─────────────┘     └─────────────┘     │  │  (LangGraph ReAct)   │   │    │
 │                             │            │  │                     │   │    │
-│                             │            │  │  12 Specialized     │   │    │
-│                             ▼            │  │  Agents + RAG       │   │    │
+│                             │            │  │  9 Tools + Swarm    │   │    │
+│                             ▼            │  │  + PostgresSaver    │   │    │
 │  ┌─────────────────────────────────────┐ │  └─────────────────────┘   │    │
 │  │         Data Layer                   │ │                           │    │
 │  │  ┌──────────┐ ┌──────────┐ ┌──────┐ │ │  ┌─────────────────────┐   │    │
@@ -97,21 +97,21 @@ curl http://localhost:8000/health
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Emma AI: Multi-Agent Orchestration
+### Emma AI: LangGraph ReAct Agent
 
-Emma AI is built on **Anthropic Skill Custom** with **PlanningFlow** orchestration:
+Emma AI is built on **LangGraph** with a ReAct agent (8 nodes) + optional Swarm parallel execution:
 
-| Agent | Domain | Capabilities |
-|-------|--------|--------------|
-| **SearchAgent** | Document Retrieval | Semantic + hybrid search across all documents |
-| **AnalystAgent** | Data Analysis | Financial analysis, metrics extraction |
-| **ContractAgent** | Contract Law | Clause analysis, risk detection, Civil Code |
-| **ComplianceAgent** | Regulatory | GDPR, LOPDGDD, compliance verification |
-| **SummarizerAgent** | Content Synthesis | Executive summaries, key points extraction |
-| **LaborAgent** | Employment Law | Workers' Statute, PRL, LISOS analysis |
-| **FiscalAgent** | Tax Law | IRPF, VAT, Corporate Tax analysis |
-| **PrivacyAgent** | Data Protection | LOPDGDD, GDPR compliance |
-| **LegalAgent** | General Legal | Cross-domain legal analysis |
+| Tool | Purpose |
+|------|---------|
+| `smart_search` | Unified search across tenant documents, BOE legislation, and knowledge graph |
+| `structural_query` | Count, list, filter via Apache AGE graph |
+| `analyze_domain` | Specialist domain analysis (legal, fiscal, labor, medical) |
+| `get_document_content` | Read full document content by ID |
+| `web_search` | Internet search (DuckDuckGo) |
+| `search_jurisprudence` | CENDOJ jurisprudence search |
+| `query_connector` | Query external connectors (SharePoint, OneDrive, etc.) |
+
+**Persistence**: PostgresSaver checkpointer (conversation continuity) + AsyncPostgresStore (cross-session user memory)
 
 ### Emma Reactive: Event-Driven Proactive AI
 
@@ -200,7 +200,7 @@ docker compose logs ngrok | grep "url="
 - **Database**: PostgreSQL 15 + Apache AGE (Graph)
 - **Vector DB**: Weaviate
 - **Cache**: Redis
-- **AI Framework**: Anthropic Skill Custom
+- **AI Framework**: LangGraph (ReAct agent + PostgresSaver + AsyncPostgresStore)
 
 ### Frontend
 - **Framework**: Next.js 15 (App Router)
@@ -209,10 +209,10 @@ docker compose logs ngrok | grep "url="
 - **Language**: TypeScript
 
 ### AI/ML
-- **Inference**: vLLM (GPU)
-- **Model**: Qwen3-4B-Thinking (default)
-- **Embeddings**: BGE-M3 (multilingual)
-- **RAG**: 7-layer pipeline with SLM Router
+- **Inference**: SGLang (GPU)
+- **Model**: Qwen3.5-9B BF16 (default, single-model dual-phase)
+- **Embeddings**: BGE-M3 (multilingual, 1024d)
+- **RAG**: SmartSearch unified pipeline with cross-encoder reranking
 
 ---
 
@@ -231,7 +231,7 @@ docker compose logs ngrok | grep "url="
 | Document | Description |
 |----------|-------------|
 | [MODULAR_ARCHITECTURE.md](docs/architecture/MODULAR_ARCHITECTURE.md) | SaaS vs On-Premise modular design |
-| [SLM_ROUTER.md](docs/architecture/SLM_ROUTER.md) | SLM Router (Query Planning) |
+| [USER_MEMORY.md](docs/architecture/USER_MEMORY.md) | Cross-session user memory (AsyncPostgresStore) |
 | [EMMA_AI.md](docs/architecture/EMMA_AI.md) | Emma AI agent system |
 | [EMMA_REACTIVE.md](docs/architecture/EMMA_REACTIVE.md) | Emma Reactive event-driven system |
 | [BOE_LEGAL_KNOWLEDGE.md](docs/architecture/BOE_LEGAL_KNOWLEDGE.md) | Spanish Legal Knowledge Base (BOE) |
@@ -259,5 +259,5 @@ This project is licensed under the [MIT License](LICENSE).
 
 <div align="center">
   <h3>NouxCubeIA - Enterprise Document Intelligence with Local AI</h3>
-  <p>Powered by vLLM + Anthropic Skill Custom</p>
+  <p>Powered by SGLang (Qwen3.5) + LangGraph</p>
 </div>

@@ -2,7 +2,9 @@
 
 Emma's User Memory system gives the assistant **persistent recall across chat sessions**. When a user says "Me llamo Carlos, trabajo en Legal", Emma remembers that fact forever (or until the user asks to forget), even after session expiry, browser close, or server restart.
 
-Unlike session-based conversation history (Redis, 30min TTL), User Memory uses **PostgreSQL** as the source of truth, with a Redis cache for fast reads. Facts survive indefinitely and are scoped to `(tenant_id, user_id)`.
+User Memory uses **LangGraph AsyncPostgresStore** as the primary storage backend (shared psycopg3 pool with the checkpointer). Legacy asyncpg + Redis is kept as fallback when Store is unavailable. Facts survive indefinitely and are scoped to `(tenant_id, user_id)`.
+
+Conversation history (short-term) is handled separately by the **PostgresSaver checkpointer** — thread-scoped, restored automatically on each invocation.
 
 ---
 
@@ -27,10 +29,13 @@ Unlike session-based conversation history (Redis, 30min TTL), User Memory uses *
 │                                           │                         │
 │                                    UserFactsService                 │
 │                                    ┌──────▼──────┐                  │
-│                                    │  UPSERT     │                  │
-│                                    │  PostgreSQL  │                  │
-│                                    │  + cache     │                  │
-│                                    │  invalidate  │                  │
+│                                    │ PRIMARY:    │                  │
+│                                    │ Store.aput()│                  │
+│                                    │ (psycopg3)  │                  │
+│                                    ├─────────────┤                  │
+│                                    │ FALLBACK:   │                  │
+│                                    │ PG UPSERT + │                  │
+│                                    │ Redis inval │                  │
 │                                    └─────────────┘                  │
 └─────────────────────────────────────────────────────────────────────┘
 
@@ -42,14 +47,18 @@ Unlike session-based conversation history (Redis, 30min TTL), User Memory uses *
 │                    UserFactsService.format_facts_for_prompt()       │
 │                              │                                      │
 │                     ┌────────▼────────┐                             │
-│                     │  Redis cache    │──── hit ──→ return facts    │
-│                     │  (1h TTL)       │                             │
+│                     │ AsyncPostgres   │                             │
+│                     │ Store.asearch() │──── ok ──→ return facts     │
+│                     │ (primary)       │                             │
 │                     └────────┬────────┘                             │
-│                              │ miss                                 │
+│                              │ unavailable                          │
 │                     ┌────────▼────────┐                             │
-│                     │  PostgreSQL     │──→ cache + return           │
-│                     │  (active=true)  │                             │
+│                     │ Legacy fallback │                             │
+│                     │ Redis → PG      │──→ return facts             │
 │                     └─────────────────┘                             │
+│                                                                     │
+│  Store namespace: ("user_facts", tenant_id, user_id)                │
+│  Store key: "category/fact_key"                                     │
 │                                                                     │
 │  Facts formatted as:                                                │
 │    ## Memoria del usuario                                           │
@@ -109,7 +118,7 @@ Migration file: `alembic/versions/d4e5f6g7h8i9_add_user_memory_facts.py`
 
 | Component | Module | Description |
 |-----------|--------|-------------|
-| **UserFactsService** | `memory/user_facts.py` | CRUD + Redis cache. Singleton via `get_user_facts_service()`. Reads (Redis → PG fallback), writes (PG UPSERT + cache invalidation), GDPR hard-delete |
+| **UserFactsService** | `memory/user_facts.py` | Store-primary CRUD with legacy fallback. Singleton via `get_user_facts_service()`. Reads (Store `asearch()` → Redis → PG), writes (Store `aput()` → PG UPSERT), GDPR hard-delete |
 | **FactExtractor** | `memory/fact_extractor.py` | Two-stage extraction: regex (~1ms) + optional LLM (~200ms). Fire-and-forget entry point `extract_and_save_facts()` |
 | **MemoryService** | `memory/service.py` | Unified interface that wraps ConversationMemory + PreferencesStore + UserFactsService. Enriches `get_user_context()` with persistent facts |
 | **ReActState** | `langgraph/state.py` | `user_memory: Optional[str]` field. Loaded at state initialization |
@@ -122,9 +131,9 @@ Migration file: `alembic/versions/d4e5f6g7h8i9_add_user_memory_facts.py`
    - If `user_id` is present, calls `UserFactsService.format_facts_for_prompt(tenant_id, user_id)`
    - Result stored in `state["user_memory"]`
 
-2. **Redis cache** (key: `emma:facts:{tenant_id}:{user_id}`, TTL: 1h):
-   - On hit: returns cached JSON array of fact dicts
-   - On miss: queries PostgreSQL, populates cache, returns
+2. **Storage lookup** (primary → fallback):
+   - **Primary**: AsyncPostgresStore `asearch()` on namespace `("user_facts", tenant_id, user_id)` — returns all items up to `USER_MEMORY_MAX_FACTS`
+   - **Fallback** (when Store unavailable): Redis cache (key: `emma:facts:{tenant_id}:{user_id}`, TTL: 1h) → PostgreSQL `emma_user_memory_facts` table
 
 3. **Prompt injection** — two points in the LangGraph:
    - **classify_node** (`nodes/classify.py:192`): When intent is `conversational` or `identity`, `user_memory` is appended to the system prompt for personalized greetings
@@ -175,11 +184,9 @@ Migration file: `alembic/versions/d4e5f6g7h8i9_add_user_memory_facts.py`
    - Extracts inferred facts (confidence = 0.7, source = `inferred`)
    - Validates categories and sanitizes output
 
-5. **UPSERT logic** (PostgreSQL):
-   - `ON CONFLICT (tenant_id, user_id, category, fact_key) WHERE is_active = true`
-   - Updates `fact_value`, keeps highest `confidence` via `GREATEST()`
-   - `declared` source always takes precedence over `inferred`
-   - After UPSERT, Redis cache is invalidated
+5. **Save logic**:
+   - **Primary (Store)**: `aput()` with key `"category/fact_key"`. Reads existing item first for confidence maximization (`max(old, new)`). Declared source always wins.
+   - **Fallback (PostgreSQL)**: `ON CONFLICT (tenant_id, user_id, category, fact_key) WHERE is_active = true` — UPSERT with `GREATEST()` for confidence, declared source precedence. Redis cache invalidated after write.
 
 6. **Max facts limit**: If user already has `USER_MEMORY_MAX_FACTS` (50) facts, new extractions are silently skipped
 
@@ -281,14 +288,21 @@ Response:
 
 **Important**: This performs a **hard DELETE** (not soft-delete) for GDPR right-to-erasure compliance. All rows for the user are permanently removed from PostgreSQL.
 
-### DELETE `/emma/memory/facts/{fact_id}` — Delete Single Fact
+### DELETE `/emma/memory/facts/{fact_id:path}` — Delete Single Fact
+
+The route uses `{fact_id:path}` because Store keys contain slashes (e.g., `identity/name`).
 
 ```bash
+# Store key format (primary):
+curl -s -X DELETE "http://localhost:8009/emma/memory/facts/identity/name?user_id=USER_ID&tenant_id=TENANT_ID" \
+  -H "X-API-Key: $API_KEY"
+
+# Legacy UUID format (fallback):
 curl -s -X DELETE "http://localhost:8009/emma/memory/facts/a1b2c3d4-...?user_id=USER_ID&tenant_id=TENANT_ID" \
   -H "X-API-Key: $API_KEY"
 ```
 
-This performs a **soft-delete** (`is_active = false`). The partial unique index allows a new fact with the same `(category, fact_key)` to be created later.
+**Store**: Calls `adelete()` — permanent removal. **Legacy**: Soft-delete (`is_active = false`).
 
 ---
 
@@ -296,18 +310,18 @@ This performs a **soft-delete** (`is_active = false`). The partial unique index 
 
 | Operation | Mechanism | Scope |
 |-----------|-----------|-------|
-| **Right to erasure** (Art. 17) | `DELETE /emma/memory/facts` | Hard DELETE — all rows permanently removed |
-| **Right to rectification** (Art. 16) | User says "Me llamo María" | UPSERT overwrites previous `identity/name` |
+| **Right to erasure** (Art. 17) | `DELETE /emma/memory/facts` | Store: iterate `asearch()` + `adelete()`. Legacy: hard DELETE all rows |
+| **Right to rectification** (Art. 16) | User says "Me llamo María" | Store `aput()` overwrites previous `identity/name` |
 | **Right to object** (Art. 21) | `USER_MEMORY_ENABLED=false` | Disables system entirely |
 | **Data minimization** (Art. 5) | `USER_MEMORY_MAX_FACTS=50` | Caps stored facts per user |
 | **Natural language deletion** | User says "Olvida todo lo que sabes" | Triggers `clear_user_facts()` (hard DELETE) |
 
 ### Soft vs Hard Delete
 
-- **Single fact deletion** (`DELETE /facts/{id}`): **Soft-delete** (`is_active = false`). Row retained for audit trail. Fact no longer returned or injected into prompts.
-- **Full user clear** (`DELETE /facts`): **Hard DELETE**. All rows physically removed. No trace remains. Used for GDPR erasure requests.
-- **Natural language "olvida todo"**: Triggers **hard DELETE** via `clear_user_facts()`.
-- **Natural language "olvida mi nombre"**: Triggers **soft-delete** of specific fact.
+- **Single fact deletion** (`DELETE /facts/{id:path}`): **Store**: `adelete()` (permanent). **Legacy**: soft-delete (`is_active = false`).
+- **Full user clear** (`DELETE /facts`): Store: iterate all items + `adelete()`. Legacy: hard DELETE all rows. No trace remains.
+- **Natural language "olvida todo"**: Triggers `clear_user_facts()` (full erasure).
+- **Natural language "olvida mi nombre"**: Triggers `delete_fact()` for specific fact.
 
 ---
 
@@ -315,12 +329,13 @@ This performs a **soft-delete** (`is_active = false`). The partial unique index 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `LANGGRAPH_CHECKPOINTER_ENABLED` | `true` | Enables Store (and checkpointer) — primary storage backend |
 | `USER_MEMORY_ENABLED` | `true` | Master switch for user memory system |
 | `USER_MEMORY_LLM_EXTRACTION` | `false` | Enable Stage 2 LLM-based fact extraction |
 | `USER_MEMORY_MAX_FACTS` | `50` | Maximum active facts per user |
-| `USER_MEMORY_CACHE_TTL` | `3600` | Redis cache TTL in seconds (1 hour) |
+| `USER_MEMORY_CACHE_TTL` | `3600` | Redis cache TTL in seconds (legacy fallback only) |
 
-All variables are defined in `emma-agent-service/app/core/config.py` (lines 267-270).
+All variables are defined in `emma-agent-service/app/core/config.py`.
 
 ---
 
@@ -342,7 +357,8 @@ The system prompt instructs the LLM to use memory **proactively but naturally** 
 |------|-------------------------------|---------|
 | DB Model | `app/db/emma_memory_models.py` | SQLAlchemy `EmmaUserMemoryFact` model |
 | Migration | `alembic/versions/d4e5f6g7h8i9_add_user_memory_facts.py` | Table + indexes creation |
-| UserFactsService | `microservices/emma-agent-service/app/services/memory/user_facts.py` | CRUD + cache singleton |
+| Checkpointer/Store | `microservices/emma-agent-service/app/core/checkpointer.py` | Shared psycopg3 pool, Store singleton |
+| UserFactsService | `microservices/emma-agent-service/app/services/memory/user_facts.py` | Store-primary CRUD with legacy fallback |
 | FactExtractor | `microservices/emma-agent-service/app/services/memory/fact_extractor.py` | Regex + LLM extraction |
 | MemoryService | `microservices/emma-agent-service/app/services/memory/service.py` | Unified memory interface |
 | Memory `__init__` | `microservices/emma-agent-service/app/services/memory/__init__.py` | Public exports |

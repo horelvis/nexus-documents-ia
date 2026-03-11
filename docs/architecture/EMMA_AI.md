@@ -1,8 +1,8 @@
 # Emma AI - Technical Architecture
 
-Emma is the intelligent AI assistant for NouxCubeIA, built on **Anthropic Skill Custom** framework with **vLLM** (Qwen3) as the primary inference engine.
+Emma is the intelligent AI assistant for NouxCubeIA, built on **LangGraph** (ReAct agent with Swarm parallel execution) with **SGLang** (Qwen3.5-9B) as the primary inference engine.
 
-> **Current Status**: EmmaCoordinator is the active execution path. Voice-first capabilities are planned for Phase 2.
+> **Current Status**: LangGraph ReAct Agent is the default execution path (`LANGGRAPH_RAG_ENABLED=true`). PostgresSaver checkpointer provides conversation continuity. AsyncPostgresStore provides cross-thread user memory.
 
 ---
 
@@ -14,27 +14,186 @@ Emma is the intelligent AI assistant for NouxCubeIA, built on **Anthropic Skill 
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────┐     ┌─────────────┐     ┌─────────────────────────────┐    │
-│  │   Frontend  │     │  API Gateway│     │     Emma Service            │    │
+│  │   Frontend  │     │  API Gateway│     │   Emma Agent Service        │    │
 │  │  Next.js 15 │────▶│   FastAPI   │────▶│  ┌─────────────────────┐   │    │
-│  │  EmmaChat   │     │   :8000     │     │  │  EmmaCoordinator    │   │    │
-│  └─────────────┘     └─────────────┘     │  │  (Orchestrator)     │   │    │
+│  │  EmmaChat   │     │   :8000     │     │  │  LangGraph ReAct    │   │    │
+│  └─────────────┘     └─────────────┘     │  │  Agent (8 nodes)    │   │    │
 │                             │            │  └──────────┬──────────┘   │    │
 │                             │            │             │              │    │
 │                             ▼            │  ┌──────────▼──────────┐   │    │
-│  ┌─────────────────────────────────────┐ │  │  Specialized Agents │   │    │
-│  │         Data Layer                   │ │  │  - SearchAgent      │   │    │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────┐ │ │  │  - ContractAgent    │   │    │
-│  │  │PostgreSQL│ │ Weaviate │ │Redis │ │ │  │  - LaborAgent       │   │    │
-│  │  │   +AGE   │ │ (Vector) │ │Memory│ │ │  │  - FiscalAgent      │   │    │
-│  │  └──────────┘ └──────────┘ └──────┘ │ │  │  - PrivacyAgent     │   │    │
-│  └─────────────────────────────────────┘ │  │  - ComplianceAgent  │   │    │
-│                                          │  │  - AnalystAgent     │   │    │
-│                                          │  │  - SummarizerAgent  │   │    │
-│                                          │  └─────────────────────┘   │    │
-│                                          └────────────────────────────┘    │
+│  ┌─────────────────────────────────────┐ │  │  9 ReAct Tools      │   │    │
+│  │         Data Layer                   │ │  │  - smart_search     │   │    │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────┐ │ │  │  - structural_query │   │    │
+│  │  │PostgreSQL│ │ Weaviate │ │Redis │ │ │  │  - analyze_domain   │   │    │
+│  │  │   +AGE   │ │ (Vector) │ │      │ │ │  │  - web_search       │   │    │
+│  │  └──────────┘ └──────────┘ └──────┘ │ │  │  - ...              │   │    │
+│  └─────────────────────────────────────┘ │  └─────────────────────┘   │    │
+│                                          │                            │    │
+│  ┌─────────────────────────────────────┐ │  ┌─────────────────────┐   │    │
+│  │     Persistence Layer               │ │  │  SGLang (GPU)       │   │    │
+│  │  ┌──────────────┐ ┌──────────────┐  │ │  │  Qwen3.5-9B BF16   │   │    │
+│  │  │PostgresSaver │ │AsyncPostgres │  │ │  │  PLANNER + CHAT     │   │    │
+│  │  │(checkpointer)│ │Store (memory)│  │ │  │  phases             │   │    │
+│  │  └──────────────┘ └──────────────┘  │ │  └─────────────────────┘   │    │
+│  │      shared psycopg3 pool           │ │                            │    │
+│  └─────────────────────────────────────┘ └────────────────────────────┘    │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## ReAct Agent Graph (8 Nodes)
+
+Two execution paths through the same StateGraph:
+
+```
+START → classify → [fast_path → END]
+                 → rewrite → memory_recall → react_loop ⟲ → synthesize → END       (simple)
+                 → rewrite → memory_recall → decompose → Send[swarm_worker × N] →   (complex)
+                   synthesize_swarm → END
+```
+
+### Nodes
+
+| Node | Purpose | LLM Role | Retry |
+|------|---------|----------|-------|
+| `classify` | Intent detection, fast-path, sector config | PLANNER | Yes (2 attempts) |
+| `rewrite` | Contextualize follow-up queries using conversation history | PLANNER | Yes |
+| `memory_recall` | Scan document memories, generate clues | PLANNER | Yes |
+| `react_loop` | Tool-calling ReAct iterations (max 10 steps) | PLANNER | Internal |
+| `synthesize` | Format final answer from tool results | — (no LLM) | No |
+| `decompose` | Split complex query into sub-tasks (Swarm) | PLANNER | Yes |
+| `swarm_worker` | Mini-ReAct loop per sub-task (parallel via `Send()`) | PLANNER | Internal |
+| `synthesize_swarm` | Merge parallel worker results into coherent answer | CHAT | Yes |
+
+### Routing Logic
+
+| Edge | Condition | Target |
+|------|-----------|--------|
+| `classify → END` | Fast-path (greeting, identity) | Direct response |
+| `classify → rewrite` | All non-fast-path queries | Always |
+| `rewrite → memory_recall` | Always | Pass-through when no history |
+| `memory_recall → react_loop` | `use_swarm=False` | Standard single-agent path |
+| `memory_recall → decompose` | `use_swarm=True` + `SWARM_ENABLED` | Complex multi-faceted queries |
+| `decompose → Send[swarm_worker × N]` | Sub-tasks generated | Dynamic fan-out |
+| `decompose → react_loop` | Decomposition failed | Fallback |
+| `react_loop → react_loop` | `is_complete=False` | Continue iterating |
+| `react_loop → synthesize` | `is_complete=True` | Terminate |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `app/agents/langgraph/graph.py` | StateGraph definition + routing functions |
+| `app/agents/langgraph/state.py` | `ReActState` TypedDict + `create_initial_react_state()` |
+| `app/agents/langgraph/nodes/` | All 8 node implementations |
+| `app/agents/langgraph/tools/` | 9 tools via `ToolRegistry` singleton |
+| `app/agents/langgraph/sectors/` | Per-sector configuration (legal, medical, documental) |
+
+---
+
+## Persistence Layer (LangGraph Level 3)
+
+### Architecture
+
+```
+┌────────────────────────────────────────────────────────────────────────────┐
+│                    PERSISTENCE (shared psycopg3 pool)                       │
+├────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌─────────────────────────┐    ┌───────────────────────────────────┐    │
+│   │   AsyncPostgresSaver    │    │       AsyncPostgresStore          │    │
+│   │     (Checkpointer)      │    │       (Cross-Thread Memory)       │    │
+│   ├─────────────────────────┤    ├───────────────────────────────────┤    │
+│   │ Scope: per thread_id    │    │ Namespace: ("user_facts",         │    │
+│   │                         │    │   tenant_id, user_id)             │    │
+│   │ Stores:                 │    │                                    │    │
+│   │ - Message history       │    │ Key: "category/fact_key"           │    │
+│   │ - Graph state snapshots │    │ Value: {fact_value, confidence,    │    │
+│   │ - Checkpoint sequence   │    │         source, source_query}      │    │
+│   │                         │    │                                    │    │
+│   │ Features:               │    │ Features:                          │    │
+│   │ - Conversation continuity│   │ - Cross-session user facts         │    │
+│   │ - Time travel (replay)  │    │ - Confidence maximization          │    │
+│   │ - State snapshots       │    │ - GDPR right-to-erasure            │    │
+│   └─────────────────────────┘    └───────────────────────────────────┘    │
+│                                                                             │
+│   Config: LANGGRAPH_CHECKPOINTER_ENABLED=true (default)                    │
+│   Key file: app/core/checkpointer.py                                       │
+│                                                                             │
+│   Legacy fallback: asyncpg + Redis (when Store unavailable)                │
+│                                                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Conversation Continuity
+
+When a user sends a follow-up message to the same `thread_id`:
+
+1. **Checkpointer restores** full message history from the last checkpoint
+2. **`create_initial_react_state()`** only appends the new `HumanMessage` (not full history)
+3. **`rewrite_node`** reads restored messages to contextualize follow-ups ("cuales son?" → "¿Cuáles son los contratos caducados?")
+4. **`_checkpoint_offsets`** pattern prevents `merge_lists` fields from accumulating across turns
+
+### Session Metadata
+
+`emma_persistence_service` runs in **slim mode** when checkpointer is active:
+- Stores only metadata (title, timestamps, message_count, previews)
+- Full message history lives in the checkpointer (not `emma_sessions.messages` JSONB)
+- Redis `emma:conv:` keys are skipped (no legacy conversation cache)
+
+---
+
+## LLM Router — Single-Model Dual-Phase
+
+One Qwen3.5-9B model on SGLang, two behavioral phases:
+
+```
+                    ┌─────────────────────────────────────┐
+                    │            LLMRouter                │
+                    │                                     │
+User Query ──────►  │  role=PLANNER → temp=0.3, 4K tok   │
+                    │  role=CHAT    → temp=0.6, 16K tok   │
+                    │                                     │
+                    │  Single SGLang instance (9B BF16)    │
+                    └─────────────────────────────────────┘
+```
+
+| Role | Temperature | Max Tokens | Used By | Purpose |
+|------|-------------|------------|---------|---------|
+| `PLANNER` | 0.3 | 4,096 | classify, rewrite, memory_recall, react_loop, decompose, swarm_worker | Tool calling, JSON extraction, routing |
+| `CHAT` | 0.6 | 16,384 | synthesize_swarm, rlm_processor, writer_agent, specialists | User-facing text generation |
+
+**Usage**:
+```python
+from app.agents.llm_router import get_llm_router
+from app.agents.llm_client import ModelRole
+
+router = await get_llm_router()
+response = await router.chat(messages=messages, role=ModelRole.PLANNER)  # Fast tool calling
+response = await router.chat(messages=messages, role=ModelRole.CHAT)     # Quality generation
+```
+
+**Optional dual-model**: `VLLM_DUAL_MODEL=true` runs a separate 4B planner instance.
+
+---
+
+## ReAct Tools (9)
+
+| Tool | Purpose |
+|------|---------|
+| `smart_search` | Unified document + legislation search (auto-detects scope, 3 data stores) |
+| `get_document_content` | Read full document by ID |
+| `structural_query` | Count, list, filter via Apache AGE graph |
+| `analyze_domain` | Specialist domain analysis (legal, fiscal, labor, etc.) |
+| `web_search` | Internet search (DuckDuckGo) |
+| `search_jurisprudence` | CENDOJ jurisprudence search |
+| `list_sources` | Discover available data sources |
+| `query_connector` | Query external connectors (SharePoint, etc.) |
+| `terminate` | Signal completion with response |
+
+Tools are registered via `ToolRegistry` singleton in `app/agents/langgraph/tools/registry.py`.
 
 ---
 
@@ -43,207 +202,120 @@ Emma is the intelligent AI assistant for NouxCubeIA, built on **Anthropic Skill 
 ```
 FRONTEND (Next.js)
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  /[tenantId]/chat/page.tsx                                                  │
-│       │                                                                      │
-│       v                                                                      │
 │  EmmaChat.tsx ───── emma.service.ts                                         │
 │       │                    │                                                 │
-│       │  queryEmmaStream() → POST /api/v1/weaviate/emma/query/stream        │
+│       │  queryEmmaStream() → POST /api/v1/emma/query/stream                │
 └───────│─────────────────────── SSE Stream ─────────────────────────────────┘
         │
         v
-WEAVIATE MICROSERVICE (FastAPI - port 8007)
+MAIN API (FastAPI - port 8000)
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  app/api/v1/emma.py → proxies to Emma Agent Service (port 8009)            │
+└─────────────────────────────────────────────────────────────────────────────┘
+        │
+        v
+EMMA AGENT SERVICE (FastAPI - port 8009)
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  app/api/emma.py                                                            │
 │       │                                                                      │
 │       v                                                                      │
-│  EmmaService.execute_query_stream()                                         │
+│  stream_react_query() → graph.astream(stream_mode=["updates","custom"])    │
 │       │                                                                      │
-│       ├──→ MemoryService (load conversation history)                        │
-│       │    Key: emma:conv:{tenant}:{session}                                │
+│       ├──→ Load session metadata (emma_persistence_service)                 │
+│       ├──→ Hydrate upload context (if document attached)                    │
+│       ├──→ Create initial state (loads user_memory from Store)              │
 │       │                                                                      │
-│       └──→ EmmaCoordinator.execute() [PRIMARY]                              │
+│       └──→ LangGraph ReAct Graph (8 nodes)                                 │
 │            │                                                                 │
-│            ├──→ SemanticPatternRouter (classify intent ~10ms)               │
-│            │                                                                 │
-│            ├──→ AgentThread (context management)                            │
-│            │                                                                 │
-│            └──→ Subagents via .as_tool()                                    │
-│                 ├── SearchAgent                                             │
-│                 ├── ContractAgent                                           │
-│                 ├── ComplianceAgent                                         │
-│                 ├── LaborAgent                                              │
-│                 ├── FiscalAgent                                             │
-│                 ├── PrivacyAgent                                            │
-│                 ├── AnalystAgent                                            │
-│                 └── SummarizerAgent                                         │
+│            ├──→ classify (intent + fast-path + sector config)               │
+│            ├──→ rewrite (contextualize follow-ups via history)              │
+│            ├──→ memory_recall (document memories from knowledge-tree)       │
+│            ├──→ react_loop (tool calls: smart_search, structural_query...)  │
+│            │    └──→ SmartSearch → Weaviate + PublicKnowledge + AGE graph   │
+│            └──→ synthesize / synthesize_swarm                               │
+│                                                                              │
+│  Checkpointer: PostgresSaver (conversation continuity)                      │
+│  Store: AsyncPostgresStore (user facts across sessions)                     │
 └─────────────────────────────────────────────────────────────────────────────┘
+
+SSE EVENTS
+  └→ event: slm_thinking  (reasoning steps, tool calls)
+  └→ event: token          (streaming answer tokens)
+  └→ event: sources        (retrieved documents)
+  └→ event: complete       (final answer + metadata)
+  └→ event: swarm_started / worker_started / worker_complete (Swarm mode)
 ```
 
 ---
 
-## Memory System (3 Layers)
+## Complete Execution Flow
 
-### Architecture
-
-```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                          MEMORY SERVICE (Unified)                           │
-├────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│   ┌─────────────────────────┐    ┌───────────────────────────────────┐    │
-│   │   ConversationMemory    │    │       PreferencesStore             │    │
-│   │        (Redis)          │    │          (Redis)                   │    │
-│   ├─────────────────────────┤    ├───────────────────────────────────┤    │
-│   │ Key: emma:conv:         │    │ Key: emma:prefs:                   │    │
-│   │   {tenant}:{session}    │    │   {tenant}:{user}                  │    │
-│   │                         │    │                                    │    │
-│   │ TTL: 30 min             │    │ TTL: Persistent                    │    │
-│   │ Max: 100 messages       │    │                                    │    │
-│   │ Max: 32K tokens         │    │ Fields:                            │    │
-│   │                         │    │ - display_name                     │    │
-│   │ Stores:                 │    │ - preferred_language               │    │
-│   │ - Message history       │    │ - response_style                   │    │
-│   │ - Active documents      │    │ - expertise_level                  │    │
-│   │ - Tool results          │    │ - frequent_queries                 │    │
-│   └─────────────────────────┘    └───────────────────────────────────┘    │
-│                                                                             │
-└────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Memory Limits
-
-| Limit | Value | Purpose |
-|-------|-------|---------|
-| MAX_MESSAGES | 100 | Messages per session |
-| MAX_TOKENS | 32,000 | Total tokens (~128KB) |
-| MAX_MESSAGE_LENGTH | 8,000 chars | Per individual message |
-
-### Key Files
-
-- `app/services/memory/service.py` - Unified MemoryService
-- `app/services/memory/conversation.py` - ConversationMemory (Redis)
-- `app/services/memory/preferences.py` - PreferencesStore (Redis)
-- `app/services/memory/types.py` - Message, ConversationContext, UserPreferences
-
----
-
-## EmmaCoordinator (Main Orchestrator)
-
-### Orchestration Patterns
-
-| Pattern | Description | Use Cases |
-|---------|-------------|-----------|
-| **HANDOFF** | LLM decides delegation via `.as_tool()` | Default, conversational queries |
-| **SEQUENTIAL** | Pipeline A→B→C | "Search, analyze, summarize" |
-| **CONCURRENT** | Parallel A\|B\|C | "From legal, fiscal and labor perspective" |
-
-### Execution Flow
-
-```python
-# 1. Pattern detection (SemanticRouter, ~10ms)
-pattern = await detect_orchestration_pattern(query)
-
-# 2. Load/Create AgentThread (Redis persistence)
-thread = await self._load_or_create_thread(tenant_id, session_id)
-
-# 3. Emma ChatAgent.run() with subagents as tools
-#    Emma sees 8 available tools and decides which to invoke
-result = await self._emma.run(query, thread)
-
-# 4. Clean thinking tags (Qwen3)
-answer = clean_thinking_tags(result.text)
-
-# 5. Save thread state
-await self._save_thread(thread)
-```
-
-### Main File
-
-`backend/microservices/weaviate-service/app/agents/emma_coordinator.py`
-
----
-
-## SemanticRouter (Intent Classification)
-
-### SemanticPatternRouter
-
-Classifies queries in ~10ms using local embeddings:
-
-```python
-# Model: sentence-transformers/all-MiniLM-L6-v2
-# Latency: ~10ms per classification
-
-Routes defined:
-- conversational: Greetings, thanks, identity
-- sequential: "First..., then..."
-- concurrent: "From legal, fiscal and labor perspective"
-```
-
-### SemanticDomainRouter
-
-Classifies queries by legal domain:
-
-| Domain | Agent | Keywords |
-|--------|-------|----------|
-| contract | ContractAgent | contract, clause, terms |
-| labor | LaborAgent | dismissal, payroll, collective agreement |
-| fiscal | FiscalAgent | tax, VAT, IRPF |
-| compliance | ComplianceAgent | GDPR, RGPD, compliance |
-| privacy | PrivacyAgent | LOPDGDD, personal data |
-| search | SearchAgent | search, find, documents |
-| summary | SummarizerAgent | summarize, synthesize |
-| general | AnalystAgent | analyze, evaluate, examine |
-
-### File
-
-`backend/microservices/weaviate-service/app/agents/orchestration/router.py`
-
----
-
-## Specialized Agents (8)
-
-### Core Agents
-
-| Agent | Purpose | Temperature |
-|-------|---------|-------------|
-| **SearchAgent** | Document search | 0.2 |
-| **AnalystAgent** | Deep analysis | 0.2 |
-| **ContractAgent** | Contracts, clauses | 0.1 |
-| **ComplianceAgent** | GDPR/RGPD | 0.1 |
-| **SummarizerAgent** | Executive summaries | 0.3 |
-
-### Legal Domain Agents
-
-| Agent | Domain | Legislation |
-|-------|--------|-------------|
-| **LaborAgent** | Employment law | Workers' Statute |
-| **FiscalAgent** | Tax | General Tax Law |
-| **PrivacyAgent** | Data protection | LOPDGDD |
-
-### File Location
-
-`backend/microservices/weaviate-service/app/agents/agents/`
-
----
-
-## RAG Pipeline (7 Layers)
+### Example: "What risks does this contract have?"
 
 ```
-Layer 0: Document Processing (chunking)
-Layer 1: Semantic Chunking (structure-aware)
-Layer 2: Query Intelligence ◄── Expansion, intent classification
-Layer 3: Hybrid Retrieval + RRF ◄── Dense + Sparse fusion
-Layer 4: Context Assembly ◄── Token management
-Layer 5: Validated Generation ◄── LLM + semantic validation
-Layer 6: Semantic Cache ◄── Redis (~90% latency reduction)
+1. FRONTEND
+   └→ User types query in EmmaChat
+   └→ emma.service.queryEmmaStream()
+      POST /api/v1/emma/query/stream
+      Body: { query, session_id, tenant_id, context: { user_id } }
+
+2. MAIN API (port 8000)
+   └→ Validates auth token
+   └→ Proxies to Emma Agent Service (port 8009)
+
+3. EMMA AGENT SERVICE
+   └→ stream_react_query()
+       │
+       ├→ Load session metadata (slim mode: title, timestamps only)
+       ├→ Hydrate upload context (if documents attached)
+       ├→ Create initial state
+       │   ├→ Load user_memory from AsyncPostgresStore
+       │   └→ Append HumanMessage (history from checkpointer)
+       │
+       └→ graph.astream(config={"configurable": {"thread_id": session_id}})
+           │
+           ├→ classify_node
+           │   Intent: document_query (not fast-path)
+           │   Records _checkpoint_offsets for merge_lists fields
+           │
+           ├→ rewrite_node
+           │   No conversation history → pass-through
+           │
+           ├→ memory_recall_node
+           │   Scans document memories → injects clues if found
+           │
+           ├→ react_loop (iteration 1)
+           │   LLM decides: call smart_search(query="contract risks")
+           │   → SmartSearch: entity extraction → scope detection →
+           │     parallel search (Weaviate + PublicKnowledge) →
+           │     merge + dedup + re-rank
+           │   Returns: 8 relevant chunks with sources
+           │
+           ├→ react_loop (iteration 2)
+           │   LLM has enough context → calls terminate(answer="...")
+           │
+           └→ synthesize_react_node
+               Formats final_answer, deduplicates sources
+               No extra LLM call (direct pass-through)
+
+4. SSE STREAMING
+   └→ event: slm_thinking { step: "Searching documents..." }
+   └→ event: slm_thinking { step: "Found 8 relevant chunks" }
+   └→ event: token { text: "He identificado..." }
+   └→ event: sources [{ title, document_id, score }]
+   └→ event: complete { answer, sources, metadata }
+
+5. PERSISTENCE
+   └→ Checkpointer: graph state saved (messages, tool results)
+   └→ emma_persistence_service: metadata only (title, message_count)
+   └→ Fire-and-forget: extract_and_save_facts() (user memory)
 ```
 
 ---
 
 ## Verified Generation (Generación Verificada)
 
-Emma puede generar documentos verificados donde cada afirmación se valida contra fuentes documentales.
+Emma generates verified documents where each claim is validated against source evidence.
 
 ### Flow
 
@@ -251,15 +323,16 @@ Emma puede generar documentos verificados donde cada afirmación se valida contr
 User → "Verificar: [topic]" + attachments →
   EmmaChat.handleVerifiedGeneration() →
     POST /api/v1/emma/verified/generate/stream (SSE) →
-      Claim Extraction → Evidence Search → Verification → Synthesis
+      Stop-and-Go LangGraph: initialize → extract_item → search_and_evaluate → decide → synthesize
 ```
 
-### Frontend Commands
+### Two-Tier Verification
 
-| Trigger | Action |
-|---------|--------|
-| `/verificar [topic]` | Slash command in chat input |
-| Button "Verificar" | Action toolbar (requires attachments) |
+| Tier | What | Source | Confidence Cap |
+|------|------|--------|---------------|
+| **Tier 1: Faithfulness** | NLI check against source document | Source evidence | 0.80 (fidelity_only) |
+| **Tier 2: External** | Corroboration from external sources | External evidence | Full confidence |
+| **Combined** | Both tiers agree | Both | `corroborated` |
 
 ### SSE Events
 
@@ -271,7 +344,7 @@ User → "Verificar: [topic]" + attachments →
 | `claim_corrected` | Claim modified based on evidence |
 | `claim_rejected` | Claim rejected (insufficient evidence) |
 | `synthesis_started` | Generating final document |
-| `synthesis_complete` | Final verified document ready |
+| `document_complete` | Final verified document ready |
 
 ### Export Formats
 
@@ -282,9 +355,9 @@ User → "Verificar: [topic]" + attachments →
 
 | File | Purpose |
 |------|---------|
-| `emma-agent-service/app/services/verified_generation/service.py` | Main service |
-| `emma-agent-service/app/services/verified_generation/claim_extractor.py` | Extract claims |
-| `emma-agent-service/app/services/verified_generation/claim_verifier.py` | Verify claims |
+| `emma-agent-service/app/agents/langgraph/stop_and_go/` | Stop-and-Go graph (14 files) |
+| `emma-agent-service/app/services/verified_generation/service.py` | Service wrapper |
+| `emma-agent-service/app/services/verified_generation/writer_agent.py` | Claim writing |
 | `emma-agent-service/app/api/verified_generation.py` | REST endpoints |
 | `frontend/.../components/emma-chat/VerifiedDocumentResult.tsx` | UI component |
 
@@ -292,7 +365,7 @@ User → "Verificar: [topic]" + attachments →
 
 ## Predictive Analysis (Análisis Predictivo)
 
-Emma analiza factores jurídicos y predice probabilidades de resultados legales.
+Emma analyzes legal factors and predicts outcome probabilities.
 
 ### Flow
 
@@ -300,96 +373,62 @@ Emma analiza factores jurídicos y predice probabilidades de resultados legales.
 User → "Predecir: [case]" + attachments →
   EmmaChat.handlePredictiveAnalysis() →
     POST /api/v1/emma/predictive/analyze/stream (SSE) →
-      Factor Extraction → Evidence Weighting → Outcome Synthesis
+      Stop-and-Go LangGraph: initialize → extract_item → search_and_evaluate → decide → synthesize
 ```
-
-### Frontend Commands
-
-| Trigger | Action |
-|---------|--------|
-| `/predecir [case]` | Slash command in chat input |
-| Button "Predecir" (⚖️) | Action toolbar (requires attachments) |
-
-### SSE Events
-
-| Event | Description |
-|-------|-------------|
-| `factor_extracted` | New legal factor identified |
-| `factor_verification_started` | Searching evidence |
-| `factor_weighted` | Factor weighted with evidence |
-| `factor_rejected` | Factor rejected (insufficient evidence) |
-| `synthesis_started` | Aggregating prediction |
-| `prediction_complete` | Final prediction ready |
-
-### Prediction Output
-
-```python
-PredictionResult:
-    probability: float          # 0.0-1.0
-    primary_outcome: str        # "favorable" | "unfavorable" | "mixed"
-    outcome_probabilities: Dict # {favorable: 0.7, unfavorable: 0.3}
-    factors: List[WeightedFactor]
-    recommendation: str         # Natural language recommendation (Spanish)
-    disclaimer: str
-```
-
-### Export Formats
-
-- **PDF**: `GET /api/v1/emma/predictive/analysis/{session_id}/pdf`
-- **DOCX**: `GET /api/v1/emma/predictive/analysis/{session_id}/docx`
 
 ### Key Files
 
 | File | Purpose |
 |------|---------|
 | `emma-agent-service/app/services/predictive_analysis/service.py` | Main service |
-| `emma-agent-service/app/services/predictive_analysis/factor_extractor.py` | Extract factors |
+| `emma-agent-service/app/services/predictive_analysis/factor_agent.py` | Factor extraction |
 | `emma-agent-service/app/services/predictive_analysis/prediction_synthesizer.py` | Synthesis |
 | `emma-agent-service/app/api/predictive_analysis.py` | REST endpoints |
-| `emma-agent-service/config/prompts/predictive_prompts.yaml` | LLM prompts |
-| `frontend/.../components/emma-chat/PredictionResult.tsx` | UI component |
 
 ---
 
-## vLLM Configuration
+## SGLang Configuration
 
 ### Environment Variables
 
 ```bash
-# vLLM (Primary LLM)
+# SGLang (Primary LLM — service name kept as "vllm" for URL compatibility)
 VLLM_ENABLED=true
 VLLM_BASE_URL=http://vllm:8000/v1
-VLLM_MODEL=Qwen/Qwen3-4B
+VLLM_MODEL=Qwen/Qwen3.5-9B
 VLLM_MAX_MODEL_LEN=16384
+VLLM_GPU_UTIL=0.75
 
 # Embeddings (BGE-M3)
 EMBEDDING_PROVIDER=sentence-transformers
 EMBEDDING_MODEL=BAAI/bge-m3
 EMBEDDING_DIMENSIONS=1024
 
-# Redis (Memory + Context)
+# LangGraph Persistence
+LANGGRAPH_CHECKPOINTER_ENABLED=true
+DATABASE_URL=postgresql+asyncpg://user:pass@postgres:5432/db
+
+# Redis (session metadata, caching)
 REDIS_HOST=redis
 REDIS_PORT=6379
-
-# Weaviate (Vector DB)
-WEAVIATE_URL=http://weaviate:8080
 ```
 
-### Recommended Configuration (RTX 4090 24GB)
+### GPU Allocation (RTX 4090 24GB)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  LLM: Qwen/Qwen3-4B                                         │
-│    • VRAM: ~8GB (35% allocation)                            │
-│    • Context: 16K tokens (configurable up to 32K)           │
+│  LLM: Qwen/Qwen3.5-9B (BF16)                               │
+│    • VRAM: ~11.4GB (75% allocation via mem_fraction_static)  │
+│    • Context: 16K tokens (PLANNER: 8K)                       │
+│    • Runtime: SGLang v0.5.9                                  │
 ├─────────────────────────────────────────────────────────────┤
 │  Embedding: BAAI/bge-m3                                     │
-│    • VRAM: ~2GB (10% allocation)                            │
-│    • Dimensions: 1024                                       │
+│    • VRAM: ~2.7GB                                            │
+│    • Dimensions: 1024                                        │
 │    • Features: Multilingual (100+ languages)                │
 ├─────────────────────────────────────────────────────────────┤
-│  Total VRAM: ~10GB (45% of 24GB)                            │
-│  Buffer: ~14GB for batching and concurrent requests         │
+│  Total VRAM: ~14.1GB (59% of 24GB)                           │
+│  Buffer: ~9.9GB for KV cache and concurrent requests        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -399,178 +438,22 @@ WEAVIATE_URL=http://weaviate:8080
 
 | Layer | Timeout | File |
 |-------|---------|------|
-| Frontend | 180s | `frontend/src/lib/config.ts` |
-| Gateway | 180s | `backend/app/api/v1/weaviate.py` |
-| Coordinator | 300s | `emma_coordinator.py` |
-
----
-
-## Critical Files
-
-### Frontend
-
-| File | Purpose |
-|------|---------|
-| `frontend/src/app/(main)/[tenantId]/chat/page.tsx` | Chat page |
-| `frontend/src/components/emma-chat/EmmaChat.tsx` | Main component |
-| `frontend/src/lib/services/emma.service.ts` | API client |
-| `frontend/src/hooks/use-agent-chat.ts` | Chat hook |
-
-### Weaviate Microservice
-
-| File | Purpose |
-|------|---------|
-| `app/api/emma.py` | Emma endpoints |
-| `app/services/emma_service.py` | Main service |
-| `app/agents/emma_coordinator.py` | Main orchestrator |
-| `app/agents/orchestration/router.py` | Semantic Router |
-| `app/services/memory/service.py` | Unified memory |
-| `app/tools/channel_tools.py` | Channel tools |
-
----
-
-## Complete Execution Flow
-
-### Example: "What risks does this contract have?"
-
-```
-1. FRONTEND
-   └→ User types query in EmmaQueryInput
-   └→ EmmaChat.handleSendQuery() called
-   └→ emma.service.queryEmmaStream()
-      POST /api/v1/weaviate/emma/query/stream
-      Body: { query, session_id, tenant_id, context: { user_id, user_name } }
-
-2. BACKEND GATEWAY (weaviate.py)
-   └→ Validates JWT token
-   └→ Injects tenant_id from claims
-   └→ Proxies to Weaviate microservice (timeout: 180s)
-
-3. WEAVIATE SERVICE (emma.py)
-   └→ EmmaService.execute_query_stream()
-       │
-       ├→ Load conversation history (MemoryService)
-       │   Key: emma:conv:{tenant}:{session}
-       │
-       ├→ Enrich user context (name, email, role, preferences)
-       │
-       └→ EmmaCoordinator.execute()
-           │
-           ├→ Pattern Detection (SemanticRouter)
-           │   Query: "risks" + "contract"
-           │   → HANDOFF pattern (default)
-           │
-           ├→ Load/Create AgentThread
-           │
-           ├→ Build context-aware query
-           │
-           └→ Emma ChatAgent.run(query, thread)
-               │
-               │  Emma sees 8 tools available:
-               │  - search_agent, contract_agent, compliance_agent...
-               │
-               │  Emma decides to call:
-               │  1. contract_agent.as_tool() → Analyze contract clauses
-               │  2. compliance_agent.as_tool() → Check GDPR compliance
-               │
-               └→ Synthesize final answer
-
-4. STREAMING EVENTS (SSE)
-   └→ event: start
-   └→ event: delegation { agent: "contract_agent" }
-   └→ event: delegation { agent: "compliance_agent" }
-   └→ event: token { text: "I have identified..." }
-   └→ event: complete { answer, tools_used, confidence }
-
-5. MEMORY STORAGE
-   └→ MemoryService.add_exchange()
-       - Store user message
-       - Store assistant response
-       - Store tools_used metadata
-       - Apply token limits (truncate if needed)
-```
-
----
-
-## Voice-First Architecture (Phase 2)
-
-### Planned Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         EMMA VOICE ASSISTANT                                 │
-│                                                                              │
-│   🎤 User speaks → STT → vLLM (own model) → TTS → 🔊                        │
-│                                                                              │
-│   "Analyze the contract"  →  [Processing]  →  "I found 3 risks..."          │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Voice Components
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **STT** | faster-whisper (local) | Speech to Text |
-| **LLM** | vLLM (Qwen3) | Inference |
-| **TTS** | Gemini Pro | Text to Speech |
-| **Streaming** | WebSocket | Bidirectional |
-| **VAD** | silero-vad | Voice Activity Detection |
-
-### Latency Targets
-
-| Phase | Target |
-|-------|--------|
-| VAD detection | <50ms |
-| STT (Whisper) | <500ms |
-| vLLM first token | <200ms |
-| TTS first chunk | <300ms |
-| **End-to-end** | **<1.5s** |
-
----
-
-## Development
-
-```bash
-# Start backend services
-cd backend/docker && ./start-dev.sh
-
-# Verify Emma service
-curl -H "Authorization: Bearer ${MICROSERVICES_API_KEY}" \
-     http://localhost:8007/emma/health
-
-# View Emma logs
-docker logs docker-weaviate-service-1 --tail 100 -f
-```
+| Frontend SSE | 180s | `frontend/src/lib/config.ts` |
+| Gateway proxy | 180s | `backend/app/api/v1/emma.py` |
+| ReAct global | 120s | `emma-agent-service/app/core/config.py` (`react_global_timeout_seconds`) |
+| Swarm worker | 45s | `SWARM_WORKER_TIMEOUT_SECONDS` |
 
 ---
 
 ## Multi-Pipeline RAG Sectors
 
-Emma supports per-deployment sector configuration that tunes the entire RAG pipeline for a specific domain. Configured via `ACTIVE_SECTOR` environment variable.
+Emma supports per-deployment sector configuration via `ACTIVE_SECTOR` environment variable.
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                    EMMA + MULTI-PIPELINE RAG SECTORS                         │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│   User Query                                                                 │
-│       │                                                                      │
-│       ▼                                                                      │
-│   Coordinator → Context Tree → Retrieve (sector alpha/top_k)                │
-│       │                                                                      │
-│       ▼                                                                      │
-│   Graph Expand (sector entity extraction + Apache AGE)                      │
-│       │                                                                      │
-│       ▼                                                                      │
-│   Plan (agents filtered to active sector)                                   │
-│       │                                                                      │
-│       ▼                                                                      │
-│   Specialist Agents → Synthesize (MEN optional)                             │
-│                                                                              │
-│   Sectors: legal | medical | documental | (none = generic)                  │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+| Sector | Specialist Agents | hybrid_alpha | top_k | Chunk Strategy |
+|--------|-------------------|-------------|-------|----------------|
+| `legal` | legal, labor, fiscal, contract, compliance, privacy | 0.7 | 12 | legal_sections (1500/200) |
+| `medical` | general | 0.6 | 15 | paragraph (1200/150) |
+| `documental` | general, education, realestate | 0.5 | 10 | semantic (1000/100) |
 
 See `emma-agent-service/app/agents/langgraph/sectors/` for implementation.
 
@@ -589,36 +472,68 @@ Emma Reactive extends Emma beyond request-response into a **proactive, event-dri
 | **Background Service** | LangGraph + Celery | Proactive analysis without user HTTP request |
 | **Notifications** | Redis Pub/Sub + WebSocket | Real-time in-app, email, webhook |
 | **Multi-Channel** | Telegram, WhatsApp, Slack, Email | External messaging with user pairing |
+| **Heartbeat** | Celery Beat (30min) | Proactive context evaluation + insight generation |
 
-### Key Endpoints (emma-agent-service)
+---
 
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /triggers` | Create reactive triggers |
-| `GET /notifications` | List user notifications |
-| `POST /channels` | Configure messaging channels |
-| `POST /channels/webhooks/{type}` | Inbound messages from external channels |
-| `POST /channels/pairing/confirm` | Link external user → KeyCloak identity |
-| `POST /emma/background/analyze_document` | Background document analysis |
+## Critical Files
 
-### Docker Service
+### Emma Agent Service (`backend/microservices/emma-agent-service/`)
 
-```yaml
-emma-reactive-worker:
-  command: ["python", "-m", "app.workers.event_listener"]
-  # Consumes Redis Streams → evaluates triggers → dispatches actions
+| File | Purpose |
+|------|---------|
+| `app/api/emma.py` | REST + SSE endpoints (`/emma/query`, `/emma/stream`) |
+| `app/agents/langgraph/graph.py` | StateGraph definition (compiled with checkpointer + Store) |
+| `app/agents/langgraph/state.py` | `ReActState` TypedDict + initial state factory |
+| `app/agents/langgraph/api.py` | `stream_react_query()` — SSE streaming bridge |
+| `app/agents/langgraph/nodes/` | 8 node implementations |
+| `app/agents/langgraph/tools/` | 9 tools via ToolRegistry |
+| `app/agents/langgraph/sectors/` | Sector configuration |
+| `app/agents/llm_router.py` | LLMRouter with dual-phase client pool |
+| `app/core/checkpointer.py` | PostgresSaver + Store singletons (shared pool) |
+| `app/services/memory/user_facts.py` | User memory CRUD (Store primary, legacy fallback) |
+| `app/services/emma_persistence_service.py` | Session metadata (slim mode with checkpointer) |
+| `config/prompts/emma_prompts.yaml` | All LLM prompts (Langfuse fallback) |
+
+### Frontend
+
+| File | Purpose |
+|------|---------|
+| `frontend/apps/on-premise/src/components/emma-chat/EmmaChat.tsx` | Main chat component |
+| `frontend/apps/on-premise/src/lib/services/emma.service.ts` | API client + SSE parser |
+
+---
+
+## Voice-First Architecture (Phase 2 — Planned)
+
+### Planned Architecture
+
 ```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         EMMA VOICE ASSISTANT                                 │
+│                                                                              │
+│   🎤 User speaks → STT → SGLang (Qwen3.5) → TTS → 🔊                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+| Component | Technology | Target Latency |
+|-----------|------------|----------------|
+| **STT** | faster-whisper (local) | <500ms |
+| **LLM** | SGLang (Qwen3.5-9B) | <200ms first token |
+| **TTS** | Gemini Pro | <300ms first chunk |
+| **Streaming** | WebSocket | Bidirectional |
+| **End-to-end** | — | **<1.5s** |
 
 ---
 
 ## Related Documentation
 
+- [USER_MEMORY.md](./USER_MEMORY.md) - Cross-session persistent user facts (AsyncPostgresStore)
 - [EMMA_REACTIVE.md](./EMMA_REACTIVE.md) - Emma Reactive event-driven system
-- [SIL.md](./SIL.md) - Structural Intelligence Layer (Legacy/Removed)
-- [SLM_ROUTER.md](./SLM_ROUTER.md) - SLM Router (Legacy/Removed)
 - [RAG_PIPELINE.md](./RAG_PIPELINE.md) - RAG Implementation Blueprint
 - [MODULAR_ARCHITECTURE.md](./MODULAR_ARCHITECTURE.md) - On-Premise Architecture
+- [PUBLIC_KNOWLEDGE.md](./PUBLIC_KNOWLEDGE.md) - BOE Legislation & Legal Knowledge Graph
 
 ---
 
-*Architecture: EmmaCoordinator + LangGraph + vLLM (Qwen3) + Multi-Pipeline RAG Sectors + Emma Reactive*
+*Architecture: LangGraph ReAct Agent + SGLang (Qwen3.5-9B) + PostgresSaver + AsyncPostgresStore + SmartSearch + Multi-Pipeline RAG Sectors + Emma Reactive*
