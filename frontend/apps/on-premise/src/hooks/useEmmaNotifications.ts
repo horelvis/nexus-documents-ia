@@ -1,12 +1,17 @@
 /**
- * useEmmaNotifications — Real-time notification hook via WebSocket.
+ * useEmmaNotifications — Notification hook via Main API proxy.
  *
- * Connects to the Emma notification WebSocket and provides:
- * - Real-time notification updates
- * - Unread count badge
- * - Mark as read functionality
+ * Fetches notifications through the Main API (port 8000) which proxies
+ * to emma-agent-service. This avoids direct browser → microservice calls
+ * that would fail outside the Docker network.
+ *
+ * HTTP endpoints:
+ *   GET    /api/v1/emma/notifications
+ *   PATCH  /api/v1/emma/notifications/:id/read
+ *   POST   /api/v1/emma/notifications/read-all
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { API_CONFIG } from "../lib/config";
 
 export interface EmmaNotification {
   id: string;
@@ -23,113 +28,91 @@ export interface EmmaNotification {
 }
 
 interface UseEmmaNotificationsOptions {
-  /** Emma Agent Service base URL */
-  baseUrl?: string;
-  /** Whether to auto-connect */
+  /** Whether to auto-fetch notifications */
   enabled?: boolean;
 }
 
+const SSO_TOKEN_KEY = 'nexus_sso_tokens'
+
+function getAccessToken(): string | null {
+  if (typeof window === 'undefined') return null
+  const stored = sessionStorage.getItem(SSO_TOKEN_KEY)
+  if (!stored) return null
+  try {
+    const tokens = JSON.parse(stored)
+    return tokens.access_token || null
+  } catch {
+    return null
+  }
+}
+
+/** Build the API base URL matching emma.service.ts pattern */
+function getApiBase(): string {
+  const normalizedBaseUrl = (API_CONFIG.BASE_URL || '').replace(/\/$/, '')
+  return `${normalizedBaseUrl}${API_CONFIG.API_V1}`
+}
+
 export function useEmmaNotifications(options: UseEmmaNotificationsOptions = {}) {
-  const {
-    baseUrl = process.env.NEXT_PUBLIC_EMMA_SERVICE_URL || "http://localhost:8009",
-    enabled = true,
-  } = options;
+  const { enabled = true } = options;
 
   const [notifications, setNotifications] = useState<EmmaNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch initial notifications
+  // Fetch notifications via Main API proxy
   useEffect(() => {
     if (!enabled) return;
 
     const fetchNotifications = async () => {
+      const token = getAccessToken();
+      if (!token) return;
+
       try {
-        const res = await fetch(`${baseUrl}/emma/notifications?limit=50`);
+        const apiBase = getApiBase();
+        const res = await fetch(`${apiBase}/emma/notifications?limit=50`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        });
         if (res.ok) {
           const data = await res.json();
-          setNotifications(data.notifications || []);
-          setUnreadCount(
-            (data.notifications || []).filter((n: EmmaNotification) => !n.is_read).length
-          );
+          const items: EmmaNotification[] = data.notifications || [];
+          setNotifications(items);
+          setUnreadCount(items.filter((n) => !n.is_read).length);
+          setIsConnected(true);
         }
       } catch (err) {
         console.warn("Failed to fetch notifications:", err);
+        setIsConnected(false);
       }
     };
 
+    // Initial fetch
     fetchNotifications();
-  }, [baseUrl, enabled]);
 
-  // WebSocket connection for real-time updates
-  useEffect(() => {
-    if (!enabled) return;
-
-    const wsUrl = baseUrl.replace(/^http/, "ws") + "/emma/ws/notifications";
-    let ws: WebSocket;
-
-    const connect = () => {
-      try {
-        ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          setIsConnected(true);
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-
-            // Ignore ping/pong messages and messages without required fields
-            if (data.type === "ping" || data.type === "pong") {
-              return;
-            }
-
-            // Validate it's a real notification with required fields
-            if (!data.id || !data.title) {
-              return;
-            }
-
-            const notification = data as EmmaNotification;
-            setNotifications((prev) => [notification, ...prev].slice(0, 100));
-            if (!notification.is_read) {
-              setUnreadCount((prev) => prev + 1);
-            }
-          } catch (err) {
-            // Silently ignore parse errors (keepalive messages, etc.)
-          }
-        };
-
-        ws.onclose = () => {
-          setIsConnected(false);
-          // Auto-reconnect after 5 seconds
-          setTimeout(connect, 5000);
-        };
-
-        ws.onerror = () => {
-          ws.close();
-        };
-      } catch (err) {
-        console.warn("WebSocket connection failed:", err);
-      }
-    };
-
-    connect();
+    // Poll every 30s as lightweight alternative to WebSocket
+    pollTimerRef.current = setInterval(fetchNotifications, 30_000);
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+        pollTimerRef.current = null;
       }
     };
-  }, [baseUrl, enabled]);
+  }, [enabled]);
 
   const markAsRead = async (notificationId: string) => {
+    const token = getAccessToken();
+    if (!token) return;
+
     try {
-      const res = await fetch(`${baseUrl}/emma/notifications/${notificationId}/read`, {
+      const apiBase = getApiBase();
+      const res = await fetch(`${apiBase}/emma/notifications/${notificationId}/read`, {
         method: "PATCH",
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
       });
       if (res.ok) {
         setNotifications((prev) =>
@@ -143,9 +126,16 @@ export function useEmmaNotifications(options: UseEmmaNotificationsOptions = {}) 
   };
 
   const markAllAsRead = async () => {
+    const token = getAccessToken();
+    if (!token) return;
+
     try {
-      const res = await fetch(`${baseUrl}/emma/notifications/read-all`, {
+      const apiBase = getApiBase();
+      const res = await fetch(`${apiBase}/emma/notifications/read-all`, {
         method: "POST",
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
       });
       if (res.ok) {
         setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));

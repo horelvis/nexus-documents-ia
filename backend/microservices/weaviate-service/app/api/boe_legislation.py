@@ -487,55 +487,46 @@ class BOEDownloaderService:
                         )
 
                         # --- Stage C: Legal reference extraction + graph ---
+                        # Delegated to knowledge-tree-service via HTTP
                         try:
-                            from app.services.sil.legal_graph_service import (
-                                legal_graph,
-                                LegalLaw,
-                                LawStatus,
-                            )
-                            from app.services.knowledge.legal_reference_extractor import (
-                                legal_reference_extractor,
-                            )
+                            from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
                             # Detect domain from materias
                             domain = detect_legal_domain(materias, title)
                             short_name = extract_law_short_name(title, boe_id)
-                            status = LawStatus.DEROGADA if get_text(metadatos, 'estatus_derogacion') == "S" else LawStatus.VIGENTE
+                            status = "derogada" if get_text(metadatos, 'estatus_derogacion') == "S" else "vigente"
 
-                            # Create LegalLaw node in public graph
-                            law = LegalLaw(
-                                boe_id=boe_id,
-                                title=title,
-                                short_name=short_name,
-                                domain=domain,
-                                status=status,
-                                publication_date=get_text(metadatos, 'fecha_publicacion'),
-                                effective_date=get_text(metadatos, 'fecha_vigencia'),
-                                eli_uri=get_text(metadatos, 'url_eli'),
-                                summary=title[:500],
-                                keywords=materias[:10],
-                                weaviate_uuid=weaviate_uuid,
+                            # Create LegalLaw node via knowledge-tree-service
+                            law_data = {
+                                "boe_id": boe_id,
+                                "title": title,
+                                "short_name": short_name,
+                                "domain": domain.value if hasattr(domain, 'value') else str(domain),
+                                "status": status,
+                                "publication_date": get_text(metadatos, 'fecha_publicacion'),
+                                "effective_date": get_text(metadatos, 'fecha_vigencia'),
+                                "eli_uri": get_text(metadatos, 'url_eli'),
+                                "summary": title[:500],
+                                "keywords": materias[:10],
+                                "weaviate_uuid": weaviate_uuid,
+                            }
+                            await knowledge_tree_legal_client.add_law(law_data)
+                            logger.info(f"Added legal_law node: {short_name} ({boe_id})")
+
+                            # Extract + store references in one call
+                            ref_result = await knowledge_tree_legal_client.extract_and_store_references(
+                                boe_id=boe_id, text=content
                             )
-                            await legal_graph.add_law(law)
-                            logger.info(f"✅ Added legal_law node: {short_name} ({boe_id})")
-
-                            # Extract legal references from full text
-                            legal_refs = await legal_reference_extractor.extract(
-                                text=content, boe_id=boe_id
-                            )
-
-                            # Store references as graph edges
-                            if legal_refs.total_references > 0:
-                                ref_counts = await legal_graph.store_references(boe_id, legal_refs)
-                                logger.info(f"✅ Stored legal refs for {boe_id}: {ref_counts}")
+                            if ref_result.get("stored"):
+                                logger.info(f"Stored legal refs for {boe_id}: {ref_result['stored']}")
 
                             # Enrich with BOE /analisis API (posterior references)
                             try:
-                                boe_analysis = await legal_reference_extractor.enrich_from_boe_api(boe_id)
-                                for ref in boe_analysis.posterior_references:
+                                boe_analysis = await knowledge_tree_legal_client.enrich_from_boe_api(boe_id)
+                                for ref in boe_analysis.get("posterior_references", []):
                                     ref_boe_id = ref.get("identificador", "")
                                     if ref_boe_id:
-                                        await legal_graph.add_reference(
+                                        await knowledge_tree_legal_client.add_reference(
                                             ref_boe_id, boe_id, "MODIFIES",
                                             context_snippet=ref.get("titulo", "")[:200],
                                         )
@@ -543,7 +534,7 @@ class BOEDownloaderService:
                                 logger.debug(f"BOE /analisis enrichment skipped: {api_err}")
 
                         except Exception as graph_error:
-                            logger.warning(f"⚠️ Failed to process legal graph for {boe_id}: {graph_error}")
+                            logger.warning(f"Failed to process legal graph for {boe_id}: {graph_error}")
 
                     except Exception as e:
                         logger.error(f"Failed to index {boe_id}: {e}")
@@ -697,26 +688,24 @@ def detect_legal_domain(materias: List[str], title: str) -> "LegalDomain":
         title: Law title
 
     Returns:
-        LegalDomain enum value
+        Domain string value
     """
-    from app.services.sil.legal_graph_service import LegalDomain
-
     # Combine materias and title for analysis
     text = " ".join(materias + [title]).lower()
 
     # Domain detection rules (order matters - more specific first)
     domain_rules = [
-        (LegalDomain.LABOR, ["laboral", "trabajador", "trabajo", "empleo", "despido", "salario", "contrato de trabajo", "seguridad social", "prevención de riesgos"]),
-        (LegalDomain.PRIVACY, ["protección de datos", "datos personales", "privacidad", "rgpd", "lopdgdd"]),
-        (LegalDomain.FISCAL, ["tribut", "fiscal", "impuesto", "irpf", "iva", "hacienda", "tributaria"]),
-        (LegalDomain.MERCANTILE, ["mercantil", "sociedad", "comercio", "empresa", "competencia", "consumidor"]),
-        (LegalDomain.CIVIL, ["civil", "código civil", "enjuiciamiento", "propiedad", "arrendamiento", "hipoteca"]),
-        (LegalDomain.ADMINISTRATIVE, ["administrativ", "procedimiento", "sector público", "contratación pública"]),
-        (LegalDomain.COMPLIANCE, ["blanqueo", "penal", "concursal", "insolvencia", "auditoría", "secretos"]),
-        (LegalDomain.IP, ["propiedad intelectual", "marca", "patente", "autor"]),
-        (LegalDomain.COMMERCE, ["consumidor", "comercio minorista", "publicidad"]),
-        (LegalDomain.REAL_ESTATE, ["inmobiliario", "arrendamiento urbano", "propiedad horizontal", "hipotecaria", "vivienda"]),
-        (LegalDomain.EDUCATION, ["educación", "universidad", "enseñanza", "educativ"]),
+        ("labor", ["laboral", "trabajador", "trabajo", "empleo", "despido", "salario", "contrato de trabajo", "seguridad social", "prevención de riesgos"]),
+        ("privacy", ["protección de datos", "datos personales", "privacidad", "rgpd", "lopdgdd"]),
+        ("fiscal", ["tribut", "fiscal", "impuesto", "irpf", "iva", "hacienda", "tributaria"]),
+        ("mercantile", ["mercantil", "sociedad", "comercio", "empresa", "competencia", "consumidor"]),
+        ("civil", ["civil", "código civil", "enjuiciamiento", "propiedad", "arrendamiento", "hipoteca"]),
+        ("administrative", ["administrativ", "procedimiento", "sector público", "contratación pública"]),
+        ("compliance", ["blanqueo", "penal", "concursal", "insolvencia", "auditoría", "secretos"]),
+        ("ip", ["propiedad intelectual", "marca", "patente", "autor"]),
+        ("commerce", ["consumidor", "comercio minorista", "publicidad"]),
+        ("real_estate", ["inmobiliario", "arrendamiento urbano", "propiedad horizontal", "hipotecaria", "vivienda"]),
+        ("education", ["educación", "universidad", "enseñanza", "educativ"]),
     ]
 
     for domain, keywords in domain_rules:
@@ -724,7 +713,7 @@ def detect_legal_domain(materias: List[str], title: str) -> "LegalDomain":
             if keyword in text:
                 return domain
 
-    return LegalDomain.GENERAL
+    return "general"
 
 
 # =============================================================================

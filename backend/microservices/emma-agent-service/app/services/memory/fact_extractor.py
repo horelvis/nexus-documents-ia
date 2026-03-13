@@ -110,6 +110,7 @@ async def _extract_inferred_facts(
     """
     try:
         from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
 
         prompt = _LLM_EXTRACTION_PROMPT.format(
             user_message=user_message[:500],
@@ -121,6 +122,7 @@ async def _extract_inferred_facts(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=300,
+            role=ModelRole.PLANNER,
         )
 
         content = (response.content or "").strip()

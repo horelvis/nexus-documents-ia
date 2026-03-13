@@ -47,6 +47,7 @@ REGLAS CRÍTICAS:
 5. Usa datos específicos: nombres, fechas, números, porcentajes cuando estén disponibles
 6. Mantén las afirmaciones concisas (1-2 frases máximo)
 7. Escribe SIEMPRE en el mismo idioma que los documentos fuente
+8. VARÍA el inicio de cada afirmación. NUNCA repitas la misma apertura (ej. "Este estudio", "El estudio", "El artículo") en afirmaciones consecutivas. Usa sujetos concretos: nombres de autores, conceptos específicos, datos, hallazgos, metodologías, etc.
 
 FORMATO:
 - Genera SOLO el texto de la afirmación, nada más
@@ -60,12 +61,15 @@ EJEMPLOS DE BUENAS AFIRMACIONES:
 - "El contrato tiene una vigencia de 24 meses a partir del 1 de enero de 2024."
 - "La cláusula de penalización establece un 5% del valor total por incumplimiento."
 - "ACME Corporation es responsable del mantenimiento del software según la sección 4.2."
+- "Los resultados muestran una correlación significativa (r=0.82) entre ambas variables."
+- "La muestra incluyó 245 participantes de edades comprendidas entre 18 y 65 años."
 
 EJEMPLOS DE MALAS AFIRMACIONES:
 - "El contrato parece establecer..." (incierto)
 - "Según mi análisis..." (meta-comentario)
 - "1. El contrato..." (numerado/con viñeta)
 - "<think>Voy a analizar...</think>" (etiquetas de pensamiento - NUNCA USAR)
+- "Este estudio analiza..." seguido de "El estudio muestra..." (apertura repetitiva)
 """
 
 FALLBACK_CLAIM_USER_NEXT = """Genera la SIGUIENTE afirmación factual para este documento.
@@ -80,6 +84,8 @@ AFIRMACIONES PREVIAMENTE VERIFICADAS (complementa estas, no repitas):
 {verified_claims_text}
 
 NÚMERO DE AFIRMACIÓN A GENERAR: {claim_number}
+
+IMPORTANTE: Varía el inicio de la afirmación. NO empieces con la misma frase que las afirmaciones previas (evita repetir "Este estudio", "El estudio", "El artículo", etc.). Usa sujetos concretos y específicos.
 
 Genera SOLO UNA nueva afirmación factual. Solo el texto de la afirmación, nada más."""
 
@@ -179,7 +185,7 @@ class WriterAgent:
             verified_text = self._format_verified_claims(verified_claims)
             variables = {
                 "query": query,
-                "source_context": source_context[:4000],
+                "source_context": source_context,
                 "verified_claims_text": verified_text,
                 "claim_number": str(claim_number),
             }
@@ -193,7 +199,7 @@ class WriterAgent:
             # First claim - simpler prompt
             variables = {
                 "query": query,
-                "source_context": source_context[:4000],
+                "source_context": source_context,
             }
             user_cached = await client.get_prompt(
                 "emma_verified_claim_user_first",
@@ -266,7 +272,7 @@ class WriterAgent:
         # User prompt
         variables = {
             "query": query,
-            "source_context": source_context[:2000],
+            "source_context": source_context,
             "verified_claims_text": verified_text,
         }
         user_cached = await client.get_prompt(
@@ -409,10 +415,11 @@ class WriterAgent:
         """
         # Try shared LLM client first (handles thinking tags properly)
         try:
-            from app.agents.llm_client import get_llm_client
+            from app.agents.llm_router import get_llm_router
+            from app.agents.llm_client import ModelRole
 
-            llm_client = await get_llm_client()
-            response = await llm_client.chat(
+            router = await get_llm_router()
+            response = await router.chat(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -420,14 +427,16 @@ class WriterAgent:
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
                 enable_thinking=False,
+                seed=42,
+                role=ModelRole.CHAT,
             )
 
             if response and response.content:
                 return response.content.strip()
             else:
-                logger.warning("⚠️ LLMClient returned empty response, falling back to raw vLLM")
+                logger.warning("⚠️ LLM router returned empty response, falling back to raw vLLM")
         except Exception as e:
-            logger.warning(f"⚠️ LLMClient failed ({e}), falling back to raw vLLM")
+            logger.warning(f"⚠️ LLM router failed ({e}), falling back to raw vLLM")
 
         # Fallback: direct vLLM call
         try:
@@ -440,6 +449,7 @@ class WriterAgent:
                     ],
                     "temperature": self._temperature,
                     "max_tokens": self._max_tokens,
+                    "seed": 42,
                     "stop": ["\n\n", "\n1.", "\n2.", "\n-", "\n•"],
                     "chat_template_kwargs": {
                         "enable_thinking": False

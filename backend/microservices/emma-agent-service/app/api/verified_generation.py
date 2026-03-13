@@ -18,6 +18,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.core.security import verify_api_key
 from app.schemas.verified_generation import (
+    ReviewSubmission,
     SessionClaimsResponse,
     VerificationSessionStatus,
     VerifiedDocumentRequest,
@@ -159,6 +160,80 @@ async def generate_verified_document_stream(
 
 
 @router.post(
+    "/session/{session_id}/resume/stream",
+    summary="Submit HITL review and resume generation",
+    description="""
+    Submit human review decisions for a paused verified generation session
+    and stream the remaining events (synthesis + document assembly).
+
+    This endpoint is called after the frontend receives a `review_requested`
+    event from the initial `/generate/stream` SSE connection. The review
+    decisions are submitted and the graph resumes from the interrupt point.
+
+    Returns an SSE stream with:
+    - `review_submitted`: Summary of applied decisions
+    - `document_complete`: Final assembled document
+
+    Returns 410 Gone if the session has expired.
+    """,
+)
+async def resume_verified_stream(
+    session_id: str,
+    review: ReviewSubmission,
+    _: None = Depends(verify_api_key),
+) -> StreamingResponse:
+    """Submit HITL review and resume verified document generation."""
+    logger.info(
+        f"📝 HITL resume request: session={session_id[:16]}..., "
+        f"decisions={len(review.decisions)}"
+    )
+
+    # Verify session exists in Redis
+    cache = get_verified_cache()
+    await cache.connect()
+    claims_count = await cache.get_claims_count(review.tenant_id, session_id)
+
+    if claims_count == 0:
+        raise HTTPException(
+            status_code=410,
+            detail="Session expired or not found. Please regenerate the document.",
+        )
+
+    async def event_generator():
+        """Generate SSE events for the resume phase."""
+        try:
+            service = get_verified_document_service()
+
+            decisions_dicts = [d.model_dump() for d in review.decisions]
+
+            async for event in service.resume_after_review(
+                session_id=session_id,
+                tenant_id=review.tenant_id,
+                review_decisions=decisions_dicts,
+            ):
+                yield event.to_sse()
+
+        except Exception as e:
+            logger.error(f"❌ Resume stream error: {e}")
+            import json
+            error_data = json.dumps({
+                "event_type": "error",
+                "data": {"error": str(e)},
+            })
+            yield f"data: {error_data}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
     "/generate/pdf",
     summary="Generate a verified document as PDF",
     description="Generate and verify a document, then return it as a downloadable PDF report.",
@@ -187,6 +262,10 @@ async def generate_verified_document_pdf(
             "claims_rejected": response.claims_rejected,
             "average_confidence": response.average_confidence,
             "execution_time_ms": response.execution_time_ms,
+            "sources": response.sources,
+            "doi_validations": response.doi_validations,
+            "source_filenames": response.source_filenames,
+            "source_summary": response.source_summary,
         })
 
         return Response(
@@ -245,6 +324,9 @@ async def export_session_pdf(
                     "confidence": c.confidence,
                     "status": c.status.value,
                     "evidence_document_ids": c.evidence_document_ids,
+                    "evidence_sources": c.evidence_sources,
+                    "verification_type": c.verification_type,
+                    "verification_reason": c.verification_reason,
                 }
                 for c in claims
             ],
@@ -254,6 +336,9 @@ async def export_session_pdf(
             "average_confidence": stats.get("average_confidence", 0.0),
             "execution_time_ms": meta.get("execution_time_ms", 0),
             "sources": meta.get("sources", []),
+            "doi_validations": meta.get("doi_validations", []),
+            "source_filenames": meta.get("source_filenames", []),
+            "source_summary": meta.get("source_summary", ""),
         })
 
         return Response(
@@ -314,6 +399,9 @@ async def export_session_docx(
                     "confidence": c.confidence,
                     "status": c.status.value,
                     "evidence_document_ids": c.evidence_document_ids,
+                    "evidence_sources": c.evidence_sources,
+                    "verification_type": c.verification_type,
+                    "verification_reason": c.verification_reason,
                 }
                 for c in claims
             ],
@@ -323,6 +411,9 @@ async def export_session_docx(
             "average_confidence": stats.get("average_confidence", 0.0),
             "execution_time_ms": meta.get("execution_time_ms", 0),
             "sources": meta.get("sources", []),
+            "doi_validations": meta.get("doi_validations", []),
+            "source_filenames": meta.get("source_filenames", []),
+            "source_summary": meta.get("source_summary", ""),
         })
 
         return Response(
@@ -385,6 +476,75 @@ async def get_session_claims(
             status_code=500,
             detail=f"Failed to get claims: {str(e)}"
         )
+
+
+@router.get(
+    "/session/{session_id}",
+    response_model=dict,
+    summary="Get full session data for recovery",
+    description="Retrieve a completed (or running) verification session for frontend recovery.",
+)
+async def get_session(
+    session_id: str,
+    tenant_id: str,
+    _: None = Depends(verify_api_key),
+) -> dict:
+    """
+    Return full session state for frontend recovery after navigation.
+
+    Reads metadata + claims from Redis and returns a shape compatible with
+    the frontend VerifiedGenerationMetadata type.
+    """
+    try:
+        cache = get_verified_cache()
+        await cache.connect()
+
+        meta = await cache.get_session_metadata(tenant_id, session_id)
+        if not meta:
+            raise HTTPException(status_code=404, detail="Session not found or expired")
+
+        status = meta.get("status", "unknown")
+
+        claims = await cache.get_verified_claims(tenant_id, session_id)
+
+        # Map VerifiedClaim models to frontend-compatible dicts
+        claims_list = []
+        for i, c in enumerate(claims):
+            claims_list.append({
+                "claim_id": c.id,
+                "claim_number": i + 1,
+                "total_expected": len(claims),
+                "claim_text": c.text,
+                "status": c.status.value if hasattr(c.status, "value") else str(c.status),
+                "confidence": c.confidence,
+                "evidence_count": len(c.evidence_document_ids),
+                "original_text": c.original_text,
+                "evidence_sources": c.evidence_sources,
+                "verification_type": c.verification_type,
+                "verification_reason": c.verification_reason,
+            })
+
+        return {
+            "session_id": session_id,
+            "status": status,
+            "topic": meta.get("query", ""),
+            "claims": claims_list,
+            "document_text": meta.get("document_text"),
+            "current_phase": "complete" if status == "completed" else "generating",
+            "verified_count": meta.get("claims_verified", 0),
+            "rejected_count": meta.get("claims_rejected", 0),
+            "total_claims": len(claims),
+            "average_confidence": meta.get("average_confidence"),
+            "execution_time_ms": meta.get("execution_time_ms"),
+            "sources": meta.get("sources", []),
+            "doi_validations": meta.get("doi_validations", []),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get session: {str(e)}")
 
 
 @router.get(

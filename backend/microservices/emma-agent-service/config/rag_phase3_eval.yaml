@@ -1,0 +1,218 @@
+meta:
+  name: "emma_rag_phase3_regex_scope_eval"
+  version: "1.0"
+  description: "Golden set for scope/entity/rerank evaluation after Phase 1-2 hardening."
+  top_k: 3
+
+cases:
+  - id: "scope_docs_persona"
+    query: "Necesito las facturas de Javier Martinez"
+    expected_scope: "documents"
+    expected_entity_types: ["persona"]
+
+  - id: "scope_legal_articulo"
+    query: "Que dice el articulo 54 del Estatuto de los Trabajadores"
+    expected_scope: "legislation"
+    expected_entity_types: ["articulo"]
+
+  - id: "scope_legal_rgpd"
+    query: "Dame legislacion sobre proteccion de datos y RGPD"
+    expected_scope: "legislation"
+    expected_entity_types: []
+
+  - id: "scope_all_law_and_docs"
+    query: "Busca contratos de ACME y la Ley 39/2015"
+    expected_scope: "all"
+    expected_entity_types: ["ley"]
+
+  - id: "scope_false_positive_leyenda"
+    query: "Quiero una leyenda urbana sobre contratos"
+    expected_scope: "documents"
+    expected_entity_types: []
+
+  - id: "scope_all_boe_persona"
+    query: "BOE 123 y expedientes de Ana de la Fuente"
+    expected_scope: "all"
+    expected_entity_types: ["boe", "persona"]
+
+  - id: "scope_docs_referencia"
+    query: "Muestrame expediente Ref: EXP-2025-001"
+    expected_scope: "documents"
+    expected_entity_types: ["referencia"]
+
+  - id: "scope_docs_count"
+    query: "Cuantas facturas hay"
+    expected_scope: "documents"
+    expected_entity_types: []
+
+  - id: "scope_legal_real_decreto"
+    query: "Real Decreto 2/2015 articulo 14"
+    expected_scope: "legislation"
+    expected_entity_types: ["ley", "articulo"]
+
+  - id: "scope_docs_privacidad"
+    query: "documentos de privacidad"
+    expected_scope: "documents"
+    expected_entity_types: []
+
+  - id: "scope_legal_civil_article"
+    query: "art. 1902 del Codigo Civil aplicado a ACME"
+    expected_scope: "legislation"
+    expected_entity_types: ["articulo"]
+
+  - id: "scope_all_mixed_terms"
+    query: "contratos y normativa laboral vigente"
+    expected_scope: "all"
+    expected_entity_types: []
+
+  - id: "rerank_person_focus"
+    query: "facturas de Javier Martinez"
+    expected_scope: "documents"
+    expected_entity_types: ["persona"]
+    expected_topk_doc_ids: ["doc_fact_javier"]
+    graph_document_ids: []
+    candidates:
+      - document_id: "doc_fact_javier"
+        title: "Factura Servicios Javier Martinez"
+        content: "Factura emitida por consultoria a nombre de Javier Martinez."
+        semantic_type: "factura"
+        associated_person: "Javier Martinez"
+        domain: "fiscal"
+        folder_path: "/Facturas/2025"
+        score: 0.57
+        quality_score: 0.82
+        created_at: "2026-02-10T10:00:00+00:00"
+      - document_id: "doc_fact_maria"
+        title: "Factura Servicios Maria Lopez"
+        content: "Factura de servicios profesionales."
+        semantic_type: "factura"
+        associated_person: "Maria Lopez"
+        domain: "fiscal"
+        folder_path: "/Facturas/2025"
+        score: 0.63
+        quality_score: 0.79
+        created_at: "2026-02-12T10:00:00+00:00"
+      - document_id: "doc_contrato_javier"
+        title: "Contrato Javier Martinez"
+        content: "Contrato de prestacion de servicios con Javier Martinez."
+        semantic_type: "contrato"
+        associated_person: "Javier Martinez"
+        domain: "legal"
+        folder_path: "/Contratos"
+        score: 0.56
+        quality_score: 0.76
+        created_at: "2026-01-10T10:00:00+00:00"
+
+  - id: "rerank_ley_focus"
+    query: "Ley 39/2015 procedimiento administrativo"
+    expected_scope: "legislation"
+    expected_entity_types: ["ley"]
+    expected_topk_doc_ids: ["doc_ley_39_2015"]
+    graph_document_ids: ["doc_ley_39_2015"]
+    candidates:
+      - document_id: "doc_ley_39_2015"
+        title: "Ley 39/2015 del Procedimiento Administrativo Comun"
+        content: "Regula el procedimiento administrativo comun de las administraciones."
+        semantic_type: "legislacion"
+        associated_person: ""
+        domain: "legal"
+        folder_path: "/Leyes"
+        score: 0.58
+        quality_score: 0.90
+        created_at: "2020-01-01T00:00:00+00:00"
+      - document_id: "doc_ley_40_2015"
+        title: "Ley 40/2015 Regimen Juridico del Sector Publico"
+        content: "Regula el regimen juridico del sector publico."
+        semantic_type: "legislacion"
+        associated_person: ""
+        domain: "legal"
+        folder_path: "/Leyes"
+        score: 0.62
+        quality_score: 0.86
+        created_at: "2020-01-01T00:00:00+00:00"
+      - document_id: "doc_manual_proc"
+        title: "Manual interno de procedimientos"
+        content: "Procedimientos internos de la empresa."
+        semantic_type: "informe"
+        associated_person: ""
+        domain: "general"
+        folder_path: "/Manuales"
+        score: 0.60
+        quality_score: 0.70
+        created_at: "2025-12-15T00:00:00+00:00"
+
+  - id: "rerank_referencia_persona"
+    query: "expediente EXP-2025-001 de Ana de la Fuente"
+    expected_scope: "documents"
+    expected_entity_types: ["referencia", "persona"]
+    expected_topk_doc_ids: ["doc_exp_001"]
+    graph_document_ids: []
+    candidates:
+      - document_id: "doc_exp_001"
+        title: "Expediente EXP-2025-001 Ana de la Fuente"
+        content: "Expediente de cumplimiento asociado a Ana de la Fuente."
+        semantic_type: "expediente"
+        associated_person: "Ana de la Fuente"
+        domain: "compliance"
+        folder_path: "/Expedientes/2025"
+        score: 0.59
+        quality_score: 0.84
+        created_at: "2026-02-01T00:00:00+00:00"
+      - document_id: "doc_exp_009"
+        title: "Expediente EXP-2025-009 Revision"
+        content: "Expediente tecnico de revision anual."
+        semantic_type: "expediente"
+        associated_person: "Carlos Perez"
+        domain: "compliance"
+        folder_path: "/Expedientes/2025"
+        score: 0.65
+        quality_score: 0.81
+        created_at: "2026-02-02T00:00:00+00:00"
+      - document_id: "doc_informe_ana"
+        title: "Informe Ana de la Fuente"
+        content: "Informe de auditoria relacionado."
+        semantic_type: "informe"
+        associated_person: "Ana de la Fuente"
+        domain: "legal"
+        folder_path: "/Informes"
+        score: 0.55
+        quality_score: 0.78
+        created_at: "2026-01-18T00:00:00+00:00"
+
+  - id: "rerank_temporal_nominas"
+    query: "nominas de 2025"
+    expected_scope: "documents"
+    expected_entity_types: []
+    expected_topk_doc_ids: ["doc_nomina_ene_2025"]
+    graph_document_ids: []
+    candidates:
+      - document_id: "doc_nomina_ene_2025"
+        title: "Nomina enero 2025"
+        content: "Nomina del mes de enero de 2025."
+        semantic_type: "nomina"
+        associated_person: "Laura Gomez"
+        domain: "laboral"
+        folder_path: "/Nominas/2025"
+        score: 0.58
+        quality_score: 0.81
+        created_at: "2025-01-31T00:00:00+00:00"
+      - document_id: "doc_nomina_dic_2024"
+        title: "Nomina diciembre 2024"
+        content: "Nomina del mes de diciembre de 2024."
+        semantic_type: "nomina"
+        associated_person: "Laura Gomez"
+        domain: "laboral"
+        folder_path: "/Nominas/2024"
+        score: 0.61
+        quality_score: 0.80
+        created_at: "2024-12-31T00:00:00+00:00"
+      - document_id: "doc_contrato_laboral"
+        title: "Contrato laboral Laura Gomez"
+        content: "Contrato de trabajo indefinido."
+        semantic_type: "contrato"
+        associated_person: "Laura Gomez"
+        domain: "laboral"
+        folder_path: "/Contratos"
+        score: 0.56
+        quality_score: 0.75
+        created_at: "2023-09-01T00:00:00+00:00"

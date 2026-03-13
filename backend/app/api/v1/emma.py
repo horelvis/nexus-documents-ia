@@ -348,6 +348,35 @@ async def emma_verified_session_pdf(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/verified/session/{session_id}")
+async def emma_verified_session(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Get full session data for recovery. Proxies to Emma Agent Service.
+    Used when the frontend navigates away during generation and needs
+    to recover the completed result.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/verified/session/{session_id}",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                logger.error(f"Verified session error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Verified session proxy error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================================
 # Training Endpoints (proxy to emma-agent-service /training/*)
 # ============================================================================
@@ -847,6 +876,85 @@ async def emma_memory_fact_delete(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================================
+# Notification Endpoints (proxy to emma-agent-service /emma/notifications/*)
+# ============================================================================
+
+@router.get("/notifications")
+async def emma_notifications_list(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """List recent notifications for the current user."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/notifications",
+                params={
+                    **dict(request.query_params),
+                    "tenant_id": tenant_id,
+                    "user_id": str(current_user.id),
+                },
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Notifications list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/notifications/{notification_id}/read")
+async def emma_notification_mark_read(
+    notification_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Mark a single notification as read."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.patch(
+                f"{EMMA_SERVICE_URL}/emma/notifications/{notification_id}/read",
+                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Notification mark read error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/notifications/read-all")
+async def emma_notifications_read_all(
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async)
+):
+    """Mark all notifications as read."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/notifications/read-all",
+                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Notifications read-all error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.patch("/cendoj/status")
 async def emma_cendoj_status_update(
     request: Request,
@@ -873,4 +981,62 @@ async def emma_cendoj_status_update(
         raise
     except Exception as e:
         logger.error(f"❌ CENDOJ status update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Generated Document Download (proxy to emma-agent-service)
+# ============================================================================
+
+@router.get("/generated/{doc_id}/download")
+async def emma_generated_download(
+    doc_id: str,
+    current_user: User = Depends(get_current_user_async)
+):
+    """
+    Download a DOCX document generated by the generate_document tool.
+    Documents are available for 1 hour after generation.
+    Proxies to Emma Agent Service.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/generated/{doc_id}/download",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+
+            from fastapi.responses import Response
+            return Response(
+                content=response.content,
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers=dict(response.headers),
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Generated doc download error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/generated/{doc_id}/info")
+async def emma_generated_info(
+    doc_id: str,
+    current_user: User = Depends(get_current_user_async)
+):
+    """Get metadata about a generated document without downloading it."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/generated/{doc_id}/info",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Generated doc info error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

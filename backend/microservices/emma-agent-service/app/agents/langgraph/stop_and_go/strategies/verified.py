@@ -19,13 +19,93 @@ from app.agents.langgraph.stop_and_go.strategy import register_strategy
 
 logger = logging.getLogger(__name__)
 
-# Fallback prompts for fact-checking (reused from original service)
+# =========================================================================
+# Fallback prompts — Two-tier verification
+# =========================================================================
+
+# Tier 1: Faithfulness check — does the claim accurately represent the source?
+FALLBACK_FAITHFULNESS_SYSTEM = (
+    "Eres un evaluador de fidelidad textual. Tu tarea es determinar si una AFIRMACIÓN "
+    "es una representación fiel del TEXTO FUENTE del que fue generada.\n\n"
+    "Responde SOLO con un objeto JSON (sin markdown, sin explicación):\n"
+    '{"faithful": true/false, "confidence": 0.0-1.0, "reason": "razón breve", '
+    '"correction": "texto corregido o null"}\n\n'
+    "Evalúa:\n"
+    "1. ¿La afirmación está CONTENIDA (entailed) en el texto fuente?\n"
+    "2. ¿La afirmación añade información NO presente en la fuente? (= alucinación)\n"
+    "3. ¿La afirmación distorsiona el significado del texto fuente?\n\n"
+    "Escala de confidence (USA TODA LA ESCALA, no siempre 0.9+):\n"
+    "- 0.95: Cita textual o paráfrasis exacta con datos verificables\n"
+    "- 0.85: Paráfrasis correcta pero simplificada\n"
+    "- 0.75: Resumen fiel pero con posible pérdida de matiz\n"
+    "- 0.65: Mayormente fiel pero con alguna imprecisión menor\n"
+    "- 0.50: Parcialmente fiel, mezcla información correcta e incorrecta\n"
+    "- 0.30: Distorsiona significativamente el contenido fuente\n\n"
+    "Reglas:\n"
+    "- faithful=true si la afirmación parafrasea o resume correctamente el texto fuente\n"
+    "- faithful=false si añade datos, cifras o conclusiones que no están en la fuente\n"
+    "- Si la afirmación es mayormente correcta pero necesita ajustes, establece correction\n"
+    "- 'correction' debe ser el TEXTO REESCRITO en el MISMO IDIOMA, NO un meta-comentario\n"
+    "- NUNCA uses etiquetas <think>. Genera el JSON directamente.\n"
+    "- Escribe 'reason' SIEMPRE en español."
+)
+
+FALLBACK_FAITHFULNESS_USER = (
+    "AFIRMACIÓN GENERADA:\n{claim_text}\n\n"
+    "TEXTO FUENTE (del cual se generó la afirmación):\n{source_text}\n\n"
+    "¿La afirmación representa fielmente el texto fuente? Responde solo con JSON."
+)
+
+# Tier 2: External verification — is the claim independently supported?
+FALLBACK_EXTERNAL_VERIFY_SYSTEM = (
+    "Eres un verificador de hechos. Evalúa si una AFIRMACIÓN está respaldada por "
+    "EVIDENCIA INDEPENDIENTE (fuentes distintas al documento original).\n\n"
+    "Responde SOLO con un objeto JSON (sin markdown, sin explicación):\n"
+    '{"supported": true/false, "confidence": 0.0-1.0, "reason": "razón breve"}\n\n'
+    "Reglas de DOI (prioridad máxima):\n"
+    "- Si la evidencia incluye una fuente con source='doi_invalid', la afirmación contiene un DOI incorrecto.\n"
+    "  Marca supported=false.\n"
+    "- Si la evidencia incluye una fuente con source='doi_mismatch', el DOI apunta a un artículo diferente.\n"
+    "  Marca supported=false y explica la discrepancia en reason.\n"
+    "- Si la evidencia incluye una fuente con source='citation_unverified', la cita no pudo verificarse.\n"
+    "  Reduce confidence. No es motivo para supported=false si hay otra evidencia.\n"
+    "- Si la evidencia incluye una fuente con source='doi' (DOI validado), verifica que el título y autores\n"
+    "  del DOI coincidan con lo citado en la afirmación. Si no coinciden, marca supported=false.\n\n"
+    "Escala de confidence (USA TODA LA ESCALA, no siempre 0.9+):\n"
+    "- 0.95: La evidencia confirma directamente la afirmación con datos específicos\n"
+    "- 0.85: La evidencia respalda la idea general con alta certeza\n"
+    "- 0.75: La evidencia es consistente pero no confirma directamente\n"
+    "- 0.65: La evidencia es parcialmente relevante o tangencial\n"
+    "- 0.50: La evidencia tiene relación temática pero no confirma la afirmación\n"
+    "- 0.30: La evidencia contradice parcialmente la afirmación\n\n"
+    "Reglas generales:\n"
+    "- supported=true si la evidencia independiente respalda la afirmación\n"
+    "- La evidencia proviene de fuentes DISTINTAS al documento que generó la afirmación\n"
+    "- Prioriza evidencia de documentos internos sobre evidencia web\n"
+    "- NUNCA uses etiquetas <think>. Genera el JSON directamente.\n"
+    "- Escribe 'reason' SIEMPRE en español."
+)
+
+FALLBACK_EXTERNAL_VERIFY_USER = (
+    "AFIRMACIÓN A VERIFICAR:\n{claim_text}\n\n"
+    "EVIDENCIA INDEPENDIENTE:\n{evidence_text}\n\n"
+    "¿La evidencia independiente respalda la afirmación? Responde solo con JSON."
+)
+
+# Legacy combined prompt — kept for Langfuse fallback compatibility
 FALLBACK_FACTCHECK_SYSTEM = (
     "Eres un asistente de verificación de hechos. Evalúa si una afirmación está respaldada por la evidencia.\n\n"
     "Responde SOLO con un objeto JSON (sin markdown, sin explicación):\n"
     '{"supported": true/false, "confidence": 0.0-1.0, "reason": "razón breve", '
     '"correction": "texto corregido o null"}\n\n'
-    "Reglas:\n"
+    "Reglas de DOI (prioridad máxima):\n"
+    "- Si la evidencia incluye una fuente con source='doi_invalid', la afirmación contiene un DOI incorrecto.\n"
+    "  Marca supported=false y en correction reescribe la afirmación eliminando o marcando el DOI erróneo.\n"
+    "- Si la evidencia incluye una fuente con source='doi' (DOI validado), verifica que el título y autores\n"
+    "  del DOI coincidan con lo citado en la afirmación. Si no coinciden, marca supported=false.\n"
+    "- Para documentos académicos: verifica que las referencias bibliográficas estén correctamente citadas\n"
+    "  (autores, año, título, revista). Un DOI válido pero con metadatos que no coinciden es un error.\n\n"
+    "Reglas generales:\n"
     "- supported=true si la evidencia respalda razonablemente o es consistente con la afirmación\n"
     "- Para documentos subidos: la afirmación fue generada A PARTIR de este documento, verifica que refleja el contenido con precisión\n"
     "- Prioriza evidencia de documentos internos/subidos. La evidencia web es complementaria.\n"
@@ -43,6 +123,18 @@ FALLBACK_FACTCHECK_USER = (
     "EVIDENCIA:\n{evidence_text}\n\n"
     "Evalúa si la afirmación está respaldada por la evidencia. Responde solo con JSON."
 )
+
+# Source document summary — used in the verified report header
+FALLBACK_SUMMARY_SYSTEM = (
+    "Genera un resumen conciso (2-3 frases) del siguiente documento. "
+    "Incluye: tema principal, metodología si aplica, y alcance. "
+    "Responde SOLO con el resumen, sin preámbulos."
+)
+
+FALLBACK_SUMMARY_USER = "{document_text}"
+
+# Confidence cap for faithfulness-only verdicts (no external corroboration)
+FIDELITY_CONFIDENCE_CAP = 0.80
 
 
 class VerifiedStrategy:
@@ -78,6 +170,7 @@ class VerifiedStrategy:
                 "query": state["query"],
                 "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
                 "session_id": state["session_id"],
+                "status": "running",
             },
         )
 
@@ -114,43 +207,100 @@ class VerifiedStrategy:
     async def evaluate_item(
         self,
         item: Dict[str, Any],
-        evidence: List[Dict],
+        evidence,
         state: dict,
     ) -> Dict[str, Any]:
-        """Evaluate claim against evidence using LLM fact-checking."""
+        """Two-tier claim evaluation: faithfulness + external corroboration.
+
+        Tier 1 (Faithfulness): NLI-style check against source documents.
+            "Does this claim accurately represent the source?"
+        Tier 2 (External): Independent evidence from Weaviate, DOI, web, CENDOJ.
+            "Is this claim supported by external sources?"
+
+        The combined verdict determines verification_type:
+            - corroborated: Tier 1 pass + Tier 2 pass → full confidence
+            - fidelity_only: Tier 1 pass, no Tier 2 → capped at 0.80
+            - independent: Tier 2 pass only (no source docs) → full confidence
+            - unsupported: Neither tier → rejected
+        """
         claim_text = item.get("text", "")
         confidence_threshold = state.get("confidence_threshold", 0.7)
         mode_config = state.get("mode_config", {})
         auto_correct = mode_config.get("auto_correct", True)
-        max_correction_attempts = mode_config.get("max_correction_attempts", 2)
 
-        # No evidence → reject
-        if not evidence:
+        # Parse tiered evidence
+        if isinstance(evidence, dict) and "source" in evidence:
+            source_evidence = evidence.get("source", [])
+            external_evidence = evidence.get("external", [])
+        else:
+            # Legacy flat list — treat all as external
+            source_evidence = []
+            external_evidence = evidence if evidence else []
+
+        all_evidence = source_evidence + external_evidence
+
+        # No evidence at all → reject
+        if not all_evidence:
             return {
                 "status": "rejected",
                 "confidence": 0.0,
-                "reason": "No evidence found to support the claim",
+                "reason": "No se encontró evidencia para respaldar la afirmación",
                 "correction": None,
                 "evidence": [],
+                "verification_type": None,
             }
 
-        # Build evidence text for LLM
-        evaluation = await self._llm_evaluate_claim(claim_text, evidence)
+        # --- Tier 1: Faithfulness check (if source evidence exists) ---
+        faithfulness = None
+        if source_evidence:
+            faithfulness = await self._llm_faithfulness_check(claim_text, source_evidence)
+
+        # --- Tier 2: External corroboration (if external evidence exists) ---
+        external = None
+        if external_evidence:
+            external = await self._llm_external_verify(claim_text, external_evidence)
+
+        # --- Combine verdicts ---
+        verification_type, combined_confidence, reason, correction = self._combine_verdicts(
+            faithfulness, external
+        )
+
+        logger.info(
+            f"Two-tier verdict: type={verification_type} conf={combined_confidence:.2f} "
+            f"(faithfulness={faithfulness} | external={external})"
+        )
 
         # Determine status
-        if evaluation["supported"] and evaluation["confidence"] >= confidence_threshold:
+        if verification_type == "unsupported":
+            if correction and auto_correct:
+                # Faithfulness offered a correction — accept it as corrected
+                # but keep it capped at fidelity_only confidence
+                status = "corrected"
+                verification_type = "fidelity_only"
+                combined_confidence = min(
+                    faithfulness.get("confidence", 0.5) if faithfulness else 0.5,
+                    FIDELITY_CONFIDENCE_CAP,
+                )
+                logger.info(
+                    f"Unsupported claim corrected by faithfulness tier → "
+                    f"fidelity_only at {combined_confidence:.2f}"
+                )
+            else:
+                status = "rejected"
+        elif combined_confidence >= confidence_threshold:
             status = "accepted"
-        elif evaluation.get("correction") and auto_correct:
+        elif correction and auto_correct:
             status = "corrected"
         else:
             status = "rejected"
 
         return {
             "status": status,
-            "confidence": evaluation["confidence"],
-            "reason": evaluation.get("reason", ""),
-            "correction": evaluation.get("correction"),
-            "evidence": evidence,
+            "confidence": combined_confidence,
+            "reason": reason,
+            "correction": correction,
+            "evidence": all_evidence,
+            "verification_type": verification_type,
         }
 
     def is_duplicate(self, item: Dict[str, Any], state: dict) -> bool:
@@ -201,9 +351,33 @@ class VerifiedStrategy:
 
         status = evaluation.get("status", "accepted")
         is_corrected = status == "corrected"
+        verification_type = evaluation.get("verification_type")
 
         claim_text = evaluation.get("correction", item["text"]) if is_corrected else item["text"]
         original_text = item["text"] if is_corrected else None
+
+        # Extract EXTERNAL evidence only as "validation sources".
+        # Source-document evidence (uploaded docs matched via RLM) is NOT a
+        # validation source — it's the generation source.  Showing it would
+        # mislead the user into thinking the claim was independently verified.
+        # The source document is already implicit in the verification_type
+        # label (fidelity_only / corroborated).
+        evidence_sources = []
+        for e in evaluation.get("evidence", []):
+            # Skip uploaded-document / source-document evidence
+            src_type = e.get("source", "internal")
+            if src_type == "uploaded" or src_type == "source_document":
+                continue
+            src_entry = {
+                "id": e.get("document_id", ""),
+                "title": e.get("document_title", ""),
+                "source": src_type,
+                "url": e.get("url", ""),
+            }
+            if src_type == "jurisprudence":
+                src_entry["roj"] = e.get("roj", "")
+                src_entry["ecli"] = e.get("ecli", "")
+            evidence_sources.append(src_entry)
 
         verified_claim = VerifiedClaim(
             id=item["id"],
@@ -214,7 +388,11 @@ class VerifiedStrategy:
             evidence_document_ids=[
                 e.get("document_id", "")
                 for e in evaluation.get("evidence", [])
+                if e.get("source") not in ("uploaded", "source_document")
             ],
+            evidence_sources=evidence_sources,
+            verification_type=verification_type,
+            verification_reason=evaluation.get("reason"),
             generation_order=item.get("_raw_candidate", {}).get("generation_order", 0),
         )
 
@@ -222,6 +400,8 @@ class VerifiedStrategy:
             state["tenant_id"], state["session_id"], verified_claim
         )
         await self._cache.extend_ttl(state["tenant_id"], state["session_id"])
+
+        reason = evaluation.get("reason", "")
 
         if is_corrected:
             return {
@@ -231,6 +411,9 @@ class VerifiedStrategy:
                     "original_text": item["text"],
                     "corrected_text": claim_text,
                     "confidence": evaluation.get("confidence", 0.0),
+                    "evidence_sources": evidence_sources,
+                    "verification_type": verification_type,
+                    "verification_reason": reason,
                 },
             }
         else:
@@ -241,6 +424,9 @@ class VerifiedStrategy:
                     "claim_text": claim_text,
                     "confidence": evaluation.get("confidence", 0.0),
                     "evidence_count": len(evaluation.get("evidence", [])),
+                    "evidence_sources": evidence_sources,
+                    "verification_type": verification_type,
+                    "verification_reason": reason,
                 },
             }
 
@@ -269,9 +455,22 @@ class VerifiedStrategy:
             state["tenant_id"], state["session_id"]
         )
 
+        # DOI validation results from source document (pre-validated at initialization)
+        doi_validations = state.get("source_doi_validations", [])
+
+        # Generate a brief summary of the source document
+        source_filenames = state.get("source_filenames", [])
+        source_summary = await self._generate_source_summary(state)
+
         # Assemble document using the existing Jinja2 template logic
         svc = VerifiedDocumentService.__new__(VerifiedDocumentService)
-        document_text = svc._assemble_document(state["query"], final_claims)
+        global_sources = list(state.get("sources_map", {}).values())
+        document_text = svc._assemble_document(
+            state["query"], final_claims, sources=global_sources,
+            doi_validations=doi_validations,
+            source_filenames=source_filenames,
+            source_summary=source_summary,
+        )
 
         execution_time_ms = state.get("execution_time_ms", 0)
 
@@ -285,12 +484,21 @@ class VerifiedStrategy:
         for claim in final_claims:
             all_evidence_ids.update(claim.evidence_document_ids)
 
-        # Update session metadata
+        # Update session metadata (enrich for recovery)
         existing_meta = await self._cache.get_session_metadata(
             state["tenant_id"], state["session_id"]
         )
+        existing_meta["status"] = "completed"
+        existing_meta["document_text"] = document_text
+        existing_meta["average_confidence"] = round(avg_confidence, 3)
+        existing_meta["claims_verified"] = state.get("items_accepted", 0)
+        existing_meta["claims_corrected"] = state.get("items_corrected", 0)
+        existing_meta["claims_rejected"] = state.get("items_rejected", 0)
         existing_meta["execution_time_ms"] = execution_time_ms
         existing_meta["sources"] = list(state.get("sources_map", {}).values())
+        existing_meta["doi_validations"] = doi_validations
+        existing_meta["source_filenames"] = source_filenames
+        existing_meta["source_summary"] = source_summary
         await self._cache.store_session_metadata(
             state["tenant_id"], state["session_id"], existing_meta
         )
@@ -316,77 +524,261 @@ class VerifiedStrategy:
             "verification_time_ms": 0,  # not tracked per-item in graph mode
             "evidence_document_ids": list(all_evidence_ids),
             "sources": list(state.get("sources_map", {}).values()),
+            "doi_validations": doi_validations,
+            "source_filenames": source_filenames,
+            "source_summary": source_summary,
         }
 
-    # =========================================================================
-    # Private helpers
-    # =========================================================================
+    async def _generate_source_summary(self, state: dict) -> str:
+        """Generate a brief summary of the source document via LLM.
 
-    async def _llm_evaluate_claim(
-        self,
-        claim_text: str,
-        evidence: List[Dict],
-    ) -> Dict[str, Any]:
-        """Evaluate a claim against evidence using LLM — extracted from original _verify_claim."""
-        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+        Uses Langfuse prompts (emma_verified_summary_system/user) with
+        hardcoded fallbacks, following the same _resolve_prompts pattern
+        as faithfulness and external verification.
+        """
+        source_context = state.get("source_context", "")
+        if not source_context:
+            return ""
 
-        # Build evidence context (cap at ~8000 chars)
-        MAX_EVIDENCE_CHARS = 8000
-        evidence_parts = []
-        total_chars = 0
-        for e in evidence:
-            source = e.get("source", "internal")
-            if source == "web":
-                label = f"[Web Source: {e.get('document_title', 'Unknown')} - {e.get('url', '')}]"
-            elif source == "uploaded":
-                label = f"[Uploaded Document: {e.get('document_title', 'Unknown')}]"
-            else:
-                label = f"[Internal Document: {e.get('document_title', 'Unknown')}]"
-            part = f"{label}\n{e.get('text_excerpt', '')}"
-            if total_chars + len(part) > MAX_EVIDENCE_CHARS:
-                remaining = MAX_EVIDENCE_CHARS - total_chars
-                if remaining > 100:
-                    evidence_parts.append(part[:remaining] + "...")
-                break
-            evidence_parts.append(part)
-            total_chars += len(part)
-        evidence_text = "\n\n".join(evidence_parts)
-
-        # Resolve prompts via Langfuse
-        prompt_client = get_langfuse_prompt_client()
-        sys_cached = await prompt_client.get_prompt(
-            "emma_verified_factcheck_system",
-            fallback=FALLBACK_FACTCHECK_SYSTEM,
-        )
-        system_prompt = sys_cached.content if sys_cached else FALLBACK_FACTCHECK_SYSTEM
-
-        fc_variables = {"claim_text": claim_text, "evidence_text": evidence_text}
-        user_cached = await prompt_client.get_prompt(
-            "emma_verified_factcheck_user",
-            variables=fc_variables,
-            fallback=FALLBACK_FACTCHECK_USER.format(**fc_variables),
-        )
-        user_prompt = user_cached.content if user_cached else FALLBACK_FACTCHECK_USER.format(**fc_variables)
-
-        evaluation = {
-            "supported": False,
-            "confidence": 0.0,
-            "reason": "LLM evaluation failed",
-            "correction": None,
-        }
-
+        # Use first ~4000 chars for summary (enough to capture intro/abstract)
+        preview = source_context[:4000]
         try:
-            from app.agents.llm_client import get_llm_client
+            system_prompt, user_prompt = await self._resolve_prompts(
+                system_key="emma_verified_summary_system",
+                user_key="emma_verified_summary_user",
+                system_fallback=FALLBACK_SUMMARY_SYSTEM,
+                user_fallback=FALLBACK_SUMMARY_USER,
+                variables={"document_text": preview},
+            )
 
-            llm_client = await get_llm_client()
-            llm_response = await llm_client.chat(
+            from app.agents.llm_router import get_llm_router
+            from app.agents.llm_client import ModelRole
+            router = await get_llm_router()
+            response = await router.chat(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                max_tokens=200,
                 temperature=0.1,
+                role=ModelRole.CHAT,
+            )
+            summary = response.content.strip() if response and response.content else ""
+            logger.info(f"Source summary generated: {len(summary)} chars")
+            return summary
+        except Exception as e:
+            logger.warning(f"Source summary generation failed: {e}")
+            return ""
+
+    # =========================================================================
+    # Private helpers — Two-tier verification
+    # =========================================================================
+
+    @staticmethod
+    def _combine_verdicts(
+        faithfulness: Dict[str, Any] | None,
+        external: Dict[str, Any] | None,
+    ) -> tuple:
+        """Combine faithfulness and external verification into a final verdict.
+
+        Returns (verification_type, confidence, reason, correction).
+        """
+        has_faithful = faithfulness and faithfulness.get("faithful")
+        has_external = external and external.get("supported")
+        f_conf = faithfulness.get("confidence", 0.0) if faithfulness else 0.0
+        e_conf = external.get("confidence", 0.0) if external else 0.0
+        f_reason = faithfulness.get("reason", "") if faithfulness else ""
+        e_reason = external.get("reason", "") if external else ""
+        correction = faithfulness.get("correction") if faithfulness else None
+
+        if has_faithful and has_external:
+            # Best case: faithful to source AND independently corroborated
+            return (
+                "corroborated",
+                min(max(f_conf, e_conf), 0.99),
+                f"Fiel al documento fuente y corroborado externamente. {e_reason}".strip(),
+                correction,
+            )
+        elif has_faithful:
+            # Source-faithful but no external evidence
+            return (
+                "fidelity_only",
+                min(f_conf, FIDELITY_CONFIDENCE_CAP),
+                f"Fiel al documento fuente (sin corroboración externa). {f_reason}".strip(),
+                correction,
+            )
+        elif has_external:
+            # No source doc, but external evidence supports it
+            return (
+                "independent",
+                e_conf,
+                f"Respaldado por evidencia independiente. {e_reason}".strip(),
+                None,
+            )
+        else:
+            # Neither tier passed
+            reason_parts = []
+            if faithfulness and not has_faithful:
+                reason_parts.append(f"No fiel al fuente: {f_reason}")
+            if external and not has_external:
+                reason_parts.append(f"Sin respaldo externo: {e_reason}")
+            if not faithfulness and not external:
+                reason_parts.append("Sin evidencia disponible")
+            return (
+                "unsupported",
+                0.0,
+                " | ".join(reason_parts),
+                correction,
+            )
+
+    async def _llm_faithfulness_check(
+        self,
+        claim_text: str,
+        source_evidence: List[Dict],
+    ) -> Dict[str, Any]:
+        """Tier 1: Check if the claim faithfully represents the source document.
+
+        This is an NLI-style entailment check — the claim (hypothesis) should
+        be entailed by the source (premise). Not a fact-check, but a
+        faithfulness check.
+        """
+        source_text = self._build_evidence_text(source_evidence, max_chars=6000)
+
+        system_prompt, user_prompt = await self._resolve_prompts(
+            system_key="emma_verified_faithfulness_system",
+            user_key="emma_verified_faithfulness_user",
+            system_fallback=FALLBACK_FAITHFULNESS_SYSTEM,
+            user_fallback=FALLBACK_FAITHFULNESS_USER,
+            variables={"claim_text": claim_text, "source_text": source_text},
+        )
+
+        result = await self._call_llm_json(system_prompt, user_prompt, tier_label="faithfulness")
+
+        correction = result.get("correction")
+        # LLM sometimes returns the string "null" instead of JSON null
+        if isinstance(correction, str) and correction.strip().lower() == "null":
+            correction = None
+
+        return {
+            "faithful": result.get("faithful", False),
+            "confidence": float(result.get("confidence", 0.0)),
+            "reason": result.get("reason", ""),
+            "correction": correction,
+        }
+
+    async def _llm_external_verify(
+        self,
+        claim_text: str,
+        external_evidence: List[Dict],
+    ) -> Dict[str, Any]:
+        """Tier 2: Check if the claim is supported by independent evidence.
+
+        Evidence here comes from Weaviate (excluding source docs), DOI
+        validation, CENDOJ jurisprudence, or web search.
+        """
+        evidence_text = self._build_evidence_text(external_evidence, max_chars=8000)
+
+        system_prompt, user_prompt = await self._resolve_prompts(
+            system_key="emma_verified_external_system",
+            user_key="emma_verified_external_user",
+            system_fallback=FALLBACK_EXTERNAL_VERIFY_SYSTEM,
+            user_fallback=FALLBACK_EXTERNAL_VERIFY_USER,
+            variables={"claim_text": claim_text, "evidence_text": evidence_text},
+        )
+
+        result = await self._call_llm_json(system_prompt, user_prompt, tier_label="external")
+
+        return {
+            "supported": result.get("supported", False),
+            "confidence": float(result.get("confidence", 0.0)),
+            "reason": result.get("reason", ""),
+        }
+
+    # =========================================================================
+    # Shared LLM utilities
+    # =========================================================================
+
+    @staticmethod
+    def _build_evidence_text(evidence: List[Dict], max_chars: int = 8000) -> str:
+        """Build labeled evidence text from evidence list, capped at max_chars."""
+        parts = []
+        total = 0
+        for e in evidence:
+            source = e.get("source", "internal")
+            if source == "doi":
+                label = f"[DOI Validado: {e.get('document_title', 'Unknown')} - {e.get('url', '')}]"
+            elif source == "doi_invalid":
+                label = f"[⚠ DOI INVALIDO: {e.get('document_title', 'Unknown')}]"
+            elif source == "doi_mismatch":
+                label = f"[⚠ DOI NO CORRESPONDE: {e.get('document_title', 'Unknown')} - {e.get('url', '')}]"
+            elif source == "crossref":
+                label = f"[CrossRef: {e.get('document_title', 'Unknown')} - {e.get('url', '')}]"
+            elif source == "citation_unverified":
+                label = f"[⚠ CITA NO VERIFICABLE: {e.get('document_title', 'Unknown')}]"
+            elif source == "web":
+                label = f"[Web: {e.get('document_title', 'Unknown')} - {e.get('url', '')}]"
+            elif source == "uploaded":
+                label = f"[Documento Fuente: {e.get('document_title', 'Unknown')}]"
+            elif source == "jurisprudence":
+                label = f"[Jurisprudencia: {e.get('document_title', 'Unknown')} - {e.get('url', '')}]"
+            else:
+                label = f"[Documento Interno: {e.get('document_title', 'Unknown')}]"
+            part = f"{label}\n{e.get('text_excerpt', '')}"
+            if total + len(part) > max_chars:
+                remaining = max_chars - total
+                if remaining > 100:
+                    parts.append(part[:remaining] + "...")
+                break
+            parts.append(part)
+            total += len(part)
+        return "\n\n".join(parts)
+
+    async def _resolve_prompts(
+        self,
+        system_key: str,
+        user_key: str,
+        system_fallback: str,
+        user_fallback: str,
+        variables: Dict[str, str],
+    ) -> tuple:
+        """Resolve system + user prompts via Langfuse with YAML fallbacks."""
+        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+
+        prompt_client = get_langfuse_prompt_client()
+
+        sys_cached = await prompt_client.get_prompt(system_key, fallback=system_fallback)
+        system_prompt = sys_cached.content if sys_cached else system_fallback
+
+        formatted_fallback = user_fallback.format(**variables)
+        user_cached = await prompt_client.get_prompt(
+            user_key, variables=variables, fallback=formatted_fallback
+        )
+        user_prompt = user_cached.content if user_cached else formatted_fallback
+
+        return system_prompt, user_prompt
+
+    async def _call_llm_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        tier_label: str = "eval",
+    ) -> Dict[str, Any]:
+        """Call LLM and parse JSON response with robust fallback parsing."""
+        try:
+            from app.agents.llm_router import get_llm_router
+            from app.agents.llm_client import ModelRole
+
+            router = await get_llm_router()
+            llm_response = await router.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.0,
                 max_tokens=500,
                 enable_thinking=False,
+                seed=42,
+                role=ModelRole.PLANNER,
             )
 
             if llm_response and llm_response.content:
@@ -403,40 +795,41 @@ class VerifiedStrategy:
                         content = content[4:]
                     content = content.strip()
 
-                parsed = False
+                logger.debug(f"[{tier_label}] Raw LLM response: {content[:300]}")
+
                 try:
-                    result = json.loads(content)
-                    parsed = True
+                    parsed = json.loads(content)
+                    logger.info(
+                        f"[{tier_label}] LLM verdict: "
+                        f"faithful={parsed.get('faithful', 'N/A')} "
+                        f"supported={parsed.get('supported', 'N/A')} "
+                        f"confidence={parsed.get('confidence', 'N/A')} "
+                        f"reason={str(parsed.get('reason', ''))[:80]}"
+                    )
+                    return parsed
                 except json.JSONDecodeError:
-                    json_match = re.search(r'\{[^{}]*"supported"[^{}]*\}', content, re.DOTALL)
+                    # Regex fallback: find the first JSON object in the response
+                    json_match = re.search(r'\{[^{}]*\}', content, re.DOTALL)
                     if json_match:
                         try:
-                            result = json.loads(json_match.group())
-                            parsed = True
+                            parsed = json.loads(json_match.group())
+                            logger.info(f"[{tier_label}] LLM verdict (regex parsed): {parsed}")
+                            return parsed
                         except json.JSONDecodeError:
                             pass
 
-                if parsed:
-                    evaluation = {
-                        "supported": result.get("supported", False),
-                        "confidence": float(result.get("confidence", 0.0)),
-                        "reason": result.get("reason", ""),
-                        "correction": result.get("correction"),
-                    }
-                else:
-                    lower = content.lower()
-                    if '"supported": true' in lower or '"supported":true' in lower:
-                        evaluation = {
-                            "supported": True,
-                            "confidence": 0.7,
-                            "reason": "Parsed from non-JSON response",
-                            "correction": None,
-                        }
+                # Last resort: keyword detection
+                lower = content.lower()
+                if '"faithful": true' in lower or '"supported": true' in lower:
+                    logger.warning(f"[{tier_label}] LLM response parsed via keyword detection")
+                    return {"faithful": True, "supported": True, "confidence": 0.7, "reason": "Parsed from non-JSON"}
+
+                logger.warning(f"[{tier_label}] Could not parse LLM response: {content[:200]}")
 
         except Exception as e:
-            logger.error(f"LLM claim evaluation failed: {e}")
+            logger.error(f"[{tier_label}] LLM evaluation call failed: {e}")
 
-        return evaluation
+        return {}
 
 
 # Register at import time

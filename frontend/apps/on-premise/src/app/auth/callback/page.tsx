@@ -7,7 +7,7 @@
  * The actual token exchange is handled by the AuthContext.
  */
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Image from 'next/image'
 import { IconLoader2, IconAlertCircle } from '@tabler/icons-react'
@@ -17,6 +17,18 @@ import { useAuth } from '@/contexts/auth-context'
 type CallbackStatus = 'processing' | 'error'
 
 export default function AuthCallbackPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center bg-[#05070d]">
+        <IconLoader2 className="h-10 w-10 animate-spin text-cyan-400" />
+      </div>
+    }>
+      <AuthCallbackContent />
+    </Suspense>
+  )
+}
+
+function AuthCallbackContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { isLoaded, isAuthenticated } = useAuth()

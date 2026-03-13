@@ -23,6 +23,8 @@ so the LLM doesn't have to choose which store to query.
 import asyncio
 import logging
 import math
+import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Type
 
@@ -67,9 +69,18 @@ _LEGISLATION_KEYWORDS = {
 
 # Keywords that signal document scope
 _DOCUMENT_KEYWORDS = {
-    "factura", "contrato", "nomina", "nómina", "informe",
-    "expediente", "documento", "archivo", "carpeta",
-    "acta", "presupuesto", "certificado", "escrito",
+    "factura", "facturas",
+    "contrato", "contratos",
+    "nomina", "nominas", "nómina", "nóminas",
+    "informe", "informes",
+    "expediente", "expedientes",
+    "documento", "documentos",
+    "archivo", "archivos",
+    "carpeta", "carpetas",
+    "acta", "actas",
+    "presupuesto", "presupuestos",
+    "certificado", "certificados",
+    "escrito", "escritos",
     "persona", "nif", "cliente", "proveedor", "empleado",
 }
 
@@ -96,6 +107,40 @@ _SPANISH_STEM_MAP: Dict[str, str] = {
 }
 
 _snowball_stemmer = None
+_SCOPE_LOW_CONFIDENCE = 0.10
+_SCOPE_MIN_SIGNAL = 0.03
+_SCOPE_MARGIN = 0.05
+_DOC_REQUEST_PATTERNS = (
+    "documentos de",
+    "documentos sobre",
+    "documentos del",
+    "informes de",
+    "contratos de",
+    "facturas de",
+    "expedientes de",
+)
+
+
+def _normalize_for_match(text: str) -> str:
+    """Normalize text for robust keyword matching (case/accents/spacing)."""
+    normalized = unicodedata.normalize("NFKD", text)
+    no_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", no_accents.lower()).strip()
+
+
+def _contains_keyword(query: str, keyword: str) -> bool:
+    """Word-boundary keyword/phrase match (avoids substring false positives)."""
+    q_norm = _normalize_for_match(query)
+    kw_norm = _normalize_for_match(keyword)
+    if not q_norm or not kw_norm:
+        return False
+    pattern = rf"(?<!\w){re.escape(kw_norm)}(?!\w)"
+    return re.search(pattern, q_norm) is not None
+
+
+def _count_keyword_matches(query: str, keywords: Set[str]) -> int:
+    """Count how many configured keywords match as full tokens/phrases."""
+    return sum(1 for kw in keywords if _contains_keyword(query, kw))
 
 
 def _get_snowball_stemmer():
@@ -138,6 +183,45 @@ def _expand_query_spanish(query: str) -> str:
     return " ".join(expanded)
 
 
+# Words that indicate the LLM is misusing person_filter for topics/concepts
+_NOT_PERSON_KEYWORDS = {
+    "política", "politica", "privacidad", "protección", "proteccion",
+    "datos", "documento", "documentos", "cumplimiento", "compliance",
+    "factura", "facturas", "contrato", "contratos", "nómina", "nomina",
+    "informe", "informes", "laboral", "fiscal", "legal", "mercantil",
+    "servicio", "servicios", "análisis", "analisis", "búsqueda", "busqueda",
+    "sistema", "empresa", "departamento", "ley", "artículo", "articulo",
+    "normativa", "reglamento", "expediente", "acta", "presupuesto",
+    "seguridad", "salud", "médico", "medico", "tratamiento", "rgpd",
+}
+
+
+def _sanitize_person_filter(value: str) -> Optional[str]:
+    """Reject person_filter values that are clearly not person names.
+
+    The LLM sometimes passes thematic text (e.g. "protección de datos")
+    as person_filter. This function detects and discards those.
+    """
+    if not value or not value.strip():
+        return None
+
+    words = value.strip().split()
+
+    # Person names are 1-4 words max
+    if len(words) > 4:
+        logger.info(f"🚫 person_filter rejected (too many words): '{value}'")
+        return None
+
+    # Check if any word is a known non-person keyword
+    value_lower = {w.lower() for w in words}
+    overlap = value_lower & _NOT_PERSON_KEYWORDS
+    if overlap:
+        logger.info(f"🚫 person_filter rejected (topic keywords: {overlap}): '{value}'")
+        return None
+
+    return value.strip()
+
+
 class SmartSearchInput(BaseModel):
     """Input for unified multi-store search."""
     query: str = Field(
@@ -152,7 +236,9 @@ class SmartSearchInput(BaseModel):
     )
     person_filter: Optional[str] = Field(
         default=None,
-        description="Filtrar por persona asociada (nombre completo o parcial).",
+        description="Nombre de una PERSONA HUMANA (ej: 'Javier Martínez', 'García López'). "
+        "NO uses este campo para temas, conceptos, o tipos de documento. "
+        "Solo para nombres propios de personas físicas.",
     )
     domain_filter: Optional[str] = Field(
         default=None,
@@ -161,6 +247,14 @@ class SmartSearchInput(BaseModel):
     folder_filter: Optional[str] = Field(
         default=None,
         description="Filtrar por ruta de carpeta (ej: /Contratos/ACME).",
+    )
+    date_from: Optional[str] = Field(
+        default=None,
+        description="Fecha mínima (ISO 8601, ej: '2026-02-01'). Filtra documentos creados desde esta fecha.",
+    )
+    date_to: Optional[str] = Field(
+        default=None,
+        description="Fecha máxima (ISO 8601, ej: '2026-03-04'). Filtra documentos creados hasta esta fecha.",
     )
     limit: int = Field(
         default=10, ge=1, le=20,
@@ -180,8 +274,10 @@ class SmartSearchTool(EmmaTool):
         return (
             "Búsqueda inteligente unificada en documentos del usuario Y legislación española (BOE). "
             "Detecta automáticamente qué buscar y filtra por tipo de documento (facturas, contratos, "
-            "nóminas, informes, etc.) y por persona. Usa esto para: 'facturas de Javier', "
-            "'contratos de 2024', 'nóminas del departamento X', o cualquier búsqueda documental/legal. "
+            "nóminas, informes, etc.), por persona, y por rango de fechas. "
+            "Usa date_from/date_to para consultas temporales como 'facturas del último mes'. "
+            "Usa esto para: 'facturas de Javier', 'contratos de 2024', 'nóminas del departamento X', "
+            "o cualquier búsqueda documental/legal. "
             "Para CONTAR documentos (cuántos hay), usa structural_query en su lugar."
         )
 
@@ -202,7 +298,13 @@ class SmartSearchTool(EmmaTool):
         person_filter = arguments.get("person_filter")
         domain_filter = arguments.get("domain_filter")
         folder_filter = arguments.get("folder_filter")
+        date_from = arguments.get("date_from")
+        date_to = arguments.get("date_to")
         limit = arguments.get("limit", 10)
+
+        # Validate person_filter — reject non-person values
+        if person_filter:
+            person_filter = _sanitize_person_filter(person_filter)
 
         # Get sector config for entity patterns and re-rank weights
         sector_config = context.get("sector_config")
@@ -216,8 +318,21 @@ class SmartSearchTool(EmmaTool):
         if expanded_query != query:
             logger.info(f"🔍 Query expanded: '{query}' → '{expanded_query}'")
 
-        # ── Step 2: Scope detection (rules, no LLM) ──
-        search_docs, search_legislation = self._detect_scope(scope, query, entities)
+        # ── Step 2: Scope detection with confidence scoring ──
+        scope_decision = self._detect_scope(scope, query, entities)
+        search_docs = scope_decision["search_docs"]
+        search_legislation = scope_decision["search_legislation"]
+        entity_confidence = self._score_entities(entities)
+        scope_decision["entity_confidence"] = entity_confidence
+        logger.info(
+            "🔎 Scope decision: docs=%s legal=%s confidence=%.2f docs_score=%.2f legal_score=%.2f reason=%s",
+            search_docs,
+            search_legislation,
+            scope_decision["confidence"],
+            scope_decision["docs_score"],
+            scope_decision["legal_score"],
+            scope_decision["reason"],
+        )
 
         # ── Step 3: Filter enrichment from entities ──
         enriched_person = person_filter
@@ -225,19 +340,30 @@ class SmartSearchTool(EmmaTool):
         enriched_domain = domain_filter
 
         if not enriched_person and "persona" in entities:
-            enriched_person = entities["persona"][0]
+            candidate = _sanitize_person_filter(entities["persona"][0])
+            if candidate:
+                enriched_person = candidate
 
-        query_lower = query.lower()
         for keyword, sem_type in _SEMANTIC_TYPE_KEYWORDS.items():
-            if keyword in query_lower:
+            if _contains_keyword(query, keyword):
                 enriched_semantic_type = sem_type
                 break
 
-        # ── Step 4: Graph expansion (optional, ~20-50ms) ──
+        # ── Step 4: Graph expansion (optional, ~20-50ms / ~100-200ms for GraphRAG) ──
         graph_doc_ids: Set[str] = set()
         graph_boe_ids: List[str] = []
+        graph_context_text: str = ""  # GraphRAG structured subgraph context
 
-        if settings.smart_search_graph_enabled and entities and sector_config_dict.get("graph_name"):
+        if settings.graphrag_enabled and entities:
+            # GraphRAG: multi-hop subgraph extraction (Phase 5)
+            graph_context_text, sg_doc_ids, sg_boe_ids = await self._extract_subgraph(
+                tenant_id, entities,
+            )
+            graph_doc_ids.update(sg_doc_ids)
+            graph_boe_ids.extend(sg_boe_ids)
+
+        elif settings.smart_search_graph_enabled and entities and sector_config_dict.get("graph_name"):
+            # Legacy: flat graph expansion (document IDs only)
             graph_doc_ids, graph_boe_ids = await self._expand_graph(
                 query, entities, sector_config_dict, tenant_id
             )
@@ -262,6 +388,8 @@ class SmartSearchTool(EmmaTool):
                 domain_filter=enriched_domain,
                 semantic_type_filter=enriched_semantic_type,
                 folder_filter=folder_filter,
+                date_from=date_from,
+                date_to=date_to,
                 dropped_filters=dropped_filters,
             ))
 
@@ -303,11 +431,51 @@ class SmartSearchTool(EmmaTool):
                 all_results, graph_doc_ids, entities, rerank_weights
             )
 
+        # ── Step 7b: Cross-encoder re-rank (neural, ~50-100ms) ──
+        if settings.smart_search_cross_encoder_enabled:
+            try:
+                from app.agents.langgraph.reranker import get_reranker
+                reranker = get_reranker(model_name=settings.smart_search_cross_encoder_model)
+                all_results = reranker.rerank(
+                    query=query,
+                    results=all_results,
+                    top_k=limit,
+                    heuristic_weight=1.0 - settings.smart_search_cross_encoder_weight,
+                )
+            except Exception as e:
+                logger.warning(f"Cross-encoder reranking failed (non-fatal): {e}")
+
         # Trim to requested limit
         all_results = all_results[:limit]
 
+        # ── Step 7c: Parent-child expansion (swap content → parent_content) ──
+        seen_parents: set = set()
+        expanded_results: List[Dict[str, Any]] = []
+        for r in all_results:
+            parent_content = (r.get("metadata") or {}).get("parent_content") or r.get("parent_content")
+            parent_id = (r.get("metadata") or {}).get("parent_chunk_id") or r.get("parent_chunk_id")
+            if parent_content and parent_id:
+                if parent_id in seen_parents:
+                    continue  # Dedup: one parent per unique parent_chunk_id
+                seen_parents.add(parent_id)
+                r["content"] = parent_content[:1500]  # Use parent for LLM context
+            expanded_results.append(r)
+        all_results = expanded_results if expanded_results else all_results
+
+        # ── Step 7d: Retrieval quality assessment ──
+        from ..retrieval_guard import assess_retrieval_quality
+        retrieval_quality = await assess_retrieval_quality(
+            query=query, results=all_results, entities=entities,
+        )
+
         # ── Step 8: Format for LLM ──
-        return self._format_results(query, all_results, dropped_filters=dropped_filters)
+        return self._format_results(
+            query, all_results,
+            dropped_filters=dropped_filters,
+            retrieval_quality=retrieval_quality,
+            graph_context=graph_context_text,
+            scope_decision=scope_decision,
+        )
 
     # ─── Private helpers ──────────────────────────────────────────────
 
@@ -329,32 +497,205 @@ class SmartSearchTool(EmmaTool):
 
     def _detect_scope(
         self, scope: str, query: str, entities: Dict[str, List[str]]
-    ) -> tuple[bool, bool]:
-        """Determine whether to search documents, legislation, or both."""
+    ) -> Dict[str, Any]:
+        """Determine search scope with confidence scoring and controlled fallback."""
         if scope == "documents":
-            return True, False
+            return {
+                "search_docs": True,
+                "search_legislation": False,
+                "docs_score": 1.0,
+                "legal_score": 0.0,
+                "confidence": 1.0,
+                "reason": "explicit_scope_documents",
+            }
         if scope == "legislation":
-            return False, True
+            return {
+                "search_docs": False,
+                "search_legislation": True,
+                "docs_score": 0.0,
+                "legal_score": 1.0,
+                "confidence": 1.0,
+                "reason": "explicit_scope_legislation",
+            }
         if scope == "all":
-            return True, True
+            return {
+                "search_docs": True,
+                "search_legislation": True,
+                "docs_score": 0.8,
+                "legal_score": 0.8,
+                "confidence": 1.0,
+                "reason": "explicit_scope_all",
+            }
 
-        # scope == "auto" — heuristic detection
-        query_lower = query.lower()
-        has_legal = any(kw in query_lower for kw in _LEGISLATION_KEYWORDS)
-        has_legal = has_legal or bool(entities.get("ley")) or bool(entities.get("articulo")) or bool(entities.get("boe"))
+        # scope == "auto" — weighted signals
+        legal_kw = _count_keyword_matches(query, _LEGISLATION_KEYWORDS)
+        docs_kw = _count_keyword_matches(query, _DOCUMENT_KEYWORDS)
+        legal_entity = int(bool(entities.get("ley"))) + int(bool(entities.get("articulo"))) + int(bool(entities.get("boe")))
+        docs_entity = (
+            int(bool(entities.get("persona")))
+            + int(bool(entities.get("nif")))
+            + int(bool(entities.get("fecha")))
+            + int(bool(entities.get("importe")))
+            + int(bool(entities.get("referencia")))
+        )
 
-        has_docs = any(kw in query_lower for kw in _DOCUMENT_KEYWORDS)
-        has_docs = has_docs or bool(entities.get("persona")) or bool(entities.get("nif"))
+        legal_score = min(1.0, (0.18 * legal_kw) + (0.22 * legal_entity))
+        docs_score = min(1.0, (0.15 * docs_kw) + (0.20 * docs_entity))
 
-        if has_legal and has_docs:
-            return True, True
-        if has_legal:
-            return False, True
-        if has_docs:
-            return True, False
+        if docs_score == 0.0 and legal_score == 0.0:
+            return {
+                "search_docs": True,
+                "search_legislation": True,
+                "docs_score": 0.0,
+                "legal_score": 0.0,
+                "confidence": 0.2,
+                "reason": "no_scope_signals",
+            }
 
-        # Default: search documents (most common use case)
-        return True, False
+        # Mixed explicit evidence on both sides: preserve recall querying both.
+        # Exception: "documentos de/sobre X" with only weak legal lexical hints
+        # should stay in documents scope (e.g., "documentos de normativa interna").
+        q_norm = _normalize_for_match(query)
+        doc_request_context = any(p in q_norm for p in _DOC_REQUEST_PATTERNS)
+        if doc_request_context and docs_kw > 0 and legal_entity == 0 and legal_kw <= 1:
+            return {
+                "search_docs": True,
+                "search_legislation": False,
+                "docs_score": docs_score,
+                "legal_score": legal_score,
+                "confidence": min(1.0, docs_score + 0.2),
+                "reason": "doc_request_context_override",
+            }
+
+        if (docs_kw + docs_entity) > 0 and (legal_kw + legal_entity) > 0:
+            return {
+                "search_docs": True,
+                "search_legislation": True,
+                "docs_score": docs_score,
+                "legal_score": legal_score,
+                "confidence": min(1.0, max(docs_score, legal_score)),
+                "reason": "mixed_scope_signals",
+            }
+
+        diff = abs(docs_score - legal_score)
+        max_score = max(docs_score, legal_score)
+        confidence = min(1.0, (0.55 * max_score) + (0.45 * diff))
+
+        # Low confidence / mixed evidence: query both scopes to preserve recall.
+        if confidence < _SCOPE_LOW_CONFIDENCE or max_score < _SCOPE_MIN_SIGNAL or diff < _SCOPE_MARGIN:
+            return {
+                "search_docs": True,
+                "search_legislation": True,
+                "docs_score": docs_score,
+                "legal_score": legal_score,
+                "confidence": confidence,
+                "reason": "low_confidence_fallback_all",
+            }
+
+        search_docs = docs_score > legal_score
+        return {
+            "search_docs": search_docs,
+            "search_legislation": not search_docs,
+            "docs_score": docs_score,
+            "legal_score": legal_score,
+            "confidence": confidence,
+            "reason": "high_confidence_auto_scope",
+        }
+
+    def _score_entities(self, entities: Dict[str, List[str]]) -> Dict[str, Any]:
+        """Compute lightweight confidence for extracted entities."""
+        if not entities:
+            return {"overall": 0.0, "by_type": {}, "count": 0}
+
+        by_type: Dict[str, float] = {}
+        weighted_sum = 0.0
+        total_values = 0
+
+        for entity_type, values in entities.items():
+            if not values:
+                continue
+            total_values += len(values)
+
+            if entity_type in {"ley", "articulo", "boe", "nif", "fecha", "importe"}:
+                conf = 0.9
+            elif entity_type in {"persona", "referencia"}:
+                conf = 0.75
+            else:
+                conf = 0.7
+
+            by_type[entity_type] = conf
+            weighted_sum += conf * len(values)
+
+        overall = (weighted_sum / total_values) if total_values else 0.0
+        return {"overall": round(overall, 3), "by_type": by_type, "count": total_values}
+
+    async def _extract_subgraph(
+        self,
+        tenant_id: str,
+        entities: Dict[str, List[str]],
+    ) -> tuple:
+        """Extract multi-hop subgraph via GraphRAG (Phase 5).
+
+        Returns:
+            (graph_context_text, doc_ids, boe_ids) — formatted text, doc IDs for
+            re-ranking, BOE IDs for legislation filtering.
+        """
+        try:
+            from app.clients.knowledge_tree_client import get_knowledge_tree_client
+            from app.core.config import settings
+            from .subgraph_formatter import format_subgraph
+
+            client = get_knowledge_tree_client()
+
+            # Build entity seeds from extracted entities
+            seeds = []
+            for etype, values in entities.items():
+                for val in values[:3]:
+                    seeds.append({"value": val, "type": etype})
+
+            if not seeds:
+                return "", set(), []
+
+            subgraph = await client.extract_subgraph(
+                tenant_id=tenant_id,
+                entities=seeds,
+                max_hops=settings.graphrag_max_hops,
+                max_nodes=settings.graphrag_max_nodes,
+                include_legal=settings.graphrag_include_legal,
+            )
+
+            nodes = subgraph.get("nodes", [])
+            if not nodes:
+                return "", set(), []
+
+            # Extract doc IDs and BOE IDs for re-ranking/filtering
+            doc_ids = {
+                n["properties"]["document_id"]
+                for n in nodes
+                if n.get("properties", {}).get("document_id")
+            }
+            boe_ids = [
+                n["properties"]["boe_id"]
+                for n in nodes
+                if n.get("properties", {}).get("boe_id")
+            ]
+
+            # Format for LLM
+            context_text = format_subgraph(
+                subgraph, token_budget=settings.graphrag_token_budget,
+            ) or ""
+
+            logger.info(
+                f"GraphRAG: {len(nodes)} nodes, {len(subgraph.get('edges', []))} edges, "
+                f"{len(doc_ids)} docs, {len(boe_ids)} laws "
+                f"({subgraph.get('latency_ms', 0)}ms)"
+            )
+
+            return context_text, doc_ids, boe_ids
+
+        except Exception as e:
+            logger.warning(f"GraphRAG subgraph extraction failed (non-fatal): {e}")
+            return "", set(), []
 
     async def _expand_graph(
         self,
@@ -418,6 +759,8 @@ class SmartSearchTool(EmmaTool):
         domain_filter: Optional[str] = None,
         semantic_type_filter: Optional[str] = None,
         folder_filter: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
         dropped_filters: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Search tenant documents via Weaviate hybrid search.
@@ -452,6 +795,8 @@ class SmartSearchTool(EmmaTool):
                 domain_filter=domain_filter,
                 semantic_type_filter=semantic_type_filter,
                 folder_filter=folder_filter,
+                date_from=date_from,
+                date_to=date_to,
             )
 
             if has_enrichment:
@@ -472,6 +817,8 @@ class SmartSearchTool(EmmaTool):
                         domain_filter=domain_filter,
                         semantic_type_filter=semantic_type_filter,
                         folder_filter=folder_filter,
+                        date_from=date_from,
+                        date_to=date_to,
                     )
                     if results:
                         logger.info(f"✅ Without person filter: {len(results)} results")
@@ -487,6 +834,8 @@ class SmartSearchTool(EmmaTool):
                         alpha=alpha,
                         semantic_type_filter=semantic_type_filter,
                         folder_filter=folder_filter,
+                        date_from=date_from,
+                        date_to=date_to,
                     )
                     if results:
                         logger.info(f"✅ With semantic_type only: {len(results)} results")
@@ -500,6 +849,8 @@ class SmartSearchTool(EmmaTool):
                         limit=limit,
                         alpha=alpha,
                         folder_filter=folder_filter,
+                        date_from=date_from,
+                        date_to=date_to,
                     )
 
             return [
@@ -605,12 +956,22 @@ class SmartSearchTool(EmmaTool):
     def _format_results(
         self, query: str, results: List[Dict[str, Any]],
         dropped_filters: Optional[List[str]] = None,
+        retrieval_quality: Any = None,
+        graph_context: str = "",
+        scope_decision: Optional[Dict[str, Any]] = None,
     ) -> ToolResult:
         """Format unified results for LLM consumption."""
         doc_count = sum(1 for r in results if r["type"] == "tenant_document")
         leg_count = sum(1 for r in results if r["type"] == "legislation")
 
-        parts = [f"Se encontraron {len(results)} resultados"]
+        parts = []
+
+        # Prepend GraphRAG subgraph context if available
+        if graph_context:
+            parts.append(graph_context)
+            parts.append("")  # Blank line separator
+
+        parts.append(f"Se encontraron {len(results)} resultados")
         if doc_count and leg_count:
             parts[0] += f" ({doc_count} documentos, {leg_count} legislación)"
         parts[0] += f" para '{query}':\n"
@@ -667,10 +1028,22 @@ class SmartSearchTool(EmmaTool):
                 }
             sources.append(source)
 
+        # Inject retrieval guard warnings into output
+        if retrieval_quality and retrieval_quality.warnings:
+            parts.append("---")
+            for w in retrieval_quality.warnings:
+                parts.append(w)
+
+        data = {"result_count": len(results), "doc_count": doc_count, "leg_count": leg_count}
+        if retrieval_quality:
+            data["retrieval_quality"] = retrieval_quality.to_dict()
+        if scope_decision:
+            data["scope_decision"] = scope_decision
+
         return ToolResult(
             output="\n".join(parts),
             sources=sources,
-            data={"result_count": len(results), "doc_count": doc_count, "leg_count": leg_count},
+            data=data,
         )
 
 

@@ -198,7 +198,7 @@ export default function InsightsPage() {
         setTotal(response.data.total)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error al cargar alertas')
+      setError(err instanceof Error ? err.message : 'Error al cargar insights')
     } finally {
       setIsLoading(false)
     }
@@ -264,7 +264,7 @@ export default function InsightsPage() {
           <nav className="flex items-center gap-2 text-sm text-muted-foreground">
             <Link href="/" className="hover:text-foreground transition-colors">Inicio</Link>
             <span>/</span>
-            <span className="text-foreground font-medium">Alertas</span>
+            <span className="text-foreground font-medium">Inteligencia Proactiva</span>
           </nav>
         </PageHeader>
 
@@ -275,7 +275,7 @@ export default function InsightsPage() {
               <div>
                 <h1 className="text-2xl font-semibold flex items-center gap-2">
                   <IconBell className="h-6 w-6" />
-                  Alertas Proactivas
+                  Inteligencia Proactiva
                 </h1>
                 <p className="text-sm text-muted-foreground mt-1">
                   Insights generados por Emma sobre tus documentos
@@ -350,12 +350,12 @@ export default function InsightsPage() {
                 <IconInbox className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
                 <p className="text-muted-foreground mb-2">
                   {statusFilter === 'active'
-                    ? 'No hay alertas activas'
-                    : 'No se encontraron alertas'}
+                    ? 'No hay insights activos'
+                    : 'No se encontraron insights'}
                 </p>
                 <p className="text-sm text-muted-foreground">
-                  Emma genera alertas automáticamente al detectar vencimientos,
-                  riesgos o cambios relevantes en tus documentos
+                  Emma analiza tus documentos continuamente y genera insights
+                  al detectar vencimientos, riesgos o cambios relevantes
                 </p>
               </div>
             ) : (

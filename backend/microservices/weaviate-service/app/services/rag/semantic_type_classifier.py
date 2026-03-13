@@ -207,7 +207,10 @@ async def _get_reference_embeddings() -> Dict[str, np.ndarray]:
         embeddings = {}
 
         for type_name, description in _SEMANTIC_TYPE_DESCRIPTIONS.items():
-            emb = await generate_embedding(description)
+            # Use classification task adapter for Jina v3 (ignored by BGE-M3)
+            from app.core.config import settings as ws_settings
+            task = getattr(ws_settings, "embedding_task_classification", "")
+            emb = await generate_embedding(description, task=task)
             if emb:
                 embeddings[type_name] = np.array(emb, dtype=np.float32)
 
@@ -270,7 +273,9 @@ async def classify_semantic_type(
     if not doc_text:
         return None
 
-    doc_embedding = await generate_embedding(doc_text)
+    from app.core.config import settings as ws_settings
+    task = getattr(ws_settings, "embedding_task_classification", "")
+    doc_embedding = await generate_embedding(doc_text, task=task)
     if not doc_embedding:
         return None
 

@@ -179,6 +179,8 @@ class WeaviateClient(BaseHTTPClient):
         semantic_type_filter: Optional[str] = None,
         min_quality: Optional[float] = None,
         folder_filter: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> list[SearchResult]:
         """
         Hybrid search combining vector and keyword search.
@@ -217,6 +219,10 @@ class WeaviateClient(BaseHTTPClient):
         if folder_filter:
             payload["filters"] = payload.get("filters") or {}
             payload["filters"]["folder_path"] = folder_filter
+        if date_from:
+            payload["date_from"] = date_from
+        if date_to:
+            payload["date_to"] = date_to
 
         try:
             # Use the global hybrid search endpoint

@@ -123,6 +123,7 @@ FORMATO DE RESPUESTA (JSON):
 
         try:
             from app.agents.llm_router import get_llm_router
+            from app.agents.llm_client import ModelRole
 
             router = await get_llm_router()
             response = await router.chat(
@@ -132,6 +133,7 @@ FORMATO DE RESPUESTA (JSON):
                 ],
                 temperature=0.3,
                 max_tokens=2048,
+                role=ModelRole.PLANNER,
             )
 
             raw_response = response.content

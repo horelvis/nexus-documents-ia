@@ -72,19 +72,25 @@ class Settings(BaseSettings):
     openrouter_api_key: str = os.getenv("OPENROUTER_API_KEY", "")
 
     # ==========================================================================
-    # Embedding configuration (BGE-M3 - Local Sentence Transformers)
+    # Embedding configuration
     # ==========================================================================
     # Primary Provider: sentence-transformers (local, no external service needed)
-    # Model: BAAI/bge-m3 - high-quality multilingual embeddings (1024 dim)
-    # Alternative providers: infinity (external), vllm (external)
+    # Default Model: jinaai/jina-embeddings-v3 (1024 dims, 5 LoRA task adapters)
+    # Alternative: BAAI/bge-m3 (1024 dims, generic — set EMBEDDING_MODEL=BAAI/bge-m3)
+    # Jina v3 advantages: +4% MTEB, +24.5% LongEmbed, task-specific LoRA adapters
     embedding_provider: str = os.getenv("EMBEDDING_PROVIDER", "sentence-transformers")
-    embedding_model: str = os.getenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "jinaai/jina-embeddings-v3")
     embedding_dimensions: int = int(os.getenv("EMBEDDING_DIMENSIONS", "1024"))
     embedding_url: str = os.getenv("EMBEDDING_URL", "http://embedding-service:8000")
     # Sentence Transformers device (cuda or cpu)
     embedding_device: str = os.getenv("EMBEDDING_DEVICE", "cuda")
     # Legacy: TEI URL (deprecated)
     tei_url: str = os.getenv("TEI_URL", "http://text-embeddings-inference:8080")
+    # Jina v3 Task Adapters (LoRA): select adapter per use case
+    # Available: retrieval.query, retrieval.passage, classification, text-matching, separation
+    embedding_task_query: str = os.getenv("EMBEDDING_TASK_QUERY", "retrieval.query")
+    embedding_task_passage: str = os.getenv("EMBEDDING_TASK_PASSAGE", "retrieval.passage")
+    embedding_task_classification: str = os.getenv("EMBEDDING_TASK_CLASSIFICATION", "classification")
 
     # Multimodal Embedding - DISABLED BY DEFAULT (BGE-M3 is text-only)
     # Enable for cross-modal search (text → images, images → text)
@@ -223,6 +229,16 @@ class Settings(BaseSettings):
     contextual_retrieval_max_context_length: int = int(os.getenv("CONTEXTUAL_RETRIEVAL_MAX_CONTEXT_LENGTH", "300"))  # Max chars for context prefix
 
     # ==========================================================================
+    # RAG Pipeline - Parent-Child Chunk Retrieval
+    # ==========================================================================
+    # Search on small children (~300 tokens) for precision, return large parents
+    # (~1500 tokens) for context. Requires re-indexation when toggled on.
+    parent_child_chunking_enabled: bool = os.getenv("PARENT_CHILD_CHUNKING_ENABLED", "false").lower() == "true"
+    parent_chunk_size: int = int(os.getenv("PARENT_CHUNK_SIZE", "1500"))
+    child_chunk_size: int = int(os.getenv("CHILD_CHUNK_SIZE", "300"))
+    child_chunk_overlap: int = int(os.getenv("CHILD_CHUNK_OVERLAP", "50"))
+
+    # ==========================================================================
     # RAG Pipeline - Knowledge Graph (Apache AGE)
     # ==========================================================================
     # Knowledge Graph - Apache AGE (PostgreSQL extension) for persistent graph storage
@@ -257,6 +273,14 @@ class Settings(BaseSettings):
 
     # Storage service URL (LEGACY - Use MCP storage server instead)
     storage_service_url: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8003")
+
+    # Knowledge Tree Service URL (consolidated graph operations)
+    knowledge_tree_service_url: str = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree:8011")
+
+    # Emma Agent Service URL (for memory generation at indexing time)
+    emma_agent_service_url: str = os.getenv("EMMA_AGENT_SERVICE_URL", "http://emma-agent-service:8009")
+    memory_bank_enabled: bool = os.getenv("MEMORY_BANK_ENABLED", "true").lower() == "true"
+    memorag_enabled: bool = os.getenv("MEMORAG_ENABLED", "true").lower() == "true"
 
     # ==========================================================================
     # MCP (Model Context Protocol) Configuration

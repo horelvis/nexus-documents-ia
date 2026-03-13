@@ -27,10 +27,11 @@ SSE event emission between steps.
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 
@@ -39,6 +40,8 @@ from app.core.langfuse_config import observe
 from ..state import ReActState
 from ..reasoning_tracker import StepType
 from ..tools.registry import get_tool_registry
+from ..quality_gate import assess_step0_no_tools, assess_terminate_quality
+from ..context_compressor import compress_tool_observations, estimate_message_tokens, trim_messages_to_token_budget
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +97,8 @@ con información verificada y citada.
 - Leer y analizar documentos completos
 - Análisis especializado: legal, fiscal, laboral, RGPD, contractual, compliance
 - Consultar legislación vigente (BOE: leyes, reglamentos, normativas)
-- Generar borradores de documentos basados en contexto y normativa
+- Generar nuevos documentos basados en existentes con modificaciones
+- Enviar documentos por email (con confirmación previa del usuario)
 - Buscar información en internet cuando las fuentes internas no son suficientes
 - Descubrir y consultar fuentes externas conectadas al sistema
 
@@ -130,9 +134,37 @@ Si los resultados NO son relevantes:
 - Si necesitas el texto completo de un documento → usa `get_document_content`
 - Si quieres contrastar con legislación → combina resultados de varias herramientas
 
-### Paso 5: RESPONDER
+### Paso 5: GENERAR DOCUMENTOS (cuando se solicite)
+- Si el usuario pide RENOVAR, ACTUALIZAR o CREAR un documento basado en uno existente → usa `generate_document`
+  - Primero lee el documento fuente con `get_document_content` para obtener su ID
+  - Luego llama a `generate_document` con el source_document_id y las modificaciones
+- Si el usuario pide ENVIAR un documento por email → usa `send_email`
+  - SIEMPRE llama primero con confirmed=false para mostrar un preview
+  - Solo envía (confirmed=true) cuando el usuario confirme explícitamente
+
+### Paso 6: RESPONDER
 Solo usa `terminate` cuando tengas información RELEVANTE y VERIFICADA.
 NO respondas con resultados que no corresponden a lo que se preguntó.
+
+## REGLA ANTI-ALUCINACIÓN (CRÍTICA)
+Tu respuesta SOLO puede contener datos que aparezcan TEXTUALMENTE en los resultados \
+de las herramientas que has usado. Esto incluye:
+- Números de factura, importes, fechas, nombres, NIFs
+- Cantidades, rangos, totales
+- Títulos de documentos, artículos de leyes
+
+Si una herramienta devuelve 2 facturas, tu respuesta dice "2 facturas" — NO "12 facturas".
+Si no encontraste importes en los documentos, NO inventes importes.
+Si no hay datos de un período específico, di "no encontré facturas de ese período".
+
+PROHIBIDO:
+- Inventar números de factura que no aparecen en los resultados
+- Extrapolar rangos ("del 1023 al 1034") que no están en los datos
+- Fabricar importes, fechas o nombres que no están en los documentos
+- Asumir datos que "probablemente" existen
+
+Si los datos encontrados son insuficientes para responder completamente, \
+di exactamente qué encontraste y qué falta.
 
 ## Reglas OBLIGATORIAS
 - Si los resultados de una búsqueda no son relevantes: LLAMA a otra herramienta directamente. NUNCA respondas sugiriendo al usuario que busque él mismo.
@@ -141,12 +173,32 @@ NO respondas con resultados que no corresponden a lo que se preguntó.
 - SIEMPRE cita las fuentes de tu información
 - Distingue entre CONTENEDORES (carpetas/expedientes) y DOCUMENTOS (archivos)
 - Si piden MOSTRAR un documento: búscalo y léelo, NUNCA lo inventes
-- Si piden GENERAR un documento: créalo con [PLACEHOLDER] para datos faltantes
+- NUNCA digas que "no puedes" enviar emails o generar documentos — TIENES las herramientas `send_email` y `generate_document`. ÚSALAS.
+- Si piden GENERAR un documento basado en uno existente → usa `generate_document` (NO inventes el contenido)
 - Si no encuentras información relevante tras 3+ intentos, dilo honestamente
 - Responde en el mismo idioma que el usuario
 - Sé DIRECTO y CONCISO
 - NUNCA respondas con información de una ley diferente a la que se preguntó
 """
+
+
+# ── Email action detection ───────────────────────────────────────────
+_EMAIL_ADDR_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_SEND_KEYWORDS = re.compile(
+    r"\b(enviar?|mandar?|send|remitir?|enví[ao]|manda)\b", re.IGNORECASE
+)
+
+
+def _detect_email_action(query: str) -> Tuple[bool, str]:
+    """Detect if the query is an email-sending action.
+
+    Returns (is_email_action, email_address).
+    Matches patterns like "enviar a user@domain.com" or "send to user@domain.com".
+    """
+    email_match = _EMAIL_ADDR_RE.search(query)
+    if email_match and _SEND_KEYWORDS.search(query):
+        return True, email_match.group(0)
+    return False, ""
 
 
 async def _build_system_message(state: ReActState) -> SystemMessage:
@@ -180,6 +232,25 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
     user_memory = state.get("user_memory")
     if user_memory:
         prompt += f"\n\n{user_memory}"
+
+    # Inject memory recall clues (MemoRAG — document memory scan results)
+    memory_clues = state.get("memory_clues")
+    if memory_clues:
+        prompt += f"\n\n## Pistas de memoria documental\nBasándote en los documentos del usuario, estas pistas pueden ayudarte a buscar mejor:\n{memory_clues}"
+
+    # Detect email-sending action and inject strong hint for small models
+    query = state.get("query", "")
+    is_email_action, email_addr = _detect_email_action(query)
+    if is_email_action:
+        prompt += (
+            f"\n\n## ACCIÓN DETECTADA: ENVIAR EMAIL"
+            f"\nEl usuario quiere enviar un email a {email_addr}."
+            f"\nUSA `send_email` directamente con confirmed=false."
+            f"\nNO busques documentos — usa la conversación previa para componer "
+            f"el asunto y cuerpo del email."
+            f"\nSi en la conversación se generó un documento con generate_document, "
+            f"incluye su attachment_id."
+        )
 
     return SystemMessage(content=prompt)
 
@@ -363,45 +434,187 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             # HumanMessage or other
             llm_messages.append({"role": "user", "content": msg.content or ""})
 
-    # Sliding window: keep system messages + last N messages to avoid context overflow.
-    # Walk the cut boundary to avoid orphaning tool_call/result pairs.
-    max_history = settings.react_max_history_messages
-    if len(llm_messages) > max_history:
-        # Preserve system messages at the start
-        system_msgs = [m for m in llm_messages if m.get("role") == "system"]
-        non_system = [m for m in llm_messages if m.get("role") != "system"]
-
-        if len(non_system) > max_history:
-            cut = len(non_system) - max_history
-            # Walk cut backward past any orphaned tool messages at the boundary
-            while cut > 0 and non_system[cut].get("role") == "tool":
-                cut -= 1
-            non_system = non_system[cut:]
-
-        llm_messages = system_msgs + non_system
-        logger.debug(f"Trimmed message history to {len(llm_messages)} messages (max_history={max_history})")
+    # Token-budget sliding window: trim messages to fit within model context.
+    # This replaces the old message-count window, which could still overflow
+    # when tool observations (e.g., get_document_content) are large.
+    # Reserve tokens for: system prompt overhead, completion, and safety margin.
+    MODEL_CONTEXT_BUDGET = int(os.getenv("VLLM_MAX_MODEL_LEN", "32768"))
+    # Leave room for completion tokens + safety margin
+    input_token_budget = MODEL_CONTEXT_BUDGET - settings.react_max_completion_tokens - 512
+    llm_messages = trim_messages_to_token_budget(
+        llm_messages,
+        token_budget=input_token_budget,
+        preserve_recent=max(4, settings.react_context_compress_preserve_recent),
+    )
 
     # Call LLM with tools
+    # Per-request thinking override: when user enables deep_reasoning in UI,
+    # pass enable_thinking to override the PLANNER default (no thinking)
+    #
+    # Dynamic max_tokens: estimate input tokens and cap completion to avoid
+    # exceeding the 16K context. PLANNER needs ~500 tokens max for tool calls.
+    MODEL_CONTEXT_LIMIT = int(os.getenv("VLLM_MAX_MODEL_LEN", "32768"))
+    # Count ALL content: message content + tool_calls JSON structures + overhead
+    _est_chars = 0
+    for m in llm_messages:
+        _est_chars += len(m.get("content", "") or "")
+        # tool_calls JSON adds significant tokens (name, arguments, structure)
+        if m.get("tool_calls"):
+            for tc in m["tool_calls"]:
+                _est_chars += len(json.dumps(tc.get("function", {}), default=str))
+                _est_chars += 20  # role/structure overhead per tool_call
+        _est_chars += 10  # per-message overhead (role tokens, separators)
+    estimated_input_tokens = _est_chars // 3 + 100  # ~3 chars/token for multilingual
+    desired_max = settings.react_max_completion_tokens
+    safe_max = max(512, MODEL_CONTEXT_LIMIT - estimated_input_tokens - 200)
+    effective_max_tokens = min(desired_max, safe_max)
+    if effective_max_tokens < desired_max:
+        logger.info(
+            f"ReAct step {step}: capping max_tokens {desired_max}→{effective_max_tokens} "
+            f"(~{estimated_input_tokens} input tokens, {MODEL_CONTEXT_LIMIT} context)"
+        )
+
+    # Pre-call safety: if input alone would exceed context, force-compress tool observations
+    if estimated_input_tokens > MODEL_CONTEXT_LIMIT - 512:
+        logger.warning(
+            f"ReAct step {step}: estimated {estimated_input_tokens} input tokens exceeds "
+            f"safe limit — force-compressing tool observations"
+        )
+        # Compress BaseMessage list from state, then rebuild llm_messages
+        all_base_messages = list(state.get("messages", []))
+        compressed = compress_tool_observations(
+            all_base_messages,
+            budget=2000,  # aggressive compression
+            preserve_recent=1,
+        )
+        if compressed is not None:
+            # Rebuild llm_messages from compressed BaseMessages
+            llm_messages_new: List[Dict[str, Any]] = []
+            if cached_sys_content:
+                llm_messages_new.append({"role": "system", "content": cached_sys_content})
+            for msg in compressed:
+                if isinstance(msg, SystemMessage):
+                    llm_messages_new.append({"role": "system", "content": msg.content})
+                elif isinstance(msg, AIMessage):
+                    msg_d: Dict[str, Any] = {"role": "assistant", "content": msg.content or ""}
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        msg_d["tool_calls"] = [
+                            {
+                                "id": tc.get("id", tc.get("tool_call_id", "")),
+                                "type": "function",
+                                "function": {
+                                    "name": tc.get("name", ""),
+                                    "arguments": json.dumps(tc.get("args", tc.get("arguments", "")))
+                                        if isinstance(tc.get("args", tc.get("arguments", "")), dict)
+                                        else tc.get("args", tc.get("arguments", "")),
+                                },
+                            }
+                            for tc in msg.tool_calls
+                        ]
+                    llm_messages_new.append(msg_d)
+                elif isinstance(msg, ToolMessage):
+                    llm_messages_new.append({
+                        "role": "tool",
+                        "tool_call_id": msg.tool_call_id,
+                        "content": msg.content or "",
+                    })
+                else:
+                    llm_messages_new.append({"role": "user", "content": msg.content or ""})
+            llm_messages = llm_messages_new
+            # Recalculate tokens after compression
+            _est_chars2 = sum(len(m.get("content", "") or "") for m in llm_messages)
+            estimated_input_tokens = _est_chars2 // 3 + 100
+            safe_max = max(512, MODEL_CONTEXT_LIMIT - estimated_input_tokens - 200)
+            effective_max_tokens = min(desired_max, safe_max)
+            logger.info(
+                f"ReAct step {step}: after compression ~{estimated_input_tokens} input tokens, "
+                f"max_tokens={effective_max_tokens}"
+            )
+
     try:
         from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
         router = await get_llm_router()
-        response = await router.chat(
-            messages=llm_messages,
-            tools=tool_schemas if tool_schemas else None,
-            max_tokens=settings.react_max_completion_tokens,
-        )
-    except Exception as e:
-        logger.error(f"ReAct loop: LLM call failed at step {step}: {e}")
-        return {
-            "is_complete": True,
-            "current_step": step + 1,
-            "success": False,
-            "final_answer": f"Lo siento, hubo un error procesando tu consulta: {e}",
-            "reasoning_steps": [{
-                "type": StepType.ERROR.value,
-                "content": f"LLM error at step {step}: {e}",
-            }],
+        llm_kwargs = {
+            "messages": llm_messages,
+            "tools": tool_schemas if tool_schemas else None,
+            "max_tokens": effective_max_tokens,
+            "role": ModelRole.PLANNER,
         }
+        per_request_thinking = state.get("enable_thinking")
+        if per_request_thinking is not None:
+            llm_kwargs["enable_thinking"] = per_request_thinking
+        response = await router.chat(**llm_kwargs)
+    except Exception as e:
+        error_str = str(e)
+        logger.error(f"ReAct loop: LLM call failed at step {step}: {error_str}")
+
+        # ── Context overflow recovery: trim history and retry once ──
+        _is_context_overflow = (
+            "context length" in error_str.lower()
+            or "token" in error_str.lower() and ("exceed" in error_str.lower() or "limit" in error_str.lower())
+        )
+        if _is_context_overflow and not state.get("metadata", {}).get("_context_overflow_retried"):
+            logger.warning(
+                f"ReAct step {step}: context overflow detected, trimming history and retrying"
+            )
+            # Aggressively trim: keep system + last 6 messages
+            system_msgs = [m for m in llm_messages if m.get("role") == "system"]
+            non_system = [m for m in llm_messages if m.get("role") != "system"]
+            # Walk cut boundary to avoid orphaning tool messages
+            keep = min(6, len(non_system))
+            cut = len(non_system) - keep
+            while cut > 0 and cut < len(non_system) and non_system[cut].get("role") == "tool":
+                cut -= 1
+            trimmed = system_msgs + non_system[cut:]
+            # Retry with trimmed messages and minimum completion tokens
+            try:
+                retry_kwargs = {
+                    "messages": trimmed,
+                    "tools": tool_schemas if tool_schemas else None,
+                    "max_tokens": 512,
+                    "role": ModelRole.PLANNER,
+                }
+                if per_request_thinking is not None:
+                    retry_kwargs["enable_thinking"] = per_request_thinking
+                response = await router.chat(**retry_kwargs)
+                logger.info(
+                    f"ReAct step {step}: retry succeeded after trimming "
+                    f"({len(llm_messages)}→{len(trimmed)} messages)"
+                )
+                # Fall through to normal processing below
+            except Exception as retry_err:
+                logger.error(f"ReAct loop: retry also failed: {retry_err}")
+                return {
+                    "is_complete": True,
+                    "current_step": step + 1,
+                    "success": False,
+                    "final_answer": (
+                        "Lo siento, la conversación se ha vuelto demasiado larga para procesar. "
+                        "Por favor, inicia una nueva conversación para continuar."
+                    ),
+                    "reasoning_steps": [{
+                        "type": StepType.ERROR.value,
+                        "content": f"Context overflow at step {step} — retry failed",
+                    }],
+                    "metadata": {"_context_overflow_retried": True},
+                }
+        else:
+            # Non-overflow error or already retried: return user-friendly message
+            # Log full technical detail but never expose to user
+            return {
+                "is_complete": True,
+                "current_step": step + 1,
+                "success": False,
+                "final_answer": (
+                    "Lo siento, hubo un problema temporal procesando tu consulta. "
+                    "Por favor, inténtalo de nuevo en unos segundos."
+                ),
+                "reasoning_steps": [{
+                    "type": StepType.ERROR.value,
+                    "content": f"LLM error at step {step}: {error_str}",
+                }],
+            }
 
     # Track thinking/reasoning
     reasoning_steps: List[Dict[str, Any]] = []
@@ -427,9 +640,35 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     # ─── No tool calls → agent wants to respond directly ───
     if not response.has_tool_calls:
         intent = (state.get("metadata") or {}).get("classify_intent", "")
+        metadata = state.get("metadata") or {}
+
+        # Gate 1: Step-0 no-tools retry (CRAG quality gate)
+        if settings.react_quality_gate_enabled:
+            should_retry, corrective_msg = assess_step0_no_tools(
+                intent=intent, step=step, has_tool_calls=False, metadata=metadata,
+            )
+            if should_retry:
+                from langchain_core.messages import HumanMessage
+                return {
+                    "is_complete": False,
+                    "current_step": step + 1,
+                    "messages": [
+                        AIMessage(content=content),
+                        HumanMessage(content=corrective_msg),
+                    ],
+                    "reasoning_steps": reasoning_steps + [{
+                        "type": StepType.ERROR.value,
+                        "content": "Quality Gate: step 0 no-tools — injecting retry",
+                    }],
+                    "metadata": {
+                        f"react_step_{step}_latency_ms": latency_ms,
+                        "quality_gate_step0_retried": True,
+                        "_tool_schemas_cache": tool_schemas,
+                        "_system_message_cache": cached_sys_content,
+                    },
+                }
+
         if step == 0 and intent in ("document_query", "legal_query", "analysis"):
-            # SILENT FAILURE: LLM skipped tool calling on first step for a query
-            # that should have triggered a search. Log as warning for observability.
             logger.warning(
                 f"⚠️ ReAct step 0 — NO tool calls for intent '{intent}'. "
                 f"LLM responded directly without searching. "
@@ -502,6 +741,48 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     if terminate_tc:
         answer = terminate_tc.arguments.get("answer", "")
 
+        # Gate 2: Low-quality terminate retry (CRAG quality gate)
+        if settings.react_quality_gate_enabled:
+            metadata = state.get("metadata") or {}
+            intent = metadata.get("classify_intent", "")
+            accumulated_sources = state.get("sources", [])
+
+            should_retry, corrective_msg = assess_terminate_quality(
+                answer=answer,
+                sources=accumulated_sources,
+                intent=intent,
+                step=step,
+                max_steps=max_steps,
+                metadata=metadata,
+                tool_calls_history=tool_calls_history,
+                messages=state.get("messages", []),
+            )
+            if should_retry:
+                from langchain_core.messages import HumanMessage
+                logger.info(f"Quality Gate 2: blocking terminate at step {step}, injecting retry")
+                return {
+                    "is_complete": False,
+                    "current_step": step + 1,
+                    "messages": [
+                        ai_message,
+                        ToolMessage(content="[Terminate bloqueado por quality gate]", tool_call_id=terminate_tc.id),
+                        HumanMessage(content=corrective_msg),
+                    ],
+                    "tool_calls_history": tool_calls_history,
+                    "reasoning_steps": reasoning_steps + [{
+                        "type": StepType.ERROR.value,
+                        "content": "Quality Gate: low-quality terminate — injecting retry",
+                    }],
+                    "metadata": {
+                        f"react_step_{step}_latency_ms": latency_ms,
+                        "quality_gate_terminate_retried": True,
+                        "quality_gate_retrieval_retried": True,
+                        "quality_gate_faithfulness_retried": True,
+                        "_tool_schemas_cache": tool_schemas,
+                        "_system_message_cache": cached_sys_content,
+                    },
+                }
+
         result = await registry.execute(terminate_tc.name, terminate_tc.arguments, context=tool_context)
 
         new_messages.append(ToolMessage(
@@ -546,6 +827,8 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     results = await asyncio.gather(*[_run_tool(tc) for tc in regular_tcs])
 
     # Process results in order
+    last_retrieval_quality = None
+    email_preview_pending = None  # Track email preview for HITL interrupt
     for tc, result in results:
         # Truncate large observations (OpenManus max_observe pattern)
         observation = result.output
@@ -562,13 +845,122 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         if result.sources:
             new_sources.extend(result.sources)
 
+        # Extract retrieval quality from smart_search for Quality Gate 4
+        if tc.name == "smart_search" and result.data and result.data.get("retrieval_quality"):
+            last_retrieval_quality = result.data["retrieval_quality"]
+
+        # Detect send_email preview → will trigger HITL interrupt
+        if tc.name == "send_email" and result.data and result.data.get("preview"):
+            email_preview_pending = {
+                "tool_call": tc,
+                "result": result,
+            }
+
         reasoning_steps.append({
             "type": StepType.OBSERVATION.value,
             "content": observation[:300],
             "source": tc.name,
         })
 
+    # ─── HITL: Email confirmation interrupt ────────────────────────────
+    # When send_email returns a preview, pause the graph and show
+    # confirmation buttons to the user. On resume, re-invoke send_email
+    # with confirmed=true automatically.
+    if email_preview_pending:
+        from langgraph.types import interrupt
+        tc = email_preview_pending["tool_call"]
+        result = email_preview_pending["result"]
+        to_addr = result.data.get("to", "")
+
+        logger.info(f"ReAct loop: email preview detected → HITL interrupt (to={to_addr})")
+
+        # Return current state with messages so far, then interrupt
+        # The interrupt surfaces the preview + confirmation buttons to the frontend
+        confirmed = interrupt({
+            "type": "confirmation",
+            "question": result.output,
+            "options": [
+                {"label": "✉️ Confirmar envío", "value": "confirm_send"},
+                {"label": "Cancelar", "value": "cancel_send"},
+            ],
+            # Pass original args so we can re-invoke with confirmed=true
+            "_email_args": {
+                "to": tc.arguments.get("to"),
+                "subject": tc.arguments.get("subject"),
+                "body": tc.arguments.get("body"),
+                "attachment_id": tc.arguments.get("attachment_id"),
+            },
+        })
+
+        # After resume: user selected an option
+        if confirmed == "confirm_send":
+            logger.info(f"ReAct loop: email confirmed by user → sending to {to_addr}")
+            registry = await get_tool_registry()
+            send_result = await registry.execute(
+                "send_email",
+                {**tc.arguments, "confirmed": True},
+                context=tool_context,
+            )
+            # Replace the preview ToolMessage with the send result
+            for i, m in enumerate(new_messages):
+                if hasattr(m, "tool_call_id") and m.tool_call_id == tc.id:
+                    new_messages[i] = ToolMessage(
+                        content=send_result.output,
+                        tool_call_id=tc.id,
+                    )
+                    break
+            logger.info(f"ReAct loop: email sent successfully to {to_addr}")
+        else:
+            logger.info(f"ReAct loop: email cancelled by user")
+            for i, m in enumerate(new_messages):
+                if hasattr(m, "tool_call_id") and m.tool_call_id == tc.id:
+                    new_messages[i] = ToolMessage(
+                        content="El usuario ha cancelado el envío del email.",
+                        tool_call_id=tc.id,
+                    )
+                    break
+
+    # ─── Context compression: compress old ToolMessages if context overflows ───
+    if settings.react_context_compress_enabled:
+        all_messages = list(state.get("messages", [])) + new_messages
+        compressed = compress_tool_observations(
+            all_messages,
+            budget=settings.react_context_compress_threshold,
+            preserve_recent=settings.react_context_compress_preserve_recent,
+        )
+        if compressed is not None:
+            # Replace entire message list with compressed version
+            # Return compressed as the full messages list (overwrite, not append)
+            reasoning_steps.append({
+                "type": StepType.OBSERVATION.value,
+                "content": "Context compressed to fit token budget",
+            })
+            _compressed_meta = {
+                f"react_step_{step}_latency_ms": latency_ms,
+                "_tool_schemas_cache": tool_schemas,
+                "_system_message_cache": cached_sys_content,
+                "context_compressed": True,
+            }
+            if last_retrieval_quality:
+                _compressed_meta["last_retrieval_quality"] = last_retrieval_quality
+            return {
+                "messages": compressed,
+                "current_step": step + 1,
+                "is_complete": False,
+                "tool_calls_history": tool_calls_history,
+                "sources": new_sources,
+                "reasoning_steps": reasoning_steps,
+                "metadata": _compressed_meta,
+            }
+
     # Return updated state — is_complete=False triggers another react_loop iteration
+    _step_meta = {
+        f"react_step_{step}_latency_ms": latency_ms,
+        "_tool_schemas_cache": tool_schemas,
+        "_system_message_cache": cached_sys_content,
+    }
+    if last_retrieval_quality:
+        _step_meta["last_retrieval_quality"] = last_retrieval_quality
     return {
         "messages": new_messages,
         "current_step": step + 1,
@@ -576,11 +968,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         "tool_calls_history": tool_calls_history,
         "sources": new_sources,
         "reasoning_steps": reasoning_steps,
-        "metadata": {
-            f"react_step_{step}_latency_ms": latency_ms,
-            "_tool_schemas_cache": tool_schemas,
-            "_system_message_cache": cached_sys_content,
-        },
+        "metadata": _step_meta,
     }
 
 

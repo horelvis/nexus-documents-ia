@@ -12,6 +12,8 @@ from .notifications import router as notifications_router
 from .channels_emma import router as channels_router
 from .heartbeat import router as heartbeat_router
 from .prompts import router as prompts_router
+from .diagnostics import router as diagnostics_router
+from .generated_documents import router as generated_documents_router
 
 __all__ = [
     "emma_router",
@@ -26,4 +28,6 @@ __all__ = [
     "channels_router",
     "heartbeat_router",
     "prompts_router",
+    "diagnostics_router",
+    "generated_documents_router",
 ]

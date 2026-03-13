@@ -47,3 +47,13 @@ SELECT create_elabel('medical_graph', 'TRATADO_CON');
 SELECT create_elabel('medical_graph', 'DERIVADO_A');
 SELECT create_elabel('medical_graph', 'ADJUNTO');
 SELECT create_elabel('medical_graph', 'CONTRAINDICADO');
+
+-- Ontology proxy (for INSTANCE_OF edges to shared EntityType nodes)
+SELECT create_vlabel('medical_graph', 'EntityType');
+
+-- Memory Bank (MemoRAG-inspired document summaries for planner clue generation)
+SELECT create_vlabel('medical_graph', 'DocumentMemory');
+
+SELECT create_elabel('medical_graph', 'INSTANCE_OF');
+SELECT create_elabel('medical_graph', 'EXTRACTED_FROM');
+SELECT create_elabel('medical_graph', 'HAS_MEMORY');

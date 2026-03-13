@@ -6,6 +6,7 @@ Handles:
 - Channel selection based on priority and configuration
 - Batching low-priority insights into daily digests
 """
+import json
 import logging
 import uuid
 from datetime import datetime, time, timedelta, timezone
@@ -371,25 +372,15 @@ class DeliveryManager:
         """Store delivered insight in Redis for retrieval."""
         r = await self._get_redis()
 
-        # Store insight data
+        # Full JSON serialization (all fields preserved)
         key = f"emma:insights:{tenant_id}:{insight.id}"
-        await r.hset(key, mapping={
-            "id": insight.id,
-            "insight_type": insight.insight_type,
-            "title": insight.title,
-            "summary": insight.summary or "",
-            "priority_score": str(insight.priority_score),
-            "urgency": insight.urgency if isinstance(insight.urgency, str) else insight.urgency.value,
-            "status": insight.status if isinstance(insight.status, str) else insight.status.value,
-            "delivered_at": insight.delivered_at.isoformat() if insight.delivered_at else "",
-            "created_at": insight.created_at.isoformat(),
-        })
-        await r.expire(key, settings.heartbeat_insight_ttl_seconds)
+        await r.set(key, insight.model_dump_json(), ex=settings.heartbeat_insight_ttl_seconds)
 
-        # Add to tenant's insight list
+        # Add to tenant's insight list with matching TTL (prevents zombie entries)
         list_key = f"emma:insights:{tenant_id}:list"
         await r.lpush(list_key, insight.id)
         await r.ltrim(list_key, 0, settings.heartbeat_max_insights_stored - 1)
+        await r.expire(list_key, settings.heartbeat_insight_ttl_seconds)
 
     async def _get_delivery_stats(self, tenant_id: str) -> Dict[str, Any]:
         """Get current delivery statistics for rate limiting."""
@@ -457,11 +448,19 @@ class DeliveryManager:
         insight_ids = await r.lrange(list_key, 0, limit - 1)
 
         insights = []
+        expired_ids = []
         for insight_id in insight_ids:
             key = f"emma:insights:{tenant_id}:{insight_id}"
-            data = await r.hgetall(key)
+            data = await r.get(key)
             if data:
-                insights.append(data)
+                insights.append(json.loads(data))
+            else:
+                expired_ids.append(insight_id)
+
+        # Auto-clean zombie entries (IDs in list but hash expired)
+        if expired_ids:
+            for eid in expired_ids:
+                await r.lrem(list_key, 0, eid)
 
         return insights
 

@@ -18,6 +18,7 @@ Usage:
     # Update configuration
     await heartbeat_service.update_config(tenant_id, {"enabled": False})
 """
+import json
 import logging
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -234,7 +235,6 @@ class HeartbeatService:
         config_str = await r.hget(key, "config")
         if config_str:
             try:
-                import json
                 config_data = json.loads(config_str)
                 return HeartbeatConfig(**config_data)
             except Exception:
@@ -262,7 +262,6 @@ class HeartbeatService:
         r = await self._get_redis()
         key = f"emma:heartbeat:config:{tenant_id}"
 
-        import json
         await r.hset(key, "config", json.dumps(new_config.model_dump()))
 
         return new_config
@@ -339,19 +338,26 @@ class HeartbeatService:
         r = await self._get_redis()
         key = f"emma:insights:{tenant_id}:{insight_id}"
 
-        exists = await r.exists(key)
-        if not exists:
+        raw = await r.get(key)
+        if not raw:
             return False
 
+        data = json.loads(raw)
+        data["status"] = status
+
         now = datetime.now(timezone.utc)
-        updates = {"status": status}
-
         if status == "dismissed":
-            updates["dismissed_at"] = now.isoformat()
+            data["dismissed_at"] = now.isoformat()
         elif status == "acted_on":
-            updates["acted_on_at"] = now.isoformat()
+            data["acted_on_at"] = now.isoformat()
 
-        await r.hset(key, mapping=updates)
+        # Preserve remaining TTL
+        ttl = await r.ttl(key)
+        if ttl > 0:
+            await r.set(key, json.dumps(data), ex=ttl)
+        else:
+            await r.set(key, json.dumps(data), ex=settings.heartbeat_insight_ttl_seconds)
+
         return True
 
     # ─────────────────────────────────────────────────────────────────

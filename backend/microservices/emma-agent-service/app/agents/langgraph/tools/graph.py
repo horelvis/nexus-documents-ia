@@ -13,6 +13,7 @@ proper semantic_type data for document type counts.
 import json
 import logging
 import re
+import unicodedata
 from typing import Any, Dict, Optional, Type
 
 from pydantic import BaseModel, Field
@@ -42,6 +43,21 @@ _COUNT_PATTERN = re.compile(
     r"(?:cuánt[oa]s?|cuant[oa]s?|total\s+de|número\s+de|cantidad\s+de|hay\s+de)",
     re.IGNORECASE,
 )
+
+
+def _normalize_for_match(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    no_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", no_accents.lower()).strip()
+
+
+def _contains_keyword(query: str, keyword: str) -> bool:
+    q_norm = _normalize_for_match(query)
+    kw_norm = _normalize_for_match(keyword)
+    if not q_norm or not kw_norm:
+        return False
+    pattern = rf"(?<!\w){re.escape(kw_norm)}(?!\w)"
+    return re.search(pattern, q_norm) is not None
 
 
 class StructuralQueryInput(BaseModel):
@@ -128,9 +144,10 @@ class StructuralQueryTool(EmmaTool):
             and data.get("count") is None
             and _COUNT_PATTERN.search(query)
         ):
-            query_lower = query.lower()
+            matched_specific = False
             for keyword, sem_type in _COUNT_TYPE_KEYWORDS.items():
-                if keyword in query_lower:
+                if _contains_keyword(query, keyword):
+                    matched_specific = True
                     try:
                         from app.clients.weaviate_client import get_weaviate_client
                         wv_client = get_weaviate_client()
@@ -146,6 +163,23 @@ class StructuralQueryTool(EmmaTool):
                         logger.warning(f"Weaviate count fallback failed: {e}")
                     break
 
+            # Generic "cuántos documentos" without specific type → sum all
+            if not matched_specific and data.get("count") is None:
+                try:
+                    from app.clients.weaviate_client import get_weaviate_client
+                    wv_client = get_weaviate_client()
+                    wv_result = await wv_client.count_by_semantic_type(tenant_id)
+                    type_counts = wv_result.get("type_counts", {})
+                    if type_counts:
+                        total = sum(type_counts.values())
+                        data["count"] = total
+                        data["count_type"] = "documents"
+                        data["count_source"] = "weaviate"
+                        data["type_breakdown"] = type_counts
+                        logger.info(f"📊 Weaviate total count fallback: {total} ({type_counts})")
+                except Exception as e:
+                    logger.warning(f"Weaviate total count fallback failed: {e}")
+
         lines = []
 
         if route == "GRAPH_ONLY":
@@ -154,9 +188,13 @@ class StructuralQueryTool(EmmaTool):
                 count = data.get("count") or data.get("total")
                 if count is not None:
                     matched_type = data.get("matched_type", "")
-                    count_type = data.get("count_type", "")
+                    type_breakdown = data.get("type_breakdown")
                     if matched_type:
                         lines.append(f"**Resultado**: {count} {matched_type}(s) encontrado(s)")
+                    elif type_breakdown:
+                        lines.append(f"**Total de documentos**: {count}")
+                        breakdown_parts = [f"{v} {k}(s)" for k, v in type_breakdown.items()]
+                        lines.append(f"**Desglose por tipo**: {', '.join(breakdown_parts)}")
                     else:
                         lines.append(f"**Resultado**: {count}")
                 items = data.get("items") or data.get("results") or data.get("nodes", [])

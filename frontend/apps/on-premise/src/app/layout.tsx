@@ -4,6 +4,8 @@ import { Inter } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { Toaster } from "@nexus/shared/ui"
 import { AuthProvider } from "@/contexts/auth-context"
+import { VerifiedGenerationProvider } from "@/contexts/verified-generation-context"
+import { VerifiedGenerationFloating } from "@/components/emma-chat/VerifiedGenerationFloating"
 import "./globals.css"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -32,7 +34,10 @@ export default function RootLayout({
         >
           <Suspense fallback={null}>
             <AuthProvider>
-              {children}
+              <VerifiedGenerationProvider>
+                {children}
+                <VerifiedGenerationFloating />
+              </VerifiedGenerationProvider>
             </AuthProvider>
           </Suspense>
           <Toaster />

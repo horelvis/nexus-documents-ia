@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.services.age_client import age_client
+from app.services.ontology_service import ontology_service
 
 logger = logging.getLogger(__name__)
 
@@ -416,6 +417,23 @@ class StructuralIndexer:
             )
             persona_edge = "MERGE (d)-[:ASOCIADO_A]->(p)"
 
+        # INSTANCE_OF: link document to ontology EntityType proxy node
+        instance_of_merge = ""
+        instance_of_edge = ""
+        ontology_type = None
+        if semantic_type:
+            resolved = ontology_service.resolve_type(semantic_type)
+            if resolved:
+                ontology_type = resolved.name
+                instance_of_merge = (
+                    f"MERGE (et:EntityType {{name: '{_escape(resolved.name)}'}})"
+                    f" SET et.display_name = '{_escape(resolved.display_name)}'"
+                    f", et.category = '{_escape(resolved.category)}'"
+                )
+                if resolved.parent:
+                    instance_of_merge += f", et.parent = '{_escape(resolved.parent)}'"
+                instance_of_edge = "MERGE (d)-[:INSTANCE_OF]->(et)"
+
         cypher = f"""
         SELECT * FROM cypher('{graph}', $$
             MERGE (d:structural_document {{tenant_id: '{_escape(tenant_id)}', document_id: '{_escape(document_id)}'}})
@@ -425,6 +443,8 @@ class StructuralIndexer:
             {folder_edge}
             {persona_merge}
             {persona_edge}
+            {instance_of_merge}
+            {instance_of_edge}
             RETURN d.semantic_type as semantic_type
         $$) as (semantic_type agtype)
         """
@@ -432,11 +452,14 @@ class StructuralIndexer:
             await age_client.execute_cypher(cypher)
             if associated_person:
                 logger.info(f"Linked document {document_id} to Persona '{associated_person}'")
+            if ontology_type:
+                logger.debug(f"Linked document {document_id} INSTANCE_OF '{ontology_type}'")
             return {
                 "success": True,
                 "indexed_to_graph": True,
                 "node_type": "structural_document",
                 "semantic_type": semantic_type,
+                "ontology_type": ontology_type,
                 "associated_person": associated_person,
             }
         except Exception as e:

@@ -57,6 +57,15 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
     }
   }
 
+  // Handle history - use provided handler or navigate to home with query param
+  const handleOpenHistory = () => {
+    if (onOpenHistory) {
+      onOpenHistory()
+    } else {
+      router.push('/?history=open')
+    }
+  }
+
   const mainNavItems = [
     {
       title: 'Nueva consulta',
@@ -64,12 +73,12 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       onClick: handleNewConversation,
       isActive: false,
     },
-    ...(onOpenHistory ? [{
+    {
       title: 'Historial',
       icon: IconHistory,
-      onClick: onOpenHistory,
+      onClick: handleOpenHistory,
       isActive: false,
-    }] : []),
+    },
   ]
 
   const configNavItems = [
@@ -89,7 +98,7 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       icon: IconSchool,
     },
     {
-      title: 'Alertas',
+      title: 'Inteligencia Proactiva',
       href: '/insights',
       icon: IconBell,
     },

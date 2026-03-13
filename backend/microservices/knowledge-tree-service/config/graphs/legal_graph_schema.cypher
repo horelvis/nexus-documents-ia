@@ -50,5 +50,12 @@ SELECT create_elabel('legal_graph', 'MODIFICA');
 SELECT create_elabel('legal_graph', 'APLICA');
 SELECT create_elabel('legal_graph', 'PARTE_DE');
 
--- Node property indexes for fast lookup
--- (Apache AGE uses GIN indexes on properties)
+-- Ontology proxy (for INSTANCE_OF edges to shared EntityType nodes)
+SELECT create_vlabel('legal_graph', 'EntityType');
+
+-- Memory Bank (MemoRAG-inspired document summaries for planner clue generation)
+SELECT create_vlabel('legal_graph', 'DocumentMemory');
+
+SELECT create_elabel('legal_graph', 'INSTANCE_OF');
+SELECT create_elabel('legal_graph', 'EXTRACTED_FROM');
+SELECT create_elabel('legal_graph', 'HAS_MEMORY');

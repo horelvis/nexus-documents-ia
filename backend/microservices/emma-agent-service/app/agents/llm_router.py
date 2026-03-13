@@ -1,39 +1,52 @@
 """
-LLM Router with Automatic Fallback
+LLM Router with Automatic Fallback and Dual-Model Architecture
 
 Provides unified access to multiple LLM providers with automatic fallback
-when the primary provider fails. Inspired by OpenRouter's gateway pattern.
+when the primary provider fails. Supports dual-model routing where a fast
+planner model handles tool calling/routing and a quality chat model handles
+final response generation.
 
-Architecture:
+Architecture (Dual-Model):
     ┌─────────────────────────────────────────────────────────────┐
     │                      LLMRouter                               │
     │                                                              │
-    │  Primary (vLLM) ──fail──> Fallback (OpenRouter) ──fail──>   │
-    │                           Fallback (OpenAI)                  │
+    │  role=PLANNER → vLLM-Planner (4B, fast tool calling)        │
+    │  role=CHAT    → vLLM-Chat (9B, quality generation)          │
     │                                                              │
-    │  Each provider uses LLMClient with appropriate LLMConfig    │
+    │  Each role+provider combo has its own LLMClient instance     │
+    │  Fallback chain works per-role                               │
+    └─────────────────────────────────────────────────────────────┘
+
+Architecture (Single-Model, backwards compatible):
+    ┌─────────────────────────────────────────────────────────────┐
+    │  VLLM_DUAL_MODEL=false (default)                            │
+    │  Both PLANNER and CHAT use the same vLLM endpoint/model     │
     └─────────────────────────────────────────────────────────────┘
 
 Usage:
-    >>> router = LLMRouter()
-    >>> response = await router.chat(messages, tools)
-    >>> # Uses primary provider, falls back automatically if it fails
+    >>> router = await get_llm_router()
+    >>> # Tool calling (uses planner if dual-model enabled)
+    >>> response = await router.chat(messages, tools=tools, role=ModelRole.PLANNER)
+    >>> # Final response (uses chat model)
+    >>> response = await router.chat(messages, role=ModelRole.CHAT)
 
 Environment Variables:
     LLM_PROVIDER: Primary provider (vllm, openrouter, openai)
-    LLM_FALLBACK_ENABLED: Enable automatic fallback (true/false)
-    LLM_FALLBACK_CHAIN: Comma-separated provider order (e.g., "vllm,openrouter,openai")
+    VLLM_DUAL_MODEL: Enable dual-model routing (true/false)
+    VLLM_PLANNER_URL: Planner vLLM endpoint (defaults to VLLM_BASE_URL)
+    VLLM_PLANNER_MODEL: Planner model name (defaults to VLLM_MODEL)
 """
 
 import asyncio
 import logging
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 from app.agents.llm_client import (
     LLMClient,
     LLMConfig,
     LLMProvider,
     LLMResponse,
+    ModelRole,
     StreamEvent,
     create_llm_config_for_provider,
 )
@@ -46,49 +59,35 @@ class LLMRouter:
     """
     Router with automatic fallback between LLM providers.
 
-    The router maintains a pool of LLM clients and routes requests
-    to the primary provider. If the primary fails, it automatically
-    tries fallback providers in order.
+    Supports dual-model architecture where PLANNER role uses a fast model
+    for tool calling and CHAT role uses a quality model for generation.
 
     Features:
     - Lazy client initialization (created on first use)
     - Automatic fallback on provider failure
-    - Provider override per request
+    - Provider and role override per request
     - Configurable fallback chain
     - Langfuse observability integration
-
-    Example:
-        >>> router = LLMRouter()
-        >>> # Uses primary provider with automatic fallback
-        >>> response = await router.chat(messages)
-        >>> # Force specific provider (no fallback)
-        >>> response = await router.chat(messages, provider_override="openrouter")
     """
 
     def __init__(self):
         """Initialize the router with empty client pool."""
-        self._clients: Dict[LLMProvider, LLMClient] = {}
+        # Client pool keyed by (provider, role) for dual-model support
+        self._clients: Dict[Tuple[LLMProvider, ModelRole], LLMClient] = {}
         self._fallback_chain: List[LLMProvider] = self._parse_fallback_chain()
         self._fallback_enabled: bool = self._is_fallback_enabled()
+        self._dual_model: bool = self._is_dual_model()
 
         logger.info(
             f"LLMRouter initialized: primary={self._fallback_chain[0].value if self._fallback_chain else 'none'}, "
+            f"dual_model={self._dual_model}, "
             f"fallback_enabled={self._fallback_enabled}, chain={[p.value for p in self._fallback_chain]}"
         )
 
     def _parse_fallback_chain(self) -> List[LLMProvider]:
-        """
-        Parse fallback chain from settings.
-
-        LLM_PROVIDER is always first (primary). Remaining providers from
-        LLM_FALLBACK_CHAIN follow in order, with the primary deduplicated.
-
-        Returns:
-            List of providers in fallback order
-        """
+        """Parse fallback chain from settings."""
         from app.core.config import settings
 
-        # Primary provider always comes first
         primary_name = settings.llm_provider.lower()
         try:
             primary = LLMProvider(primary_name)
@@ -96,7 +95,6 @@ class LLMRouter:
             logger.warning(f"Unknown primary provider: {primary_name}, defaulting to vllm")
             primary = LLMProvider.VLLM
 
-        # Parse remaining chain, excluding primary (already first)
         chain_str = settings.llm_fallback_chain
         providers = [primary]
 
@@ -116,33 +114,38 @@ class LLMRouter:
         from app.core.config import settings
         return settings.llm_fallback_enabled
 
-    def _get_or_create_client(self, provider: LLMProvider) -> LLMClient:
+    def _is_dual_model(self) -> bool:
+        """Check if dual-model architecture is enabled."""
+        from app.core.config import settings
+        return settings.vllm_dual_model
+
+    def _get_or_create_client(
+        self,
+        provider: LLMProvider,
+        role: ModelRole = ModelRole.CHAT,
+    ) -> LLMClient:
         """
-        Get existing client or create new one for provider.
+        Get existing client or create new one for provider+role combo.
 
-        Args:
-            provider: The LLM provider
-
-        Returns:
-            LLMClient instance for the provider
+        In single-model mode, both roles share the same client.
+        In dual-model mode, each role gets its own client with different config.
         """
-        if provider not in self._clients:
-            config = create_llm_config_for_provider(provider)
-            self._clients[provider] = LLMClient(config)
-            logger.debug(f"Created LLM client for provider: {provider.value}")
+        # In single-model mode, normalize role to CHAT to share client
+        effective_role = role if self._dual_model else ModelRole.CHAT
+        key = (provider, effective_role)
 
-        return self._clients[provider]
+        if key not in self._clients:
+            config = create_llm_config_for_provider(provider, effective_role)
+            self._clients[key] = LLMClient(config)
+            logger.debug(
+                f"Created LLM client: provider={provider.value}, role={effective_role.value}, "
+                f"model={config.model}"
+            )
+
+        return self._clients[key]
 
     def _get_providers_to_try(self, provider_override: Optional[str] = None) -> List[LLMProvider]:
-        """
-        Get list of providers to try in order.
-
-        Args:
-            provider_override: If set, only try this provider (no fallback)
-
-        Returns:
-            List of providers to attempt
-        """
+        """Get list of providers to try in order."""
         if provider_override:
             try:
                 return [LLMProvider(provider_override.lower())]
@@ -152,7 +155,6 @@ class LLMRouter:
         if self._fallback_enabled:
             return self._fallback_chain
         else:
-            # Only try primary (first in chain)
             return [self._fallback_chain[0]] if self._fallback_chain else [LLMProvider.VLLM]
 
     @observe(as_type="span", name="llm_router.chat")
@@ -161,6 +163,7 @@ class LLMRouter:
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         provider_override: Optional[str] = None,
+        role: ModelRole = ModelRole.CHAT,
         **kwargs,
     ) -> LLMResponse:
         """
@@ -170,6 +173,7 @@ class LLMRouter:
             messages: Conversation history
             tools: Available tools (OpenAI function format)
             provider_override: Force specific provider (disables fallback)
+            role: Model role — PLANNER for tool calling, CHAT for generation
             **kwargs: Override config (temperature, max_tokens, etc.)
 
         Returns:
@@ -187,12 +191,11 @@ class LLMRouter:
         for i, provider in enumerate(providers):
             is_fallback = i > 0
 
-            client = self._get_or_create_client(provider)
+            client = self._get_or_create_client(provider, role)
 
             if is_fallback:
                 logger.info(f"Fallback attempt {i}: trying provider {provider.value}")
 
-            # Try each provider up to 2 times (initial + 1 fast retry)
             for attempt in range(2):
                 try:
                     response = await client.chat(messages, tools, **kwargs)
@@ -203,6 +206,8 @@ class LLMRouter:
                     langfuse_context.update_current_observation(
                         metadata={
                             "provider": provider.value,
+                            "model_role": role.value,
+                            "model": client.config.model,
                             "is_fallback": is_fallback,
                             "fallback_attempt": i if is_fallback else 0,
                             "retry_attempt": attempt,
@@ -214,16 +219,14 @@ class LLMRouter:
                 except Exception as e:
                     last_error = e
                     logger.warning(
-                        f"Provider {provider.value} attempt {attempt}: "
+                        f"Provider {provider.value} (role={role.value}) attempt {attempt}: "
                         f"{type(e).__name__}: {str(e)[:200]}"
                     )
 
                     if attempt == 0:
-                        # Fast retry before escalating to next provider
                         await asyncio.sleep(retry_delay)
                         continue
                     else:
-                        # Both attempts failed, update Langfuse and try next provider
                         langfuse_context.update_current_observation(
                             metadata={
                                 f"provider_{provider.value}_error": str(e)[:200],
@@ -231,7 +234,6 @@ class LLMRouter:
                         )
                         break
 
-        # All providers failed
         error_msg = f"All LLM providers failed. Last error: {last_error}"
         logger.error(error_msg)
         raise Exception(error_msg)
@@ -241,6 +243,7 @@ class LLMRouter:
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
         provider_override: Optional[str] = None,
+        role: ModelRole = ModelRole.CHAT,
         **kwargs,
     ) -> AsyncGenerator[StreamEvent, None]:
         """
@@ -253,6 +256,7 @@ class LLMRouter:
             messages: Conversation history
             tools: Available tools
             provider_override: Force specific provider (disables fallback)
+            role: Model role — PLANNER for tool calling, CHAT for generation
             **kwargs: Override config
 
         Yields:
@@ -265,16 +269,14 @@ class LLMRouter:
             is_fallback = i > 0
 
             try:
-                client = self._get_or_create_client(provider)
+                client = self._get_or_create_client(provider, role)
 
                 if is_fallback:
                     logger.info(f"Fallback attempt {i}: trying provider {provider.value} for streaming")
 
-                # Start streaming - if this succeeds, we're committed to this provider
                 async for event in client.chat_stream(messages, tools, **kwargs):
                     yield event
 
-                # Stream completed successfully
                 if is_fallback:
                     logger.info(f"Fallback streaming from {provider.value} succeeded")
 
@@ -283,26 +285,18 @@ class LLMRouter:
             except Exception as e:
                 last_error = e
                 logger.warning(
-                    f"Provider {provider.value} failed to start stream: {type(e).__name__}: {str(e)[:200]}"
+                    f"Provider {provider.value} (role={role.value}) failed to start stream: "
+                    f"{type(e).__name__}: {str(e)[:200]}"
                 )
                 continue
 
-        # All providers failed to start streaming
         yield StreamEvent(
             event_type="error",
             error=f"All LLM providers failed. Last error: {last_error}"
         )
 
     async def validate_connection(self, provider: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Validate connection to one or all providers.
-
-        Args:
-            provider: Specific provider to check, or None for all in chain
-
-        Returns:
-            Dict with provider status information
-        """
+        """Validate connection to one or all providers."""
         results = {}
 
         if provider:
@@ -311,31 +305,53 @@ class LLMRouter:
             providers_to_check = self._fallback_chain
 
         for p in providers_to_check:
+            # Validate chat model
             try:
-                client = self._get_or_create_client(p)
+                client = self._get_or_create_client(p, ModelRole.CHAT)
                 is_connected, message = await client.validate_connection()
-                results[p.value] = {
+                results[f"{p.value}:chat"] = {
                     "connected": is_connected,
                     "message": message,
                     "model": client.config.model,
+                    "role": "chat",
                 }
             except Exception as e:
-                results[p.value] = {
+                results[f"{p.value}:chat"] = {
                     "connected": False,
                     "message": f"Error: {str(e)}",
                     "model": None,
+                    "role": "chat",
                 }
+
+            # Validate planner model (only if dual-model and vLLM)
+            if self._dual_model and p == LLMProvider.VLLM:
+                try:
+                    planner_client = self._get_or_create_client(p, ModelRole.PLANNER)
+                    is_connected, message = await planner_client.validate_connection()
+                    results[f"{p.value}:planner"] = {
+                        "connected": is_connected,
+                        "message": message,
+                        "model": planner_client.config.model,
+                        "role": "planner",
+                    }
+                except Exception as e:
+                    results[f"{p.value}:planner"] = {
+                        "connected": False,
+                        "message": f"Error: {str(e)}",
+                        "model": None,
+                        "role": "planner",
+                    }
 
         return results
 
     async def close(self) -> None:
         """Close all LLM clients."""
-        for provider, client in self._clients.items():
+        for key, client in self._clients.items():
             try:
                 await client.close()
-                logger.debug(f"Closed LLM client for provider: {provider.value}")
+                logger.debug(f"Closed LLM client: provider={key[0].value}, role={key[1].value}")
             except Exception as e:
-                logger.warning(f"Error closing client for {provider.value}: {e}")
+                logger.warning(f"Error closing client for {key}: {e}")
 
         self._clients.clear()
 
@@ -353,6 +369,11 @@ class LLMRouter:
     def is_fallback_enabled(self) -> bool:
         """Check if fallback is enabled."""
         return self._fallback_enabled
+
+    @property
+    def is_dual_model(self) -> bool:
+        """Check if dual-model architecture is active."""
+        return self._dual_model
 
 
 # =============================================================================

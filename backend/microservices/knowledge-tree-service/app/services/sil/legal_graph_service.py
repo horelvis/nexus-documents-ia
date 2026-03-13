@@ -1,7 +1,11 @@
 """
-Legal Graph Service Stub for Emma Agent Service.
+DEPRECATED: Legal Graph Service Stub
 
-Delegates legal graph queries to weaviate-service.
+This stub is superseded by app.services.legal_graph_service which
+provides the real implementation using Apache AGE directly.
+Use `from app.services.legal_graph_service import legal_graph` instead.
+
+Kept temporarily for backwards compatibility with scripts.
 """
 
 import logging

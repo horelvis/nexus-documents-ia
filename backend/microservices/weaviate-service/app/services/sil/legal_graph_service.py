@@ -1,30 +1,26 @@
 """
-Legal Graph Service
+DEPRECATED: Legal Graph Service
 
-Manages the public knowledge graph (knowledge_graph_public) for legal references
-between BOE legislation. Separated from tenant knowledge_graph to avoid mixing
-public law data with tenant document entities.
+The canonical implementation now lives in knowledge-tree-service.
+Runtime API consumers should use the HTTP client:
+    from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
-Graph structure:
-- Nodes: LegalLaw (boe_id, title, short_name, domain, status)
-         LegalArticle (article_number, boe_id_parent, content_hash)
-- Edges: CONTAINS (LegalLaw → LegalArticle)
-         MODIFIES (LegalLaw → LegalLaw)
-         DEROGATES (LegalLaw → LegalLaw)
-         REFERENCES (LegalLaw → LegalLaw)
-         CITES (LegalArticle → LegalArticle)
+This module is kept ONLY for scripts (seed_legal_graph.py,
+populate_legal_edges.py, connect_orphan_laws.py) that run
+inside the weaviate-service container and need direct AGE access.
 
-Usage:
-    from app.services.sil.legal_graph_service import legal_graph
-
-    await legal_graph.add_law(law)
-    await legal_graph.store_references(boe_id, legal_refs)
+TODO: Migrate scripts to knowledge-tree-service and delete this file.
 """
 
 import logging
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass, field
 from enum import Enum
+from contextlib import asynccontextmanager
+
+import asyncpg
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -77,23 +73,37 @@ class LegalGraphService:
     PUBLIC_GRAPH_NAME = "knowledge_graph_public"
 
     def __init__(self):
-        self._age_service = None
+        self._pool: Optional[asyncpg.Pool] = None
         self._initialized = False
 
+    @asynccontextmanager
+    async def _get_connection(self):
+        """Get a connection with AGE loaded and search path set."""
+        if not self._pool:
+            raise RuntimeError("Database pool not initialized")
+        async with self._pool.acquire() as conn:
+            await conn.execute("LOAD 'age';")
+            await conn.execute('SET search_path = ag_catalog, "$user", public;')
+            yield conn
+
     async def initialize(self):
-        """Initialize the service and ensure public graph exists."""
+        """Initialize the service with its own asyncpg pool."""
         if self._initialized:
             return
 
         try:
-            from app.services.knowledge.age_graph_service import age_knowledge_graph
-            self._age_service = age_knowledge_graph
-            await self._age_service.initialize()
+            db_url = settings.database_url
+            if "+asyncpg" in db_url:
+                db_url = db_url.replace("+asyncpg", "")
+
+            self._pool = await asyncpg.create_pool(
+                db_url, min_size=1, max_size=5, command_timeout=30,
+            )
 
             # Ensure public graph exists
             await self._ensure_public_graph()
             self._initialized = True
-            logger.info("✅ LegalGraphService initialized")
+            logger.info("✅ LegalGraphService initialized (self-contained pool)")
 
         except Exception as e:
             logger.warning(f"⚠️ LegalGraphService initialization failed: {e}")
@@ -101,11 +111,11 @@ class LegalGraphService:
 
     async def _ensure_public_graph(self):
         """Create the public knowledge graph if it doesn't exist."""
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             return
 
         try:
-            async with self._age_service._get_connection() as conn:
+            async with self._get_connection() as conn:
                 result = await conn.fetchval(
                     "SELECT count(*) FROM ag_catalog.ag_graph WHERE name = $1",
                     self.PUBLIC_GRAPH_NAME,
@@ -169,9 +179,9 @@ class LegalGraphService:
         Returns:
             True if successful
         """
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             await self.initialize()
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             return False
 
         try:
@@ -181,7 +191,7 @@ class LegalGraphService:
             summary = law.summary.replace("'", "''")[:500]
             weaviate_uuid = (law.weaviate_uuid or "").replace("'", "''")
 
-            async with self._age_service._get_connection() as conn:
+            async with self._get_connection() as conn:
                 # MERGE + SET (Apache AGE doesn't support ON CREATE/ON MATCH)
                 cypher = f"""
                     MERGE (l:LegalLaw {{boe_id: '{boe_id}'}})
@@ -226,9 +236,9 @@ class LegalGraphService:
         Returns:
             True if successful
         """
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             await self.initialize()
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             return False
 
         try:
@@ -239,7 +249,7 @@ class LegalGraphService:
             articles = articles_affected or []
             articles_str = str(articles).replace("'", '"')
 
-            async with self._age_service._get_connection() as conn:
+            async with self._get_connection() as conn:
                 # Check if edge already exists to avoid duplicates
                 check_cypher = f"""
                     MATCH (s:LegalLaw {{boe_id: '{src}'}})-[r:{rel}]->(t:LegalLaw {{boe_id: '{tgt}'}})
@@ -347,15 +357,15 @@ class LegalGraphService:
         Returns:
             List of neighbor law dicts with relationship info
         """
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             await self.initialize()
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             return []
 
         try:
             boe_escaped = boe_id.replace("'", "''")
 
-            async with self._age_service._get_connection() as conn:
+            async with self._get_connection() as conn:
                 cypher = f"""
                     MATCH (start:LegalLaw {{boe_id: '{boe_escaped}'}})
                           -[r*1..{max_depth}]-(neighbor:LegalLaw)
@@ -390,11 +400,11 @@ class LegalGraphService:
 
     async def get_graph_stats(self) -> Dict[str, Any]:
         """Get statistics about the public legal graph."""
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             return {"initialized": False}
 
         try:
-            async with self._age_service._get_connection() as conn:
+            async with self._get_connection() as conn:
                 # Count laws
                 law_results = await self._execute_public_cypher(
                     conn,
@@ -429,13 +439,13 @@ class LegalGraphService:
 
     async def get_all_laws(self) -> List[Dict[str, Any]]:
         """Get all LegalLaw nodes from the public graph."""
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             await self.initialize()
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             return []
 
         try:
-            async with self._age_service._get_connection() as conn:
+            async with self._get_connection() as conn:
                 results = await self._execute_public_cypher(
                     conn,
                     """
@@ -474,13 +484,13 @@ class LegalGraphService:
 
         Returns dict with 'nodes' and 'edges' arrays.
         """
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             await self.initialize()
-        if not self._age_service or not self._age_service._pool:
+        if not self._pool:
             return {"nodes": [], "edges": []}
 
         try:
-            async with self._age_service._get_connection() as conn:
+            async with self._get_connection() as conn:
                 # Get all law nodes
                 law_nodes = await self._execute_public_cypher(
                     conn,

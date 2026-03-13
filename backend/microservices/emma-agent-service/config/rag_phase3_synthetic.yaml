@@ -1,0 +1,1607 @@
+meta:
+  name: emma_rag_phase3_synthetic
+  version: '1.0'
+  description: Synthetic balanced benchmark for scope/entity routing.
+  top_k: 3
+  seed: 42
+cases:
+- id: syn_0001
+  query: Muestrame facturas del año 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0002
+  query: Necesito documentos de Maria Lopez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0003
+  query: Quiero el contrato de Javier Martinez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0004
+  query: Dame documentos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0005
+  query: Busca facturas con referencia FAC-2026-009
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0006
+  query: Dame contratos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0007
+  query: Ver nominas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0008
+  query: Quiero el factura de Marta Gil
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0009
+  query: Ver documentos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0010
+  query: Necesito facturas de Ana de la Fuente
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0011
+  query: Ver facturas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0012
+  query: Ver contratos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0013
+  query: Quiero el documento de Lucia Gomez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0014
+  query: Ver contratos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0015
+  query: Necesito documentos de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0016
+  query: Quiero el nomina de Pedro Sanchez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0017
+  query: Ver contratos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0018
+  query: Ver contratos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0019
+  query: Busca documentos con referencia CTR-2024-014
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0020
+  query: Necesito contratos de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0021
+  query: Quiero el documento de Ana de la Fuente
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0022
+  query: Quiero el informe de Ana de la Fuente
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0023
+  query: Ver documentos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0024
+  query: Dame facturas del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0025
+  query: Quiero el documento de Javier Martinez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0026
+  query: Busca documentos con referencia REF-ACME-77
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0027
+  query: Dame expedientes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0028
+  query: Necesito facturas de Javier Martinez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0029
+  query: Necesito expedientes de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0030
+  query: Busca contratos con referencia REF-ACME-77
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0031
+  query: Dame contratos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0032
+  query: Muestrame informes del año 2026
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0033
+  query: Quiero el nomina de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0034
+  query: Necesito facturas de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0035
+  query: Ver nominas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0036
+  query: Muestrame contratos del año 2024
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0037
+  query: Ver informes de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0038
+  query: Ver nominas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0039
+  query: Dame documentos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0040
+  query: Quiero el contrato de Pedro Sanchez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0041
+  query: Dame contratos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0042
+  query: Ver facturas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0043
+  query: Dame facturas del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0044
+  query: Dame contratos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0045
+  query: Dame informes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0046
+  query: Necesito contratos de Marta Gil
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0047
+  query: Quiero el nomina de Javier Martinez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0048
+  query: Quiero el expediente de Marta Gil
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0049
+  query: Dame contratos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0050
+  query: Dame expedientes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0051
+  query: Busca nominas con referencia REF-ACME-77
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0052
+  query: Busca contratos con referencia CTR-2024-014
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0053
+  query: Quiero el informe de Ana de la Fuente
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0054
+  query: Necesito expedientes de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0055
+  query: Quiero el nomina de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0056
+  query: Ver expedientes de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0057
+  query: Ver contratos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0058
+  query: Muestrame nominas del año 2024
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0059
+  query: Necesito expedientes de Lucia Gomez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0060
+  query: Muestrame nominas del año 2023
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0061
+  query: Quiero el documento de Lucia Gomez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0062
+  query: Busca facturas con referencia EXP-2025-001
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0063
+  query: Busca informes con referencia FAC-2026-009
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0064
+  query: Busca nominas con referencia EXP-2025-001
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0065
+  query: Muestrame expedientes del año 2024
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0066
+  query: Dame informes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0067
+  query: Necesito nominas de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0068
+  query: Busca contratos con referencia FAC-2026-009
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0069
+  query: Busca contratos con referencia CTR-2024-014
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0070
+  query: Ver facturas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0071
+  query: Quiero el factura de Pedro Sanchez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0072
+  query: Ver facturas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0073
+  query: Quiero el expediente de Pedro Sanchez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0074
+  query: Quiero el factura de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0075
+  query: Quiero el informe de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0076
+  query: Ver documentos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0077
+  query: Muestrame nominas del año 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0078
+  query: Dame documentos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0079
+  query: Quiero el nomina de Javier Martinez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0080
+  query: Quiero el informe de Pedro Sanchez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0081
+  query: Quiero el contrato de Marta Gil
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0082
+  query: Muestrame facturas del año 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0083
+  query: Quiero el factura de Maria Lopez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0084
+  query: Dame informes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0085
+  query: Dame contratos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0086
+  query: Quiero el documento de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0087
+  query: Ver facturas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0088
+  query: Muestrame informes del año 2026
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0089
+  query: Quiero el nomina de Marta Gil
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0090
+  query: Necesito documentos de Marta Gil
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0091
+  query: Quiero el nomina de Lucia Gomez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0092
+  query: Ver contratos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0093
+  query: Dame documentos del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0094
+  query: Muestrame expedientes del año 2026
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0095
+  query: Dame informes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0096
+  query: Quiero el nomina de Javier Martinez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0097
+  query: Dame informes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0098
+  query: Dame informes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0099
+  query: Quiero el expediente de Maria Lopez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0100
+  query: Dame facturas del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0101
+  query: Muestrame facturas del año 2026
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0102
+  query: Dame nominas del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0103
+  query: Busca facturas con referencia EXP-2025-001
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0104
+  query: Muestrame documentos del año 2023
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0105
+  query: Muestrame facturas del año 2024
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0106
+  query: Ver documentos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0107
+  query: Busca nominas con referencia REF-ACME-77
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0108
+  query: Dame expedientes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0109
+  query: Ver facturas de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0110
+  query: Busca documentos con referencia EXP-2025-001
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0111
+  query: Necesito documentos de Laura Ruiz
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0112
+  query: Ver informes de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0113
+  query: Ver documentos de 2025
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0114
+  query: Dame expedientes del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0115
+  query: Dame nominas del ultimo mes
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0116
+  query: Necesito informes de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0117
+  query: Busca nominas con referencia REF-ACME-77
+  expected_scope: documents
+  expected_entity_types:
+  - referencia
+- id: syn_0118
+  query: Quiero el nomina de Lucia Gomez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0119
+  query: Quiero el contrato de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0120
+  query: Necesito documentos de Carlos Perez
+  expected_scope: documents
+  expected_entity_types:
+  - persona
+- id: syn_0121
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0122
+  query: BOE 278 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0123
+  query: Dame legislacion aplicable a contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0124
+  query: Dame legislacion aplicable a prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0125
+  query: BOE 123 sobre prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0126
+  query: Dame legislacion aplicable a contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0127
+  query: Que dice el articulo 24 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0128
+  query: Explica la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0129
+  query: Que dice el articulo 1902 de la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0130
+  query: Dame legislacion aplicable a compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0131
+  query: Que dice el articulo 54 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0132
+  query: Explica la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0133
+  query: Que dice el articulo 24 de la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0134
+  query: Explica la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0135
+  query: Explica la Real Decreto 2/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0136
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0137
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0138
+  query: BOE 25 sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0139
+  query: Necesito normativa sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0140
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0141
+  query: Explica la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0142
+  query: Que dice el articulo 54 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0143
+  query: BOE 278 sobre prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0144
+  query: Dame legislacion aplicable a compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0145
+  query: BOE 25 sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0146
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0147
+  query: BOE 123 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0148
+  query: BOE 12 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0149
+  query: Dame legislacion aplicable a compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0150
+  query: BOE 278 sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0151
+  query: BOE 25 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0152
+  query: Que dice el articulo 54 de la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0153
+  query: Que dice el articulo 1902 de la Real Decreto 2/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0154
+  query: Que dice el articulo 1902 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0155
+  query: BOE 278 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0156
+  query: Necesito normativa sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0157
+  query: Necesito normativa sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0158
+  query: BOE 123 sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0159
+  query: BOE 12 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0160
+  query: Necesito normativa sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0161
+  query: Dame legislacion aplicable a proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0162
+  query: Explica la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0163
+  query: Dame legislacion aplicable a prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0164
+  query: Necesito normativa sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0165
+  query: Que dice el articulo 24 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0166
+  query: Necesito normativa sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0167
+  query: Que dice el articulo 24 de la Real Decreto 2/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0168
+  query: Necesito normativa sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0169
+  query: Dame legislacion aplicable a prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0170
+  query: Explica la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0171
+  query: Explica la Real Decreto 2/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0172
+  query: Que dice el articulo 54 de la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0173
+  query: Necesito normativa sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0174
+  query: Que dice el articulo 14 de la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0175
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0176
+  query: Necesito normativa sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0177
+  query: Explica la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0178
+  query: BOE 278 sobre prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0179
+  query: Explica la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0180
+  query: Explica la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0181
+  query: Dame legislacion aplicable a compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0182
+  query: Necesito normativa sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0183
+  query: Que dice el articulo 54 de la Real Decreto 2/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0184
+  query: Explica la Real Decreto 2/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0185
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0186
+  query: Que dice el articulo 24 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0187
+  query: Necesito normativa sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0188
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0189
+  query: Necesito normativa sobre prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0190
+  query: Que dice el articulo 54 de la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0191
+  query: BOE 123 sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0192
+  query: Dame legislacion aplicable a proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0193
+  query: Explica la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0194
+  query: BOE 123 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0195
+  query: BOE 25 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0196
+  query: Que dice el articulo 14 de la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0197
+  query: Que dice el articulo 1902 de la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0198
+  query: Dame legislacion aplicable a prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0199
+  query: BOE 25 sobre prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0200
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0201
+  query: Que dice el articulo 24 de la Real Decreto 2/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0202
+  query: Dame legislacion aplicable a contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0203
+  query: Necesito normativa sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0204
+  query: Necesito normativa sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0205
+  query: Necesito normativa sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0206
+  query: Necesito normativa sobre prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0207
+  query: Que dice el articulo 24 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0208
+  query: Explica la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0209
+  query: Que dice el articulo 24 de la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0210
+  query: BOE 25 sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0211
+  query: Explica la Real Decreto 2/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0212
+  query: Que dice el articulo 54 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0213
+  query: Que dice el articulo 1902 de la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0214
+  query: Dame legislacion aplicable a compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0215
+  query: Explica la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0216
+  query: Explica la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0217
+  query: BOE 123 sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0218
+  query: BOE 278 sobre prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0219
+  query: BOE 278 sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0220
+  query: BOE 123 sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0221
+  query: BOE 25 sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0222
+  query: Explica la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0223
+  query: BOE 278 sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0224
+  query: Que dice el articulo 54 de la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0225
+  query: Que dice el articulo 1902 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0226
+  query: Explica la Ley Organica 3/2018
+  expected_scope: legislation
+  expected_entity_types:
+  - ley
+- id: syn_0227
+  query: Que dice el articulo 14 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0228
+  query: Dame legislacion aplicable a contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0229
+  query: Que dice el articulo 24 de la Ley 39/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0230
+  query: BOE 123 sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0231
+  query: Dame legislacion aplicable a compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0232
+  query: Necesito normativa sobre contratacion publica
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0233
+  query: BOE 278 sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types:
+  - boe
+- id: syn_0234
+  query: Dame legislacion aplicable a compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0235
+  query: Que dice el articulo 54 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0236
+  query: Necesito normativa sobre compliance laboral
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0237
+  query: Dame legislacion aplicable a proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0238
+  query: Dame legislacion aplicable a prevencion de riesgos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0239
+  query: Necesito normativa sobre proteccion de datos
+  expected_scope: legislation
+  expected_entity_types: []
+- id: syn_0240
+  query: Que dice el articulo 24 de la Ley 40/2015
+  expected_scope: legislation
+  expected_entity_types:
+  - articulo
+  - ley
+- id: syn_0241
+  query: Busca documentos de Laura Ruiz y la Ley 39/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0242
+  query: Quiero facturas de Marta Gil y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0243
+  query: Busca nominas de Laura Ruiz y la Ley 39/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0244
+  query: Busca contratos de Pedro Sanchez y la Real Decreto 2/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0245
+  query: Quiero facturas de Laura Ruiz y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0246
+  query: Necesito informes y normativa sobre contratacion publica
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0247
+  query: Necesito contratos y normativa sobre proteccion de datos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0248
+  query: Busca nominas de Pedro Sanchez y la Ley 40/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0249
+  query: Necesito nominas y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0250
+  query: Quiero contratos de Ana de la Fuente y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0251
+  query: Quiero documentos de Pedro Sanchez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0252
+  query: Muestrame informes de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0253
+  query: Quiero nominas de Javier Martinez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0254
+  query: Muestrame facturas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0255
+  query: Quiero documentos de Ana de la Fuente y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0256
+  query: Quiero informes de Javier Martinez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0257
+  query: Muestrame facturas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0258
+  query: Necesito expedientes y normativa sobre proteccion de datos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0259
+  query: Muestrame informes de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0260
+  query: Busca informes de Lucia Gomez y la Real Decreto 2/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0261
+  query: Quiero facturas de Pedro Sanchez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0262
+  query: Busca nominas de Lucia Gomez y la Ley 40/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0263
+  query: Necesito nominas y normativa sobre compliance laboral
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0264
+  query: Necesito nominas y normativa sobre contratacion publica
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0265
+  query: Busca documentos de Ana de la Fuente y la Real Decreto 2/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0266
+  query: Muestrame nominas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0267
+  query: Necesito contratos y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0268
+  query: Muestrame nominas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0269
+  query: Necesito expedientes y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0270
+  query: Busca documentos de Maria Lopez y la Ley 40/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0271
+  query: Muestrame nominas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0272
+  query: Quiero contratos de Marta Gil y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0273
+  query: Muestrame nominas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0274
+  query: Necesito expedientes y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0275
+  query: Muestrame nominas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0276
+  query: Busca documentos de Ana de la Fuente y la Ley 39/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0277
+  query: Quiero nominas de Maria Lopez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0278
+  query: Busca contratos de Ana de la Fuente y la Real Decreto 2/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0279
+  query: Necesito facturas y normativa sobre contratacion publica
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0280
+  query: Busca facturas de Laura Ruiz y la Ley Organica 3/2018
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0281
+  query: Necesito facturas y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0282
+  query: Quiero nominas de Javier Martinez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0283
+  query: Busca expedientes de Marta Gil y la Ley 39/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0284
+  query: Busca contratos de Lucia Gomez y la Ley 40/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0285
+  query: Busca contratos de Lucia Gomez y la Ley Organica 3/2018
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0286
+  query: Busca informes de Carlos Perez y la Real Decreto 2/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0287
+  query: Necesito expedientes y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0288
+  query: Necesito informes y normativa sobre contratacion publica
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0289
+  query: Busca contratos de Laura Ruiz y la Ley 39/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0290
+  query: Quiero informes de Javier Martinez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0291
+  query: Busca nominas de Pedro Sanchez y la Ley 39/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0292
+  query: Necesito contratos y normativa sobre contratacion publica
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0293
+  query: Quiero nominas de Javier Martinez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0294
+  query: Busca documentos de Marta Gil y la Ley 40/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0295
+  query: Busca facturas de Marta Gil y la Ley Organica 3/2018
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0296
+  query: Quiero facturas de Carlos Perez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0297
+  query: Muestrame nominas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0298
+  query: Busca facturas de Pedro Sanchez y la Ley Organica 3/2018
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0299
+  query: Quiero informes de Pedro Sanchez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0300
+  query: Muestrame contratos de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0301
+  query: Quiero facturas de Lucia Gomez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0302
+  query: Busca expedientes de Maria Lopez y la Ley Organica 3/2018
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0303
+  query: Quiero nominas de Ana de la Fuente y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0304
+  query: Quiero contratos de Laura Ruiz y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0305
+  query: Muestrame documentos de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0306
+  query: Necesito facturas y normativa sobre contratacion publica
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0307
+  query: Necesito contratos y normativa sobre proteccion de datos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0308
+  query: Quiero contratos de Ana de la Fuente y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0309
+  query: Muestrame expedientes de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0310
+  query: Muestrame informes de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0311
+  query: Busca nominas de Laura Ruiz y la Ley Organica 3/2018
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0312
+  query: Quiero documentos de Javier Martinez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0313
+  query: Necesito nominas y normativa sobre compliance laboral
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0314
+  query: Busca documentos de Lucia Gomez y la Real Decreto 2/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0315
+  query: Quiero facturas de Maria Lopez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0316
+  query: Busca documentos de Ana de la Fuente y la Ley Organica 3/2018
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0317
+  query: Muestrame nominas de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0318
+  query: Necesito facturas y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0319
+  query: Quiero facturas de Marta Gil y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0320
+  query: Muestrame expedientes de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0321
+  query: Quiero documentos de Laura Ruiz y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0322
+  query: Quiero contratos de Ana de la Fuente y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0323
+  query: Necesito documentos y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0324
+  query: Necesito informes y normativa sobre proteccion de datos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0325
+  query: Necesito contratos y normativa sobre contratacion publica
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0326
+  query: Muestrame expedientes de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0327
+  query: Muestrame documentos de 2025 y legislacion aplicable
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0328
+  query: Necesito expedientes y normativa sobre prevencion de riesgos
+  expected_scope: all
+  expected_entity_types: []
+- id: syn_0329
+  query: Busca expedientes de Pedro Sanchez y la Ley 39/2015
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - ley
+- id: syn_0330
+  query: Quiero documentos de Javier Martinez y el articulo 54 del Estatuto
+  expected_scope: all
+  expected_entity_types:
+  - persona
+  - articulo
+- id: syn_0331
+  query: Quiero una leyenda urbana de contratos
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0332
+  query: Documentos de normativa interna
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0333
+  query: Necesito documentos de proteccion de datos de la empresa
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0334
+  query: Buscame contratos sobre leyendas de onboarding
+  expected_scope: documents
+  expected_entity_types: []
+- id: syn_0335
+  query: Muestrame informes de politicas internas
+  expected_scope: documents
+  expected_entity_types: []

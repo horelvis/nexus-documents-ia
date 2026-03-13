@@ -51,8 +51,9 @@ warnings.filterwarnings(
 
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import time
 
 from app.core.config import settings
@@ -191,6 +192,62 @@ async def health_check():
         "weaviate_url": settings.weaviate_url,
         "capabilities": ["vector-search", "rag-pipeline", "indexing", "caching"]
     }
+
+
+# ── Embedding endpoint (used by emma-agent-service for few-shot retrieval) ──
+
+class EmbedRequest(BaseModel):
+    """Request for text embedding generation."""
+    text: str = ""
+    texts: list[str] = []
+    task: str = "retrieval.passage"  # Jina v3 task adapter (ignored by BGE-M3)
+
+
+@app.post("/embed")
+async def generate_embedding_endpoint(request: EmbedRequest):
+    """Generate embeddings using the loaded model (BGE-M3 or Jina v3).
+
+    Supports both single text and batch:
+    - {"text": "..."} → {"embedding": [...]}
+    - {"texts": ["...", "..."]} → {"embeddings": [[...], [...]]}
+
+    The `task` parameter selects Jina v3 LoRA adapters:
+    - "retrieval.query": for search queries
+    - "retrieval.passage": for document chunks (default)
+    - "classification": for semantic type classification
+    """
+    from app.services.weaviate_service import get_embedding_model
+    import asyncio
+
+    model = await get_embedding_model()
+    if model is None or model == "tei":
+        from app.services.weaviate_service import get_tei_embedding
+        texts = request.texts if request.texts else [request.text]
+        embeddings = await get_tei_embedding(texts)
+        if embeddings is None:
+            raise HTTPException(status_code=500, detail="Embedding generation failed")
+        if request.text and not request.texts:
+            return {"embedding": embeddings[0]}
+        return {"embeddings": embeddings}
+
+    texts = request.texts if request.texts else [request.text]
+    task = request.task
+
+    loop = asyncio.get_event_loop()
+
+    def _encode():
+        kwargs = {"convert_to_numpy": True}
+        try:
+            return model.encode(texts, prompt_name=task, **kwargs).tolist()
+        except (TypeError, ValueError, KeyError):
+            # BGE-M3 only accepts prompt_name in ['query', 'document']
+            return model.encode(texts, **kwargs).tolist()
+
+    embeddings = await loop.run_in_executor(None, _encode)
+
+    if request.text and not request.texts:
+        return {"embedding": embeddings[0]}
+    return {"embeddings": embeddings}
 
 
 # Service info

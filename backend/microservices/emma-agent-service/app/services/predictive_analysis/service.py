@@ -186,6 +186,7 @@ class PredictiveAnalysisService:
                 "factor_weighted": PredictiveEventType.FACTOR_WEIGHTED,
                 "factor_rejected": PredictiveEventType.FACTOR_REJECTED,
                 "predictive_complete": PredictiveEventType.PREDICTION_COMPLETE,
+                "section_advanced": PredictiveEventType.PROGRESS,
                 "error": PredictiveEventType.ERROR,
             }
 
@@ -504,9 +505,10 @@ class PredictiveAnalysisService:
         )
 
         try:
-            from app.agents.llm_client import get_llm_client
-            llm_client = await get_llm_client()
-            response = await llm_client.chat(
+            from app.agents.llm_router import get_llm_router
+            from app.agents.llm_client import ModelRole
+            router = await get_llm_router()
+            response = await router.chat(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -514,6 +516,7 @@ class PredictiveAnalysisService:
                 temperature=0.1,
                 max_tokens=200,
                 enable_thinking=False,
+                role=ModelRole.PLANNER,
             )
 
             if response and response.content:

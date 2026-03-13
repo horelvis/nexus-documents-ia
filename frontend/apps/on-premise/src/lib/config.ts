@@ -68,9 +68,14 @@ export const API_CONFIG = {
     EMMA_VERIFIED_CLAIMS: '/emma/verified/session',
     EMMA_VERIFIED_SESSION_PDF: (sessionId: string) => `/emma/verified/session/${sessionId}/pdf`,
     EMMA_VERIFIED_SESSION_DOCX: (sessionId: string) => `/emma/verified/session/${sessionId}/docx`,
+    EMMA_VERIFIED_RESUME_STREAM: (sessionId: string) => `/emma/verified/session/${sessionId}/resume/stream`,
+    EMMA_GENERATED_DOWNLOAD: (docId: string) => `/emma/generated/${docId}/download`,
     EMMA_PREDICTIVE_STREAM: '/emma/predictive/analyze/stream',
     EMMA_MEMORY_FACTS: '/emma/memory/facts',
     EMMA_WELCOME: '/emma/welcome',
+    EMMA_NOTIFICATIONS: '/emma/notifications',
+    EMMA_NOTIFICATION_READ: (id: string) => `/emma/notifications/${id}/read`,
+    EMMA_NOTIFICATIONS_READ_ALL: '/emma/notifications/read-all',
 
     // Connectors
     CONNECTORS: '/connectors',

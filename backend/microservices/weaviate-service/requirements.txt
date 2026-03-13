@@ -20,12 +20,15 @@ httpx>=0.25.0
 aiohttp>=3.9.0
 
 # Vector and ML - Cross-encoder reranking
-sentence-transformers>=2.2.2
+sentence-transformers>=2.7.0
 torch>=1.11.0
 numpy>=1.24.0
 
 # transformers: For embeddings and reranking
 transformers>=4.36.0
+
+# Jina Embeddings v3 dependency (tensor operations for LoRA adapters)
+einops>=0.7.0
 
 # FastEmbed - ONNX-optimized embeddings for ultra-low latency
 fastembed>=0.4.0

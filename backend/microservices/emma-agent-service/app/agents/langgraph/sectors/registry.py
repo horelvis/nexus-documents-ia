@@ -72,6 +72,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
             "similarity": 0.35, "quality": 0.15, "graph": 0.30,
             "recency": 0.05, "entity": 0.15,
         },
+        graph_search_properties=["title", "short_name", "boe_id", "domain"],
     ),
 
     # -----------------------------------------------------------------
@@ -115,6 +116,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
             "similarity": 0.40, "quality": 0.25, "graph": 0.15,
             "recency": 0.10, "entity": 0.10,
         },
+        graph_search_properties=["name", "code", "title"],
     ),
 
     # -----------------------------------------------------------------
@@ -150,7 +152,9 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
                 r"(?:€\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)",
             ],
             "referencia": [
-                r"(?:(?:Ref|REF|Expediente|Exp)\.?\s*[:# ]?\s*[\w/-]+)",
+                # Strict reference extractor: avoids matching verbs like "Explica"
+                # by requiring a full token prefix and a structured reference value.
+                r"(?:\b(?:Ref|REF|Expediente|Exp)\b\.?\s*(?:[:#-]\s*|\s+)(?:[A-Z0-9][A-Z0-9/_-]{2,}))",
             ],
             "fecha": [
                 r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
@@ -166,6 +170,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
             "similarity": 0.35, "quality": 0.15, "graph": 0.20,
             "recency": 0.15, "entity": 0.15,
         },
+        graph_search_properties=["name", "associated_person", "title"],
     ),
 }
 

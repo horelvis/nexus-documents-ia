@@ -30,6 +30,8 @@ class StopAndGoState(TypedDict, total=False):
     uploaded_texts: List[Dict]          # Raw uploaded documents
     collections: List[str]              # Weaviate collections
     context_document_ids: List[str]     # Specific doc IDs for context
+    source_document_ids: List[str]      # Doc IDs used to build source_context (for exclusion in verification)
+    source_filenames: List[str]          # Original filenames of uploaded documents
 
     # === Configuration ===
     max_items: int                      # max_factors or max_claims
@@ -48,8 +50,16 @@ class StopAndGoState(TypedDict, total=False):
     duplicate_streak: int               # Consecutive duplicates
     is_complete: bool                   # Should we stop?
 
+    # === Section-Windowed Generation ===
+    source_sections: List[str]          # Source document split into sections
+    current_section_index: int          # Index of current section being processed
+    section_claims_count: List[int]     # Claims generated per section
+
     # === Jurisprudence (legal sector, ephemeral) ===
     jurisprudence_evidence: List[Dict]  # CENDOJ results cached for session
+
+    # === DOI validation (from source document, cached for session) ===
+    source_doi_validations: List[Dict]  # DOIs extracted from uploaded docs + validation results
 
     # === Items ===
     all_extracted_items: List[Dict]     # ALL items for dedup context
@@ -57,6 +67,11 @@ class StopAndGoState(TypedDict, total=False):
 
     # === SSE Events Queue (reducer: append) ===
     pending_events: Annotated[List[Dict[str, Any]], merge_lists]
+
+    # === HITL (Human-in-the-Loop) ===
+    hitl_enabled: bool                        # Whether HITL review is active for this session
+    review_payload: Optional[Dict[str, Any]]  # Claims sent for human review (set by review node)
+    review_response: Optional[Dict[str, Any]] # Human decisions (set by Command(resume=...))
 
     # === Output ===
     result: Optional[Dict[str, Any]]    # Final synthesis result
@@ -80,6 +95,7 @@ def create_initial_state(
     collections: Optional[List[str]] = None,
     context_document_ids: Optional[List[str]] = None,
     mode_config: Optional[Dict[str, Any]] = None,
+    hitl_enabled: bool = False,
 ) -> StopAndGoState:
     """Create initial state for a stop-and-go graph execution."""
     return StopAndGoState(
@@ -91,6 +107,8 @@ def create_initial_state(
         uploaded_texts=uploaded_texts or [],
         collections=collections or [],
         context_document_ids=context_document_ids or [],
+        source_document_ids=[],
+        source_filenames=[],
         max_items=max_items,
         confidence_threshold=confidence_threshold,
         mode=mode,
@@ -102,9 +120,16 @@ def create_initial_state(
         items_corrected=0,
         duplicate_streak=0,
         is_complete=False,
+        source_sections=[],
+        current_section_index=0,
+        section_claims_count=[],
         jurisprudence_evidence=[],
+        source_doi_validations=[],
         all_extracted_items=[],
         current_item=None,
+        hitl_enabled=hitl_enabled,
+        review_payload=None,
+        review_response=None,
         pending_events=[],
         result=None,
         execution_time_ms=0,

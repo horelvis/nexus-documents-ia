@@ -1,15 +1,20 @@
 """
-Emma Swarm Agent — Worker Node
+Emma Swarm Agent — Worker Node (Typed SubAgents)
 
 Each swarm worker is a focused mini-ReAct loop that handles one sub-task
 from the decomposition. Workers execute in parallel via LangGraph's Send() API.
 
 Key differences from react_loop_node:
+- Typed profiles: Each focus category has a WorkerProfile with specialized
+  system prompt, model role, tool set, and Langfuse prompt key
 - Focused tools: Only the tools assigned in swarm_current_task.tool_names + terminate
-- Fewer iterations: max_steps = 2-3 (vs 10 for full react_loop)
+- Fewer iterations: max_steps from profile (typically 2-3 vs 10 for full react_loop)
 - Own message history: Builds fresh system+user messages per sub-task
-- Simpler system prompt: Focused on the sub-task, not the full agent persona
 - Results accumulate via swarm_worker_results (merge_lists reducer)
+
+Inspired by Deep Agents SubAgentMiddleware where each subagent has
+{name, description, system_prompt, tools}, but implemented natively
+within LangGraph's Send() fan-out architecture.
 
 The worker follows the same Think-Act-Observe pattern as react_loop
 but is scoped to a single independent research task.
@@ -27,6 +32,7 @@ from app.core.langfuse_config import observe
 from ..state import ReActState
 from ..reasoning_tracker import StepType
 from ..tools.registry import get_tool_registry
+from ..tools.worker_profiles import get_worker_profile
 
 logger = logging.getLogger(__name__)
 
@@ -76,8 +82,8 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
     Other workers continue independently.
 
     Returns:
-        State updates: swarm_worker_results, sources, reasoning_steps,
-        swarm_pending_events
+        State updates: swarm_worker_results, reasoning_steps.
+        Worker events emitted via get_stream_writer() (not state).
     """
     start = time.time()
     task = state.get("swarm_current_task")
@@ -102,20 +108,29 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
     task_description = task.get("description", "")
     task_tool_names = set(task.get("tool_names", []))
     task_focus = task.get("focus", "general")
-    max_steps = task.get("max_steps", settings.swarm_worker_max_steps)
 
-    logger.info(f"Swarm worker {worker_id}: starting '{task_description[:80]}' "
-                f"(tools: {task_tool_names}, max_steps: {max_steps})")
+    # Resolve typed worker profile for this focus category (sector-aware)
+    profile = get_worker_profile(task_focus, sector=state.get("sector"))
+    max_steps = task.get("max_steps", profile.max_steps)
 
-    # Emit worker_started SSE event
-    pending_events = [{
-        "type": "worker_started",
-        "data": {
-            "worker_id": worker_id,
-            "sub_task": task_description[:200],
-            "tools": list(task_tool_names),
-        },
-    }]
+    logger.info(f"Swarm worker {worker_id} [{profile.name}]: starting '{task_description[:80]}' "
+                f"(tools: {task_tool_names}, role: {profile.model_role.value}, max_steps: {max_steps})")
+
+    # Emit worker_started via stream writer (real-time to frontend)
+    try:
+        from langgraph.config import get_stream_writer
+        writer = get_stream_writer()
+        writer({
+            "type": "worker_started",
+            "data": {
+                "worker_id": worker_id,
+                "worker_type": profile.name,
+                "sub_task": task_description[:200],
+                "tools": list(task_tool_names),
+            },
+        })
+    except Exception:
+        writer = None  # Fallback: no streaming (e.g., invoke() without stream_mode)
 
     # Filter tools to task's assigned tools + terminate
     registry = get_tool_registry()
@@ -131,21 +146,15 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
 
     if not worker_tools:
         logger.warning(f"Swarm worker {worker_id}: no matching tools found")
-        return _worker_failure(worker_id, task, "No matching tools available", start, pending_events)
+        return _worker_failure(worker_id, task, "No matching tools available", start, writer)
 
     tool_schemas = [t.to_openai_param() for t in worker_tools]
     tools_desc = ", ".join(t.name for t in worker_tools if t.name != "terminate")
 
-    # Build focused system prompt
-    system_content = (
-        f"Eres un agente especializado. Tu tarea: {task_description}\n\n"
-        f"Herramientas: {tools_desc}\n\n"
-        f"Reglas:\n"
-        f"- Usa SOLO las herramientas proporcionadas\n"
-        f"- Sé conciso y directo\n"
-        f"- Cuando tengas la información, usa 'terminate' con tu respuesta\n"
-        f"- Cita las fuentes encontradas\n"
-        f"- Responde en el mismo idioma que el usuario"
+    # Build specialized system prompt from worker profile (Langfuse → default)
+    system_content = await profile.resolve_prompt(
+        task_description=task_description,
+        tools_desc=tools_desc,
     )
 
     messages: List[Dict[str, Any]] = [
@@ -175,6 +184,7 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
         for step in range(max_steps):
             # LLM call with focused tools
             from app.agents.llm_router import get_llm_router
+            from app.agents.llm_client import ModelRole
             router = await get_llm_router()
 
             response = await asyncio.wait_for(
@@ -182,6 +192,7 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
                     messages=messages,
                     tools=tool_schemas,
                     max_tokens=settings.react_max_completion_tokens,
+                    role=profile.model_role,
                 ),
                 timeout=settings.swarm_worker_timeout_seconds,
             )
@@ -297,12 +308,12 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
         return _worker_failure(
             worker_id, task,
             f"Timeout after {settings.swarm_worker_timeout_seconds}s",
-            start, pending_events, reasoning_steps,
+            start, writer, reasoning_steps,
         )
     except Exception as e:
         logger.error(f"Swarm worker {worker_id}: error: {e}", exc_info=True)
         return _worker_failure(
-            worker_id, task, str(e), start, pending_events, reasoning_steps,
+            worker_id, task, str(e), start, writer, reasoning_steps,
         )
 
     latency_ms = (time.time() - start) * 1000
@@ -320,19 +331,22 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
         f"answer_len={len(answer)}, sources={len(collected_sources)}"
     )
 
-    # Emit worker_complete SSE event
-    pending_events.append({
-        "type": "worker_complete",
-        "data": {
-            "worker_id": worker_id,
-            "preview": answer[:200] if answer else "",
-            "sources_count": len(collected_sources),
-            "latency_ms": latency_ms,
-        },
-    })
+    # Emit worker_complete via stream writer (real-time to frontend)
+    if writer:
+        writer({
+            "type": "worker_complete",
+            "data": {
+                "worker_id": worker_id,
+                "worker_type": profile.name,
+                "preview": answer[:200] if answer else "",
+                "sources_count": len(collected_sources),
+                "latency_ms": latency_ms,
+            },
+        })
 
     worker_result = {
         "worker_id": worker_id,
+        "worker_type": profile.name,
         "sub_task": task_description,
         "focus": task_focus,
         "answer": answer,
@@ -347,7 +361,6 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
         # when multiple workers complete in the same step. Sources are stored
         # inside swarm_worker_results and extracted by synthesize_swarm_node.
         "reasoning_steps": reasoning_steps,
-        "swarm_pending_events": pending_events,
     }
 
 
@@ -356,22 +369,24 @@ def _worker_failure(
     task: Dict[str, Any],
     error: str,
     start_time: float,
-    pending_events: List[Dict[str, Any]],
+    writer: Any = None,
     reasoning_steps: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Build a failure result for a worker."""
     latency_ms = (time.time() - start_time) * 1000
 
-    pending_events.append({
-        "type": "worker_complete",
-        "data": {
-            "worker_id": worker_id,
-            "preview": f"Error: {error}",
-            "sources_count": 0,
-            "latency_ms": latency_ms,
-            "error": True,
-        },
-    })
+    # Emit worker_complete (error) via stream writer if available
+    if writer:
+        writer({
+            "type": "worker_complete",
+            "data": {
+                "worker_id": worker_id,
+                "preview": f"Error: {error}",
+                "sources_count": 0,
+                "latency_ms": latency_ms,
+                "error": True,
+            },
+        })
 
     return {
         "swarm_worker_results": [{
@@ -388,5 +403,4 @@ def _worker_failure(
             "type": StepType.ERROR.value,
             "content": f"[Worker {worker_id}] Failed: {error}",
         }],
-        "swarm_pending_events": pending_events,
     }

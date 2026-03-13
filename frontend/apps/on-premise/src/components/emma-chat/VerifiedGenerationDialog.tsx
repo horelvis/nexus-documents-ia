@@ -11,16 +11,22 @@ import {
   IconCircleX,
   IconLoader2,
   IconAlertTriangle,
+  IconEdit,
+  IconCheck,
+  IconSend,
 } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { VerifiedClaimInfo, VerifiedGenerationMetadata } from '@/lib/types/emma'
+import type { ReviewDecision } from '@/lib/services/verified-generation.service'
 
 interface VerifiedGenerationDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   jobs: Record<string, VerifiedGenerationMetadata>
+  /** HITL: callback to submit review decisions for a job */
+  onSubmitReview?: (jobId: string, decisions: ReviewDecision[]) => void
 }
 
 /**
@@ -29,7 +35,7 @@ interface VerifiedGenerationDialogProps {
  * Shows all active verification jobs in a single floating panel (top-right).
  * Supports multiple concurrent jobs. Collapses to a pill when dismissed.
  */
-export function VerifiedGenerationDialog({ open, onOpenChange, jobs }: VerifiedGenerationDialogProps) {
+export function VerifiedGenerationDialog({ open, onOpenChange, jobs, onSubmitReview }: VerifiedGenerationDialogProps) {
   const [isExpanded, setIsExpanded] = useState(true)
 
   const jobEntries = Object.entries(jobs)
@@ -44,6 +50,7 @@ export function VerifiedGenerationDialog({ open, onOpenChange, jobs }: VerifiedG
   const totalVerified = jobEntries.reduce((sum, [, j]) => sum + j.verified_count, 0)
   const totalRejected = jobEntries.reduce((sum, [, j]) => sum + j.rejected_count, 0)
   const hasActiveJobs = jobEntries.some(([, j]) => j.current_phase !== 'complete')
+  const hasReviewJobs = jobEntries.some(([, j]) => j.current_phase === 'review')
 
   // Collapsed pill — show when widget is closed but jobs are active
   if (!open && hasActiveJobs) {
@@ -98,9 +105,11 @@ export function VerifiedGenerationDialog({ open, onOpenChange, jobs }: VerifiedG
               <div>
                 <h3 className="font-semibold text-sm">Cola de Verificación</h3>
                 <p className="text-xs text-muted-foreground">
-                  {hasActiveJobs
-                    ? `${totalActive} claim${totalActive !== 1 ? 's' : ''} en progreso`
-                    : `${totalVerified} verificados`
+                  {hasReviewJobs
+                    ? 'Revisión pendiente'
+                    : hasActiveJobs
+                      ? `${totalActive} claim${totalActive !== 1 ? 's' : ''} en progreso`
+                      : `${totalVerified} verificados`
                   }
                 </p>
               </div>
@@ -164,7 +173,7 @@ export function VerifiedGenerationDialog({ open, onOpenChange, jobs }: VerifiedG
               >
                 <div className="p-3 space-y-3 max-h-[50vh] overflow-y-auto">
                   {jobEntries.map(([id, job]) => (
-                    <JobSection key={id} job={job} />
+                    <JobSection key={id} jobId={id} job={job} onSubmitReview={onSubmitReview} />
                   ))}
                 </div>
               </motion.div>
@@ -179,11 +188,40 @@ export function VerifiedGenerationDialog({ open, onOpenChange, jobs }: VerifiedG
 /**
  * Single verification job section in the widget
  */
-function JobSection({ job }: { job: VerifiedGenerationMetadata }) {
+function JobSection({
+  jobId,
+  job,
+  onSubmitReview,
+}: {
+  jobId: string
+  job: VerifiedGenerationMetadata
+  onSubmitReview?: (jobId: string, decisions: ReviewDecision[]) => void
+}) {
   const { claims, current_phase, verified_count, total_claims, topic } = job
   const processedCount = claims.filter(c => c.status !== 'generating').length
   const progressPercent = total_claims > 0 ? Math.round((processedCount / total_claims) * 100) : 0
-  const isActive = current_phase !== 'complete'
+  const isActive = current_phase !== 'complete' && current_phase !== 'review'
+  const isReview = current_phase === 'review'
+
+  // HITL review state (local to widget)
+  const [reviewDecisions, setReviewDecisions] = useState<Record<string, ReviewDecision>>({})
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const reviewClaims = claims.filter(c => c.needs_review)
+  const autoApprovedClaims = claims.filter(c => !c.needs_review)
+
+  const handleDecision = (claimId: string, action: 'approve' | 'reject') => {
+    setReviewDecisions(prev => ({ ...prev, [claimId]: { claim_id: claimId, action } }))
+  }
+
+  const handleSubmit = async () => {
+    if (!onSubmitReview) return
+    setIsSubmitting(true)
+    const decisions = reviewClaims.map(c =>
+      reviewDecisions[c.claim_id] || { claim_id: c.claim_id, action: 'approve' as const }
+    )
+    onSubmitReview(jobId, decisions)
+  }
 
   return (
     <div className="space-y-2">
@@ -194,26 +232,60 @@ function JobSection({ job }: { job: VerifiedGenerationMetadata }) {
             {topic}
           </p>
           <span className="text-[10px] font-mono text-muted-foreground ml-2">
-            {processedCount}/{total_claims || '?'}
+            {isReview ? 'Revisión' : `${processedCount}/${total_claims || '?'}`}
           </span>
         </div>
         <div className="h-1.5 bg-muted rounded-full overflow-hidden mt-1">
           <motion.div
-            className="h-full bg-emerald-500 rounded-full"
+            className={cn('h-full rounded-full', isReview ? 'bg-amber-500' : 'bg-emerald-500')}
             initial={{ width: 0 }}
-            animate={{ width: `${progressPercent}%` }}
+            animate={{ width: isReview ? '100%' : `${progressPercent}%` }}
             transition={{ duration: 0.3 }}
           />
         </div>
       </div>
 
+      {/* Review banner */}
+      {isReview && (
+        <div className="p-2 bg-amber-50 dark:bg-amber-500/10 rounded-md border border-amber-200 dark:border-amber-500/20">
+          <p className="text-[10px] font-semibold text-amber-700 dark:text-amber-400">
+            {reviewClaims.length} claim{reviewClaims.length !== 1 ? 's' : ''} necesita{reviewClaims.length !== 1 ? 'n' : ''} revisión
+          </p>
+          <p className="text-[9px] text-amber-600/60 dark:text-amber-400/50">
+            {autoApprovedClaims.length} aprobados automáticamente
+          </p>
+        </div>
+      )}
+
       {/* Claims */}
       {claims.length > 0 && (
         <div className="space-y-1.5">
           {claims.map(claim => (
-            <ClaimJobItem key={claim.claim_id} claim={claim} />
+            <ClaimJobItem
+              key={claim.claim_id}
+              claim={claim}
+              isReview={isReview}
+              reviewDecision={reviewDecisions[claim.claim_id]}
+              onDecision={isReview ? handleDecision : undefined}
+            />
           ))}
         </div>
+      )}
+
+      {/* HITL Submit button */}
+      {isReview && onSubmitReview && (
+        <Button
+          size="sm"
+          className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white"
+          onClick={handleSubmit}
+          disabled={isSubmitting}
+        >
+          {isSubmitting ? (
+            <><IconLoader2 className="h-3.5 w-3.5 animate-spin" /> Generando...</>
+          ) : (
+            <><IconSend className="h-3.5 w-3.5" /> Enviar revisión</>
+          )}
+        </Button>
       )}
 
       {claims.length === 0 && isActive && (
@@ -229,8 +301,23 @@ function JobSection({ job }: { job: VerifiedGenerationMetadata }) {
 /**
  * Single claim item (matches QueueJobItem pattern)
  */
-function ClaimJobItem({ claim }: { claim: VerifiedClaimInfo }) {
+function ClaimJobItem({
+  claim,
+  isReview = false,
+  reviewDecision,
+  onDecision,
+}: {
+  claim: VerifiedClaimInfo
+  isReview?: boolean
+  reviewDecision?: ReviewDecision
+  onDecision?: (claimId: string, action: 'approve' | 'reject') => void
+}) {
   const getStatusIcon = () => {
+    if (isReview && claim.needs_review) {
+      if (reviewDecision?.action === 'approve') return <IconCircleCheck className="h-4 w-4 text-emerald-500" />
+      if (reviewDecision?.action === 'reject') return <IconCircleX className="h-4 w-4 text-destructive" />
+      return <IconAlertTriangle className="h-4 w-4 text-amber-500" />
+    }
     switch (claim.status) {
       case 'verified':
         return <IconCircleCheck className="h-4 w-4 text-emerald-500" />
@@ -252,6 +339,7 @@ function ClaimJobItem({ claim }: { claim: VerifiedClaimInfo }) {
     verified: 'Verificado',
     corrected: 'Corregido',
     rejected: 'Rechazado',
+    review: 'Revisión',
   }
 
   const statusColor: Record<string, string> = {
@@ -260,6 +348,7 @@ function ClaimJobItem({ claim }: { claim: VerifiedClaimInfo }) {
     verified: 'bg-emerald-500/10 text-emerald-600',
     corrected: 'bg-amber-500/10 text-amber-600',
     rejected: 'bg-destructive/10 text-destructive',
+    review: 'bg-amber-500/10 text-amber-600',
   }
 
   const isActive = claim.status === 'generating' || claim.status === 'verifying'
@@ -294,6 +383,34 @@ function ClaimJobItem({ claim }: { claim: VerifiedClaimInfo }) {
             Confianza: {Math.round(claim.confidence * 100)}%
             {claim.evidence_count ? ` · ${claim.evidence_count} evidencias` : ''}
           </p>
+        )}
+
+        {/* HITL quick approve/reject buttons */}
+        {isReview && claim.needs_review && onDecision && (
+          <div className="flex gap-1 mt-1.5">
+            <Button
+              size="sm"
+              variant={reviewDecision?.action === 'approve' ? 'default' : 'outline'}
+              className={cn(
+                'h-5 text-[9px] px-1.5 gap-0.5',
+                reviewDecision?.action === 'approve' && 'bg-emerald-600 hover:bg-emerald-700 text-white'
+              )}
+              onClick={() => onDecision(claim.claim_id, 'approve')}
+            >
+              <IconCircleCheck className="h-2.5 w-2.5" /> OK
+            </Button>
+            <Button
+              size="sm"
+              variant={reviewDecision?.action === 'reject' ? 'destructive' : 'outline'}
+              className="h-5 text-[9px] px-1.5 gap-0.5"
+              onClick={() => onDecision(claim.claim_id, 'reject')}
+            >
+              <IconCircleX className="h-2.5 w-2.5" /> No
+            </Button>
+          </div>
+        )}
+        {isReview && !claim.needs_review && (
+          <p className="text-[9px] text-emerald-500 mt-1">Auto-aprobado</p>
         )}
       </div>
     </div>

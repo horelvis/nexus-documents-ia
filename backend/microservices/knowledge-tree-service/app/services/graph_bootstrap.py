@@ -67,7 +67,21 @@ async def bootstrap_sector_graph() -> Optional[str]:
             exists = row and row["cnt"] > 0
 
         if exists:
-            logger.info(f"✅ Graph '{graph_name}' already exists — bootstrap OK")
+            logger.info(f"✅ Graph '{graph_name}' already exists — ensuring ontology labels")
+            # Ensure ontology + memory labels exist (added in BKG Phases 2-4)
+            async with age_client._get_connection() as conn2:
+                for stmt in [
+                    f"SELECT create_vlabel('{graph_name}', 'EntityType');",
+                    f"SELECT create_vlabel('{graph_name}', 'DocumentMemory');",
+                    f"SELECT create_elabel('{graph_name}', 'INSTANCE_OF');",
+                    f"SELECT create_elabel('{graph_name}', 'EXTRACTED_FROM');",
+                    f"SELECT create_elabel('{graph_name}', 'HAS_MEMORY');",
+                ]:
+                    try:
+                        await conn2.execute(stmt)
+                    except Exception as e:
+                        if "already exists" not in str(e):
+                            logger.debug(f"Label ensure: {e}")
             return graph_name
 
         # Graph doesn't exist — create from schema file

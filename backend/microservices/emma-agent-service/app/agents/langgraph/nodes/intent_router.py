@@ -143,9 +143,10 @@ def _get_intent_router() -> IntentSemanticRouter:
 async def _llm_classify_intent(query: str) -> Optional[str]:
     """LLM-based intent classification fallback."""
     try:
-        from app.agents.llm_client import get_llm_client
+        from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
 
-        llm_client = await get_llm_client()
+        router = await get_llm_router()
         system_prompt = (
             "Eres Emma, coordinadora de un sistema multi-agente. "
             "Clasifica la intención del usuario en una de estas etiquetas: "
@@ -153,13 +154,14 @@ async def _llm_classify_intent(query: str) -> Optional[str]:
             "Responde SOLO con la etiqueta."
         )
 
-        response = await llm_client.chat(
+        response = await router.chat(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": f"Consulta: {query}\nEtiqueta:"},
             ],
             temperature=0.0,
             max_tokens=10,
+            role=ModelRole.PLANNER,
         )
 
         if not response or not response.content:

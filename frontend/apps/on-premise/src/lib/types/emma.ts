@@ -67,61 +67,42 @@ export interface WorkflowStep {
   error?: string
 }
 
-// SLM Router Chain-of-Thought types
-// Extended to support all backend event types
+// Semantic step types — human-readable action categories
 export type SLMThinkingStepType =
-  | 'entity_detection'    // Entity extraction
-  | 'intent_detection'    // Intent classification
-  | 'route_decision'      // Routing decision
-  | 'retrieval'           // Document retrieval step
-  | 'domain_detection'    // Domain detection
-  | 'agent_selection'     // Agent selection
-  | 'agent_execution'     // Agent execution
-  | 'structural'          // Structural query step
-  | 'thinking'            // General thinking
-  | 'observation'         // Observation step
-  | 'tool_call'           // Tool call
-  | 'custom'              // Custom step
+  | 'searching'      // Search in documents/legislation/jurisprudence/internet
+  | 'reading'        // Reading a specific document
+  | 'analyzing'      // Domain analysis
+  | 'querying'       // Structural query
+  | 'browsing'       // Web search
+  | 'listing'        // Listing sources
+  | 'connecting'     // External connector query
+  | 'preparing'      // Preparing final response
+  | 'search_result'  // Search results summary
+  | 'doc_read'       // Document read confirmation
+  | 'thinking'       // LLM reasoning (secondary)
+  | 'error'          // Error / quality gate
+  // Swarm types
+  | 'swarm_decompose'
+  | 'swarm_worker'
+  | 'swarm_worker_done'
+  | 'swarm_synthesize'
 
 export interface SLMThinkingStep {
   step: number
   type: SLMThinkingStepType
   content: string
+  detail?: string
   entities?: string[]
   confidence?: number
 }
 
-// Interleaved Thinking Step Types (ReACT-style reasoning)
-export type ReasoningStepType =
-  | 'query_analysis'
-  | 'routing'
-  | 'thinking'
-  | 'tool_call'
-  | 'tool_execution'
-  | 'observation'
-  | 'reflection'
-  | 'connection'
-  | 'connector'
-  | 'search'
-  | 'data_extraction'
-  | 'transformation'
-  | 'validation'
-  | 'response'
-  | 'error'
-  | 'custom'
-  // LangGraph specific types
-  | 'retrieval'
-  | 'domain_detection'
-  | 'agent_selection'
-  | 'agent_execution'
-  | 'structural'
-  | 'entity_detection'
-  | 'intent_detection'
-  | 'route_decision'
+// ReasoningStep uses same semantic types
+export type ReasoningStepType = SLMThinkingStepType
 
 export interface ReasoningStep {
   type: ReasoningStepType
   content: string
+  detail?: string
   confidence?: number
   entities?: string[]
   source?: string
@@ -129,15 +110,10 @@ export interface ReasoningStep {
   metadata?: Record<string, unknown>
 }
 
-export interface SLMPlan {
-  route: string
-  confidence: number
-  entities_count?: number
-  reasoning?: string
-}
-
 // Verified Generation types
-export type VerifiedClaimStatus = 'generating' | 'verifying' | 'verified' | 'rejected' | 'corrected'
+export type VerifiedClaimStatus = 'generating' | 'verifying' | 'verified' | 'rejected' | 'corrected' | 'review'
+
+export type VerificationType = 'fidelity_only' | 'corroborated' | 'independent'
 
 export interface VerifiedClaimInfo {
   claim_id: string
@@ -148,6 +124,13 @@ export interface VerifiedClaimInfo {
   confidence?: number
   evidence_count?: number
   original_text?: string
+  evidence_sources?: VerifiedSource[]
+  verification_type?: VerificationType
+  verification_reason?: string
+  /** HITL: whether this claim needs human review (below confidence threshold) */
+  needs_review?: boolean
+  /** HITL: whether this claim was auto-approved (above threshold) */
+  auto_approved?: boolean
 }
 
 export interface VerifiedSource {
@@ -155,6 +138,21 @@ export interface VerifiedSource {
   title?: string
   source?: string
   url?: string
+  roj?: string
+  ecli?: string
+}
+
+export interface DoiValidation {
+  doi: string
+  valid: boolean
+  context?: string
+  metadata?: {
+    title?: string
+    authors?: string[]
+    year?: number
+    journal?: string
+    type?: string
+  }
 }
 
 export interface VerifiedGenerationMetadata {
@@ -162,7 +160,7 @@ export interface VerifiedGenerationMetadata {
   tenant_id?: string
   topic: string
   claims: VerifiedClaimInfo[]
-  current_phase: 'generating' | 'verifying' | 'complete'
+  current_phase: 'generating' | 'verifying' | 'complete' | 'review'
   verified_count: number
   rejected_count: number
   total_claims: number
@@ -170,6 +168,13 @@ export interface VerifiedGenerationMetadata {
   execution_time_ms?: number
   average_confidence?: number
   sources?: VerifiedSource[]
+  doi_validations?: DoiValidation[]
+  source_filenames?: string[]
+  source_summary?: string
+  /** HITL: number of claims requiring review */
+  needs_review_count?: number
+  /** HITL: confidence threshold used for flagging */
+  confidence_threshold?: number
 }
 
 // Predictive Analysis types
@@ -241,6 +246,8 @@ export interface DocGenMetadata {
   pending_fields: string[]
   sources_used: string[]
   execution_time_ms?: number
+  download_url?: string
+  generated_doc_id?: string
 }
 
 export interface EmmaMessage {
@@ -278,11 +285,9 @@ export interface EmmaMessage {
     failedQuery?: string
     // Human-in-the-Loop clarification
     clarification?: ClarificationData
-    // SLM Router chain-of-thought
+    // LangGraph chain-of-thought
     slmIsThinking?: boolean
-    slmIsExecuting?: boolean
     slmThinkingSteps?: SLMThinkingStep[]
-    slmPlan?: SLMPlan
     stage?: string
   }
   suggestions?: string[]

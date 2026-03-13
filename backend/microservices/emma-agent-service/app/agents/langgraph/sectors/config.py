@@ -10,12 +10,17 @@ Changing sectors requires clearing all data (Weaviate + AGE graph).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
     from .predictive_config import PredictiveConfig
+
+logger = logging.getLogger(__name__)
+
+_REQUIRED_RERANK_WEIGHTS = {"similarity", "quality", "graph", "recency", "entity"}
 
 
 class Sector(str, Enum):
@@ -50,6 +55,7 @@ class SectorConfig:
         system_prompt_key: Key in emma_prompts.yaml for sector system prompt
         collection_suffix: Optional suffix for Weaviate collection names
         men_domain: MEN service domain mapping
+        graph_search_properties: Node properties to search in Cypher queries
     """
     name: str
     sector: Sector
@@ -75,3 +81,15 @@ class SectorConfig:
         "recency": 0.10,
         "entity": 0.10,
     })
+    graph_search_properties: List[str] = field(default_factory=lambda: ["name", "title"])
+
+    def __post_init__(self) -> None:
+        """Validate rerank_weights keys on construction."""
+        if self.rerank_weights:
+            keys = set(self.rerank_weights.keys())
+            missing = _REQUIRED_RERANK_WEIGHTS - keys
+            if missing:
+                raise ValueError(
+                    f"SectorConfig '{self.name}' rerank_weights missing keys: {missing}. "
+                    f"Required: {_REQUIRED_RERANK_WEIGHTS}"
+                )

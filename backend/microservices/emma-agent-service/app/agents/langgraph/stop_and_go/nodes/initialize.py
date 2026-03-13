@@ -18,9 +18,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
-
-import httpx
+import os
+from typing import Any, Dict, List, Optional, Tuple
 
 import redis.asyncio as aioredis
 
@@ -28,6 +27,12 @@ from app.core.config import settings
 from app.agents.langgraph.stop_and_go.strategy import get_strategy
 
 logger = logging.getLogger(__name__)
+
+# If a document fits within ~50% of Qwen3-14B's 32K-token context (~64K chars),
+# skip sectioning entirely so the WriterAgent sees the full source at once.
+# This eliminates hallucinations caused by the LLM "filling in" missing context
+# when it only sees a 3500-char window of a 50K-char document.
+NO_CHUNK_THRESHOLD = int(os.getenv("VERIFIED_NO_CHUNK_THRESHOLD", "64000"))
 
 CENDOJ_DOCKER_IMAGE = "nouxcube-cendoj-agent"
 CENDOJ_REDIS_KEY = "emma:cendoj:enabled"
@@ -61,7 +66,7 @@ async def initialize_node(state: dict) -> dict:
     strategy = get_strategy(state["mode"])
     await strategy.initialize(state)
 
-    source_context = await _get_source_context(
+    source_context, source_document_ids = await _get_source_context(
         query=state["query"],
         tenant_id=state["tenant_id"],
         document_ids=state.get("context_document_ids"),
@@ -69,21 +74,74 @@ async def initialize_node(state: dict) -> dict:
         uploaded_texts=state.get("uploaded_texts"),
     )
 
+    # Abort if no source document — generating claims without source = hallucinations
+    if not source_context.strip():
+        logger.error("No source context available — aborting verified generation")
+        return {
+            "source_context": "",
+            "source_sections": [""],
+            "current_section_index": 0,
+            "section_claims_count": [0],
+            "is_complete": True,
+            "pending_events": [{
+                "event_type": "error",
+                "data": {
+                    "message": "No se pudo obtener el contenido del documento. "
+                               "Asegúrese de subir un archivo antes de generar.",
+                    "session_id": state["session_id"],
+                },
+            }],
+        }
+
+    # Extract source document name(s) for the report header
+    source_filenames = [
+        t.get("filename", "Documento") for t in (state.get("uploaded_texts") or [])
+        if t.get("text")
+    ]
+
+    # Split source into sections for windowed claim generation
+    sections = _chunk_source_into_sections(source_context)
+    logger.info(
+        f"Source context loaded: {len(source_context)} chars, "
+        f"{len(sections)} section(s), {len(source_document_ids)} source doc(s), "
+        f"files={source_filenames}"
+    )
+
     updates: Dict[str, Any] = {
         "source_context": source_context,
+        "source_document_ids": source_document_ids,
+        "source_filenames": source_filenames,
+        "source_sections": sections,
+        "current_section_index": 0,
+        "section_claims_count": [0] * len(sections),
         "pending_events": [{
             "event_type": "progress",
             "data": {
                 "message": "Context retrieved, starting extraction...",
                 "session_id": state["session_id"],
+                "total_sections": len(sections),
             },
             "progress_percent": 10,
         }],
     }
 
+    # Validate DOIs from uploaded documents (catch invalid references early)
+    if state.get("uploaded_texts"):
+        doi_validations = await _validate_source_dois(state["uploaded_texts"])
+        if doi_validations:
+            updates["source_doi_validations"] = doi_validations
+            valid = sum(1 for d in doi_validations if d.get("valid"))
+            invalid = len(doi_validations) - valid
+            logger.info(
+                f"DOI pre-validation: {len(doi_validations)} DOIs found in source "
+                f"({valid} valid, {invalid} invalid)"
+            )
+
     # For legal sector: search CENDOJ for jurisprudence evidence (ephemeral)
+    # CENDOJ is legal-only — the Docker container may not exist for other sectors
     verification_sources = state.get("mode_config", {}).get("verification_sources", [])
-    if "jurisprudence" in verification_sources or "public_knowledge" in verification_sources:
+    sector = state.get("sector", "")
+    if sector == "legal" and ("jurisprudence" in verification_sources or "public_knowledge" in verification_sources):
         cendoj_enabled = await _is_cendoj_enabled()
         if cendoj_enabled:
             jurisprudence = await _search_cendoj_jurisprudence(
@@ -105,60 +163,148 @@ async def _get_source_context(
     document_ids: Optional[List[str]] = None,
     collections: Optional[List[str]] = None,
     uploaded_texts: Optional[List[Dict]] = None,
-) -> str:
-    """
-    Get source context from uploaded documents and/or Weaviate.
+) -> Tuple[str, List[str]]:
+    """Build source context from uploaded documents.
 
-    Shared between predictive and verified modes. This was previously
-    duplicated identically in both service classes.
+    Verified generation requires an explicit source document — there is no
+    Weaviate fallback.  Without a source, claims cannot be faithfulness-checked
+    and the WriterAgent would hallucinate from unrelated tenant documents.
 
-    Priority:
-        1. Uploaded documents (already extracted text)
-        2. Weaviate hybrid search (if no uploads)
+    Returns:
+        Tuple of (context_text, source_document_ids).
     """
     context_parts: list[str] = []
+    source_doc_ids: list[str] = []
 
-    # Priority 1: Uploaded document text
-    if uploaded_texts:
-        for t in uploaded_texts:
-            filename = t.get("filename", "Uploaded document")
-            text = t.get("text", "")[:3000]
-            if text:
-                context_parts.append(f"[{filename}]\n{text}")
+    if not uploaded_texts:
+        logger.warning("No uploaded texts provided — verified generation requires a source document")
+        return "", []
 
-    # Priority 2: Weaviate search
-    if not context_parts:
-        sanitized_tenant = tenant_id.replace("-", "_")
-        collection_name = (
-            collections[0] if collections
-            else f"Nouxcube_{sanitized_tenant}_documents"
-        )
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{settings.weaviate_service_url}/weaviate/collections/{collection_name}/search",
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    },
-                    json={
-                        "query": query,
-                        "tenant_id": tenant_id,
-                        "limit": 10,
-                        "search_type": "hybrid",
-                        "is_admin": True,
-                    },
-                )
-                if response.status_code == 200:
-                    results = response.json().get("results", [])
-                    for r in results[:5]:
-                        title = r.get("title", "Document")
-                        content = r.get("content", "")[:2000]
-                        context_parts.append(f"[{title}]\n{content}")
-        except Exception as e:
-            logger.error(f"Weaviate source context failed: {e}")
+    for t in uploaded_texts:
+        filename = t.get("filename", "Uploaded document")
+        text = t.get("text", "")
+        if text:
+            context_parts.append(f"[{filename}]\n{text}")
+            doc_id = t.get("id", "")
+            if doc_id:
+                source_doc_ids.append(doc_id)
 
-    return "\n\n---\n\n".join(context_parts)
+    return "\n\n---\n\n".join(context_parts), source_doc_ids
+
+
+def _chunk_source_into_sections(
+    source_context: str,
+    section_size: int | None = None,
+    overlap: int | None = None,
+) -> list[str]:
+    """Split source context into overlapping sections for windowed claim generation.
+
+    Respects paragraph boundaries (``\\n\\n``) so sections don't cut mid-sentence.
+    Short documents (≤ section_size) return a single-element list, preserving
+    identical behaviour to the previous non-sectioned pipeline.
+
+    Args:
+        source_context: Full concatenated source text.
+        section_size: Target chars per section (default from settings).
+        overlap: Chars of overlap between consecutive sections.
+
+    Returns:
+        List of section strings (always ≥ 1 element).
+    """
+    if section_size is None:
+        section_size = settings.verified_section_size
+    if overlap is None:
+        overlap = settings.verified_section_overlap
+
+    if not source_context or len(source_context) <= max(section_size, NO_CHUNK_THRESHOLD):
+        return [source_context] if source_context else [""]
+
+    sections: list[str] = []
+    start = 0
+    text_len = len(source_context)
+
+    while start < text_len:
+        end = start + section_size
+
+        if end >= text_len:
+            # Last section — take everything remaining
+            sections.append(source_context[start:])
+            break
+
+        # Try to break at a paragraph boundary within the last 20% of the section
+        search_start = end - section_size // 5
+        boundary = source_context.rfind("\n\n", search_start, end)
+        if boundary > start:
+            end = boundary + 2  # include the \n\n in this section
+
+        sections.append(source_context[start:end])
+
+        # Advance with overlap
+        start = end - overlap
+        if start <= (end - section_size):
+            # Safety: ensure we always advance
+            start = end
+
+    logger.info(
+        f"Section chunking: {text_len} chars → {len(sections)} sections "
+        f"(size={section_size}, overlap={overlap})"
+    )
+    return sections
+
+
+async def _validate_source_dois(
+    uploaded_texts: List[Dict],
+) -> List[Dict[str, Any]]:
+    """Extract DOIs from uploaded documents and validate each via doi.org.
+
+    This runs ONCE at initialization (not per claim) so the results can be
+    reused for every claim in the session.  Invalid DOIs are a strong signal
+    that the source document contains reference errors.
+
+    Returns a list of dicts:
+        [{"doi": "10.xxx", "valid": bool, "metadata": {...}, "context": "surrounding text"}, ...]
+    """
+    from app.agents.langgraph.stop_and_go.nodes.search_and_evaluate import DOI_PATTERN
+
+    # Collect unique DOIs from all uploaded texts
+    all_dois: Dict[str, str] = {}  # doi -> surrounding context
+    for t in uploaded_texts:
+        text = t.get("text", "")
+        if not text:
+            continue
+        for match in DOI_PATTERN.finditer(text):
+            doi = match.group().rstrip(".")
+            if doi not in all_dois:
+                # Keep ~100 chars of context around the DOI for citation matching
+                start = max(0, match.start() - 80)
+                end = min(len(text), match.end() + 80)
+                all_dois[doi] = text[start:end].replace("\n", " ").strip()
+
+    if not all_dois:
+        return []
+
+    logger.info(f"DOI pre-validation: extracting {len(all_dois)} unique DOIs from uploaded docs")
+
+    # Validate in parallel (reuse the same validator from search_and_evaluate)
+    from app.agents.langgraph.stop_and_go.nodes.search_and_evaluate import (
+        _validate_single_doi,
+    )
+
+    results = await asyncio.gather(
+        *[_validate_single_doi(doi) for doi in all_dois],
+        return_exceptions=True,
+    )
+
+    validated: List[Dict[str, Any]] = []
+    for doi, result in zip(all_dois, results):
+        if isinstance(result, Exception):
+            logger.warning(f"DOI validation exception for {doi}: {result}")
+            validated.append({"doi": doi, "valid": False, "metadata": {}, "context": all_dois[doi]})
+        else:
+            result["context"] = all_dois[doi]
+            validated.append(result)
+
+    return validated
 
 
 async def _search_cendoj_jurisprudence(

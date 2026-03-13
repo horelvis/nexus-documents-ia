@@ -356,6 +356,127 @@ class VerifiedContextCache:
             return None
 
     # =========================================================================
+    # HITL Review — Claim Mutation Methods
+    # =========================================================================
+
+    async def remove_claim(
+        self,
+        tenant_id: str,
+        session_id: str,
+        claim_id: str,
+    ) -> bool:
+        """
+        Remove a single claim from the session by ID.
+
+        Used by HITL review to reject individual claims.
+        Redis Lists don't support removal by index efficiently, so we
+        read all, filter, delete, and re-push.
+
+        Args:
+            tenant_id: Tenant identifier
+            session_id: Session identifier
+            claim_id: ID of the claim to remove
+
+        Returns:
+            True if the claim was found and removed
+        """
+        await self.connect()
+        key = self._make_claims_key(tenant_id, session_id)
+
+        try:
+            claims_json = await self._redis.lrange(key, 0, -1)
+            new_claims = []
+            removed = False
+
+            for cj in claims_json:
+                try:
+                    data = json.loads(cj)
+                    if data.get("id") == claim_id:
+                        removed = True
+                        continue
+                    new_claims.append(cj)
+                except json.JSONDecodeError:
+                    new_claims.append(cj)
+
+            if removed:
+                # Atomic replace: delete + re-push
+                pipe = self._redis.pipeline()
+                pipe.delete(key)
+                if new_claims:
+                    pipe.rpush(key, *new_claims)
+                    pipe.expire(key, self._ttl)
+                await pipe.execute()
+                logger.info(
+                    f"🗑️ Removed claim {claim_id[:16]}... "
+                    f"from session {session_id[:16]}..."
+                )
+
+            return removed
+
+        except Exception as e:
+            logger.error(f"❌ Failed to remove claim: {e}")
+            return False
+
+    async def update_claim_text(
+        self,
+        tenant_id: str,
+        session_id: str,
+        claim_id: str,
+        new_text: str,
+    ) -> bool:
+        """
+        Update a claim's text and set its status to 'corrected'.
+
+        Used by HITL review when a human edits a claim.
+
+        Args:
+            tenant_id: Tenant identifier
+            session_id: Session identifier
+            claim_id: ID of the claim to update
+            new_text: New claim text
+
+        Returns:
+            True if the claim was found and updated
+        """
+        await self.connect()
+        key = self._make_claims_key(tenant_id, session_id)
+
+        try:
+            claims_json = await self._redis.lrange(key, 0, -1)
+            updated = False
+
+            new_claims = []
+            for cj in claims_json:
+                try:
+                    data = json.loads(cj)
+                    if data.get("id") == claim_id:
+                        data["original_text"] = data.get("text", "")
+                        data["text"] = new_text
+                        data["status"] = "corrected"
+                        updated = True
+                    new_claims.append(json.dumps(data))
+                except json.JSONDecodeError:
+                    new_claims.append(cj)
+
+            if updated:
+                pipe = self._redis.pipeline()
+                pipe.delete(key)
+                if new_claims:
+                    pipe.rpush(key, *new_claims)
+                    pipe.expire(key, self._ttl)
+                await pipe.execute()
+                logger.info(
+                    f"✏️ Updated claim {claim_id[:16]}... "
+                    f"in session {session_id[:16]}..."
+                )
+
+            return updated
+
+        except Exception as e:
+            logger.error(f"❌ Failed to update claim text: {e}")
+            return False
+
+    # =========================================================================
     # Verification Job Status Methods
     # =========================================================================
 

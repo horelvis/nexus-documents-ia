@@ -62,6 +62,9 @@ class ToolRegistry:
         from .discovery import ListSourcesTool
         from .connectors import QueryConnectorTool
         from .cendoj import CendojSearchTool
+        from .document_generator import GenerateDocumentTool
+        from .email import SendEmailTool
+        from .forge_document import ForgeDocumentTool
 
         tools: List[EmmaTool] = [
             SmartSearchTool(),         # Replaces SearchDocuments + SearchLegislation
@@ -72,6 +75,9 @@ class ToolRegistry:
             CendojSearchTool(),
             ListSourcesTool(),
             QueryConnectorTool(),
+            GenerateDocumentTool(),
+            ForgeDocumentTool(),
+            SendEmailTool(),
             TerminateTool(),  # Always last — the agent's "I'm done" signal
         ]
 
@@ -140,12 +146,19 @@ class ToolRegistry:
                 available.append(tool)
             elif name == "web_search" and features.get("web_search_enabled", False):
                 available.append(tool)
-            elif name == "search_jurisprudence" and features.get("cendoj_enabled", False):
+            elif name == "search_jurisprudence" and features.get("cendoj_enabled", False) and sector == "legal":
                 available.append(tool)
             elif name == "query_connector" and features.get("connectors_enabled", False):
                 available.append(tool)
-            elif name not in ("analyze_domain",
-                              "web_search", "search_jurisprudence", "query_connector"):
+            elif name == "generate_document" and features.get("document_generation_enabled", True):
+                available.append(tool)
+            elif name == "forge_document" and features.get("document_forge_enabled", True):
+                available.append(tool)
+            elif name == "send_email" and features.get("email_enabled", True):
+                available.append(tool)
+            elif name not in ("analyze_domain", "web_search", "search_jurisprudence",
+                              "query_connector", "generate_document", "forge_document",
+                              "send_email"):
                 # Unknown tool — include by default
                 available.append(tool)
             else:

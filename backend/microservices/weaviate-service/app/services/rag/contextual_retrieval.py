@@ -624,13 +624,23 @@ class ContextualRetrievalService:
         self._enabled = settings.contextual_retrieval_enabled if hasattr(settings, 'contextual_retrieval_enabled') else True
 
     async def _get_llm_client(self):
-        """Lazy load LLM client."""
+        """Lazy load LLM client (calls vLLM directly via HTTP)."""
         if self._llm_client is None:
             try:
-                from app.agents.llm_client import get_llm_client
-                self._llm_client = await get_llm_client()
+                from app.services.rag.context_enricher import _call_vllm_chat
+
+                # Create a thin wrapper that matches the expected interface
+                class _VLLMWrapper:
+                    async def chat(self, messages, temperature=0.3, max_tokens=200, **kwargs):
+                        class _Response:
+                            def __init__(self, text):
+                                self.content = text
+                        result = await _call_vllm_chat(messages, temperature, max_tokens)
+                        return _Response(result)
+
+                self._llm_client = _VLLMWrapper()
             except Exception as e:
-                logger.warning(f"Failed to get LLM client: {e}")
+                logger.warning(f"Failed to create vLLM client: {e}")
         return self._llm_client
 
     def detect_domain(
@@ -930,7 +940,7 @@ DOCUMENTO (primeros 1000 caracteres):
 FORMATO REQUERIDO:
 [CONTEXTO] [Tipo de documento]. [Descripción breve]. Legislación: [leyes aplicables]. Artículos clave: [arts relevantes]. [CONTENIDO]
 
-Responde SOLO con el contexto, sin explicaciones adicionales."""
+Responde SOLO con el contexto, sin explicaciones adicionales. /no_think"""
 
         try:
             response = await llm_client.chat(
@@ -939,7 +949,8 @@ Responde SOLO con el contexto, sin explicaciones adicionales."""
                 max_tokens=200
             )
             if response and response.content:
-                context = response.content.strip()
+                # Strip <think>...</think> tags from Qwen3 thinking mode
+                context = re.sub(r"<think>.*?</think>\s*", "", response.content, flags=re.DOTALL).strip()
                 # Ensure proper format
                 if not context.startswith("[CONTEXTO]"):
                     context = f"[CONTEXTO] {context}"

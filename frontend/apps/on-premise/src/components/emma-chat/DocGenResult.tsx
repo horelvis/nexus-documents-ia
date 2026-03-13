@@ -12,6 +12,7 @@ import {
   IconZoomOut,
   IconZoomReset,
   IconPrinter,
+  IconDownload,
 } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -44,6 +45,23 @@ export function DocGenResult({ metadata }: DocGenResultProps) {
       setTimeout(() => setCopied(false), 2000)
     } catch {
       // fallback
+    }
+  }
+
+  const handleDownloadDocx = async () => {
+    if (!metadata.generated_doc_id) return
+    try {
+      const { apiClient } = await import('@/lib/api-client')
+      const result = await apiClient.downloadBlob(`/emma/generated/${metadata.generated_doc_id}/download`)
+      if (result.error || !result.blob) throw new Error(result.error || 'Download failed')
+      const blobUrl = URL.createObjectURL(result.blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `${(document_type || 'documento').toLowerCase().replace(/\s+/g, '_')}.docx`
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      console.error('DOCX download failed:', err)
     }
   }
 
@@ -87,6 +105,19 @@ export function DocGenResult({ metadata }: DocGenResultProps) {
           </Button>
 
           <Separator orientation="vertical" className="h-5 mx-1" />
+
+          {/* Download DOCX */}
+          {metadata.generated_doc_id && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadDocx}
+              className="gap-1.5"
+            >
+              <IconDownload className="h-3.5 w-3.5" />
+              DOCX
+            </Button>
+          )}
 
           {/* Copy */}
           <Button

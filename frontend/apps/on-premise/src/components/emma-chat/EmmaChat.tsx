@@ -7,13 +7,13 @@ import { useAuth } from '@/contexts/auth-context'
 import { useApiClient } from '@/lib/api-client'
 import { API_CONFIG } from '@/lib/config'
 import { useEmmaService, classifyError, EmmaStreamEvent } from '@/lib/services/emma.service'
-import { queryVerifiedStream, mapEventToClaim, VerifiedStreamEvent } from '@/lib/services/verified-generation.service'
+import { queryVerifiedStream, mapEventToClaim, VerifiedStreamEvent, recoverVerifiedSession, submitReviewAndResume, ReviewDecision } from '@/lib/services/verified-generation.service'
 import { queryPredictiveStream, PredictiveStreamEvent } from '@/lib/services/predictive-analysis.service'
 import { EmmaQueryInput } from './EmmaQueryInput'
 import { EmmaRenderChat } from './EmmaRenderChat'
 import { PDFPreviewModal } from './PDFPreviewModal'
-import { VerifiedGenerationDialog } from './VerifiedGenerationDialog'
 import { PredictiveAnalysisDialog } from './PredictiveAnalysisDialog'
+import { useVerifiedGeneration } from '@/contexts/verified-generation-context'
 import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata, PredictiveFactorInfo, PredictiveAnalysisMetadata } from '@/lib/types/emma'
 import { isDocGenResult, extractDocGenMetadata } from '@/lib/utils/docgen-detector'
 import { Switch } from '@/components/ui/switch'
@@ -48,15 +48,18 @@ export function EmmaChat({
   conversationId,
 }: EmmaChatProps) {
   const { user, tenantId, isAuthenticated, login } = useAuth()
-  const { queryEmmaStream, uploadTempDocument } = useEmmaService()
+  const { queryEmmaStream, resumeQueryStreamGenerator, uploadTempDocument } = useEmmaService()
   const apiClient = useApiClient()
 
   // Proactive welcome message from Emma (LLM-generated with user context)
   const [welcomeMessage, setWelcomeMessage] = useState<string>('')
   const [welcomeLoaded, setWelcomeLoaded] = useState(false)
+  const welcomeFetchedRef = useRef(false)
 
   useEffect(() => {
+    if (welcomeFetchedRef.current) return
     async function loadWelcome() {
+      welcomeFetchedRef.current = true
       try {
         const res = await apiClient.get<{ message: string; personalized: boolean }>(
           API_CONFIG.ENDPOINTS.EMMA_WELCOME
@@ -141,9 +144,7 @@ export function EmmaChat({
   const isLoadingRef = useRef(isLoading)
   isLoadingRef.current = isLoading
 
-  // Wrapper for setIsLoading with debug logging
   const setIsLoading = useCallback((value: boolean) => {
-    console.log('[EmmaChat] setIsLoading:', value)
     setIsLoadingInternal(value)
   }, [])
   const [deepReasoning, setDeepReasoning] = useState(false) // Fast mode by default
@@ -152,10 +153,17 @@ export function EmmaChat({
   const [previewDoc, setPreviewDoc] = useState<DocumentInfo | null>(null)
   const [showPreviewModal, setShowPreviewModal] = useState(false)
 
-  // Verified generation queue state (supports multiple concurrent jobs)
-  const [verifiedDialogOpen, setVerifiedDialogOpen] = useState(false)
-  const [verifiedJobs, setVerifiedJobs] = useState<Record<string, VerifiedGenerationMetadata>>({})
-  const verifiedJobsRef = useRef<Record<string, VerifiedGenerationMetadata>>({})
+  // Verified generation queue state (from layout-level context — persists across navigation)
+  const {
+    dialogOpen: verifiedDialogOpen,
+    setDialogOpen: setVerifiedDialogOpen,
+    jobs: verifiedJobs,
+    jobsRef: verifiedJobsRef,
+    updateJob: contextUpdateJob,
+    setJob: contextSetJob,
+    removeJob: contextRemoveJob,
+    reviewHandler: contextReviewHandler,
+  } = useVerifiedGeneration()
 
   // Predictive analysis queue state
   const [predictiveDialogOpen, setPredictiveDialogOpen] = useState(false)
@@ -166,6 +174,9 @@ export function EmmaChat({
   const sessionUploadIdsRef = useRef<string[]>([])
   const sessionDocIdRef = useRef<string | null>(null)
   const sessionIndexedDocIdsRef = useRef<string[]>([])
+
+  // HITL: track pending clarification thread_id for interrupt() → Command(resume) flow
+  const pendingClarificationRef = useRef<{ threadId: string; progressMessageId: string } | null>(null)
 
   // Generate stable session ID (migrate from default when tenantId becomes available)
   const [sessionId, setSessionId] = useState(() => {
@@ -206,11 +217,94 @@ export function EmmaChat({
     }
   }, [tenantId, sessionId])
 
+  // Recover verified generation session if user navigated away during generation
+  useEffect(() => {
+    if (typeof window === 'undefined' || !tenantId) return
+    const raw = sessionStorage.getItem('verified_active_session')
+    if (!raw) return
+
+    let marker: { sessionId: string; topic: string }
+    try { marker = JSON.parse(raw) } catch { sessionStorage.removeItem('verified_active_session'); return }
+
+    // Avoid injecting duplicate
+    if (messages.some(m => m.verified?.session_id === marker.sessionId)) {
+      sessionStorage.removeItem('verified_active_session')
+      return
+    }
+
+    recoverVerifiedSession(marker.sessionId).then(data => {
+      if (!data) {
+        sessionStorage.removeItem('verified_active_session')
+        return
+      }
+      if (data.status === 'completed') {
+        sessionStorage.removeItem('verified_active_session')
+        updateMessages(prev => {
+          if (prev.some(m => m.verified?.session_id === marker.sessionId)) return prev
+          return [...prev, {
+            id: `recovered_${Date.now()}`,
+            type: 'verified_result' as const,
+            content: data.document_text || '',
+            timestamp: new Date(),
+            verified: {
+              session_id: data.session_id,
+              tenant_id: tenantId,
+              topic: data.topic || marker.topic,
+              claims: data.claims || [],
+              current_phase: 'complete' as const,
+              verified_count: data.verified_count || 0,
+              rejected_count: data.rejected_count || 0,
+              total_claims: data.total_claims || 0,
+              document_text: data.document_text,
+              execution_time_ms: data.execution_time_ms,
+              average_confidence: data.average_confidence,
+              sources: data.sources,
+              doi_validations: data.doi_validations,
+              source_filenames: data.source_filenames,
+              source_summary: data.source_summary,
+            },
+          }]
+        })
+      }
+      // If still running, leave marker for next mount
+    })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId])
+
+  // Consume completed verified generation jobs from layout-level context.
+  // This effect fires when a job completes (either while on this page or after navigating back).
+  // It injects the result into chat messages and cleans up context + sessionStorage.
+  useEffect(() => {
+    const completedEntries = Object.entries(verifiedJobs).filter(
+      ([, job]) => job.current_phase === 'complete'
+    )
+    if (completedEntries.length === 0) return
+
+    for (const [jobId, job] of completedEntries) {
+      updateMessages(prev => {
+        // Avoid duplicates
+        if (prev.some(m => m.id === jobId)) return prev
+        return [...prev, {
+          id: jobId,
+          type: 'verified_result' as const,
+          content: job.document_text || '',
+          timestamp: new Date(),
+          verified: job,
+        }]
+      })
+      contextRemoveJob(jobId)
+      // Clear recovery marker now that the result is safely in messages
+      sessionStorage.removeItem('verified_active_session')
+    }
+  }, [verifiedJobs, updateMessages, contextRemoveJob])
+
   // Handle sending queries
   const handleSendQuery = useCallback(
     async (query: string, attachments?: Attachment[]) => {
       // Use ref to check loading state (prevents stale closure issues)
-      if (!user?.id || !tenantId || isLoadingRef.current) return
+      if (!user?.id || !tenantId || isLoadingRef.current) {
+        return
+      }
 
       // Verify token is valid before making the request
       if (!hasValidToken()) {
@@ -502,6 +596,7 @@ export function EmmaChat({
                   step: typeof data.step === 'number' ? data.step : slmThinkingSteps.length + 1,
                   type: inlineStepType as SLMThinkingStep['type'],
                   content: data.content || data.message || '',
+                  detail: (data as any).detail,
                   confidence: data.confidence,
                   entities: data.entities,
                 }
@@ -552,30 +647,51 @@ export function EmmaChat({
               }
             }
 
-            // Handle SLM Router plan ready event
-            if (event.event === 'slm_plan' && data.slmPlan) {
+            // Handle clarification event — LangGraph interrupt() HITL
+            // Graph is paused; user selects an option → resume via Command(resume=value)
+            if (event.event === 'clarification') {
+              streamCompleted = true
+              const question = data.question || data.message || ''
+              const options = (data.options || []) as Array<{ label: string; value: string }>
+              const threadId = (data as any).thread_id as string | undefined
+
+              // Store thread_id so handleSuggestionClick can resume the paused graph
+              if (threadId) {
+                pendingClarificationRef.current = { threadId, progressMessageId }
+              }
+
               updateMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === progressMessageId
                     ? {
                         ...msg,
-                        content: data.message || msg.content,
+                        type: 'clarification' as const,
+                        content: question,
+                        isStreaming: false,
                         metadata: {
                           ...msg.metadata,
+                          isStreaming: false,
                           slmIsThinking: false,
-                          slmPlan: data.slmPlan,
+                          clarification: {
+                            question,
+                            options: options.map((o) => ({
+                              label: o.label,
+                              value: o.value,
+                            })),
+                          },
                         },
                       }
                     : msg
                 )
               )
-              return // Don't process as other event
+              setIsLoading(false)
+              return
             }
 
             // Handle other progress events (progress, start, delegation, first_token, etc.)
             // Also handles slm_reasoning and slm_executing stages via progress events
             if (
-              !['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'token', 'slm_thinking', 'slm_plan'].includes(
+              !['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'token', 'slm_thinking', 'slm_plan', 'clarification'].includes(
                 event.event
               )
             ) {
@@ -591,9 +707,8 @@ export function EmmaChat({
                           step: data.step,
                           total_steps: data.total_steps,
                           agent: data.agent,
-                          // SLM Router fields from progress events
+                          // LangGraph reasoning fields from progress events
                           ...(data.slmIsThinking !== undefined && { slmIsThinking: data.slmIsThinking }),
-                          ...(data.slmIsExecuting !== undefined && { slmIsExecuting: data.slmIsExecuting }),
                           ...(data.slmThinkingSteps && { slmThinkingSteps: data.slmThinkingSteps }),
                           ...(data.stage && { stage: data.stage }),
                         },
@@ -606,6 +721,12 @@ export function EmmaChat({
             // Handle completion
             if (event.event === 'complete') {
               streamCompleted = true
+
+              // If this is a clarification complete, skip — already handled by clarification event
+              if ((data as any).query_clarification) {
+                setIsLoading(false)
+                return
+              }
               // Use data.answer if provided, otherwise preserve accumulated content from tokens
               const answerFromServer =
                 typeof data.answer === 'string' && data.answer.trim()
@@ -840,33 +961,23 @@ export function EmmaChat({
       updateMessages((prev) => [...prev, userMessage])
       setError(null)
 
-      // Helper to update this job in the queue
+      // Helper to update this job in the queue (delegates to context)
       const jobId = verifiedMessageId
       const updateJob = (updater: (prev: VerifiedGenerationMetadata) => VerifiedGenerationMetadata) => {
-        setVerifiedJobs((prev) => {
-          const current = prev[jobId]
-          if (!current) return prev
-          const next = updater(current)
-          const updated = { ...prev, [jobId]: next }
-          verifiedJobsRef.current = updated
-          return updated
-        })
+        contextUpdateJob(jobId, updater)
       }
       const removeJob = () => {
-        setVerifiedJobs((prev) => {
-          const { [jobId]: _, ...rest } = prev
-          verifiedJobsRef.current = rest
-          return rest
-        })
+        contextRemoveJob(jobId)
       }
 
       // Add job to queue and open widget
-      setVerifiedJobs((prev) => {
-        const updated = { ...prev, [jobId]: initialVerified }
-        verifiedJobsRef.current = updated
-        return updated
-      })
+      contextSetJob(jobId, initialVerified)
       setVerifiedDialogOpen(true)
+
+      // Mark active session for recovery if user navigates away
+      sessionStorage.setItem('verified_active_session', JSON.stringify({
+        sessionId, topic, startedAt: new Date().toISOString(),
+      }))
 
       // Upload non-indexed files (same process as normal query)
       const uploadedDocs = attachments?.filter((a) => a.type === 'upload') || []
@@ -908,34 +1019,75 @@ export function EmmaChat({
           console.log('[VerifiedGen] claimUpdate:', claimUpdate)
 
           if (event.event_type === 'document_complete') {
-            // Capture accumulated claims from ref before removing job
-            const jobClaims = verifiedJobsRef.current[jobId]?.claims || []
-            removeJob()
+            // Don't clear verified_active_session here — the consumption effect
+            // will clear it after successfully injecting into messages.
+            // This ensures recoverability if the tab is closed before consumption.
 
-            const finalVerified: VerifiedGenerationMetadata = {
-              ...initialVerified,
+            // Capture accumulated claims before updating job
+            const jobClaims = verifiedJobsRef.current[jobId]?.claims || []
+
+            // Recompute stats from actual claims array (backend counts may include regenerated claims)
+            const finalVerifiedCount = jobClaims.filter((c: VerifiedClaimInfo) => c.status === 'verified').length
+            const finalCorrectedCount = jobClaims.filter((c: VerifiedClaimInfo) => c.status === 'corrected').length
+            const finalRejectedCount = jobClaims.filter((c: VerifiedClaimInfo) => c.status === 'rejected').length
+
+            // Mark job as complete in context (don't remove — effect will inject into messages)
+            // This works even if EmmaChat is unmounted because context lives at layout level
+            updateJob((prev) => ({
+              ...prev,
               claims: jobClaims,
-              current_phase: 'complete',
+              current_phase: 'complete' as const,
               document_text: event.data.document_text,
-              verified_count: event.data.claims_verified ?? 0,
-              rejected_count: event.data.claims_rejected ?? 0,
-              total_claims: event.data.total_claims_generated ?? 0,
+              verified_count: finalVerifiedCount + finalCorrectedCount,
+              rejected_count: finalRejectedCount,
+              total_claims: jobClaims.length,
               execution_time_ms: event.data.execution_time_ms,
               average_confidence: event.data.average_confidence,
               sources: event.data.sources,
-            }
+              doi_validations: event.data.doi_validations,
+              source_filenames: event.data.source_filenames,
+              source_summary: event.data.source_summary,
+            }))
+            return
+          }
 
-            updateMessages((prev) => [...prev, {
-              id: verifiedMessageId,
-              type: 'verified_result' as const,
-              content: event.data.document_text || '',
-              timestamp: new Date(),
-              verified: finalVerified,
-            }])
+          // HITL: Backend requests human review before document assembly
+          if (event.event_type === 'review_requested') {
+            const reviewData = event.data
+            const reviewClaims = (reviewData.claims || []) as Array<{
+              claim_id: string; claim_text: string; confidence: number;
+              status: string; verification_type?: string;
+              verification_reason?: string; needs_review: boolean;
+            }>
+
+            // Update job claims with review flags and transition to review phase
+            updateJob((prev) => {
+              const updatedClaims = prev.claims.map(c => {
+                const reviewInfo = reviewClaims.find(rc => rc.claim_id === c.claim_id)
+                if (reviewInfo) {
+                  return {
+                    ...c,
+                    needs_review: reviewInfo.needs_review,
+                    auto_approved: !reviewInfo.needs_review,
+                  }
+                }
+                return { ...c, auto_approved: true }
+              })
+              return {
+                ...prev,
+                claims: updatedClaims,
+                current_phase: 'review' as const,
+                needs_review_count: reviewData.needs_review_count || 0,
+                confidence_threshold: reviewData.confidence_threshold,
+              }
+            })
+            // SSE stream ends after this event — don't return, let the
+            // stream close naturally. The review UI is shown in the widget.
             return
           }
 
           if (event.event_type === 'error') {
+            sessionStorage.removeItem('verified_active_session')
             removeJob()
             updateMessages((prev) => [...prev, {
               id: verifiedMessageId,
@@ -964,6 +1116,9 @@ export function EmmaChat({
                   confidence: claimUpdate.confidence,
                   evidence_count: claimUpdate.evidence_count,
                   original_text: claimUpdate.original_text,
+                  evidence_sources: claimUpdate.evidence_sources,
+                  verification_type: claimUpdate.verification_type,
+                  verification_reason: claimUpdate.verification_reason,
                 }]
               }
 
@@ -1004,6 +1159,91 @@ export function EmmaChat({
     },
     [user, tenantId, sessionId, login, updateMessages, uploadTempDocument]
   )
+
+  // Handle HITL review submission — resume verified generation after human review
+  const handleReviewSubmit = useCallback(
+    async (jobId: string, decisions: ReviewDecision[]) => {
+      if (!tenantId) return
+
+      const job = verifiedJobsRef.current[jobId]
+      if (!job) return
+
+      // Mark as resuming (shows loading state)
+      contextUpdateJob(jobId, (prev) => ({
+        ...prev,
+        current_phase: 'verifying' as const,
+      }))
+
+      try {
+        for await (const event of submitReviewAndResume(
+          job.session_id,
+          tenantId,
+          decisions,
+        )) {
+          if (event.event_type === 'document_complete') {
+            const jobClaims = verifiedJobsRef.current[jobId]?.claims || []
+            // Filter out rejected claims (they were removed from Redis)
+            const remainingClaims = jobClaims.filter(c => {
+              const dec = decisions.find(d => d.claim_id === c.claim_id)
+              return !dec || dec.action !== 'reject'
+            }).map(c => {
+              // Update edited claims
+              const dec = decisions.find(d => d.claim_id === c.claim_id)
+              if (dec?.action === 'edit' && dec.edited_text) {
+                return { ...c, claim_text: dec.edited_text, status: 'corrected' as const, original_text: c.claim_text }
+              }
+              return c
+            })
+
+            const finalVerifiedCount = remainingClaims.filter(c => c.status === 'verified').length
+            const finalCorrectedCount = remainingClaims.filter(c => c.status === 'corrected').length
+            const finalRejectedCount = decisions.filter(d => d.action === 'reject').length
+
+            contextUpdateJob(jobId, (prev) => ({
+              ...prev,
+              claims: remainingClaims,
+              current_phase: 'complete' as const,
+              document_text: event.data.document_text,
+              verified_count: finalVerifiedCount + finalCorrectedCount,
+              rejected_count: finalRejectedCount,
+              total_claims: remainingClaims.length,
+              execution_time_ms: event.data.execution_time_ms,
+              average_confidence: event.data.average_confidence,
+              sources: event.data.sources,
+              doi_validations: event.data.doi_validations,
+              source_filenames: event.data.source_filenames,
+              source_summary: event.data.source_summary,
+              needs_review_count: 0,
+            }))
+            return
+          }
+
+          if (event.event_type === 'error') {
+            console.error('[VerifiedGen/Resume] Error:', event.data.error)
+            contextUpdateJob(jobId, (prev) => ({
+              ...prev,
+              current_phase: 'review' as const,
+            }))
+            return
+          }
+        }
+      } catch (err) {
+        console.error('[VerifiedGen/Resume] Failed:', err)
+        // Restore review phase so user can retry
+        contextUpdateJob(jobId, (prev) => ({
+          ...prev,
+          current_phase: 'review' as const,
+        }))
+      }
+    },
+    [tenantId, verifiedJobsRef, contextUpdateJob]
+  )
+
+  // Register HITL review handler in context so the floating widget can call it
+  useEffect(() => {
+    contextReviewHandler.current = handleReviewSubmit
+    return () => { contextReviewHandler.current = null }
+  }, [handleReviewSubmit, contextReviewHandler])
 
   // Handle predictive analysis (non-blocking dialog)
   const handlePredictiveAnalysis = useCallback(
@@ -1253,12 +1493,221 @@ export function EmmaChat({
     []
   )
 
-  // Handle suggestion click
+  // Handle clarification resume — continues paused LangGraph via Command(resume=value)
+  const handleClarificationResume = useCallback(
+    async (selectedValue: string) => {
+      const pending = pendingClarificationRef.current
+      if (!pending || !user?.id || !tenantId) return
+
+      pendingClarificationRef.current = null // Clear — only resume once
+      const { threadId, progressMessageId } = pending
+
+      // Add user message showing what they selected
+      const userMessage: EmmaMessage = {
+        id: Date.now().toString(),
+        type: 'user',
+        content: selectedValue,
+        timestamp: new Date(),
+      }
+      updateMessages((prev) => [...prev, userMessage])
+
+      // Reuse existing progress message or create a new one for resume stream
+      const resumeProgressId = (Date.now() + 1).toString()
+      const resumeProgress: EmmaMessage = {
+        id: resumeProgressId,
+        type: 'progress',
+        content: 'Procesando tu selección...',
+        timestamp: new Date(),
+        metadata: { progress: 0, streaming_text: '' },
+      }
+      updateMessages((prev) => [...prev, resumeProgress])
+      setIsLoading(true)
+      setError(null)
+
+      let streamedAnswer = ''
+      let slmThinkingSteps: SLMThinkingStep[] = []
+      let streamCompleted = false
+
+      try {
+        for await (const event of resumeQueryStreamGenerator(threadId, selectedValue, tenantId, user.id)) {
+          const { data } = event
+
+          // Token streaming
+          if (event.event === 'token' && data.text) {
+            streamedAnswer += data.text
+            updateMessages(
+              (prev) =>
+                prev.map((msg) =>
+                  msg.id === resumeProgressId
+                    ? {
+                        ...msg,
+                        metadata: {
+                          ...msg.metadata,
+                          isStreaming: true,
+                          streaming_text: streamedAnswer,
+                        },
+                      }
+                    : msg
+                ),
+              true
+            )
+            continue
+          }
+
+          // SLM thinking
+          if (event.event === 'slm_thinking') {
+            const inlineStepType = data.step_type || (data as any).type
+            if (inlineStepType) {
+              const newStep: SLMThinkingStep = {
+                step: typeof data.step === 'number' ? data.step : slmThinkingSteps.length + 1,
+                type: inlineStepType as SLMThinkingStep['type'],
+                content: data.content || data.message || '',
+                detail: (data as any).detail,
+                confidence: data.confidence,
+              }
+              slmThinkingSteps = [...slmThinkingSteps, newStep]
+              updateMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === resumeProgressId
+                    ? {
+                        ...msg,
+                        content: data.message || msg.content,
+                        metadata: {
+                          ...msg.metadata,
+                          slmIsThinking: data.slmIsThinking !== false,
+                          slmThinkingSteps: [...slmThinkingSteps],
+                        },
+                      }
+                    : msg
+                )
+              )
+              continue
+            }
+          }
+
+          // Completion
+          if (event.event === 'complete') {
+            streamCompleted = true
+            const answerFromServer =
+              typeof data.answer === 'string' && data.answer.trim()
+                ? data.answer
+                : (data.final_result as any)?.summary || null
+
+            const apiSources = ((data.final_result as any)?.sources || (data as any).sources || [])
+              .map((src: any) => ({
+                name: src.title || src.name || src.document_id || src.id || 'Fuente',
+                id: src.document_id || src.id,
+                url: src.url,
+                boe_id: src.boe_id,
+                graph_link: src.graph_link,
+                source_type: src.source_type || src.type,
+                fileType: src.file_type || src.mime_type,
+                relevanceScore: src.score || src.relevance,
+              }))
+              .filter((s: any) => s.name && s.name !== 'Fuente')
+
+            updateMessages((prev) =>
+              prev.map((msg) => {
+                if (msg.id !== resumeProgressId) return msg
+                const finalContent =
+                  answerFromServer || msg.metadata?.streaming_text || msg.content || 'Análisis completado'
+                const finalSlmSteps =
+                  slmThinkingSteps.length > 0 ? [...slmThinkingSteps] : msg.metadata?.slmThinkingSteps || []
+                return {
+                  ...msg,
+                  type: 'result' as const,
+                  content: finalContent,
+                  isStreaming: false,
+                  documents: apiSources.length > 0 ? apiSources : undefined,
+                  suggestions: data.suggestions || (data.final_result as any)?.suggestions,
+                  metadata: {
+                    ...msg.metadata,
+                    progress: 100,
+                    isStreaming: false,
+                    streaming_text: undefined,
+                    slmIsThinking: false,
+                    slmThinkingSteps: finalSlmSteps,
+                  },
+                }
+              })
+            )
+            setIsLoading(false)
+            continue
+          }
+
+          // Error
+          if (event.event === 'error') {
+            streamCompleted = true
+            updateMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === resumeProgressId
+                  ? {
+                      ...msg,
+                      type: 'error' as const,
+                      content: data.message || 'Error procesando la respuesta.',
+                      isStreaming: false,
+                      metadata: { ...msg.metadata, isStreaming: false, slmIsThinking: false },
+                    }
+                  : msg
+              )
+            )
+            setIsLoading(false)
+            continue
+          }
+
+          // Progress events
+          if (!['complete', 'error', 'token', 'slm_thinking'].includes(event.event)) {
+            updateMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === resumeProgressId
+                  ? {
+                      ...msg,
+                      content: data.message || msg.content,
+                      metadata: {
+                        ...msg.metadata,
+                        progress: data.progress,
+                        agent: data.agent,
+                        ...(data.slmIsThinking !== undefined && { slmIsThinking: data.slmIsThinking }),
+                      },
+                    }
+                  : msg
+              )
+            )
+          }
+        }
+      } catch (err: any) {
+        if (!streamCompleted) {
+          updateMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === resumeProgressId
+                ? {
+                    ...msg,
+                    type: 'error' as const,
+                    content: 'Error al continuar la consulta. Por favor, intenta de nuevo.',
+                    isStreaming: false,
+                    metadata: { ...msg.metadata, isStreaming: false, slmIsThinking: false },
+                  }
+                : msg
+            )
+          )
+        }
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [user, tenantId, resumeQueryStreamGenerator, updateMessages]
+  )
+
+  // Handle suggestion click — dispatches to resume flow if clarification is pending
   const handleSuggestionClick = useCallback(
     (suggestion: string) => {
-      handleSendQuery(suggestion)
+      if (pendingClarificationRef.current) {
+        handleClarificationResume(suggestion)
+      } else {
+        handleSendQuery(suggestion)
+      }
     },
-    [handleSendQuery]
+    [handleSendQuery, handleClarificationResume]
   )
 
   // Handle retry
@@ -1295,9 +1744,6 @@ export function EmmaChat({
   }, [initialQuery, user?.id, tenantId, messages.length, handleSendQuery])
 
   const hasMessages = messages.length > 0
-
-  // Debug: log render state
-  console.log('[EmmaChat] Render - isLoading:', isLoading, 'hasMessages:', hasMessages)
 
   return (
     <div className={cn('flex flex-col h-full', className)}>
@@ -1439,12 +1885,7 @@ export function EmmaChat({
         onOpenChange={setShowPreviewModal}
       />
 
-      {/* Verified Generation Dialog */}
-      <VerifiedGenerationDialog
-        open={verifiedDialogOpen}
-        onOpenChange={setVerifiedDialogOpen}
-        jobs={verifiedJobs}
-      />
+      {/* Verified Generation Dialog — rendered in layout via VerifiedGenerationFloating */}
 
       {/* Predictive Analysis Dialog */}
       <PredictiveAnalysisDialog

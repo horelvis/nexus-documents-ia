@@ -197,8 +197,9 @@ class AnalyzeDomainTool(EmmaTool):
         ]
 
         try:
+            from app.agents.llm_client import ModelRole
             router = await get_llm_router()
-            response = await router.chat(messages=messages, max_tokens=2048)
+            response = await router.chat(messages=messages, max_tokens=2048, role=ModelRole.CHAT)
         except Exception as e:
             logger.error(f"analyze_domain({domain}) LLM call failed: {e}")
             return ToolResult.from_error(

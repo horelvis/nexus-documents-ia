@@ -139,15 +139,13 @@ async def list_insights(
     insight_objects = []
     for i in insights:
         try:
+            # Ensure title is never empty
+            if not i.get("title"):
+                i["title"] = "Sin título"
+            # Pass all available fields (JSON storage preserves everything)
             insight_objects.append(ProactiveInsight(
-                id=i.get("id"),
+                **{k: v for k, v in i.items() if k != "tenant_id"},
                 tenant_id=tenant_id,
-                insight_type=i.get("insight_type", "activity_summary"),
-                title=i.get("title", ""),
-                summary=i.get("summary"),
-                priority_score=float(i.get("priority_score", 0.5)),
-                urgency=i.get("urgency", "medium"),
-                status=i.get("status", "pending"),
             ))
         except Exception:
             continue

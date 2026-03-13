@@ -1,14 +1,13 @@
 'use client'
 
 import { useRef, useEffect, useState } from 'react'
-import { IconAlertCircle, IconThumbUp, IconThumbDown, IconRotate, IconCircleCheck, IconPaperclip, IconSearch, IconBulb, IconGitBranch, IconBrain, IconArrowRight } from '@tabler/icons-react'
+import { IconAlertCircle, IconThumbUp, IconThumbDown, IconRotate, IconCircleCheck, IconPaperclip, IconSearch, IconBulb, IconGitBranch, IconArrowRight, IconHelpCircle, IconDownload, IconFileText } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { EmmaMessage, WorkflowStep, DocumentInfo, SLMThinkingStep, SLMPlan, ReasoningStep } from '@/lib/types/emma'
+import { EmmaMessage, WorkflowStep, DocumentInfo, SLMThinkingStep, ReasoningStep, ClarificationData } from '@/lib/types/emma'
 import { EmmaMarkdown } from './EmmaMarkdown'
 import { DocumentDisplay } from './DocumentDisplay'
 import { ReasoningCollapsible } from './ReasoningCollapsible'
@@ -104,17 +103,23 @@ export function EmmaRenderChat({
 
       <ScrollArea className="flex-1" ref={scrollRef}>
         <div className="space-y-3 p-4">
-          {messages.map((message) => (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              onFeedback={onFeedback}
-              onSuggestionClick={onSuggestionClick}
-              onRetry={onRetry}
-              onDocumentClick={onDocumentClick}
-              onPreviewClick={onPreviewClick}
-            />
-          ))}
+          {messages.map((message, idx) => {
+            // A clarification is "answered" if there's any message after it
+            const hasMessagesAfter = idx < messages.length - 1
+            return (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                isLastMessage={idx === messages.length - 1}
+                clarificationAnswered={message.type === 'clarification' && hasMessagesAfter}
+                onFeedback={onFeedback}
+                onSuggestionClick={onSuggestionClick}
+                onRetry={onRetry}
+                onDocumentClick={onDocumentClick}
+                onPreviewClick={onPreviewClick}
+              />
+            )
+          })}
 
           {/* Loading indicator when no progress message */}
           {isLoading && !messages.some((m) => m.type === 'progress') && (
@@ -134,6 +139,8 @@ export function EmmaRenderChat({
 // Message Bubble Component
 interface MessageBubbleProps {
   message: EmmaMessage
+  isLastMessage?: boolean
+  clarificationAnswered?: boolean
   onFeedback?: (messageId: string, feedback: 'positive' | 'negative') => void
   onSuggestionClick?: (suggestion: string) => void
   onRetry?: (failedQuery: string) => void
@@ -143,6 +150,8 @@ interface MessageBubbleProps {
 
 function MessageBubble({
   message,
+  isLastMessage = false,
+  clarificationAnswered = false,
   onFeedback,
   onSuggestionClick,
   onRetry,
@@ -188,9 +197,11 @@ function MessageBubble({
               steps={docgenSlmSteps.map((s: SLMThinkingStep) => ({
                 type: s.type as ReasoningStep['type'],
                 content: s.content,
+                detail: s.detail,
                 entities: s.entities,
                 confidence: s.confidence,
               }))}
+              isActive={false}
             />
           )}
 
@@ -253,6 +264,59 @@ function MessageBubble({
             </div>
           )}
         </div>
+      </div>
+    )
+  }
+
+  // Clarification card — ambiguous query with clickable options
+  if (message.type === 'clarification' && message.metadata?.clarification) {
+    const clarification = message.metadata.clarification as ClarificationData
+    // Hide chips once user has responded (this message is no longer the last)
+    const answered = clarificationAnswered
+    return (
+      <div className="w-full">
+        <Card className={cn(
+          'space-y-3 p-3 rounded-lg border',
+          answered
+            ? 'bg-primary/5 border-primary/20'
+            : 'bg-amber-500/5 border-amber-500/20'
+        )}>
+          {/* EMMA label */}
+          <div className="flex items-center gap-2">
+            <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+            <span className="text-xs font-mono text-primary uppercase tracking-wide">
+              EMMA:
+            </span>
+            {!answered && <IconHelpCircle className="h-4 w-4 text-amber-500 ml-auto" />}
+          </div>
+
+          {/* Clarification question */}
+          <p className="text-sm text-foreground/90">{clarification.question}</p>
+
+          {/* Option chips — only shown when unanswered */}
+          {!answered && clarification.options.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {clarification.options.map((opt, idx) => (
+                <Button
+                  key={idx}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSuggestionClick?.(opt.value)}
+                  className="text-xs h-7 font-mono border-amber-500/30 hover:bg-amber-500/10 hover:border-amber-500/50"
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {/* Hint — only when unanswered */}
+          {!answered && (
+            <p className="text-xs text-muted-foreground italic">
+              o escribe tu propia búsqueda
+            </p>
+          )}
+        </Card>
       </div>
     )
   }
@@ -353,18 +417,32 @@ function MessageBubble({
               const allSteps: ReasoningStep[] = slmSteps.map((s: SLMThinkingStep) => ({
                 type: s.type as ReasoningStep['type'],
                 content: s.content,
+                detail: s.detail,
                 entities: s.entities,
                 confidence: s.confidence,
               }))
               return (
                 <ReasoningCollapsible
                   steps={allSteps}
+                  isActive={false}
                 />
               )
             })()}
 
               {/* Response content */}
               <EmmaMarkdown content={message.content} />
+
+              {/* Download button for generated documents */}
+              {message.content && (() => {
+                // Match gen_ doc ID from generate_document tool output
+                // Handles: **ID de descarga**: gen_xxx, ID de descarga: gen_xxx, or bare gen_xxx
+                const docIdMatch = message.content.match(/\b(gen_[a-f0-9]{8,})\b/)
+                const docId = docIdMatch?.[1]
+                if (!docId) return null
+                return (
+                  <GeneratedDocDownload docId={docId} />
+                )
+              })()}
 
               {/* Related documents */}
               {message.metadata?.documents && message.metadata.documents.length > 0 && (
@@ -440,181 +518,6 @@ function MessageBubble({
   )
 }
 
-// Typewriter effect hook for streaming-like text display
-function useTypewriter(text: string, speed: number = 20, enabled: boolean = true) {
-  const [displayedText, setDisplayedText] = useState('')
-  const [isComplete, setIsComplete] = useState(false)
-
-  useEffect(() => {
-    if (!enabled) {
-      setDisplayedText(text)
-      setIsComplete(true)
-      return
-    }
-
-    setDisplayedText('')
-    setIsComplete(false)
-
-    if (!text) return
-
-    let currentIndex = 0
-    const interval = setInterval(() => {
-      if (currentIndex < text.length) {
-        // Add characters in small chunks for smoother effect
-        const chunkSize = Math.min(3, text.length - currentIndex)
-        setDisplayedText(text.slice(0, currentIndex + chunkSize))
-        currentIndex += chunkSize
-      } else {
-        setIsComplete(true)
-        clearInterval(interval)
-      }
-    }, speed)
-
-    return () => clearInterval(interval)
-  }, [text, speed, enabled])
-
-  return { displayedText, isComplete }
-}
-
-// Progress Bubble with Workflow Steps and Streaming Content
-// SLM Thinking Step Display (terminal style)
-function SLMThinkingStepItem({ step, isLast, animate = true }: { step: SLMThinkingStep; isLast: boolean; animate?: boolean }) {
-  const { displayedText, isComplete } = useTypewriter(step.content, 15, animate && isLast)
-  const getStepIcon = () => {
-    switch (step.type) {
-      case 'entity_detection':
-        return <IconSearch className="h-3 w-3" />
-      case 'intent_detection':
-        return <IconBulb className="h-3 w-3" />
-      case 'route_decision':
-        return <IconGitBranch className="h-3 w-3" />
-      case 'retrieval':
-        return <IconSearch className="h-3 w-3" />
-      case 'domain_detection':
-        return <IconBulb className="h-3 w-3" />
-      case 'agent_selection':
-        return <IconGitBranch className="h-3 w-3" />
-      case 'agent_execution':
-        return <IconBrain className="h-3 w-3" />
-      case 'structural':
-        return <IconGitBranch className="h-3 w-3" />
-      case 'thinking':
-        return <IconBrain className="h-3 w-3" />
-      case 'observation':
-        return <IconSearch className="h-3 w-3" />
-      case 'tool_call':
-        return <IconGitBranch className="h-3 w-3" />
-      default:
-        return <IconBulb className="h-3 w-3" />
-    }
-  }
-
-  const getStepLabel = () => {
-    switch (step.type) {
-      case 'entity_detection':
-        return 'ENTITIES'
-      case 'intent_detection':
-        return 'INTENT'
-      case 'route_decision':
-        return 'ROUTE'
-      case 'retrieval':
-        return 'RETRIEVAL'
-      case 'domain_detection':
-        return 'DOMAIN'
-      case 'agent_selection':
-        return 'AGENTS'
-      case 'agent_execution':
-        return 'EXEC'
-      case 'structural':
-        return 'STRUCTURAL'
-      case 'thinking':
-        return 'THINKING'
-      case 'observation':
-        return 'OBSERVED'
-      case 'tool_call':
-        return 'TOOL'
-      default:
-        return 'STEP'
-    }
-  }
-
-  // Show full text for completed steps, animated text for current step
-  const textToShow = (animate && isLast) ? displayedText : step.content
-  const showCursor = animate && isLast && !isComplete
-
-  return (
-    <div className="flex items-start gap-2 animate-in fade-in slide-in-from-left-2 duration-200">
-      <div className="flex items-center justify-center h-4 w-4 text-primary/70 shrink-0 mt-0.5">
-        {getStepIcon()}
-      </div>
-      <div className="flex-1 min-w-0">
-        <span className="text-primary/70 font-mono text-xs">{getStepLabel()}:</span>{' '}
-        <span className="text-foreground/80">{textToShow}</span>
-        {showCursor && (
-          <span className="inline-block w-1.5 h-4 bg-primary/70 animate-pulse ml-0.5 align-middle" />
-        )}
-        {step.entities && step.entities.length > 0 && isComplete && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {step.entities.map((entity, idx) => (
-              <Badge key={idx} variant="outline" className="text-[10px] py-0 font-mono bg-primary/10 text-primary border-primary/20">
-                {entity}
-              </Badge>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function SLMThinkingDisplay({
-  steps,
-  isThinking,
-  plan
-}: {
-  steps: SLMThinkingStep[]
-  isThinking: boolean
-  plan?: SLMPlan
-}) {
-  if (steps.length === 0 && !isThinking) return null
-
-  return (
-    <div className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
-      {/* EMMA DECIDE header */}
-      <div className="flex items-center gap-2">
-        <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
-        <span className="text-xs font-mono text-primary uppercase tracking-wide">
-          EMMA DECIDE:
-        </span>
-        {isThinking && (
-          <span className="h-2 w-2 bg-primary rounded-full animate-pulse ml-auto" />
-        )}
-      </div>
-
-      {/* Thinking steps */}
-      {steps.length > 0 && (
-        <div className="space-y-1.5 ml-1 font-mono text-xs">
-          {steps.map((step, idx) => (
-            <SLMThinkingStepItem key={step.step} step={step} isLast={idx === steps.length - 1} />
-          ))}
-        </div>
-      )}
-
-      {/* Plan result with arrow to agent */}
-      {plan && !isThinking && (
-        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-primary/20">
-          <span className="text-xs text-muted-foreground font-mono">
-            {plan.reasoning || 'Procesando consulta'}
-          </span>
-          <IconArrowRight className="h-4 w-4 text-primary/60 ml-auto" />
-          <Badge variant="outline" className="text-[10px] font-mono bg-primary/10 text-primary border-primary/30">
-            {plan.route.replace('_', ' ')}
-          </Badge>
-        </div>
-      )}
-    </div>
-  )
-}
 
 function ProgressBubble({ message }: { message: EmmaMessage }) {
   const workflowSteps = message.metadata?.workflow_steps || []
@@ -627,7 +530,6 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
   // SLM thinking steps
   const slmThinkingSteps = message.metadata?.slmThinkingSteps || []
   const slmIsThinking = message.metadata?.slmIsThinking ?? false
-  const slmPlan = message.metadata?.slmPlan
   const hasSLMThinking = slmThinkingSteps.length > 0 || slmIsThinking
 
   // Get current agent name from metadata or steps
@@ -670,9 +572,11 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
             steps={slmThinkingSteps.map((s: SLMThinkingStep) => ({
               type: s.type as ReasoningStep['type'],
               content: s.content,
+              detail: s.detail,
               entities: s.entities,
               confidence: s.confidence,
             }))}
+            isActive={slmIsThinking}
           />
         )}
 
@@ -783,6 +687,50 @@ function LoadingBubble() {
           <Skeleton className="h-4 w-1/2 bg-primary/10" />
         </div>
       </Card>
+    </div>
+  )
+}
+
+// Generated Document Download Button (inline in responses)
+function GeneratedDocDownload({ docId }: { docId: string }) {
+  const [downloading, setDownloading] = useState(false)
+
+  const handleDownload = async () => {
+    if (downloading) return
+    setDownloading(true)
+    try {
+      const { apiClient } = await import('@/lib/api-client')
+      const result = await apiClient.downloadBlob(`/emma/generated/${docId}/download`)
+      if (result.error || !result.blob) throw new Error(result.error || 'Download failed')
+      const blobUrl = URL.createObjectURL(result.blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `documento_generado_${docId}.docx`
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      console.error('DOCX download failed:', err)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 mt-3 p-2.5 rounded-lg bg-violet-500/10 border border-violet-500/20">
+      <IconFileText className="h-5 w-5 text-violet-600 flex-shrink-0" />
+      <span className="text-xs text-violet-700 dark:text-violet-400 flex-1">
+        Documento DOCX generado y listo para descargar
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleDownload}
+        disabled={downloading}
+        className="gap-1.5 text-xs border-violet-500/30 text-violet-600 hover:bg-violet-500/10"
+      >
+        <IconDownload className="h-3.5 w-3.5" />
+        {downloading ? 'Descargando...' : 'Descargar DOCX'}
+      </Button>
     </div>
   )
 }

@@ -80,6 +80,13 @@ export function PDFPreviewModal({
       try {
         let documentId: string | null = document.id || null
 
+        // Generated documents (gen_*) are DOCX stored in Redis on emma-agent-service.
+        // They can't be previewed as PDF — offer download instead.
+        if (documentId && documentId.startsWith('gen_')) {
+          setError('Este documento generado solo está disponible para descarga en formato DOCX.')
+          return
+        }
+
         // If no document ID, try to search by name
         if (!documentId) {
           const searchResult = await documentService.searchDocuments(document.name, 1)

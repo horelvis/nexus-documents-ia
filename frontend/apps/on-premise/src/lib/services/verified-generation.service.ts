@@ -37,6 +37,10 @@ export type VerifiedEventType =
   | 'document_complete'
   | 'error'
   | 'progress'
+  // HITL review events
+  | 'review_requested'
+  | 'review_submitted'
+  | 'review_skipped'
 
 export interface VerifiedStreamEvent {
   event_type: VerifiedEventType
@@ -54,6 +58,7 @@ export interface VerifiedGenerateParams {
   context_document_ids?: string[]
   uploaded_file_ids?: string[]
   confidence_threshold?: number
+  document_type?: 'academic' | 'legal' | 'medical' | 'general'
 }
 
 /**
@@ -131,6 +136,34 @@ export async function* queryVerifiedStream(
   }
 }
 
+/**
+ * Recover a verified generation session from the backend (Redis).
+ * Used when the user navigates away during generation and returns.
+ * Returns null if the session is not found (expired or invalid).
+ */
+export async function recoverVerifiedSession(
+  sessionId: string
+): Promise<Record<string, any> | null> {
+  const token = getAccessToken()
+  const url = `${STREAMING_API_URL}/emma/verified/session/${sessionId}`
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${token || ''}`,
+      },
+    })
+
+    if (response.status === 404) return null
+    if (!response.ok) return null
+
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
 function parseSsePart(part: string): VerifiedStreamEvent | null {
   const trimmed = part.trim()
   if (!trimmed || !trimmed.startsWith('data:')) return null
@@ -141,6 +174,89 @@ function parseSsePart(part: string): VerifiedStreamEvent | null {
   } catch {
     console.warn('[VerifiedGen] Failed to parse SSE:', jsonStr.slice(0, 100))
     return null
+  }
+}
+
+// =============================================================================
+// HITL Review Types & Functions
+// =============================================================================
+
+export interface ReviewDecision {
+  claim_id: string
+  action: 'approve' | 'reject' | 'edit'
+  edited_text?: string
+}
+
+/**
+ * Submit HITL review decisions and resume generation.
+ * Returns an SSE async generator with the remaining events
+ * (review_submitted + document_complete).
+ */
+export async function* submitReviewAndResume(
+  sessionId: string,
+  tenantId: string,
+  decisions: ReviewDecision[],
+): AsyncGenerator<VerifiedStreamEvent, void, unknown> {
+  const token = getAccessToken()
+  const url = `${STREAMING_API_URL}/emma/verified/session/${sessionId}/resume/stream`
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token || ''}`,
+    },
+    body: JSON.stringify({ tenant_id: tenantId, decisions }),
+  })
+
+  if (!response.ok) {
+    let errorDetail = ''
+    try {
+      const errorBody = await response.json()
+      errorDetail = errorBody?.detail || errorBody?.message || ''
+    } catch {
+      // not JSON
+    }
+    throw new Error(errorDetail || `Resume request failed: ${response.status}`)
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('No response body')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (value) {
+        buffer += decoder.decode(value, { stream: !done })
+      }
+
+      const parts = buffer.split('\n\n')
+      if (done) {
+        buffer = ''
+        for (const part of parts) {
+          const evt = parseSsePart(part)
+          if (evt) {
+            console.log('[VerifiedGen/Resume] SSE event:', evt.event_type)
+            yield evt
+          }
+        }
+        break
+      } else {
+        buffer = parts.pop() || ''
+        for (const part of parts) {
+          const evt = parseSsePart(part)
+          if (evt) {
+            console.log('[VerifiedGen/Resume] SSE event:', evt.event_type)
+            yield evt
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
   }
 }
 
@@ -172,6 +288,9 @@ export function mapEventToClaim(event: VerifiedStreamEvent): Partial<VerifiedCla
         claim_text: data.claim_text || data.text,
         confidence: data.confidence,
         evidence_count: data.evidence?.length || data.evidence_count || 0,
+        evidence_sources: data.evidence_sources,
+        verification_type: data.verification_type,
+        verification_reason: data.verification_reason,
       }
     case 'claim_corrected':
       return {
@@ -181,6 +300,9 @@ export function mapEventToClaim(event: VerifiedStreamEvent): Partial<VerifiedCla
         confidence: data.confidence,
         evidence_count: data.evidence?.length || data.evidence_count || 0,
         original_text: data.original_text,
+        evidence_sources: data.evidence_sources,
+        verification_type: data.verification_type,
+        verification_reason: data.verification_reason,
       }
     case 'claim_rejected':
       return {

@@ -79,7 +79,9 @@ async def get_embedding_model():
             model_name = settings.embedding_model
             logger.info(f"🔄 Loading embedding model: {model_name} on {device}")
 
-            _embedding_model = SentenceTransformer(model_name, device=device)
+            _embedding_model = SentenceTransformer(
+                model_name, device=device, trust_remote_code=True,
+            )
 
             # Verify dimensions match config
             test_embedding = _embedding_model.encode("test", convert_to_numpy=True)
@@ -99,8 +101,14 @@ async def get_embedding_model():
             return None
 
 
-async def generate_embedding(text: str) -> list[float] | None:
-    """Generate embedding for a single text using configured provider"""
+async def generate_embedding(text: str, task: str = "") -> list[float] | None:
+    """Generate embedding for a single text using configured provider.
+
+    Args:
+        text: Text to embed.
+        task: Jina v3 LoRA task adapter name (e.g., "retrieval.query", "retrieval.passage").
+              Ignored by models that don't support prompt_name (e.g., BGE-M3).
+    """
     if settings.embedding_provider == "tei":
         embeddings = await get_tei_embedding([text])
         return embeddings[0] if embeddings else None
@@ -109,10 +117,17 @@ async def generate_embedding(text: str) -> list[float] | None:
         if model is None or model == "tei":
             return None
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: model.encode(text, convert_to_numpy=True).tolist()
-        )
+
+        def _encode():
+            kwargs = {"convert_to_numpy": True}
+            if task:
+                try:
+                    return model.encode(text, prompt_name=task, **kwargs).tolist()
+                except (TypeError, ValueError, KeyError):
+                    pass  # Model doesn't support this prompt_name/task adapter
+            return model.encode(text, **kwargs).tolist()
+
+        return await loop.run_in_executor(None, _encode)
 
 
 class WeaviateService:
@@ -645,6 +660,12 @@ class WeaviateService:
         "semantic_type": (weaviate.classes.config.DataType.TEXT, True),
         "quality_score": (weaviate.classes.config.DataType.NUMBER, False),
         "associated_person": (weaviate.classes.config.DataType.TEXT, True),
+        # Parent-Child Chunk Retrieval (Feature 4)
+        "parent_chunk_id": (weaviate.classes.config.DataType.TEXT, True),
+        "parent_content": (weaviate.classes.config.DataType.TEXT, True),
+        "child_index": (weaviate.classes.config.DataType.INT, False),
+        # Contextual Retrieval per-chunk context (Feature 2)
+        "chunk_context": (weaviate.classes.config.DataType.TEXT, True),
     }
 
     async def ensure_enrichment_properties(self, collection_name: str) -> None:
@@ -1654,6 +1675,12 @@ class WeaviateService:
                         "semantic_type": chunk_metadata.get("semantic_type", "") or base_properties.get("semantic_type", ""),
                         "quality_score": float(chunk_metadata.get("quality_score", 0.0) or base_properties.get("quality_score", 0.0)),
                         "associated_person": chunk_metadata.get("associated_person", "") or base_properties.get("associated_person", ""),
+                        # Parent-Child Chunk Retrieval (Feature 4)
+                        "parent_chunk_id": chunk_metadata.get("parent_chunk_id", ""),
+                        "parent_content": chunk_metadata.get("parent_content", ""),
+                        "child_index": chunk_metadata.get("child_index", 0),
+                        # Contextual Retrieval per-chunk context (Feature 2)
+                        "chunk_context": chunk_metadata.get("chunk_context", ""),
                     }
 
                     # Generate embedding for chunk
@@ -1990,6 +2017,27 @@ class WeaviateService:
             if min_quality is not None and "quality_score" in _schema_props:
                 combined_filters = combined_filters & Filter.by_property("quality_score").greater_or_equal(min_quality)
                 logger.debug(f"⭐ Filtering by min_quality: {min_quality}")
+
+            # ========== Temporal filters ==========
+            date_from = getattr(search_request, 'date_from', None)
+            if date_from and "created_at" in _schema_props:
+                from datetime import datetime as dt
+                try:
+                    parsed = dt.fromisoformat(date_from)
+                    combined_filters = combined_filters & Filter.by_property("created_at").greater_or_equal(parsed)
+                    logger.debug(f"📅 Filtering by date_from: {date_from}")
+                except ValueError:
+                    logger.warning(f"⚠️ Invalid date_from format: {date_from}")
+
+            date_to = getattr(search_request, 'date_to', None)
+            if date_to and "created_at" in _schema_props:
+                from datetime import datetime as dt
+                try:
+                    parsed = dt.fromisoformat(date_to)
+                    combined_filters = combined_filters & Filter.by_property("created_at").less_or_equal(parsed)
+                    logger.debug(f"📅 Filtering by date_to: {date_to}")
+                except ValueError:
+                    logger.warning(f"⚠️ Invalid date_to format: {date_to}")
 
             # Execute search based on type using v4 API
             if search_request.search_type == "vector":

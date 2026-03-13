@@ -184,7 +184,7 @@ async def legal_article_lookup(
     and their content within Spanish laws.
     """
     try:
-        from app.services.sil.legal_graph_service import legal_graph_service
+        from app.services.legal_graph_service import legal_graph as legal_graph_service
 
         # Initialize if needed
         if not legal_graph_service._initialized:
@@ -262,7 +262,7 @@ async def law_cross_references(
     between laws (modifications, references, etc.).
     """
     try:
-        from app.services.sil.legal_graph_service import legal_graph_service
+        from app.services.legal_graph_service import legal_graph as legal_graph_service
 
         # Initialize if needed
         if not legal_graph_service._initialized:

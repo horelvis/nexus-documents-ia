@@ -1,22 +1,12 @@
 """
-API endpoints for Legal Knowledge Graph
+Legal Knowledge Graph API — Proxy to knowledge-tree-service
 
-Provides access to the legal knowledge graph for:
-- Managing laws (add, get, list)
-- Managing articles (add, get by law)
-- Linking documents to applicable laws
-- Querying legal applicability
+All legal graph operations are now handled by knowledge-tree-service.
+This module proxies requests to maintain backwards compatibility for
+existing clients while the consolidation is in progress.
 
-Endpoints:
-- GET /legal/laws - List all laws
-- GET /legal/laws/{boe_id} - Get a specific law
-- GET /legal/laws/domain/{domain} - Get laws by domain
-- POST /legal/laws - Add a new law (admin only)
-- GET /legal/laws/{boe_id}/articles - Get articles for a law
-- POST /legal/laws/{boe_id}/articles - Add an article to a law
-- POST /legal/documents/{doc_id}/link-law - Link document to law
-- GET /legal/documents/{doc_id}/applicable-laws - Get applicable laws
-- GET /legal/stats - Get legal graph statistics
+Once all clients are updated to call knowledge-tree-service directly,
+this proxy can be removed.
 """
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
@@ -25,6 +15,7 @@ from enum import Enum
 import logging
 
 from app.core.security import verify_api_key
+from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
 logger = logging.getLogger(__name__)
 
@@ -125,57 +116,9 @@ class LegalGraphStats(BaseModel):
 # API Endpoints
 # =============================================================================
 
-@router.get("/laws", response_model=List[LawResponse])
-async def list_laws(
-    domain: Optional[LegalDomainEnum] = Query(None, description="Filter by domain"),
-    limit: int = Query(100, ge=1, le=500, description="Maximum results"),
-):
-    """
-    List all laws in the legal knowledge graph.
-
-    Optionally filter by domain.
-    """
-    from app.services.sil.legal_graph_service import legal_graph, LegalDomain
-
-    try:
-        if domain:
-            laws = await legal_graph.get_laws_by_domain(LegalDomain(domain.value))
-        else:
-            laws = await legal_graph.get_all_laws()
-
-        return [
-            LawResponse(
-                boe_id=law.get("boe_id", ""),
-                title=law.get("title", ""),
-                short_name=law.get("short_name", ""),
-                domain=law.get("domain", ""),
-                status=law.get("status", "vigente"),
-                publication_date=law.get("publication_date"),
-                effective_date=law.get("effective_date"),
-                eli_uri=law.get("eli_uri"),
-                summary=law.get("summary"),
-                keywords=law.get("keywords", []),
-                weaviate_uuid=law.get("weaviate_uuid"),
-            )
-            for law in laws[:limit]
-        ]
-
-    except Exception as e:
-        logger.error(f"Failed to list laws: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/laws/{boe_id}", response_model=LawResponse)
-async def get_law(boe_id: str):
-    """Get a specific law by BOE ID."""
-    from app.services.sil.legal_graph_service import legal_graph
-
-    law = await legal_graph.get_law(boe_id)
-    if not law:
-        raise HTTPException(status_code=404, detail=f"Law '{boe_id}' not found")
-
+def _to_law_response(law: dict) -> LawResponse:
     return LawResponse(
-        boe_id=law.get("boe_id", boe_id),
+        boe_id=law.get("boe_id", ""),
         title=law.get("title", ""),
         short_name=law.get("short_name", ""),
         domain=law.get("domain", ""),
@@ -189,29 +132,39 @@ async def get_law(boe_id: str):
     )
 
 
+# All endpoints proxy to knowledge-tree-service via HTTP client
+
+@router.get("/laws", response_model=List[LawResponse])
+async def list_laws(
+    domain: Optional[LegalDomainEnum] = Query(None),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """List all laws (proxied to knowledge-tree-service)."""
+    try:
+        if domain:
+            laws = await knowledge_tree_legal_client.get_laws_by_domain(domain.value)
+        else:
+            laws = await knowledge_tree_legal_client.get_all_laws()
+        return [_to_law_response(law) for law in laws[:limit]]
+    except Exception as e:
+        logger.error(f"Failed to list laws: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/laws/{boe_id}", response_model=LawResponse)
+async def get_law(boe_id: str):
+    """Get a specific law by BOE ID."""
+    law = await knowledge_tree_legal_client.get_law(boe_id)
+    if not law:
+        raise HTTPException(status_code=404, detail=f"Law '{boe_id}' not found")
+    return _to_law_response(law)
+
+
 @router.get("/laws/domain/{domain}", response_model=List[LawResponse])
 async def get_laws_by_domain(domain: LegalDomainEnum):
     """Get all laws for a specific domain."""
-    from app.services.sil.legal_graph_service import legal_graph, LegalDomain
-
-    laws = await legal_graph.get_laws_by_domain(LegalDomain(domain.value))
-
-    return [
-        LawResponse(
-            boe_id=law.get("boe_id", ""),
-            title=law.get("title", ""),
-            short_name=law.get("short_name", ""),
-            domain=law.get("domain", ""),
-            status=law.get("status", "vigente"),
-            publication_date=law.get("publication_date"),
-            effective_date=law.get("effective_date"),
-            eli_uri=law.get("eli_uri"),
-            summary=law.get("summary"),
-            keywords=law.get("keywords", []),
-            weaviate_uuid=law.get("weaviate_uuid"),
-        )
-        for law in laws
-    ]
+    laws = await knowledge_tree_legal_client.get_laws_by_domain(domain.value)
+    return [_to_law_response(law) for law in laws]
 
 
 @router.post("/laws", response_model=LawResponse)
@@ -219,221 +172,96 @@ async def create_law(
     request: LawCreateRequest,
     api_key: str = Depends(verify_api_key),
 ):
-    """
-    Add a new law to the legal knowledge graph.
-
-    Requires API key authentication.
-    """
-    from app.services.sil.legal_graph_service import (
-        legal_graph,
-        LegalLaw,
-        LegalDomain,
-        LawStatus,
-    )
-
+    """Add a new law (proxied to knowledge-tree-service)."""
     try:
-        law = LegalLaw(
-            boe_id=request.boe_id,
-            title=request.title,
-            short_name=request.short_name,
-            domain=LegalDomain(request.domain.value),
-            status=LawStatus(request.status.value),
-            publication_date=request.publication_date,
-            effective_date=request.effective_date,
-            eli_uri=request.eli_uri,
-            summary=request.summary,
-            keywords=request.keywords,
-        )
-
-        success = await legal_graph.add_law(law)
+        law_data = request.model_dump()
+        law_data["domain"] = request.domain.value
+        law_data["status"] = request.status.value
+        success = await knowledge_tree_legal_client.add_law(law_data)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to add law")
-
-        return LawResponse(
-            boe_id=law.boe_id,
-            title=law.title,
-            short_name=law.short_name,
-            domain=law.domain.value,
-            status=law.status.value,
-            publication_date=law.publication_date,
-            effective_date=law.effective_date,
-            eli_uri=law.eli_uri,
-            summary=law.summary,
-            keywords=law.keywords,
-        )
-
+        return LawResponse(**{k: v for k, v in law_data.items() if k in LawResponse.model_fields})
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to create law: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/laws/{boe_id}/articles", response_model=List[ArticleResponse])
+@router.get("/laws/{boe_id}/articles")
 async def get_articles_for_law(boe_id: str):
     """Get all articles for a specific law."""
-    from app.services.sil.legal_graph_service import legal_graph
-
-    # First verify law exists
-    law = await legal_graph.get_law(boe_id)
+    law = await knowledge_tree_legal_client.get_law(boe_id)
     if not law:
         raise HTTPException(status_code=404, detail=f"Law '{boe_id}' not found")
-
-    articles = await legal_graph.get_articles_for_law(boe_id)
-
-    return [
-        ArticleResponse(
-            article_id=art.get("article_id", ""),
-            law_boe_id=art.get("law_boe_id", boe_id),
-            article_number=art.get("article_number", ""),
-            title=art.get("title"),
-            summary=art.get("summary"),
-            key_concepts=art.get("key_concepts", []),
-            is_derogated=art.get("is_derogated", False),
-        )
-        for art in articles
-    ]
+    # Proxy to knowledge-tree-service
+    try:
+        return await knowledge_tree_legal_client._request("GET", f"/legal/laws/{boe_id}/articles")
+    except Exception:
+        return []
 
 
-@router.post("/laws/{boe_id}/articles", response_model=ArticleResponse)
+@router.post("/laws/{boe_id}/articles")
 async def create_article(
     boe_id: str,
     request: ArticleCreateRequest,
     api_key: str = Depends(verify_api_key),
 ):
-    """
-    Add an article to a law.
-
-    Requires API key authentication.
-    """
-    from app.services.sil.legal_graph_service import legal_graph
-
-    # Verify law exists
-    law = await legal_graph.get_law(boe_id)
+    """Add an article to a law."""
+    law = await knowledge_tree_legal_client.get_law(boe_id)
     if not law:
         raise HTTPException(status_code=404, detail=f"Law '{boe_id}' not found")
-
-    success = await legal_graph.add_article(
-        law_boe_id=boe_id,
-        article_number=request.article_number,
-        title=request.title,
-        summary=request.summary,
-        key_concepts=request.key_concepts,
-    )
-
-    if not success:
-        raise HTTPException(status_code=500, detail="Failed to add article")
-
-    article_id = f"{boe_id}:art:{request.article_number}"
-
-    return ArticleResponse(
-        article_id=article_id,
-        law_boe_id=boe_id,
-        article_number=request.article_number,
-        title=request.title,
-        summary=request.summary,
-        key_concepts=request.key_concepts,
-        is_derogated=False,
-    )
+    try:
+        return await knowledge_tree_legal_client._request(
+            "POST", f"/legal/laws/{boe_id}/articles",
+            json=request.model_dump(),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/documents/{document_id}/link-law")
 async def link_document_to_law(
     document_id: str,
     request: DocumentLawLinkRequest,
-    tenant_id: str = Query(..., description="Tenant ID"),
+    tenant_id: str = Query(...),
     api_key: str = Depends(verify_api_key),
 ):
-    """
-    Link a document to an applicable law.
-
-    This creates a `governed_by` relationship between the document
-    and the law in the knowledge graph.
-
-    Requires API key authentication.
-    """
-    from app.services.sil.legal_graph_service import legal_graph
-
-    # Verify law exists
-    law = await legal_graph.get_law(request.law_boe_id)
-    if not law:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Law '{request.law_boe_id}' not found"
-        )
-
-    success = await legal_graph.link_document_to_law(
+    """Link a document to an applicable law."""
+    success = await knowledge_tree_legal_client.link_document_to_law(
         document_id=document_id,
         law_boe_id=request.law_boe_id,
         tenant_id=tenant_id,
         relationship_type=request.relationship_type,
-        articles=request.articles,
     )
-
     if not success:
         raise HTTPException(status_code=500, detail="Failed to link document to law")
-
-    return {
-        "success": True,
-        "document_id": document_id,
-        "law_boe_id": request.law_boe_id,
-        "relationship": request.relationship_type,
-    }
+    return {"success": True, "document_id": document_id, "law_boe_id": request.law_boe_id}
 
 
 @router.get("/documents/{document_id}/applicable-laws", response_model=List[LawResponse])
 async def get_applicable_laws(
     document_id: str,
-    tenant_id: str = Query(..., description="Tenant ID"),
+    tenant_id: str = Query(...),
 ):
-    """
-    Get all laws applicable to a document.
-
-    Returns the laws that have been linked to this document
-    via the `governed_by` relationship.
-    """
-    from app.services.sil.legal_graph_service import legal_graph
-
-    laws = await legal_graph.get_applicable_laws(document_id, tenant_id)
-
-    return [
-        LawResponse(
-            boe_id=law.get("boe_id", ""),
-            title=law.get("title", ""),
-            short_name=law.get("short_name", ""),
-            domain=law.get("domain", ""),
-            status=law.get("status", "vigente"),
-        )
-        for law in laws
-    ]
+    """Get all laws applicable to a document."""
+    laws = await knowledge_tree_legal_client.get_applicable_laws(document_id, tenant_id)
+    return [_to_law_response(law) for law in laws]
 
 
 @router.get("/suggest-laws")
 async def suggest_applicable_laws(
-    document_type: str = Query(..., description="Document semantic type"),
-    domain: Optional[str] = Query(None, description="Business domain"),
+    document_type: str = Query(...),
+    domain: Optional[str] = Query(None),
 ):
-    """
-    Suggest laws that might apply to a document type.
-
-    Uses heuristics based on document type and domain to
-    suggest potentially applicable legislation.
-    """
-    from app.services.sil.legal_graph_service import legal_graph
-
-    laws = await legal_graph.find_applicable_laws_for_domain(
-        document_type=document_type,
-        domain=domain,
-    )
-
+    """Suggest laws that might apply to a document type."""
+    laws = await knowledge_tree_legal_client.get_laws_by_domain(domain or "general")
     return {
         "document_type": document_type,
         "domain": domain,
         "suggested_laws": [
-            {
-                "boe_id": law.get("boe_id", ""),
-                "short_name": law.get("short_name", ""),
-                "title": law.get("title", ""),
-                "domain": law.get("domain", ""),
-            }
+            {"boe_id": law.get("boe_id", ""), "short_name": law.get("short_name", ""),
+             "title": law.get("title", ""), "domain": law.get("domain", "")}
             for law in laws
         ],
     }
@@ -441,13 +269,9 @@ async def suggest_applicable_laws(
 
 @router.get("/graph/structure")
 async def get_legal_graph_structure():
-    """Get full legal graph structure (nodes + edges) for D3 visualization."""
-    from app.services.sil.legal_graph_service import legal_graph
-
+    """Get full legal graph structure for D3 visualization."""
     try:
-        await legal_graph.initialize()
-        structure = await legal_graph.get_graph_structure()
-        return structure
+        return await knowledge_tree_legal_client.get_graph_structure()
     except Exception as e:
         logger.error(f"Failed to get legal graph structure: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -455,30 +279,9 @@ async def get_legal_graph_structure():
 
 @router.get("/graph/enriched")
 async def get_enriched_legal_graph():
-    """
-    Get enriched legal graph with domain clusters, topics, and metrics.
-
-    Returns:
-    - nodes: Law nodes + Domain cluster nodes + Topic nodes
-    - edges: Law relationships + Domain membership + Topic coverage
-    - stats: Graph statistics (hub laws, edge types, domain counts)
-
-    Node types:
-    - law: Actual legislation (BOE documents)
-    - domain: Cluster nodes grouping laws by legal domain
-    - topic: Shared topics/keywords connecting multiple laws
-
-    Edge types:
-    - MODIFIES, REFERENCES, DEROGATES: Law-to-law relationships
-    - CONTAINS: Domain-to-law membership
-    - COVERS: Topic-to-law coverage
-    """
-    from app.services.sil.legal_graph_service import legal_graph
-
+    """Get enriched graph with domain clusters and metrics."""
     try:
-        await legal_graph.initialize()
-        structure = await legal_graph.get_enriched_graph_structure()
-        return structure
+        return await knowledge_tree_legal_client.get_enriched_graph_structure()
     except Exception as e:
         logger.error(f"Failed to get enriched legal graph: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -486,28 +289,15 @@ async def get_enriched_legal_graph():
 
 @router.get("/graph/search")
 async def search_legal_graph(
-    q: Optional[str] = Query(None, description="Search query (matches title, short_name, boe_id)"),
-    domain: Optional[str] = Query(None, description="Filter by domain (labor, fiscal, civil, etc.)"),
-    boe_id: Optional[str] = Query(None, description="Get specific law and its neighbors"),
-    include_neighbors: bool = Query(True, description="Include connected laws in results"),
-    limit: int = Query(20, ge=1, le=100, description="Maximum results"),
+    q: Optional[str] = Query(None),
+    domain: Optional[str] = Query(None),
+    boe_id: Optional[str] = Query(None),
+    include_neighbors: bool = Query(True),
+    limit: int = Query(20, ge=1, le=100),
 ):
-    """
-    Search the legal graph for laws matching criteria.
-
-    Use cases:
-    - Search by keyword: ?q=despido
-    - Filter by domain: ?domain=labor
-    - Get law and neighbors: ?boe_id=BOE-A-2015-11430
-    - Combined: ?q=contrato&domain=civil
-
-    Returns filtered graph structure with matching nodes and their connections.
-    """
-    from app.services.sil.legal_graph_service import legal_graph
-
+    """Search the legal graph (proxied, filtering done server-side)."""
     try:
-        await legal_graph.initialize()
-        structure = await legal_graph.get_graph_structure()
+        structure = await knowledge_tree_legal_client.get_graph_structure()
         nodes = structure.get("nodes", [])
         edges = structure.get("edges", [])
 
@@ -515,90 +305,41 @@ async def search_legal_graph(
             return {"nodes": [], "edges": [], "query": {"q": q, "domain": domain, "boe_id": boe_id}}
 
         matched_ids = set()
-
-        # Filter by specific BOE ID
         if boe_id:
-            for node in nodes:
-                if node.get("id") == boe_id:
-                    matched_ids.add(boe_id)
-                    break
-
-        # Filter by domain
+            matched_ids.update(n["id"] for n in nodes if n.get("id") == boe_id)
         if domain:
-            domain_lower = domain.lower()
-            for node in nodes:
-                if node.get("domain", "").lower() == domain_lower:
-                    matched_ids.add(node.get("id"))
-
-        # Filter by search query
+            dl = domain.lower()
+            matched_ids.update(n["id"] for n in nodes if n.get("domain", "").lower() == dl)
         if q:
-            q_lower = q.lower()
-            for node in nodes:
-                node_id = node.get("id", "").lower()
-                label = node.get("label", "").lower()
-                title = node.get("title", "").lower()
-
-                if q_lower in node_id or q_lower in label or q_lower in title:
-                    matched_ids.add(node.get("id"))
-
-        # If no filters, return all (limited)
+            ql = q.lower()
+            matched_ids.update(
+                n["id"] for n in nodes
+                if ql in n.get("id", "").lower() or ql in n.get("label", "").lower() or ql in n.get("title", "").lower()
+            )
         if not q and not domain and not boe_id:
-            matched_ids = {n.get("id") for n in nodes[:limit]}
-
-        # Include neighbors if requested
+            matched_ids = {n["id"] for n in nodes[:limit]}
         if include_neighbors and matched_ids:
-            neighbor_ids = set()
-            for edge in edges:
-                src = edge.get("source")
-                tgt = edge.get("target")
-                if src in matched_ids:
-                    neighbor_ids.add(tgt)
-                if tgt in matched_ids:
-                    neighbor_ids.add(src)
-            matched_ids.update(neighbor_ids)
-
-        # Limit results
+            for e in edges:
+                if e.get("source") in matched_ids:
+                    matched_ids.add(e["target"])
+                if e.get("target") in matched_ids:
+                    matched_ids.add(e["source"])
         matched_ids = set(list(matched_ids)[:limit])
 
-        # Filter nodes and edges
-        filtered_nodes = [n for n in nodes if n.get("id") in matched_ids]
-        filtered_edges = [
-            e for e in edges
-            if e.get("source") in matched_ids and e.get("target") in matched_ids
-        ]
-
-        # Generate deep link URL for frontend
-        focus_boe = boe_id or (list(matched_ids)[0] if matched_ids else None)
-
         return {
-            "nodes": filtered_nodes,
-            "edges": filtered_edges,
-            "query": {
-                "q": q,
-                "domain": domain,
-                "boe_id": boe_id,
-                "matched_count": len(filtered_nodes),
-            },
-            "deep_link": f"/admin/knowledge-tree?focus={focus_boe}" if focus_boe else None,
+            "nodes": [n for n in nodes if n.get("id") in matched_ids],
+            "edges": [e for e in edges if e.get("source") in matched_ids and e.get("target") in matched_ids],
+            "query": {"q": q, "domain": domain, "boe_id": boe_id, "matched_count": len(matched_ids)},
         }
-
     except Exception as e:
         logger.error(f"Failed to search legal graph: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/stats", response_model=LegalGraphStats)
+@router.get("/stats")
 async def get_legal_graph_stats():
     """Get statistics about the legal knowledge graph."""
-    from app.services.sil.legal_graph_service import legal_graph
-
-    stats = await legal_graph.get_stats()
-
+    stats = await knowledge_tree_legal_client.get_stats()
     if "error" in stats:
         raise HTTPException(status_code=500, detail=stats["error"])
-
-    return LegalGraphStats(
-        total_laws=stats.get("total_laws", 0),
-        total_articles=stats.get("total_articles", 0),
-        laws_by_domain=stats.get("laws_by_domain", {}),
-    )
+    return stats

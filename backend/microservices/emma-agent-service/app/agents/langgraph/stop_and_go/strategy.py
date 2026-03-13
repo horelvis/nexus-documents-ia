@@ -52,11 +52,16 @@ class StopAndGoStrategy(Protocol):
     async def evaluate_item(
         self,
         item: Dict[str, Any],
-        evidence: List[Dict],
+        evidence: Any,
         state: "StopAndGoState",
     ) -> Dict[str, Any]:
         """
         Evaluate item against evidence.
+
+        Args:
+            evidence: Either Dict[str, List[Dict]] with "source" and "external"
+                      tiers (verified mode), or a flat List[Dict] (legacy).
+                      Strategies that don't need tiers should flatten internally.
 
         Returns dict with:
             'status': 'accepted' | 'rejected' | 'corrected'

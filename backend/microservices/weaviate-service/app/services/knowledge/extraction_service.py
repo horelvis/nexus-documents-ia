@@ -499,7 +499,11 @@ class KnowledgeExtractionService:
         acl_everyone: bool = False
     ) -> Dict[str, str]:
         """
-        Store entities in Weaviate and Knowledge Graph.
+        Store entities in Weaviate and Knowledge Graph (Apache AGE).
+
+        Entities are persisted in two places:
+        1. Weaviate _knowledge collection (for semantic entity search)
+        2. knowledge-tree-service sector graph (for graph traversal + ontology)
 
         Returns a mapping of entity_value -> entity_id for relationship storage.
         """
@@ -508,22 +512,13 @@ class KnowledgeExtractionService:
         if not self.config.store_in_weaviate:
             return entity_map
 
-        # Import graph service for knowledge graph storage
-        try:
-            from .graph_service import knowledge_graph_service
-            graph_available = True
-        except ImportError:
-            graph_available = False
-            logger.debug("Knowledge graph service not available")
-
         for entity in entities:
             try:
-                # Generate UUID for this entity
                 import uuid
                 entity_id = str(uuid.uuid4())
 
-                # Store in Weaviate
-                embedding_id = await self._weaviate_service.add_knowledge_entity(
+                # Store in Weaviate _knowledge collection
+                await self._weaviate_service.add_knowledge_entity(
                     tenant_id=tenant_id,
                     entity_id=entity_id,
                     entity_type=entity.entity_type,
@@ -539,21 +534,6 @@ class KnowledgeExtractionService:
                     acl_everyone=acl_everyone
                 )
 
-                # Also store in Knowledge Graph for graph-based retrieval
-                if graph_available:
-                    await knowledge_graph_service.add_entity(
-                        tenant_id=tenant_id,
-                        entity_id=entity_id,
-                        entity_type=entity.entity_type.value if hasattr(entity.entity_type, 'value') else str(entity.entity_type),
-                        entity_value=entity.entity_value,
-                        document_id=document_id,
-                        attributes={
-                            "domain": entity.domain.value if hasattr(entity.domain, 'value') else str(entity.domain),
-                            "confidence": entity.extraction_confidence,
-                            "label": entity.entity_label,
-                        },
-                    )
-
                 entity_map[entity.entity_value] = entity_id
                 logger.debug(f"Stored entity {entity_id}: {entity.entity_value}")
 
@@ -561,7 +541,41 @@ class KnowledgeExtractionService:
                 logger.warning(f"⚠️ Failed to store entity {entity.entity_value}: {e}")
                 continue
 
-        logger.info(f"📦 Stored {len(entity_map)} entities in Weaviate and knowledge graph")
+        # Store in knowledge-tree-service sector graph (Apache AGE)
+        # This creates typed nodes (Persona, Organizacion) with INSTANCE_OF
+        # edges to the ontology — replacing the old NetworkX graph_service
+        if entity_map:
+            try:
+                from app.clients.knowledge_tree_client import knowledge_tree_legal_client
+
+                kt_entities = [
+                    {
+                        "type": (e.entity_type.value if hasattr(e.entity_type, 'value') else str(e.entity_type)),
+                        "value": e.entity_value,
+                        "confidence": e.extraction_confidence,
+                        "attributes": {
+                            "domain": e.domain.value if hasattr(e.domain, 'value') else str(e.domain),
+                            "label": e.entity_label or e.entity_value,
+                        },
+                    }
+                    for e in entities
+                    if e.entity_value in entity_map
+                ]
+
+                kt_result = await knowledge_tree_legal_client.store_entities(
+                    tenant_id=tenant_id,
+                    document_id=document_id,
+                    entities=kt_entities,
+                )
+
+                kt_stored = kt_result.get("entities_stored", 0)
+                if kt_stored > 0:
+                    logger.info(f"📊 Stored {kt_stored} entities in sector graph (AGE)")
+
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to store entities in knowledge-tree: {e}")
+
+        logger.info(f"📦 Stored {len(entity_map)} entities in Weaviate")
         return entity_map
 
     async def _store_relationships(
@@ -572,54 +586,46 @@ class KnowledgeExtractionService:
         entity_map: Dict[str, str]
     ) -> int:
         """
-        Store relationships in Knowledge Graph and log them.
+        Store relationships in the sector graph (Apache AGE) via knowledge-tree-service.
 
-        Note: Relationships are now stored in the Knowledge Graph (NetworkX + Redis)
-        for graph-based query expansion during retrieval.
+        Creates edges between typed entity nodes (Persona, Organizacion, etc.)
+        that were persisted by _store_entities().
         """
-        stored_count = 0
+        if not relationships:
+            return 0
 
-        # Import graph service for persistent storage
+        # Filter to only relationships where both entities were stored
+        valid_rels = [
+            {
+                "source": rel.source_entity_value,
+                "target": rel.target_entity_value,
+                "type": rel.relationship_type.value if hasattr(rel.relationship_type, 'value') else str(rel.relationship_type),
+                "strength": rel.relationship_strength,
+            }
+            for rel in relationships
+            if entity_map.get(rel.source_entity_value) and entity_map.get(rel.target_entity_value)
+        ]
+
+        if not valid_rels:
+            return 0
+
         try:
-            from .graph_service import knowledge_graph_service
-            graph_available = True
-        except ImportError:
-            graph_available = False
-            logger.debug("Knowledge graph service not available")
+            from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
-        for rel in relationships:
-            try:
-                source_id = entity_map.get(rel.source_entity_value)
-                target_id = entity_map.get(rel.target_entity_value)
+            result = await knowledge_tree_legal_client.store_entities(
+                tenant_id=tenant_id,
+                document_id=document_id,
+                entities=[],  # No new entities, just relationships
+                relationships=valid_rels,
+            )
 
-                if not source_id or not target_id:
-                    continue
+            stored = result.get("relationships_stored", 0)
+            logger.info(f"📦 Stored {stored} relationships in sector graph")
+            return stored
 
-                # Store in Knowledge Graph if available
-                if graph_available:
-                    await knowledge_graph_service.add_relationship(
-                        tenant_id=tenant_id,
-                        source_id=source_id,
-                        target_id=target_id,
-                        relationship_type=rel.relationship_type.value if hasattr(rel.relationship_type, 'value') else str(rel.relationship_type),
-                        strength=rel.relationship_strength,
-                        document_id=document_id,
-                        context_snippet=rel.context_snippet,
-                    )
-
-                logger.debug(
-                    f"Relationship: {rel.source_entity_value} "
-                    f"--[{rel.relationship_type}]--> "
-                    f"{rel.target_entity_value}"
-                )
-                stored_count += 1
-
-            except Exception as e:
-                logger.warning(f"⚠️ Failed to store relationship: {e}")
-                continue
-
-        logger.info(f"📦 Stored {stored_count} relationships in knowledge graph")
-        return stored_count
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to store relationships in knowledge-tree: {e}")
+            return 0
 
     async def delete_document_knowledge(
         self,

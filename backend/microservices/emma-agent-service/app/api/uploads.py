@@ -39,6 +39,8 @@ async def upload_temp_document(
             content_type=content_type,
             file_bytes=file_bytes,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
     except Exception as exc:
         logger.error("Temp upload failed: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to extract uploaded document") from exc

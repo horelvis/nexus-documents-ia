@@ -31,24 +31,27 @@ from app.core.langfuse_config import observe
 from ..state import ReActState
 from ..reasoning_tracker import StepType
 from ..tools.registry import get_tool_registry
+from ..tools.worker_profiles import get_worker_profile, get_valid_focus_types
 
 logger = logging.getLogger(__name__)
 
 # Fallback decomposition prompt (used when Langfuse is unavailable)
 _DECOMPOSE_SYSTEM_FALLBACK = """\
-Eres un coordinador de agentes. Descompón la consulta del usuario en sub-tareas \
-INDEPENDIENTES que puedan ejecutarse en paralelo.
+Eres un coordinador de agentes especializados. Descompón la consulta del usuario en \
+sub-tareas INDEPENDIENTES que puedan ejecutarse en paralelo por agentes tipados.
 
 Herramientas disponibles:
 {tools_description}
+
+Tipos de agente disponibles (campo "focus"):
+{focus_types}
 
 Reglas:
 - Máximo {max_workers} sub-tareas
 - Cada sub-tarea debe ser INDEPENDIENTE (no depender del resultado de otra)
 - Asigna 1-3 herramientas relevantes a cada sub-tarea (excluyendo "terminate")
 - Si la consulta es simple (una sola fuente necesaria), devuelve una lista vacía []
-- El campo "focus" indica la categoría: document_search, legislation_search, \
-jurisprudence_search, domain_analysis, web_search, structural_query
+- El campo "focus" DEBE ser uno de los tipos listados arriba
 
 Responde SOLO con un array JSON (sin markdown, sin explicaciones):
 [
@@ -108,6 +111,10 @@ def _validate_sub_tasks(
         if not description:
             continue
 
+        # Resolve focus and get typed worker profile
+        focus = task.get("focus", "document_search")
+        profile = get_worker_profile(focus)
+
         # Validate tool names — keep only known ones
         raw_tools = task.get("tool_names", [])
         if isinstance(raw_tools, str):
@@ -115,32 +122,29 @@ def _validate_sub_tasks(
 
         tool_names = [t for t in raw_tools if t in valid_tool_names and t != "terminate"]
         if not tool_names:
-            # Assign a sensible default based on focus
-            focus = task.get("focus", "document_search")
+            # Use profile's default tools
             tool_names = _default_tools_for_focus(focus)
 
         validated.append({
             "id": i,
             "description": description,
             "tool_names": tool_names,
-            "focus": task.get("focus", "general"),
-            "max_steps": min(task.get("max_steps", settings.swarm_worker_max_steps), 4),
+            "focus": focus,
+            "worker_type": profile.name,
+            "max_steps": min(task.get("max_steps", profile.max_steps), 4),
         })
 
     return validated
 
 
 def _default_tools_for_focus(focus: str) -> List[str]:
-    """Return default tool names based on focus category."""
-    mapping = {
-        "document_search": ["smart_search", "get_document_content"],
-        "legislation_search": ["smart_search"],
-        "jurisprudence_search": ["search_jurisprudence"],
-        "domain_analysis": ["smart_search", "analyze_domain"],
-        "web_search": ["web_search"],
-        "structural_query": ["structural_query"],
-    }
-    return mapping.get(focus, ["smart_search"])
+    """Return default tool names from the typed worker profile.
+
+    Each focus category has a WorkerProfile that defines its preferred
+    tools. This replaces the hardcoded mapping with profile-driven defaults.
+    """
+    profile = get_worker_profile(focus)
+    return list(profile.tool_names) if profile.tool_names else ["smart_search"]
 
 
 @observe(as_type="span", name="decompose_node")
@@ -195,8 +199,15 @@ async def decompose_node(state: ReActState) -> Dict[str, Any]:
         logger.debug(f"Langfuse prompt fetch failed for decompose: {e}")
 
     if not prompt_content:
+        # Build focus types description from worker profiles
+        from ..tools.worker_profiles import WORKER_PROFILES
+        focus_types_desc = "\n".join(
+            f"- {focus}: {p.name} (herramientas: {', '.join(p.tool_names)})"
+            for focus, p in WORKER_PROFILES.items()
+        )
         prompt_content = _DECOMPOSE_SYSTEM_FALLBACK.format(
             tools_description=tools_desc,
+            focus_types=focus_types_desc,
             max_workers=max_workers,
         )
 
@@ -209,11 +220,13 @@ async def decompose_node(state: ReActState) -> Dict[str, Any]:
 
     try:
         from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
         router = await get_llm_router()
         response = await router.chat(
             messages=messages,
             temperature=0.3,
             max_tokens=1024,
+            role=ModelRole.PLANNER,
         )
     except Exception as e:
         logger.error(f"Decompose: LLM call failed: {e}")
@@ -244,6 +257,7 @@ async def decompose_node(state: ReActState) -> Dict[str, Any]:
                 messages=messages,
                 temperature=0.5,
                 max_tokens=1024,
+                role=ModelRole.PLANNER,
             )
             content = response.content or ""
             raw_tasks = _extract_json_array(content)
@@ -304,22 +318,26 @@ async def decompose_node(state: ReActState) -> Dict[str, Any]:
         ),
     })
 
-    # SSE event for frontend
-    swarm_event = {
-        "type": "swarm_started",
-        "data": {
-            "num_workers": len(sub_tasks),
-            "sub_tasks": [
-                {"description": t["description"][:200], "focus": t["focus"]}
-                for t in sub_tasks
-            ],
-        },
-    }
+    # Emit swarm_started event via stream writer (real-time to frontend)
+    try:
+        from langgraph.config import get_stream_writer
+        writer = get_stream_writer()
+        writer({
+            "type": "swarm_started",
+            "data": {
+                "num_workers": len(sub_tasks),
+                "sub_tasks": [
+                    {"description": t["description"][:200], "focus": t["focus"]}
+                    for t in sub_tasks
+                ],
+            },
+        })
+    except Exception:
+        pass  # No streaming context (e.g., graph.invoke())
 
     return {
         "swarm_sub_tasks": sub_tasks,
         "reasoning_steps": reasoning_steps,
-        "swarm_pending_events": [swarm_event],
         "metadata": {
             "decompose_latency_ms": latency_ms,
             "decompose_count": len(sub_tasks),

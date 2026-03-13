@@ -50,10 +50,14 @@ Reglas:
 
 
 def _format_worker_results(results: List[Dict[str, Any]]) -> str:
-    """Format worker results for the synthesis prompt."""
+    """Format worker results for the synthesis prompt.
+
+    Uses worker_type (typed profile name) when available for clearer
+    labeling in the synthesis prompt.
+    """
     parts = []
     for r in results:
-        focus = r.get("focus", "general")
+        worker_label = r.get("worker_type") or r.get("focus", "general")
         answer = r.get("answer", "")
         sources = r.get("sources", [])
         sources_str = ""
@@ -65,7 +69,7 @@ def _format_worker_results(results: List[Dict[str, Any]]) -> str:
             sources_str = f"\n  Fuentes: {', '.join(s for s in source_names if s)}"
 
         parts.append(
-            f"--- Agente [{focus}] ---\n"
+            f"--- {worker_label} ---\n"
             f"Tarea: {r.get('sub_task', '')}\n"
             f"Resultado: {answer}"
             f"{sources_str}"

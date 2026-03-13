@@ -48,7 +48,6 @@ function PageLoaderProviderInner({ children }: { children: React.ReactNode }) {
 
   const startLoading = () => {
     setIsLoading(true)
-    // Show loader after a small delay to prevent flash
     const timer = setTimeout(() => {
       setShowLoader(true)
     }, 100)
@@ -64,8 +63,20 @@ function PageLoaderProviderInner({ children }: { children: React.ReactNode }) {
     <PageLoaderContext.Provider value={{ isLoading, startLoading, stopLoading }}>
       {children}
       {showLoader && (
-        <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center">
-          <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#05070d]/90 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative">
+              <div className="absolute -inset-3 rounded-full bg-cyan-500/20 blur-xl" />
+              <img
+                src="/logo-single.png"
+                alt="NouxCube AI"
+                className="relative h-10 w-auto"
+              />
+            </div>
+            <div className="h-1 w-24 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full w-1/2 animate-[shimmer_1.5s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-transparent via-cyan-400 to-transparent" />
+            </div>
+          </div>
         </div>
       )}
     </PageLoaderContext.Provider>

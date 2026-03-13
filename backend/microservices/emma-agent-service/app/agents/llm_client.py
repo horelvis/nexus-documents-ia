@@ -69,6 +69,19 @@ class LLMProvider(str, Enum):
     OPENROUTER = "openrouter"
 
 
+class ModelRole(str, Enum):
+    """Model role in dual-model architecture (Qwen3.5).
+
+    PLANNER (Qwen3.5-4B): Fast model for routing, tool calling, clue generation.
+    CHAT (Qwen3.5-9B): Quality model for reasoning, synthesis, final responses.
+
+    When VLLM_DUAL_MODEL=false (default), both roles use the same model.
+    When VLLM_DUAL_MODEL=true, each role routes to a separate vLLM instance.
+    """
+    PLANNER = "planner"
+    CHAT = "chat"
+
+
 class ToolCallState(str, Enum):
     """State of tool call parsing during streaming."""
     NONE = "none"
@@ -213,7 +226,7 @@ class LLMConfig:
     """Configuration for LLM client."""
     provider: LLMProvider = LLMProvider.VLLM
     base_url: str = "http://vllm:8000/v1"
-    model: str = "Qwen/Qwen3-4B"
+    model: str = "Qwen/Qwen3.5-9B"
     api_key: str = ""
     max_tokens: int = 4096
     temperature: float = 0.7
@@ -331,6 +344,9 @@ class LLMClient:
             }
             # Penalize repetition to avoid generation loops in small models (7B)
             body["repetition_penalty"] = kwargs.get("repetition_penalty", 1.15)
+            # Optional seed for deterministic sampling (used by Verified Generation)
+            if "seed" in kwargs:
+                body["seed"] = kwargs["seed"]
 
         return body
 
@@ -651,12 +667,23 @@ class LLMClient:
 # Factory Functions
 # =============================================================================
 
-def create_llm_config_for_provider(provider: LLMProvider) -> LLMConfig:
+def create_llm_config_for_provider(
+    provider: LLMProvider,
+    role: ModelRole = ModelRole.CHAT,
+) -> LLMConfig:
     """
-    Create LLM configuration for a specific provider.
+    Create LLM configuration for a specific provider and model role.
+
+    In dual-model mode (VLLM_DUAL_MODEL=true), the role determines which
+    vLLM instance to use:
+    - PLANNER: Qwen3.5-4B — fast tool calling, routing, clue generation
+    - CHAT: Qwen3.5-9B — reasoning, synthesis, final responses
+
+    In single-model mode (default), both roles use the same model.
 
     Args:
         provider: The LLM provider to configure
+        role: Model role (planner vs chat). Only affects vLLM provider.
 
     Returns:
         Configured LLMConfig instance
@@ -664,6 +691,31 @@ def create_llm_config_for_provider(provider: LLMProvider) -> LLMConfig:
     from app.core.config import settings
 
     if provider == LLMProvider.VLLM:
+        if role == ModelRole.PLANNER:
+            if settings.vllm_dual_model:
+                # Dual-model: planner uses separate model/URL (e.g. 4B on dedicated SGLang)
+                return LLMConfig(
+                    provider=LLMProvider.VLLM,
+                    base_url=settings.vllm_planner_url,
+                    model=settings.vllm_planner_model,
+                    max_tokens=settings.vllm_planner_max_tokens,
+                    temperature=settings.vllm_planner_temperature,
+                    enable_thinking=False,
+                    timeout=settings.agent_timeout_seconds,
+                )
+            else:
+                # Single-model dual-phase: same model, planner parameters
+                # Low temp + no thinking = fast structured output (tool calls, routing)
+                return LLMConfig(
+                    provider=LLMProvider.VLLM,
+                    base_url=settings.vllm_base_url,
+                    model=settings.vllm_model,
+                    max_tokens=settings.vllm_planner_max_tokens,
+                    temperature=settings.vllm_planner_temperature,
+                    enable_thinking=False,
+                    timeout=settings.agent_timeout_seconds,
+                )
+        # CHAT role: full reasoning, thinking enabled
         return LLMConfig(
             provider=LLMProvider.VLLM,
             base_url=settings.vllm_base_url,

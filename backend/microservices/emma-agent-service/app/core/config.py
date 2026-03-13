@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     # ReAct Agent Loop
     react_max_observe_length: int = int(os.getenv("REACT_MAX_OBSERVE_LENGTH", "5000"))
     react_stuck_detection_window: int = int(os.getenv("REACT_STUCK_DETECTION_WINDOW", "5"))
-    react_max_completion_tokens: int = int(os.getenv("REACT_MAX_COMPLETION_TOKENS", "4096"))
+    react_max_completion_tokens: int = int(os.getenv("REACT_MAX_COMPLETION_TOKENS", "2048"))
     react_tool_timeout_seconds: float = float(os.getenv("REACT_TOOL_TIMEOUT_SECONDS", "60"))
     react_max_history_messages: int = int(os.getenv("REACT_MAX_HISTORY_MESSAGES", "40"))
     react_tool_description_max_chars: int = int(os.getenv("REACT_TOOL_DESCRIPTION_MAX_CHARS", "200"))
@@ -169,7 +169,7 @@ class Settings(BaseSettings):
     react_context_compress_preserve_recent: int = int(os.getenv("REACT_CONTEXT_COMPRESS_PRESERVE_RECENT", "2"))
 
     # Query Clarification — detect ambiguous queries before search
-    react_query_clarification_enabled: bool = os.getenv("REACT_QUERY_CLARIFICATION_ENABLED", "false").lower() == "true"
+    react_query_clarification_enabled: bool = os.getenv("REACT_QUERY_CLARIFICATION_ENABLED", "true").lower() == "true"
 
     # Memory Recall — planner scans document memories before retrieval (MemoRAG)
     memory_recall_enabled: bool = os.getenv("MEMORY_RECALL_ENABLED", "true").lower() == "true"
@@ -290,6 +290,10 @@ class Settings(BaseSettings):
     verified_section_size: int = int(os.getenv("VERIFIED_SECTION_SIZE", "16000"))
     verified_section_overlap: int = int(os.getenv("VERIFIED_SECTION_OVERLAP", "500"))
 
+    # HITL — Human-in-the-Loop review before document assembly
+    verified_hitl_enabled: bool = os.getenv("VERIFIED_HITL_ENABLED", "false").lower() == "true"
+    verified_hitl_confidence_threshold: float = float(os.getenv("VERIFIED_HITL_CONFIDENCE_THRESHOLD", "0.75"))
+
     # ==========================================================================
     # Web Search (Tavily primary, DuckDuckGo fallback)
     # ==========================================================================
@@ -346,6 +350,8 @@ class Settings(BaseSettings):
     # Document Generation & Email Tools (ReAct)
     # ==========================================================================
     document_generation_enabled: bool = os.getenv("DOCUMENT_GENERATION_ENABLED", "true").lower() == "true"
+    document_forge_enabled: bool = os.getenv("DOCUMENT_FORGE_ENABLED", "true").lower() == "true"
+    document_forge_service_url: str = os.getenv("DOCUMENT_FORGE_SERVICE_URL", "http://document-forge-service:8013")
     email_tool_enabled: bool = os.getenv("EMAIL_TOOL_ENABLED", "true").lower() == "true"
     email_max_per_conversation: int = int(os.getenv("EMAIL_MAX_PER_CONVERSATION", "5"))
     generated_doc_ttl_seconds: int = int(os.getenv("GENERATED_DOC_TTL_SECONDS", "3600"))

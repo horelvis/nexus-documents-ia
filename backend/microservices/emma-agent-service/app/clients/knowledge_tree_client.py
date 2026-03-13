@@ -75,6 +75,68 @@ class KnowledgeTreeClient(BaseHTTPClient):
             logger.warning(f"Knowledge tree graph query failed: {e}")
             return {"results": [], "paths": []}
 
+    # ─── Memory Bank ──────────────────────────────────────────
+
+    async def store_memory(
+        self,
+        tenant_id: str,
+        document_id: str,
+        summary: str,
+        key_entities: Optional[List[str]] = None,
+        key_topics: Optional[List[str]] = None,
+        domain: Optional[str] = None,
+        semantic_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Store a document memory in the knowledge graph."""
+        payload = {
+            "tenant_id": tenant_id,
+            "document_id": document_id,
+            "summary": summary,
+            "key_entities": key_entities or [],
+            "key_topics": key_topics or [],
+            "domain": domain,
+            "semantic_type": semantic_type,
+        }
+        try:
+            return await self.post_json("/tree/memory/store", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Memory bank store failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def recall_memories(
+        self,
+        tenant_id: str,
+        query_topics: Optional[List[str]] = None,
+        domain: Optional[str] = None,
+        semantic_type: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Recall document memories matching criteria. Used by planner for clue generation."""
+        payload = {
+            "tenant_id": tenant_id,
+            "query_topics": query_topics,
+            "domain": domain,
+            "semantic_type": semantic_type,
+            "limit": limit,
+        }
+        try:
+            result = await self.post_json("/tree/memory/recall", json=payload, headers=self._headers())
+            return result if isinstance(result, list) else []
+        except Exception as e:
+            logger.warning(f"Memory bank recall failed: {e}")
+            return []
+
+    async def get_memorized_document_ids(self, tenant_id: str) -> List[str]:
+        """Get document IDs that already have memories. Used to skip re-generation."""
+        try:
+            result = await self.get_json(
+                f"/tree/memory/?tenant_id={tenant_id}", headers=self._headers()
+            )
+            return result if isinstance(result, list) else []
+        except Exception as e:
+            logger.warning(f"Memory bank list failed: {e}")
+            return []
+
     async def get_documents_by_person(
         self, tenant_id: str, person_name: str, entity_type: str = "Persona"
     ) -> List[str]:
@@ -92,6 +154,32 @@ class KnowledgeTreeClient(BaseHTTPClient):
         except Exception as e:
             logger.warning(f"Documents-by-person query failed: {e}")
             return []
+
+
+    async def extract_subgraph(
+        self,
+        tenant_id: str,
+        entities: List[Dict[str, Any]],
+        max_hops: int = 2,
+        max_nodes: int = 30,
+        include_legal: bool = True,
+    ) -> Dict[str, Any]:
+        """Extract a multi-hop subgraph rooted at entities (GraphRAG).
+
+        Returns structured nodes/edges for LLM context, not flat document IDs.
+        """
+        payload = {
+            "tenant_id": tenant_id,
+            "entities": entities,
+            "max_hops": max_hops,
+            "max_nodes": max_nodes,
+            "include_legal": include_legal,
+        }
+        try:
+            return await self.post_json("/tree/graph/subgraph", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Subgraph extraction failed: {e}")
+            return {"nodes": [], "edges": [], "root_entities": [], "pruned_count": 0}
 
 
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None

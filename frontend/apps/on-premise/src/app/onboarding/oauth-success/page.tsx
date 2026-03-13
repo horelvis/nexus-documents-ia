@@ -1,8 +1,5 @@
 'use client'
 
-// This page reads searchParams — skip static prerendering
-export const dynamic = 'force-dynamic'
-
 /**
  * OAuth Success Page
  *
@@ -10,12 +7,24 @@ export const dynamic = 'force-dynamic'
  * Redirects back to onboarding to continue the flow.
  */
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { IconCheck, IconLoader2 } from '@tabler/icons-react'
 import { Button } from '@nexus/shared/ui'
 
 export default function OAuthSuccessPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen bg-background">
+        <IconLoader2 className="h-10 w-10 animate-spin text-primary" />
+      </div>
+    }>
+      <OAuthSuccessContent />
+    </Suspense>
+  )
+}
+
+function OAuthSuccessContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [countdown, setCountdown] = useState(3)

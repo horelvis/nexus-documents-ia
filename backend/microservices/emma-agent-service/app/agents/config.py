@@ -95,7 +95,7 @@ class AgentConfig:
     vllm_enabled: bool = True
     vllm_base_url: str = "http://vllm:8000/v1"
     vllm_model: str = "Qwen/Qwen3-8B"
-    vllm_enable_thinking: bool = True  # Control Qwen3 thinking mode via chat_template_kwargs
+    vllm_enable_thinking: bool = False  # Thinking disabled: Qwen3.5 reasons inline, 4-7x faster
 
     # Ollama (LEGACY - use vLLM instead)
     ollama_base_url: str = "http://genai-ollama:11434"

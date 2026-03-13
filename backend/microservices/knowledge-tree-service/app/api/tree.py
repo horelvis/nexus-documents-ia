@@ -4,7 +4,7 @@ Tree API endpoints for Knowledge Tree Service.
 
 import logging
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
@@ -600,3 +600,50 @@ async def clear_graph(
 ):
     result = await tenant_knowledge_service.clear_tenant_graph(tenant_id=tenant_id)
     return {"success": result}
+
+
+# ─── GraphRAG: Subgraph Extraction ─────────────────────────────────────────
+
+class EntitySeed(BaseModel):
+    value: str = Field(..., description="Entity name or value to search")
+    type: Optional[str] = Field(None, description="Optional entity type hint (persona, organization)")
+
+
+class SubgraphRequest(BaseModel):
+    tenant_id: str = Field(..., description="Tenant identifier")
+    entities: List[EntitySeed] = Field(..., description="Seed entities for subgraph extraction")
+    max_hops: int = Field(2, ge=1, le=3, description="Max traversal depth")
+    max_nodes: int = Field(30, ge=5, le=100, description="Max nodes in response")
+    include_legal: bool = Field(True, description="Cross-reference public legal graph")
+    include_memories: bool = Field(False, description="Include DocumentMemory nodes")
+
+
+@tree_router.post("/graph/subgraph")
+async def extract_subgraph(
+    request: SubgraphRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Extract a multi-hop subgraph rooted at query entities (GraphRAG).
+
+    Returns structured nodes and edges for LLM consumption instead of
+    flat document IDs. Optionally cross-references the public legal graph
+    for applicable legislation.
+    """
+    import time
+    start = time.time()
+
+    from app.services.subgraph_extractor import subgraph_extractor
+
+    entities = [{"value": e.value, "type": e.type} for e in request.entities]
+
+    result = await subgraph_extractor.extract(
+        tenant_id=request.tenant_id,
+        entities=entities,
+        max_hops=request.max_hops,
+        max_nodes=request.max_nodes,
+        include_legal=request.include_legal,
+        include_memories=request.include_memories,
+    )
+
+    result["latency_ms"] = int((time.time() - start) * 1000)
+    return result

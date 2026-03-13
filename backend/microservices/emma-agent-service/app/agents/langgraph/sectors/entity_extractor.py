@@ -16,9 +16,46 @@ Usage:
 
 import logging
 import re
+import unicodedata
 from typing import Dict, List
 
 logger = logging.getLogger(__name__)
+
+_PERSON_CONNECTORS = {"de", "del", "la", "las", "los", "y"}
+_PERSON_STOPWORDS = {
+    "ley", "real", "decreto", "codigo", "civil", "proteccion", "datos",
+    "normativa", "reglamento", "estatuto", "articulo", "boe",
+    "factura", "contrato", "nomina", "informe", "expediente",
+    "documento", "archivo", "carpeta", "empresa", "departamento",
+    "compliance", "rgpd", "lopdgdd", "lprl", "lisos", "et", "lgss",
+}
+
+
+def _normalize_token(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text)
+    no_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    return re.sub(r"[^\w]", "", no_accents).lower()
+
+
+def _is_valid_person_candidate(text: str) -> bool:
+    """Reject non-person entities accidentally matched by broad name regex."""
+    tokens = [t.strip(".,;:()[]{}\"'") for t in text.split() if t.strip(".,;:()[]{}\"'")]
+    if len(tokens) < 2 or len(tokens) > 5:
+        return False
+
+    normalized_tokens = [_normalize_token(t) for t in tokens]
+    has_stopword = any(t in _PERSON_STOPWORDS for t in normalized_tokens)
+    if has_stopword:
+        return False
+
+    # Require at least 2 capitalized non-connector tokens (e.g., "Ana de la Fuente")
+    proper_count = 0
+    for original, normalized in zip(tokens, normalized_tokens):
+        if normalized in _PERSON_CONNECTORS:
+            continue
+        if original[:1].isupper() and len(normalized) > 1:
+            proper_count += 1
+    return proper_count >= 2
 
 
 def extract_entities(
@@ -45,6 +82,8 @@ def extract_entities(
                 compiled = re.compile(pattern_str, re.IGNORECASE)
                 for match in compiled.finditer(query):
                     matched_text = match.group(0).strip()
+                    if entity_type == "persona" and not _is_valid_person_candidate(matched_text):
+                        continue
                     if matched_text and matched_text not in matches:
                         matches.append(matched_text)
             except re.error as e:

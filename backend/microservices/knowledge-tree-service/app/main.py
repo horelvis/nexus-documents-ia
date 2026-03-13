@@ -10,6 +10,10 @@ from fastapi import FastAPI
 
 from app.core.config import settings
 from app.api.tree import tree_router
+from app.api.legal_graph import router as legal_graph_router
+from app.api.ontology import router as ontology_router
+from app.api.entities import router as entities_router
+from app.api.memory_bank import router as memory_bank_router
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
@@ -28,6 +32,22 @@ async def lifespan(app: FastAPI):
     graph_name = await bootstrap_sector_graph()
     if graph_name:
         logger.info(f"Graph ready: {graph_name} (sector={settings.active_sector})")
+
+    # Initialize legal graph service
+    from app.services.legal_graph_service import legal_graph
+    await legal_graph.initialize()
+
+    # Initialize business ontology
+    from app.services.ontology_service import ontology_service
+    await ontology_service.initialize()
+
+    # Initialize entity graph bridge
+    from app.services.entity_graph_bridge import entity_graph_bridge
+    await entity_graph_bridge.initialize()
+
+    # Initialize memory bank
+    from app.services.memory_bank_service import memory_bank
+    await memory_bank.initialize()
 
     yield
     logger.info("Shutting down Knowledge Tree Service...")
@@ -53,4 +73,8 @@ async def health_check():
 
 
 app.include_router(tree_router, prefix="/tree", tags=["tree"])
+app.include_router(legal_graph_router, tags=["legal-knowledge-graph"])
+app.include_router(ontology_router, tags=["business-ontology"])
+app.include_router(entities_router, tags=["entity-graph"])
+app.include_router(memory_bank_router, tags=["memory-bank"])
 

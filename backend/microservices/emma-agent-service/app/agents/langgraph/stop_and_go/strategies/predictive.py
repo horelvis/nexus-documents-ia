@@ -112,17 +112,23 @@ class PredictiveStrategy:
     async def evaluate_item(
         self,
         item: Dict[str, Any],
-        evidence: List[Dict],
+        evidence,
         state: dict,
     ) -> Dict[str, Any]:
         """Evaluate factor using OutcomeExtractor + LLM weighting."""
         from app.services.predictive_analysis.outcome_extractor import evaluate_evidence_outcomes
         from app.services.predictive_analysis.service import PredictiveAnalysisService
 
+        # Flatten tiered evidence — predictive mode doesn't need two-tier separation
+        if isinstance(evidence, dict) and "source" in evidence:
+            flat_evidence = evidence.get("source", []) + evidence.get("external", [])
+        else:
+            flat_evidence = evidence  # Legacy flat list
+
         factor = PredictionFactor(**item["_raw_factor"])
 
         # Evaluate evidence outcomes
-        matches = await evaluate_evidence_outcomes(factor, evidence, self._config)
+        matches = await evaluate_evidence_outcomes(factor, flat_evidence, self._config)
 
         # Weight the factor
         svc = PredictiveAnalysisService.__new__(PredictiveAnalysisService)

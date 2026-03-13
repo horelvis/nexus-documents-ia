@@ -9,7 +9,8 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { IconBrain, IconLoader2 } from '@tabler/icons-react'
+import Image from 'next/image'
+import { IconBrain } from '@tabler/icons-react'
 import {
   SidebarProvider,
   SidebarInset,
@@ -28,6 +29,16 @@ export default function EmmaPage() {
 
   // Sidebar and conversation state
   const [historyOpen, setHistoryOpen] = useState(false)
+
+  // Open history panel when navigating from another page via ?history=open
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('history') === 'open') {
+      setHistoryOpen(true)
+      window.history.replaceState({}, '', '/')
+    }
+  }, [])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [conversationMessages, setConversationMessages] = useState<EmmaMessage[]>([])
 
@@ -102,15 +113,29 @@ export default function EmmaPage() {
   // Loading state
   if (!isLoaded) {
     return (
-      <div className="flex items-center justify-center h-screen bg-background">
-        <div className="flex flex-col items-center gap-4">
+      <div className="flex min-h-screen items-center justify-center bg-[#05070d]">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute inset-x-0 top-0 h-[500px] bg-gradient-to-b from-cyan-500/8 via-transparent to-transparent" />
+          <div className="absolute right-0 top-1/4 h-[600px] w-[600px] rounded-full bg-cyan-500/5 blur-[120px]" />
+        </div>
+        <div className="relative flex flex-col items-center gap-6">
           <div className="relative">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center shadow-lg">
-              <IconBrain className="h-8 w-8 text-primary-foreground" />
-            </div>
-            <IconLoader2 className="absolute -bottom-1 -right-1 h-5 w-5 animate-spin text-primary" />
+            <div className="absolute -inset-4 rounded-full bg-cyan-500/20 blur-xl" />
+            <Image
+              src="/logo-single.png"
+              alt="NouxCube AI"
+              width={64}
+              height={64}
+              className="relative h-16 w-auto"
+              priority
+            />
           </div>
-          <p className="text-sm text-muted-foreground">Cargando Emma...</p>
+          <div className="flex flex-col items-center gap-2">
+            <div className="h-1 w-32 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full w-1/2 animate-[shimmer_1.5s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-transparent via-cyan-400 to-transparent" />
+            </div>
+            <p className="text-sm text-slate-400">Cargando...</p>
+          </div>
         </div>
       </div>
     )

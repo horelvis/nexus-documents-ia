@@ -19,7 +19,6 @@ class UploadContextService:
         self._tmp_dir = settings.upload_tmp_dir
         self._ttl_seconds = settings.upload_ttl_seconds
         self._max_chars_per_doc = settings.upload_max_chars_per_doc
-        self._max_total_chars = settings.upload_max_total_chars
 
         os.makedirs(self._tmp_dir, exist_ok=True)
 
@@ -49,11 +48,18 @@ class UploadContextService:
         )
 
         text = extraction.get("text", "") if isinstance(extraction, dict) else ""
-        if text and not settings.rlm_enabled and len(text) > self._max_chars_per_doc:
-            text = text[: self._max_chars_per_doc]
-            logger.info(f"Upload truncated to {self._max_chars_per_doc} chars (RLM disabled)")
-        elif text and settings.rlm_enabled:
-            logger.info(f"Upload full text preserved: {len(text)} chars (RLM enabled)")
+        if text and len(text) > self._max_chars_per_doc:
+            logger.warning(
+                f"Upload rejected: {filename} has {len(text)} chars, "
+                f"exceeds limit of {self._max_chars_per_doc} chars"
+            )
+            raise ValueError(
+                f"El documento '{filename}' excede el límite de "
+                f"{self._max_chars_per_doc // 1000}K caracteres "
+                f"({len(text):,} chars). Reduzca el tamaño del archivo."
+            )
+        if text:
+            logger.info(f"Upload text extracted: {len(text)} chars from {filename}")
 
         payload = {
             "id": upload_id,
@@ -95,8 +101,13 @@ class UploadContextService:
         return payload
 
     def get_texts(self, upload_ids: List[str]) -> List[Dict[str, Any]]:
+        """Return full text for each upload — no truncation.
+
+        The downstream pipeline (stop-and-go graph) handles large documents
+        via section chunking and RLM processing. Truncating here caused
+        hallucinations because the WriterAgent couldn't see the full source.
+        """
         texts: List[Dict[str, Any]] = []
-        remaining = float('inf') if settings.rlm_enabled else self._max_total_chars
 
         for upload_id in upload_ids:
             payload = self.get_upload(upload_id)
@@ -107,12 +118,6 @@ class UploadContextService:
             if not text:
                 continue
 
-            if remaining <= 0:
-                break
-
-            if len(text) > remaining:
-                text = text[:remaining]
-
             texts.append(
                 {
                     "id": payload.get("id"),
@@ -121,7 +126,6 @@ class UploadContextService:
                     "text": text,
                 }
             )
-            remaining -= len(text)
 
         return texts
 

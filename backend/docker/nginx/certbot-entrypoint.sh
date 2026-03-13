@@ -25,7 +25,9 @@ echo "[certbot] Waiting for nginx (tls-proxy) on port 80..."
 tries=0
 max_tries=60
 while [ $tries -lt $max_tries ]; do
-  if wget -q --spider "http://tls-proxy:80/.well-known/acme-challenge/" 2>/dev/null; then
+  # Just check that nginx responds on port 80 (any status code is fine —
+  # the acme-challenge dir is empty until certbot creates challenge files)
+  if wget -q -O /dev/null --server-response "http://tls-proxy:80/" 2>&1 | grep -q "HTTP/"; then
     echo "[certbot] nginx is ready."
     break
   fi

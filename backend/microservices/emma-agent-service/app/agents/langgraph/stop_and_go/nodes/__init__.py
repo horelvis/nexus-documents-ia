@@ -4,6 +4,7 @@ from .initialize import initialize_node
 from .extract_item import extract_item_node
 from .search_and_evaluate import search_and_evaluate_node
 from .decide import decide_node
+from .review import review_node
 from .synthesize import synthesize_node
 
 __all__ = [
@@ -11,5 +12,6 @@ __all__ = [
     "extract_item_node",
     "search_and_evaluate_node",
     "decide_node",
+    "review_node",
     "synthesize_node",
 ]

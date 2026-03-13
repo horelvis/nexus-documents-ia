@@ -254,8 +254,8 @@ export function ConversationSidebar({
     <>
       <Sheet open={isOpen} onOpenChange={onOpenChange}>
         <SheetContent side="left" className="w-80 p-0 flex flex-col">
-          <SheetHeader className="p-4 border-b space-y-3">
-            <div className="flex items-center gap-2">
+          <SheetHeader className="p-4 pb-3 border-b space-y-3">
+            <div className="flex items-center gap-2 pr-8">
               {/* New conversation button - left side */}
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -273,7 +273,7 @@ export function ConversationSidebar({
 
               <SheetTitle className="flex-1">Conversaciones</SheetTitle>
 
-              {/* Selection mode toggle - before the native Sheet X */}
+              {/* Selection mode toggle */}
               {conversations.length > 0 && (
                 <Tooltip>
                   <TooltipTrigger asChild>

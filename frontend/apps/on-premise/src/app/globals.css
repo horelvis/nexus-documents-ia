@@ -29,6 +29,11 @@
   animation: glow-pulse 2s ease-in-out infinite;
 }
 
+@keyframes shimmer {
+  0% { transform: translateX(-200%); }
+  100% { transform: translateX(200%); }
+}
+
 /* Masks */
 .mask {
   mask-image: linear-gradient(

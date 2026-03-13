@@ -26,6 +26,19 @@ class VerificationStatus(str, Enum):
     ERROR = "error"
 
 
+class VerificationType(str, Enum):
+    """How a claim was verified — distinguishes faithfulness from independent corroboration.
+
+    - fidelity_only: Claim faithfully represents the source document, but no
+      independent evidence was found. Confidence capped at 0.80.
+    - corroborated: Faithful to source AND supported by independent evidence.
+    - independent: Supported by external evidence only (no source document).
+    """
+    FIDELITY_ONLY = "fidelity_only"
+    CORROBORATED = "corroborated"
+    INDEPENDENT = "independent"
+
+
 class VerificationEventType(str, Enum):
     """Types of events emitted during verified generation."""
     CLAIM_GENERATED = "claim_generated"
@@ -37,6 +50,10 @@ class VerificationEventType(str, Enum):
     DOCUMENT_COMPLETE = "document_complete"
     ERROR = "error"
     PROGRESS = "progress"
+    # HITL review events
+    REVIEW_REQUESTED = "review_requested"
+    REVIEW_SUBMITTED = "review_submitted"
+    REVIEW_SKIPPED = "review_skipped"
 
 
 class CandidateClaim(BaseModel):
@@ -156,6 +173,18 @@ class VerifiedClaim(BaseModel):
         default_factory=list,
         description="IDs of documents that support this claim"
     )
+    evidence_sources: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="Source metadata per claim: [{id, title, source, url}]"
+    )
+    verification_type: Optional[str] = Field(
+        None,
+        description="How the claim was verified: fidelity_only, corroborated, or independent"
+    )
+    verification_reason: Optional[str] = Field(
+        None,
+        description="LLM-generated reason explaining the verification verdict"
+    )
     generation_order: int = Field(..., description="Order in final document")
     verified_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -168,6 +197,9 @@ class VerifiedClaim(BaseModel):
             "status": self.status.value,
             "confidence": self.confidence,
             "evidence_document_ids": self.evidence_document_ids,
+            "evidence_sources": self.evidence_sources,
+            "verification_type": self.verification_type,
+            "verification_reason": self.verification_reason,
             "generation_order": self.generation_order,
             "verified_at": self.verified_at.isoformat(),
         }
@@ -182,6 +214,9 @@ class VerifiedClaim(BaseModel):
             status=VerificationStatus(data["status"]),
             confidence=data["confidence"],
             evidence_document_ids=data.get("evidence_document_ids", []),
+            evidence_sources=data.get("evidence_sources", []),
+            verification_type=data.get("verification_type"),
+            verification_reason=data.get("verification_reason"),
             generation_order=data["generation_order"],
             verified_at=datetime.fromisoformat(data["verified_at"]) if isinstance(data["verified_at"], str) else data["verified_at"],
         )
@@ -280,6 +315,10 @@ class VerifiedDocumentRequest(BaseModel):
         default_factory=list,
         description="Weaviate collections to search for evidence"
     )
+    document_type: Optional[str] = Field(
+        default=None,
+        description="Document type hint: 'academic', 'legal', 'medical', 'general'. Auto-detected if not provided."
+    )
 
     class Config:
         json_schema_extra = {
@@ -299,6 +338,18 @@ class VerifiedClaimSummary(BaseModel):
     confidence: float
     status: VerificationStatus
     evidence_count: int
+    evidence_sources: List[Dict[str, str]] = Field(
+        default_factory=list,
+        description="Source metadata: [{id, title, source, url}]"
+    )
+    verification_type: Optional[str] = Field(
+        None,
+        description="How the claim was verified: fidelity_only, corroborated, or independent"
+    )
+    verification_reason: Optional[str] = Field(
+        None,
+        description="LLM-generated reason explaining the verification verdict"
+    )
 
 
 class VerifiedDocumentResponse(BaseModel):
@@ -332,6 +383,12 @@ class VerifiedDocumentResponse(BaseModel):
         description="All documents used as evidence"
     )
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    # Report enrichment (for PDF/DOCX export)
+    sources: List[dict] = Field(default_factory=list, description="External sources consulted")
+    doi_validations: List[dict] = Field(default_factory=list, description="DOI validation results")
+    source_filenames: List[str] = Field(default_factory=list, description="Uploaded source filenames")
+    source_summary: str = Field(default="", description="LLM-generated summary of the source document")
 
     class Config:
         json_schema_extra = {
@@ -376,3 +433,31 @@ class SessionClaimsResponse(BaseModel):
     claims: List[VerifiedClaim]
     total_claims: int
     cache_ttl_remaining_seconds: Optional[int] = None
+
+
+# =============================================================================
+# HITL Review Schemas
+# =============================================================================
+
+
+class ReviewDecision(BaseModel):
+    """A human decision for a single claim during HITL review."""
+    claim_id: str = Field(..., description="ID of the claim being reviewed")
+    action: str = Field(
+        ...,
+        description="Review action: 'approve', 'reject', or 'edit'",
+        pattern="^(approve|reject|edit)$",
+    )
+    edited_text: Optional[str] = Field(
+        None,
+        description="New claim text (required when action='edit')",
+    )
+
+
+class ReviewSubmission(BaseModel):
+    """Human review decisions submitted to resume generation."""
+    tenant_id: str = Field(..., description="Tenant identifier")
+    decisions: List[ReviewDecision] = Field(
+        ...,
+        description="One decision per claim that needs review",
+    )

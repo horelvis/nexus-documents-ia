@@ -65,6 +65,29 @@ router = APIRouter(tags=["Emma"])
 FAST_MAX_ITERATIONS = 3
 
 
+class _SafeEncoder(json.JSONEncoder):
+    """JSON encoder that handles numpy scalar types (float32, int64, etc.)."""
+
+    def default(self, obj):
+        # Handle numpy floating types (float16, float32, float64)
+        try:
+            import numpy as np
+            if isinstance(obj, np.floating):
+                return float(obj)
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+        except ImportError:
+            pass
+        return super().default(obj)
+
+
+def _dumps(obj) -> str:
+    """json.dumps with numpy-safe encoding."""
+    return json.dumps(obj, cls=_SafeEncoder)
+
+
 def _generate_contextual_suggestions(
     query: str,
     response: str,
@@ -575,13 +598,13 @@ async def _generate_langgraph_sse(
             data = event.get("data", {})
 
             if event_type == "started":
-                yield f"event: start\ndata: {json.dumps({'message': 'Iniciando análisis...', 'progress': 0, 'thread_id': data.get('thread_id')})}\n\n"
+                yield f"event: start\ndata: {_dumps({'message': 'Iniciando análisis...', 'progress': 0, 'thread_id': data.get('thread_id')})}\n\n"
 
             elif event_type == "retrieve_complete":
                 doc_count = data.get("doc_count", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'search_result', 'content': f'{doc_count} documentos recuperados', 'slmIsThinking': True})}\n\n"
-                yield f"event: progress\ndata: {json.dumps({'message': f'Recuperados {doc_count} documentos', 'stage': 'retrieval', 'progress': 20})}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'search_result', 'content': f'{doc_count} documentos recuperados', 'slmIsThinking': True})}\n\n"
+                yield f"event: progress\ndata: {_dumps({'message': f'Recuperados {doc_count} documentos', 'stage': 'retrieval', 'progress': 20})}\n\n"
 
             elif event_type == "plan_complete":
                 domains = data.get("domains", [])
@@ -590,14 +613,14 @@ async def _generate_langgraph_sse(
 
                 # Emit reasoning steps for traceability
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Dominios detectados: {", ".join(domains)}', 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Dominios detectados: {", ".join(domains)}', 'slmIsThinking': True})}\n\n"
 
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'preparing', 'content': f'Agentes seleccionados: {", ".join(agents)}', 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'preparing', 'content': f'Agentes seleccionados: {", ".join(agents)}', 'slmIsThinking': True})}\n\n"
 
                 # Emit plan ready
-                yield f"event: slm_plan\ndata: {json.dumps({'stage': 'slm_plan_ready', 'slmIsThinking': False, 'slmPlan': {'route': 'MULTI_AGENT' if len(agents) > 1 else agents[0] if agents else 'general_agent', 'confidence': 0.9, 'agents': agents, 'domains': domains, 'reasoning': reasoning}})}\n\n"
-                yield f"event: progress\ndata: {json.dumps({'message': f'Plan: {reasoning}', 'stage': 'planning', 'progress': 30})}\n\n"
+                yield f"event: slm_plan\ndata: {_dumps({'stage': 'slm_plan_ready', 'slmIsThinking': False, 'slmPlan': {'route': 'MULTI_AGENT' if len(agents) > 1 else agents[0] if agents else 'general_agent', 'confidence': 0.9, 'agents': agents, 'domains': domains, 'reasoning': reasoning}})}\n\n"
+                yield f"event: progress\ndata: {_dumps({'message': f'Plan: {reasoning}', 'stage': 'planning', 'progress': 30})}\n\n"
 
             elif event_type == "agent_started":
                 agent_name = data.get("agent", "unknown")
@@ -615,16 +638,16 @@ async def _generate_langgraph_sse(
                 }.get(agent_name, agent_name)
 
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Ejecutando {agent_display}...', 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Ejecutando {agent_display}...', 'slmIsThinking': True})}\n\n"
 
             elif event_type == "structural_step":
                 # Reasoning step from structural query tool
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'querying', 'content': data.get('content', ''), 'detail': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'querying', 'content': data.get('content', ''), 'detail': data.get('content', ''), 'slmIsThinking': True})}\n\n"
 
             elif event_type == "agent_complete":
                 agent_name = data.get("agent", "unknown")
-                yield f"event: progress\ndata: {json.dumps({'message': f'{agent_name} finalizado', 'stage': 'agent_complete', 'progress': 70})}\n\n"
+                yield f"event: progress\ndata: {_dumps({'message': f'{agent_name} finalizado', 'stage': 'agent_complete', 'progress': 70})}\n\n"
 
             # ReAct loop reasoning steps (Think-Act-Observe cycle)
             # Filter out internal steps that aren't meaningful to the user
@@ -635,14 +658,14 @@ async def _generate_langgraph_sse(
                     # Truncate to first sentence, max 100 chars
                     first_sentence = _re.split(r'[.\n]', content.strip())[0][:100]
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'thinking', 'content': first_sentence, 'detail': content, 'slmIsThinking': True})}\n\n"
+                    yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'thinking', 'content': first_sentence, 'detail': content, 'slmIsThinking': True})}\n\n"
 
             elif event_type == "tool_call":
                 content = data.get("content", "")
                 if content:
                     action_type, human_text, detail = _humanize_tool_call(content)
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'slmIsThinking': True})}\n\n"
+                    yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'slmIsThinking': True})}\n\n"
 
             elif event_type == "tool_result":
                 content = data.get("content", "")
@@ -650,7 +673,7 @@ async def _generate_langgraph_sse(
                     source = data.get("source", "")
                     action_type, human_text, detail = _humanize_observation(content, source)
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'slmIsThinking': True})}\n\n"
+                    yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'slmIsThinking': True})}\n\n"
 
             elif event_type == "reasoning_step":
                 step_type = data.get("step_type", "thinking")
@@ -673,32 +696,32 @@ async def _generate_langgraph_sse(
                         "connector": "connecting", "transformation": "analyzing",
                     }.get(step_type, step_type)
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': semantic_type, 'content': content, 'slmIsThinking': True})}\n\n"
+                    yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': semantic_type, 'content': content, 'slmIsThinking': True})}\n\n"
 
             # Swarm events (parallel sub-agent execution)
             elif event_type == "swarm_started":
                 num_workers = data.get("num_workers", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'swarm_decompose', 'content': f'Descomponiendo en {num_workers} tareas paralelas...', 'slmIsThinking': True})}\n\n"
-                yield f"event: swarm_started\ndata: {json.dumps(data)}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'swarm_decompose', 'content': f'Descomponiendo en {num_workers} tareas paralelas...', 'slmIsThinking': True})}\n\n"
+                yield f"event: swarm_started\ndata: {_dumps(data)}\n\n"
 
             elif event_type == "worker_started":
                 worker_id = data.get("worker_id", 0)
                 sub_task = data.get("sub_task", "")[:80]
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'swarm_worker', 'content': f'Agente {worker_id}: {sub_task}', 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'swarm_worker', 'content': f'Agente {worker_id}: {sub_task}', 'slmIsThinking': True})}\n\n"
 
             elif event_type == "worker_complete":
                 worker_id = data.get("worker_id", 0)
                 latency = data.get("latency_ms", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'swarm_worker_done', 'content': f'Agente {worker_id} completado ({latency:.0f}ms)', 'slmIsThinking': True})}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'swarm_worker_done', 'content': f'Agente {worker_id} completado ({latency:.0f}ms)', 'slmIsThinking': True})}\n\n"
 
             elif event_type == "swarm_synthesizing":
                 successful_count = data.get("successful_workers", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {json.dumps({'step': step_counter, 'type': 'swarm_synthesize', 'content': f'Sintetizando resultados de {successful_count} agentes...', 'slmIsThinking': True})}\n\n"
-                yield f"event: progress\ndata: {json.dumps({'message': 'Sintetizando resultados...', 'stage': 'synthesizing', 'progress': 80})}\n\n"
+                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'swarm_synthesize', 'content': f'Sintetizando resultados de {successful_count} agentes...', 'slmIsThinking': True})}\n\n"
+                yield f"event: progress\ndata: {_dumps({'message': 'Sintetizando resultados...', 'stage': 'synthesizing', 'progress': 80})}\n\n"
 
             elif event_type == "token":
                 # Stream tokens for real-time text display
@@ -707,29 +730,29 @@ async def _generate_langgraph_sse(
                     # Emit first_token on the very first token to switch frontend to streaming mode
                     if not first_token_sent:
                         first_token_sent = True
-                        yield f"event: first_token\ndata: {json.dumps({'text': token_text})}\n\n"
-                    yield f"event: token\ndata: {json.dumps({'text': token_text, 'token': token_text})}\n\n"
+                        yield f"event: first_token\ndata: {_dumps({'text': token_text})}\n\n"
+                    yield f"event: token\ndata: {_dumps({'text': token_text, 'token': token_text})}\n\n"
                     # Yield to event loop between tokens for HTTP chunk flushing
                     await asyncio.sleep(0)
                     continue  # Skip the general sleep below (already yielded)
 
+            elif event_type == "clarification":
+                # HITL interrupt — graph paused for user input
+                clar_data = data
+                yield f"event: clarification\ndata: {_dumps({'question': clar_data.get('question', ''), 'options': clar_data.get('options', []), 'thread_id': clar_data.get('thread_id', thread_id)})}\n\n"
+                # SSE closes after clarification — frontend will resume via /query/resume/stream
+                return
+
             elif event_type == "complete":
                 metadata = data.get("metadata", {})
-
-                # Check if this is a clarification response
-                if metadata.get("query_clarification"):
-                    clarification_options = metadata.get("clarification_options", [])
-                    yield f"event: clarification\ndata: {json.dumps({'question': data.get('answer', ''), 'options': clarification_options})}\n\n"
-                    yield f"event: complete\ndata: {json.dumps({'success': True, 'answer': data.get('answer', ''), 'query_clarification': True, 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id)})}\n\n"
-                else:
-                    # Normal completion — final result
-                    suggestions = _generate_contextual_suggestions(
-                        query.query,
-                        data.get("answer", ""),
-                        data.get("agents_used", [])
-                    )
-                    yield f"event: progress\ndata: {json.dumps({'message': 'Generando respuesta...', 'stage': 'synthesizing', 'progress': 90, 'slmIsThinking': False})}\n\n"
-                    yield f"event: complete\ndata: {json.dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'tools_used': data.get('agents_used', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id), 'domains': data.get('domains', []), 'final_result': data, 'suggestions': suggestions})}\n\n"
+                # Normal completion — final result
+                suggestions = _generate_contextual_suggestions(
+                    query.query,
+                    data.get("answer", ""),
+                    data.get("agents_used", [])
+                )
+                yield f"event: progress\ndata: {_dumps({'message': 'Generando respuesta...', 'stage': 'synthesizing', 'progress': 90, 'slmIsThinking': False})}\n\n"
+                yield f"event: complete\ndata: {_dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'tools_used': data.get('agents_used', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id), 'domains': data.get('domains', []), 'final_result': data, 'suggestions': suggestions})}\n\n"
 
                 # Fire-and-forget: extract user facts from conversation
                 if query.user_id and settings.user_memory_enabled:
@@ -766,13 +789,13 @@ async def _generate_langgraph_sse(
                     logger.warning(f"Failed to save conversation: {e}")
 
             elif event_type == "error":
-                yield f"event: error\ndata: {json.dumps({'error': data.get('error', 'Unknown error')})}\n\n"
+                yield f"event: error\ndata: {_dumps({'error': data.get('error', 'Unknown error')})}\n\n"
 
             await asyncio.sleep(0)
 
     except Exception as e:
         logger.error(f"LangGraph streaming error: {e}")
-        yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+        yield f"event: error\ndata: {_dumps({'error': 'Lo siento, hubo un problema temporal. Por favor, inténtalo de nuevo.'})}\n\n"
 
 
 @router.post("/query/stream")
@@ -886,7 +909,7 @@ async def emma_query_stream(
             logger.info(f"[Emma Stream] Starting for tenant={query.tenant_id}, query={query.query[:50]}...")
 
             # Send start event
-            yield f"event: start\ndata: {json.dumps({'message': 'Iniciando análisis...', 'progress': 0})}\n\n"
+            yield f"event: start\ndata: {_dumps({'message': 'Iniciando análisis...', 'progress': 0})}\n\n"
             await asyncio.sleep(0)
 
             try:
@@ -894,10 +917,10 @@ async def emma_query_stream(
                 logger.info("[Emma Stream] Emma instance created")
             except Exception as init_err:
                 logger.error(f"[Emma Stream] Failed to create Emma instance: {init_err}")
-                yield f"event: error\ndata: {json.dumps({'error': f'Error inicializando Emma: {str(init_err)}'})}\n\n"
+                yield f"event: error\ndata: {_dumps({'error': f'Error inicializando Emma: {str(init_err)}'})}\n\n"
                 return
 
-            yield f"event: progress\ndata: {json.dumps({'message': 'Emma inicializada...', 'stage': 'init', 'progress': 5})}\n\n"
+            yield f"event: progress\ndata: {_dumps({'message': 'Emma inicializada...', 'stage': 'init', 'progress': 5})}\n\n"
             await asyncio.sleep(0)
 
             context = ExecutionContext(
@@ -911,7 +934,7 @@ async def emma_query_stream(
             emma.config.enable_domain_routing = query.enable_domain_routing
 
             # Send progress event
-            yield f"event: progress\ndata: {json.dumps({'message': 'Procesando consulta...', 'stage': 'context_preparation', 'progress': 10})}\n\n"
+            yield f"event: progress\ndata: {_dumps({'message': 'Procesando consulta...', 'stage': 'context_preparation', 'progress': 10})}\n\n"
             await asyncio.sleep(0)
 
             logger.info(f"[Emma Stream] Starting execute_stream loop (SIL={query.enable_sil})")
@@ -931,7 +954,7 @@ async def emma_query_stream(
                             "text": event.get("content", ""),
                             "token": event.get("content", ""),
                         }
-                        yield f"event: token\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+                        yield f"event: token\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
 
                     elif event_type == "thinking":
                         # thinking → progress with stage
@@ -940,7 +963,7 @@ async def emma_query_stream(
                             "stage": "thinking",
                             "text": event.get("content", ""),
                         }
-                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+                        yield f"event: progress\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
 
                     # SLM Router chain-of-thought events
                     elif event_type == "slm_thinking_start":
@@ -951,7 +974,7 @@ async def emma_query_stream(
                             "slmIsThinking": True,
                             "slmThinkingSteps": [],
                         }
-                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+                        yield f"event: progress\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
 
                     elif event_type == "slm_thinking_step":
                         # SLM reasoning step (entity, intent, route)
@@ -967,7 +990,7 @@ async def emma_query_stream(
                                 "confidence": event.get("confidence", 1.0),
                             },
                         }
-                        yield f"event: slm_thinking\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+                        yield f"event: slm_thinking\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
 
                     elif event_type == "slm_plan_ready":
                         # SLM plan generated
@@ -982,7 +1005,7 @@ async def emma_query_stream(
                                 "reasoning": event.get("reasoning"),
                             },
                         }
-                        yield f"event: slm_plan\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+                        yield f"event: slm_plan\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
 
                     elif event_type == "slm_execution_start":
                         # SLM starting execution
@@ -992,7 +1015,7 @@ async def emma_query_stream(
                             "slmIsExecuting": True,
                             "route": event.get("route"),
                         }
-                        yield f"event: progress\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+                        yield f"event: progress\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
 
                     elif event_type == "done":
                         # done → complete
@@ -1014,18 +1037,18 @@ async def emma_query_stream(
                             "final_result": result,
                             "suggestions": suggestions,
                         }
-                        yield f"event: complete\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+                        yield f"event: complete\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
 
                     elif event_type == "error":
                         # error stays as error
                         frontend_data = {"error": event.get("error", "Unknown error")}
-                        yield f"event: error\ndata: {json.dumps(frontend_data, ensure_ascii=False)}\n\n"
+                        yield f"event: error\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
 
                     else:
                         # Unknown event types → progress
                         event_data = {k: v for k, v in event.items() if k != "type"}
                         event_data["message"] = event_data.get("message", f"Procesando ({event_type})...")
-                        yield f"event: progress\ndata: {json.dumps(event_data, ensure_ascii=False)}\n\n"
+                        yield f"event: progress\ndata: {_dumps(event_data, ensure_ascii=False)}\n\n"
 
                     # Force immediate flush after each event
                     await asyncio.sleep(0)
@@ -1036,7 +1059,7 @@ async def emma_query_stream(
                     logger.warning("[Emma Stream] No events received from execute_stream!")
                     if trace:
                         trace.update(level="WARNING", status_message="No events received")
-                    yield f"event: error\ndata: {json.dumps({'error': 'No se recibieron eventos del procesamiento'})}\n\n"
+                    yield f"event: error\ndata: {_dumps({'error': 'No se recibieron eventos del procesamiento'})}\n\n"
                 elif not has_complete:
                     logger.warning("[Emma Stream] Stream ended without 'done' event")
 
@@ -1052,7 +1075,7 @@ async def emma_query_stream(
                 logger.error(f"[Emma Stream] Error in execute_stream: {stream_err}\n{error_details}")
                 if trace:
                     trace.update(level="ERROR", status_message=str(stream_err))
-                yield f"event: error\ndata: {json.dumps({'error': f'Error en procesamiento: {str(stream_err)}'})}\n\n"
+                yield f"event: error\ndata: {_dumps({'error': f'Error en procesamiento: {str(stream_err)}'})}\n\n"
 
         except Exception as e:
             import traceback
@@ -1060,7 +1083,7 @@ async def emma_query_stream(
             logger.error(f"Emma stream error: {e}\n{error_details}")
             if trace:
                 trace.update(level="ERROR", status_message=str(e))
-            yield f"event: error\ndata: {json.dumps({'error': str(e), 'details': error_details[:500]})}\n\n"
+            yield f"event: error\ndata: {_dumps({'error': 'Lo siento, hubo un problema temporal. Por favor, inténtalo de nuevo.'})}\n\n"
         finally:
             # Cleanup: pop trace from context and flush
             if trace:
@@ -1069,6 +1092,79 @@ async def emma_query_stream(
 
     return StreamingResponse(
         generate_sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class ResumeRequest(BaseModel):
+    """Request to resume a paused graph (HITL interrupt)."""
+    thread_id: str = Field(..., description="Thread ID of the paused graph")
+    resume_value: str = Field(..., description="User's selected option / response")
+    tenant_id: str = Field(..., description="Tenant identifier")
+    user_id: Optional[str] = Field(None, description="User identifier")
+
+
+@router.post("/query/resume/stream")
+async def emma_query_resume_stream(
+    body: ResumeRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Resume a paused ReAct graph after a HITL interrupt (e.g., clarification).
+
+    Uses LangGraph Command(resume=value) to continue graph execution from
+    where interrupt() paused it. The graph resumes with the user's selection
+    and continues the normal ReAct pipeline.
+
+    SSE events are identical to /query/stream (token, complete, etc.).
+    """
+    from app.agents.langgraph import is_langgraph_enabled_for_tenant
+    from app.agents.langgraph.api import resume_react_query
+
+    if not is_emma_enabled():
+        raise HTTPException(status_code=503, detail="Emma is not enabled")
+
+    if not is_langgraph_enabled_for_tenant(body.tenant_id):
+        raise HTTPException(status_code=400, detail="LangGraph not enabled for this tenant")
+
+    async def generate_resume_sse() -> AsyncGenerator[str, None]:
+        async for event in resume_react_query(
+            thread_id=body.thread_id,
+            resume_value=body.resume_value,
+            tenant_id=body.tenant_id,
+            user_id=body.user_id,
+        ):
+            event_type = event.get("type", "")
+            data = event.get("data", {})
+
+            if event_type == "started":
+                yield f"event: start\ndata: {_dumps({'message': 'Procesando selección...', 'progress': 0, 'thread_id': data.get('thread_id')})}\n\n"
+            elif event_type == "thinking":
+                yield f"event: slm_thinking\ndata: {_dumps({'type': 'thinking', 'content': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+            elif event_type == "tool_call":
+                yield f"event: slm_thinking\ndata: {_dumps({'type': 'searching', 'content': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+            elif event_type == "tool_result":
+                yield f"event: slm_thinking\ndata: {_dumps({'type': 'search_result', 'content': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+            elif event_type == "reasoning_step":
+                yield f"event: slm_thinking\ndata: {_dumps({'type': data.get('step_type', 'analyzing'), 'content': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+            elif event_type == "token":
+                yield f"event: token\ndata: {_dumps({'text': data.get('text', ''), 'token': data.get('token', '')})}\n\n"
+            elif event_type == "complete":
+                yield f"event: complete\ndata: {_dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'sources': data.get('sources', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id')})}\n\n"
+            elif event_type == "clarification":
+                yield f"event: clarification\ndata: {_dumps({'question': data.get('question', ''), 'options': data.get('options', []), 'thread_id': data.get('thread_id')})}\n\n"
+                return
+            elif event_type == "error":
+                yield f"event: error\ndata: {_dumps({'error': 'Lo siento, hubo un problema temporal. Por favor, inténtalo de nuevo.'})}\n\n"
+
+            await asyncio.sleep(0)
+
+    return StreamingResponse(
+        generate_resume_sse(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

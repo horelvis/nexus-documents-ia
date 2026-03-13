@@ -152,10 +152,11 @@ async def _call_llm_evaluation(
     }
 
     try:
-        from app.agents.llm_client import get_llm_client
+        from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
 
-        llm_client = await get_llm_client()
-        llm_response = await llm_client.chat(
+        router = await get_llm_router()
+        llm_response = await router.chat(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -163,6 +164,7 @@ async def _call_llm_evaluation(
             temperature=0.1,
             max_tokens=300,
             enable_thinking=False,
+            role=ModelRole.PLANNER,
         )
 
         if llm_response and llm_response.content:

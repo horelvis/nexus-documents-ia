@@ -10,7 +10,7 @@
 #   - weaviate: Vector database for embeddings
 #   - weaviate-service: RAG pipeline (vector search and retrieval)
 #   - emma-agent-service: AI agent orchestration (Emma v2 + LangGraph)
-#   - vllm: GPU inference for LLM (Qwen3-4B)
+#   - vllm: SGLang GPU inference — Chat (Qwen3.5-9B) + Planner (Qwen3.5-4B)
 #   - background-worker: Async task processing (Celery) for verification
 #   - api: Main backend API (optional, for UI integration)
 
@@ -84,13 +84,34 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # vLLM - GPU Inference Server (Qwen3-14B-AWQ — tool calling nativo)
+  # SGLang — Dual-Model Architecture (Qwen3.5)
   # =============================================================================
-  # Qwen3-14B-AWQ: 14B denso, AWQ 4-bit quantization
-  # VRAM: ~8GB model + ~14GB KV cache = ~22GB (fits in RTX 4090 24GB)
-  # Context: 32K tokens (native 128K, limited for VRAM)
+  # Two SGLang instances sharing one GPU (RTX 4090 24GB):
+  #
+  #   Modelo          VRAM (AWQ INT4)    Funcion
+  #   ─────────────   ──────────────     ──────────────────────────
+  #   Qwen3.5-9B      ~8-10 GB           Chat, reasoning, synthesis
+  #   Qwen3.5-4B      ~3-4  GB           Planner, tool routing, clues
+  #   BGE-M3          ~2.7  GB           Embeddings (weaviate-service)
+  #   ─────────────   ──────────────
+  #   Total           ~14-17 GB          Leaves ~7-10 GB for KV cache
+  #
+  # Single-model mode (VLLM_DUAL_MODEL=false):
+  #   Only 'vllm' service runs. Both PLANNER and CHAT roles use same model.
+  #   mem-fraction-static: 0.80 (full GPU minus BGE-M3 headroom).
+  #
+  # Dual-model mode (VLLM_DUAL_MODEL=true):
+  #   Both 'vllm' + 'vllm-planner' run. GPU partitioned via mem-fraction-static.
+  #   Enable with: docker compose --profile dual-model up -d
+  #   mem-fraction: 0.55 (chat) + 0.18 (planner) = 0.73 total, ~6.5GB for BGE-M3 + buffer.
+  #
+  # NOTE: Service names kept as 'vllm' for backward compatibility with internal URLs.
+  #       SGLang exposes an OpenAI-compatible API at /v1 — same as vLLM.
+  # =============================================================================
+
+  # ── Chat Model (Qwen3.5-9B) — Quality generation, final responses ──
   vllm:
-    image: vllm/vllm-openai:v0.8.5.post1
+    image: lmsysorg/sglang:v0.5.9
     ports:
       - "8001:8000"
     networks:
@@ -99,26 +120,20 @@ services:
       - vllm_cache:/root/.cache/huggingface
     environment:
       - HF_TOKEN=${HF_TOKEN}
-      - VLLM_LOGGING_LEVEL=INFO
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
-    command:
-      - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}"
-      - "--served-model-name"
-      - "${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}"
-      - "--dtype"
-      - "auto"
-      - "--max-model-len"
-      - "${VLLM_MAX_MODEL_LEN:-32768}"
-      - "--gpu-memory-utilization"
-      - "0.90"
-      - "--enforce-eager"
-      - "--trust-remote-code"
-      # Enable tool calling for ReAct agent (Qwen3 uses hermes format)
-      - "--enable-auto-tool-choice"
-      - "--tool-call-parser"
-      - "hermes"
+    command: >
+      python -m sglang.launch_server
+      --model-path ${VLLM_MODEL:-Qwen/Qwen3.5-9B}
+      --served-model-name ${VLLM_MODEL:-Qwen/Qwen3.5-9B}
+      --port 8000
+      --host 0.0.0.0
+      --context-length ${VLLM_MAX_MODEL_LEN:-16384}
+      --mem-fraction-static ${VLLM_GPU_UTIL:-0.75}
+      --quantization fp8
+      --trust-remote-code
+      --tool-call-parser ${VLLM_TOOL_PARSER:-qwen3_coder}
+      --reasoning-parser qwen3
     deploy:
       resources:
         reservations:
@@ -133,6 +148,50 @@ services:
       retries: 5
       start_period: 180s
     restart: unless-stopped
+
+  # ── Planner Model (Qwen3.5-4B) — Fast tool calling, routing, clue generation ──
+  # Only used when VLLM_DUAL_MODEL=true. Enable with: --profile dual-model
+  # Shares the GPU with vllm via mem-fraction-static partitioning.
+  vllm-planner:
+    image: lmsysorg/sglang:v0.5.9
+    ports:
+      - "8003:8000"
+    networks:
+      - backend-network
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - NVIDIA_DISABLE_REQUIRE=1
+      - CUDA_VISIBLE_DEVICES=0
+    command: >
+      python -m sglang.launch_server
+      --model-path ${VLLM_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
+      --served-model-name ${VLLM_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
+      --port 8000
+      --host 0.0.0.0
+      --context-length ${VLLM_PLANNER_MAX_MODEL_LEN:-8192}
+      --mem-fraction-static ${VLLM_PLANNER_GPU_UTIL:-0.18}
+      --quantization fp8
+      --trust-remote-code
+      --tool-call-parser ${VLLM_PLANNER_TOOL_PARSER:-qwen3_coder}
+      --reasoning-parser qwen3
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    restart: unless-stopped
+    profiles:
+      - dual-model
 
 
   # =============================================================================
@@ -239,7 +298,7 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       # Override LLM provider to use local vLLM (reuses Qwen3-14B already in the stack)
       - LLM_PROVIDER=vllm
-      - LLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - LLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
       - LLM_API_BASE=http://vllm:8000/v1
     volumes:
       - ../microservices/langextract-service/app:/app/app:ro
@@ -286,21 +345,28 @@ services:
       # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
-      # Embedding Configuration (BGE-M3 local)
+      # Embedding Configuration (Jina v3 local — 5 LoRA task adapters)
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence-transformers}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
       - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
       - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
       - MULTIMODAL_EMBEDDING_ENABLED=${MULTIMODAL_EMBEDDING_ENABLED:-false}
+      # Parent-Child Chunking (search small, retrieve large)
+      - PARENT_CHILD_CHUNKING_ENABLED=${PARENT_CHILD_CHUNKING_ENABLED:-false}
+      # Per-Chunk LLM Context Enrichment (Anthropic full pattern)
+      - CONTEXTUAL_RETRIEVAL_USE_LLM=${CONTEXTUAL_RETRIEVAL_USE_LLM:-false}
       # Agent settings
       - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
       - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
       - AGENT_FRAMEWORK=${AGENT_FRAMEWORK:-qwen-agent}
       # Knowledge Tree Service
       - KNOWLEDGE_TREE_SERVICE_URL=http://knowledge-tree-service:8011
+      # Emma Agent Service (for memory generation at indexing time)
+      - EMMA_AGENT_SERVICE_URL=http://emma-agent-service:8009
+      - MEMORY_BANK_ENABLED=${MEMORY_BANK_ENABLED:-true}
       # Suppress warnings
       - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:spacy.cli._util,ignore::DeprecationWarning:pydantic
     volumes:
@@ -372,7 +438,10 @@ services:
       dockerfile: Dockerfile
       args:
         DOCKER_GID: ${DOCKER_GID:-988}
-    # Port exposed via tls-proxy (nginx) on host :8009
+    # TLS access via tls-proxy (nginx) on host :8009
+    # Localhost-only HTTP for Next.js dev proxy (not exposed to network)
+    ports:
+      - "127.0.0.1:8019:8009"
     depends_on:
       weaviate-service:
         condition: service_healthy
@@ -400,11 +469,17 @@ services:
       - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
       # Multi-Pipeline RAG Sector
       - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
-      # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
+      # vLLM Configuration — Dual-Model Architecture
+      # Set VLLM_DUAL_MODEL=true + docker compose --profile dual-model to enable
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
+      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
+      # Chat model (9B quality generation)
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
       - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
+      # Planner model (4B fast tool calling) — only active when VLLM_DUAL_MODEL=true
+      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
+      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       # Redis for sessions
       - REDIS_HOST=redis
@@ -427,14 +502,21 @@ services:
       - USE_LANGFUSE_PROMPTS=${USE_LANGFUSE_PROMPTS:-true}
       # Background Worker (for Celery verification tasks)
       - BACKGROUND_WORKER_URL=http://background-worker:8100
-      # Upload limits (temp file processing)
-      - EMMA_UPLOAD_MAX_CHARS_PER_DOC=${EMMA_UPLOAD_MAX_CHARS_PER_DOC:-15000}
-      - EMMA_UPLOAD_MAX_TOTAL_CHARS=${EMMA_UPLOAD_MAX_TOTAL_CHARS:-40000}
+      # Document Forge Service (template-based document generation)
+      - DOCUMENT_FORGE_SERVICE_URL=${DOCUMENT_FORGE_SERVICE_URL:-http://document-forge-service:8013}
+      - DOCUMENT_FORGE_ENABLED=${DOCUMENT_FORGE_ENABLED:-true}
+      # Upload limit — hard gate (rejects files exceeding this, does NOT truncate)
+      - EMMA_UPLOAD_MAX_CHARS_PER_DOC=${EMMA_UPLOAD_MAX_CHARS_PER_DOC:-2000000}
       # Default Location for Social Channels
       - DEFAULT_LOCATION_CITY=${DEFAULT_LOCATION_CITY:-Molina de Segura}
       - DEFAULT_LOCATION_REGION=${DEFAULT_LOCATION_REGION:-Región de Murcia}
       - DEFAULT_LOCATION_COUNTRY=${DEFAULT_LOCATION_COUNTRY:-España}
       - DEFAULT_LOCATION_TIMEZONE=${DEFAULT_LOCATION_TIMEZONE:-Europe/Madrid}
+      # RAG Quality Features (Phase 1 — no re-indexation needed)
+      - SMART_SEARCH_CROSS_ENCODER_ENABLED=${SMART_SEARCH_CROSS_ENCODER_ENABLED:-true}
+      - REACT_QUALITY_GATE_ENABLED=${REACT_QUALITY_GATE_ENABLED:-true}
+      - REACT_CONTEXT_COMPRESS_ENABLED=${REACT_CONTEXT_COMPRESS_ENABLED:-true}
+      - REACT_QUERY_CLARIFICATION_ENABLED=${REACT_QUERY_CLARIFICATION_ENABLED:-false}
       # RLM (Recursive Language Models) Configuration
       - RLM_ENABLED=${RLM_ENABLED:-false}
       - RLM_TOKEN_THRESHOLD=${RLM_TOKEN_THRESHOLD:-16000}
@@ -447,12 +529,17 @@ services:
       - WEB_SEARCH_MAX_RESULTS=${WEB_SEARCH_MAX_RESULTS:-5}
       - WEB_SEARCH_REGION=${WEB_SEARCH_REGION:-es-es}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      # Document Generation & Email Tools
+      - DOCUMENT_GENERATION_ENABLED=${DOCUMENT_GENERATION_ENABLED:-true}
+      - EMAIL_TOOL_ENABLED=${EMAIL_TOOL_ENABLED:-true}
       # Swarm Agent (parallel sub-agent execution)
       - SWARM_ENABLED=${SWARM_ENABLED:-false}
       - SWARM_MAX_WORKERS=${SWARM_MAX_WORKERS:-5}
       - SWARM_WORKER_MAX_STEPS=${SWARM_WORKER_MAX_STEPS:-2}
       - SWARM_WORKER_TIMEOUT_SECONDS=${SWARM_WORKER_TIMEOUT_SECONDS:-45}
       - SWARM_COMPLEXITY_THRESHOLD=${SWARM_COMPLEXITY_THRESHOLD:-3}
+      # LangGraph Checkpointer (PostgresSaver) — Level 3 persistence
+      - LANGGRAPH_CHECKPOINTER_ENABLED=${LANGGRAPH_CHECKPOINTER_ENABLED:-true}
       # Suppress warnings
       - PYTHONWARNINGS=ignore::DeprecationWarning:httpx._models,ignore::DeprecationWarning:pydantic
     volumes:
@@ -472,6 +559,49 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # Document Forge Service - Template-based document generation
+  # =============================================================================
+  # Preserves original DOCX formatting while modifying detected variable fields.
+  # Uses LLM for field detection + docxtpl for Jinja2 rendering.
+  document-forge-service:
+    build:
+      context: ../microservices/document-forge-service
+      dockerfile: Dockerfile
+    container_name: document-forge-service
+    ports:
+      - "127.0.0.1:8013:8013"
+    env_file:
+      - .env
+    environment:
+      - SERVICE_PORT=8013
+      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL_NAME=${VLLM_MODEL:-Qwen/Qwen3.5-9B}
+      - GOTENBERG_SERVICE_URL=${GOTENBERG_SERVICE_URL:-http://gotenberg-service:8005}
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
+      - MAIN_API_URL=${MAIN_API_URL:-http://main-api:8000}
+      - FORGE_SESSION_TTL=${FORGE_SESSION_TTL:-1800}
+      - DOCUMENT_FORGE_ENABLED=${DOCUMENT_FORGE_ENABLED:-true}
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../microservices/document-forge-service/app:/app/app:ro
+      - ../microservices/document-forge-service/config:/app/config:ro
+    networks:
+      - backend-network
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8013", "--reload", "--reload-dir", "/app/app"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8013/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # =============================================================================
   # Background Worker - Async task processing (Celery)
   # =============================================================================
   # Handles: claim verification, preview generation, indexing retries
@@ -487,7 +617,11 @@ services:
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      # Dual-model architecture
+      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
+      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
+      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Web Search (DuckDuckGo)
@@ -547,7 +681,11 @@ services:
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
       - VLLM_ENABLED=${VLLM_ENABLED:-true}
       - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      # Dual-model architecture
+      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
+      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
+      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
       - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
@@ -830,14 +968,13 @@ services:
       - "8000:8000"
       - "8007:8007"
       - "8009:8009"
+      - "8085:8085"
     volumes:
       - ./nginx/tls-proxy.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/tls-proxy-entrypoint.sh:/docker-entrypoint-custom.sh:ro
       - ../../frontend/apps/on-premise/certificates:/etc/nginx/certs:ro
       - certbot_webroot:/var/www/certbot
     depends_on:
-      frontend:
-        condition: service_healthy
       api:
         condition: service_healthy
       emma-agent-service:
@@ -851,12 +988,10 @@ services:
   # =============================================================================
   # Certbot - Let's Encrypt certificate automation (sidecar)
   # =============================================================================
-  # Only runs with: docker compose --profile letsencrypt up -d
-  # Without the profile, tls-proxy uses existing self-signed certs (dev mode).
-  #
-  # Flow: certbot obtains/renews certs via HTTP-01 challenge (nginx port 80),
-  #       copies them to the shared certificates directory, and signals nginx
-  #       to reload via a trigger file.
+  # Runs by default. Obtains/renews certs via HTTP-01 challenge (nginx port 80),
+  # copies them to the shared certificates directory, and signals nginx to reload.
+  # On first run with self-signed certs, certbot replaces them with LE certs.
+  # If HTTP-01 fails (port 80 closed), self-signed certs remain active (graceful).
   certbot:
     image: certbot/certbot:latest
     entrypoint: ["/bin/sh", "/opt/certbot/entrypoint.sh"]
@@ -878,16 +1013,13 @@ services:
     networks:
       - backend-network
     restart: unless-stopped
-    profiles:
-      - letsencrypt
 
   # =============================================================================
   # KeyCloak - OAuth/OIDC Server for SSO
   # =============================================================================
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
-    ports:
-      - "8085:8443"
+    # No external ports — nginx tls-proxy terminates TLS on port 8085
     environment:
       - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
       - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
@@ -895,12 +1027,9 @@ services:
       - KC_DB_URL=jdbc:postgresql://keycloak-db:5432/keycloak
       - KC_DB_USERNAME=${KEYCLOAK_DB_USER:-keycloak}
       - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:-keycloak}
-      # Keycloak 26 hostname configuration (HTTPS)
+      # Hostname: external HTTPS URL (nginx terminates TLS)
       - KC_HOSTNAME=https://nouxcubeai.ddns.net:8085
-      # TLS certificates
-      - KC_HTTPS_CERTIFICATE_FILE=/opt/keycloak/conf/cert.pem
-      - KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/keycloak/conf/key.pem
-      # Keep HTTP enabled for internal Docker health checks and JWKS fetching
+      # HTTP only — TLS handled by nginx tls-proxy
       - KC_HTTP_ENABLED=true
       - KC_PROXY_HEADERS=xforwarded
       - KC_HEALTH_ENABLED=true
@@ -909,8 +1038,6 @@ services:
       - KC_SPI_THEME_LOGIN_DEFAULT=bufete-lexnova
     volumes:
       - ./keycloak/themes/bufete-lexnova:/opt/keycloak/themes/bufete-lexnova:ro
-      - ../../frontend/apps/on-premise/certificates/cert.pem:/opt/keycloak/conf/cert.pem:ro
-      - ../../frontend/apps/on-premise/certificates/key.pem:/opt/keycloak/conf/key.pem:ro
     depends_on:
       keycloak-db:
         condition: service_healthy
@@ -996,7 +1123,7 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - PRESENTATION_API_KEY=${MICROSERVICES_API_KEY}
       - PRESENTATION_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen3-14B-AWQ}
+      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
       - PRESENTATION_STORAGE_SERVICE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
       - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
       - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-https://nouxcubeai.ddns.net:8000}
@@ -1055,7 +1182,7 @@ services:
       - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-pk-emma-dev}
       - LANGFUSE_INIT_PROJECT_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-emma-dev}
     healthcheck:
-      test: ["CMD-SHELL", "IP=$(hostname -i) && node -e \"require('http').get('http://'+'$IP'+':3000/api/public/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
+      test: ["CMD-SHELL", "IP=$$(hostname -i) && node -e \"require('http').get('http://'+'$$IP'+':3000/api/public/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 5

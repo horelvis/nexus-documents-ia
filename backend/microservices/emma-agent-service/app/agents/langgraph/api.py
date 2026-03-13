@@ -475,8 +475,177 @@ async def stream_react_query(
                 break
 
     except Exception as e:
-        logger.error(f"ReAct stream error: {e}", exc_info=True)
-        yield {"type": "error", "data": {"error": str(e), "thread_id": thread_id}}
+        # Check if this is a GraphInterrupt (HITL — clarification, approval, etc.)
+        if type(e).__name__ == "GraphInterrupt":
+            # Extract interrupt payload from the exception
+            interrupt_value = None
+            if hasattr(e, "interrupts") and e.interrupts:
+                interrupt_value = e.interrupts[0].value if hasattr(e.interrupts[0], "value") else None
+            elif hasattr(e, "args") and e.args:
+                interrupt_value = e.args[0] if e.args else None
+
+            logger.info(f"ReAct graph interrupted (HITL/exception) for thread_id={thread_id}")
+            yield {
+                "type": "clarification",
+                "data": {
+                    "thread_id": thread_id,
+                    **(interrupt_value if isinstance(interrupt_value, dict) else {"message": str(interrupt_value)}),
+                },
+            }
+        else:
+            logger.error(f"ReAct stream error: {e}", exc_info=True)
+            yield {"type": "error", "data": {"error": str(e), "thread_id": thread_id}}
+
+    finally:
+        clear_execution_context()
+
+    # ─── Post-stream interrupt detection ──────────────────────────────
+    # In LangGraph >=1.0, interrupt() with astream() does NOT raise
+    # GraphInterrupt. The stream simply ends after the interrupted node.
+    # Detect this by checking the checkpoint for pending interrupts.
+    if last_values_event and not last_values_event.get("is_complete"):
+        try:
+            state_snapshot = await graph.aget_state(langgraph_config)
+            if hasattr(state_snapshot, "tasks") and state_snapshot.tasks:
+                for task in state_snapshot.tasks:
+                    if hasattr(task, "interrupts") and task.interrupts:
+                        interrupt_value = task.interrupts[0].value if hasattr(task.interrupts[0], "value") else None
+                        logger.info(f"ReAct graph interrupted (HITL/post-stream) for thread_id={thread_id}")
+                        yield {
+                            "type": "clarification",
+                            "data": {
+                                "thread_id": thread_id,
+                                **(interrupt_value if isinstance(interrupt_value, dict) else {"message": str(interrupt_value)}),
+                            },
+                        }
+                        break
+        except Exception as check_err:
+            logger.debug(f"Post-stream interrupt check failed: {check_err}")
+
+
+# =============================================================================
+# Resume after interrupt (HITL — clarification, approval, etc.)
+# =============================================================================
+
+async def resume_react_query(
+    thread_id: str,
+    resume_value: Any,
+    tenant_id: str,
+    user_id: Optional[str] = None,
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """Resume a paused ReAct graph after a HITL interrupt.
+
+    Uses Command(resume=value) to continue the graph from where it paused.
+    The resumed node re-executes from the beginning, but interrupt() returns
+    the resume_value instead of pausing again.
+
+    Args:
+        thread_id: The thread ID of the paused graph
+        resume_value: The value to pass back to interrupt() (e.g., user's selected option)
+        tenant_id: Tenant ID
+        user_id: Optional user ID
+    """
+    from langgraph.types import Command
+    from .graph import get_react_graph
+
+    start_time = time.time()
+
+    set_execution_context(tenant_id=tenant_id, user_id=user_id)
+
+    yield {
+        "type": "started",
+        "data": {"thread_id": thread_id, "query": str(resume_value), "graph_type": "react_resume"},
+    }
+
+    try:
+        graph = await get_react_graph()
+        langgraph_config = {"configurable": {"thread_id": thread_id}}
+
+        # Get event offset from checkpoint to skip pre-interrupt events
+        emitted_step_count = 0
+        try:
+            checkpoint_state = await graph.aget_state(langgraph_config)
+            if checkpoint_state and checkpoint_state.values:
+                emitted_step_count = len(
+                    checkpoint_state.values.get("reasoning_steps", [])
+                )
+        except Exception:
+            pass
+
+        received_real_tokens = False
+
+        # Resume with Command(resume=value)
+        async for mode, event in graph.astream(
+            Command(resume=resume_value),
+            config=langgraph_config,
+            stream_mode=["values", "custom"],
+        ):
+            if mode == "custom":
+                evt_type = event.get("type", "custom_event")
+                evt_data = event.get("data", {})
+                if evt_type == "token":
+                    received_real_tokens = True
+                    yield {"type": "token", "data": evt_data}
+                else:
+                    yield {"type": evt_type, "data": evt_data}
+                continue
+
+            # mode == "values"
+            reasoning_steps = event.get("reasoning_steps", [])
+            for step in reasoning_steps[emitted_step_count:]:
+                emitted_step_count += 1
+                step_type = step.get("type", "reasoning")
+                if step_type == "thinking":
+                    yield {"type": "thinking", "data": {"content": step.get("content", "")}}
+                elif step_type == "tool_call":
+                    yield {"type": "tool_call", "data": {"content": step.get("content", "")}}
+                elif step_type == "observation":
+                    yield {"type": "tool_result", "data": {"content": step.get("content", ""), "source": step.get("source", "")}}
+                else:
+                    yield {"type": "reasoning_step", "data": {"step_type": step_type, "content": step.get("content", "")}}
+
+            if event.get("final_answer") and event.get("is_complete"):
+                latency_ms = (time.time() - start_time) * 1000
+                final_answer = event["final_answer"]
+
+                if not received_real_tokens:
+                    words = final_answer.split(' ')
+                    for i, word in enumerate(words):
+                        token = f" {word}" if i > 0 else word
+                        yield {"type": "token", "data": {"text": token, "token": token}}
+                        await asyncio.sleep(0)
+
+                yield {
+                    "type": "complete",
+                    "data": {
+                        "success": event.get("success", True),
+                        "answer": final_answer,
+                        "sources": event.get("sources", []),
+                        "thread_id": thread_id,
+                        "latency_ms": latency_ms,
+                        "total_steps": event.get("current_step", 0),
+                        "graph_type": "react_resume",
+                        "metadata": event.get("metadata", {}),
+                    },
+                }
+                break
+
+    except Exception as e:
+        if type(e).__name__ == "GraphInterrupt":
+            logger.info(f"ReAct resume: another interrupt at thread_id={thread_id}")
+            interrupt_value = None
+            if hasattr(e, "interrupts") and e.interrupts:
+                interrupt_value = e.interrupts[0].value if hasattr(e.interrupts[0], "value") else None
+            yield {
+                "type": "clarification",
+                "data": {
+                    "thread_id": thread_id,
+                    **(interrupt_value if isinstance(interrupt_value, dict) else {"message": str(interrupt_value)}),
+                },
+            }
+        else:
+            logger.error(f"ReAct resume error: {e}", exc_info=True)
+            yield {"type": "error", "data": {"error": str(e), "thread_id": thread_id}}
 
     finally:
         clear_execution_context()

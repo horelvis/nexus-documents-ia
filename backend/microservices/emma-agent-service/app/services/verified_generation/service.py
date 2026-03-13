@@ -243,12 +243,32 @@ class VerifiedDocumentService:
             except Exception as e:
                 logger.warning(f"⚠️ Failed to hydrate uploads: {e}")
 
+            # If user explicitly uploaded files but none could be extracted, fail early
+            if not uploaded_texts:
+                logger.error(
+                    f"❌ Upload hydration failed: {len(request.uploaded_file_ids)} file(s) "
+                    f"requested but 0 extracted. Aborting verified generation."
+                )
+                yield VerificationEvent(
+                    event_type=VerificationEventType.ERROR,
+                    data={
+                        "error": "No se pudo extraer el texto de los documentos subidos. "
+                                 "Verifica que el servicio de extracción esté disponible e inténtalo de nuevo.",
+                        "session_id": session_id,
+                    },
+                )
+                return
+
         # Build initial state for the stop-and-go graph
         from app.agents.langgraph.stop_and_go import (
             get_stop_and_go_graph,
+            get_stop_and_go_graph_hitl,
             stream_stop_and_go,
             create_initial_state,
         )
+
+        # Check if HITL is enabled for this session
+        hitl_enabled = settings.verified_hitl_enabled
 
         initial_state = create_initial_state(
             session_id=session_id,
@@ -265,10 +285,16 @@ class VerifiedDocumentService:
                 "auto_correct": request.auto_correct,
                 "max_correction_attempts": request.max_correction_attempts,
                 "verification_timeout_seconds": request.verification_timeout_seconds,
+                "document_type": request.document_type,
             },
+            hitl_enabled=hitl_enabled,
         )
 
-        graph = get_stop_and_go_graph()
+        # Select graph: HITL-enabled (with checkpointer) or simple
+        if hitl_enabled:
+            graph = await get_stop_and_go_graph_hitl()
+        else:
+            graph = get_stop_and_go_graph()
 
         # Map graph events → VerificationEvent SSE types
         EVENT_TYPE_MAP = {
@@ -280,11 +306,30 @@ class VerifiedDocumentService:
             "claim_rejected": VerificationEventType.CLAIM_REJECTED,
             "verified_verification_timeout": VerificationEventType.VERIFICATION_TIMEOUT,
             "verified_complete": VerificationEventType.DOCUMENT_COMPLETE,
+            "section_advanced": VerificationEventType.PROGRESS,
             "error": VerificationEventType.ERROR,
+            # HITL events
+            "review_requested": VerificationEventType.REVIEW_REQUESTED,
+            "review_submitted": VerificationEventType.REVIEW_SUBMITTED,
+            "review_skipped": VerificationEventType.REVIEW_SKIPPED,
         }
 
-        async for event in stream_stop_and_go(graph, initial_state):
+        # Pass thread_id when HITL is enabled (needed for checkpointer)
+        stream_kwargs = {}
+        if hitl_enabled:
+            stream_kwargs["thread_id"] = session_id
+
+        async for event in stream_stop_and_go(graph, initial_state, **stream_kwargs):
             event_type_str = event.get("event_type", "progress")
+
+            # __interrupt__ is a runner-internal signal — close SSE cleanly
+            if event_type_str == "__interrupt__":
+                logger.info(
+                    f"[verified] Graph interrupted for HITL review "
+                    f"(session={session_id[:16]})"
+                )
+                return
+
             mapped_type = EVENT_TYPE_MAP.get(event_type_str)
 
             if mapped_type is None:
@@ -319,6 +364,73 @@ class VerifiedDocumentService:
                     lf_client.flush()
         except Exception:
             pass
+
+    async def resume_after_review(
+        self,
+        session_id: str,
+        tenant_id: str,
+        review_decisions: list[dict],
+    ) -> AsyncGenerator[VerificationEvent, None]:
+        """
+        Resume verified generation after HITL review.
+
+        Submits human decisions and streams the remaining events
+        (review_submitted + document_complete).
+
+        Args:
+            session_id: Session ID (also used as thread_id)
+            tenant_id: Tenant identifier
+            review_decisions: List of {claim_id, action, edited_text}
+
+        Yields:
+            VerificationEvent for synthesis steps
+        """
+        await self.initialize()
+
+        start_time = time.time()
+
+        from app.agents.langgraph.stop_and_go import (
+            get_stop_and_go_graph_hitl,
+            stream_stop_and_go,
+        )
+
+        graph = await get_stop_and_go_graph_hitl()
+
+        resume_value = {"decisions": review_decisions}
+
+        EVENT_TYPE_MAP = {
+            "review_submitted": VerificationEventType.REVIEW_SUBMITTED,
+            "verified_complete": VerificationEventType.DOCUMENT_COMPLETE,
+            "error": VerificationEventType.ERROR,
+            "progress": VerificationEventType.PROGRESS,
+        }
+
+        async for event in stream_stop_and_go(
+            graph,
+            {},  # initial_state ignored on resume
+            thread_id=session_id,
+            resume_value=resume_value,
+        ):
+            event_type_str = event.get("event_type", "progress")
+            mapped_type = EVENT_TYPE_MAP.get(event_type_str)
+
+            if mapped_type is None:
+                continue
+
+            if mapped_type == VerificationEventType.DOCUMENT_COMPLETE:
+                execution_time_ms = int((time.time() - start_time) * 1000)
+                data = event.get("data", {})
+                data["execution_time_ms"] = execution_time_ms
+                yield VerificationEvent(
+                    event_type=mapped_type,
+                    data=data,
+                    progress_percent=100,
+                )
+            else:
+                yield VerificationEvent(
+                    event_type=mapped_type,
+                    data=event.get("data", {}),
+                )
 
     async def generate_verified_document_sync(
         self,
@@ -360,6 +472,9 @@ class VerifiedDocumentService:
                 confidence=c.get("confidence", 0.0),
                 status=VerificationStatus.VERIFIED if "corrected_text" not in c else VerificationStatus.CORRECTED,
                 evidence_count=c.get("evidence_count", 0),
+                evidence_sources=c.get("evidence_sources", []),
+                verification_type=c.get("verification_type"),
+                verification_reason=c.get("verification_reason"),
             )
             for c in claims_data
         ]
@@ -377,12 +492,20 @@ class VerifiedDocumentService:
             execution_time_ms=data.get("execution_time_ms", 0),
             verification_time_ms=data.get("verification_time_ms", 0),
             evidence_document_ids=data.get("evidence_document_ids", []),
+            sources=data.get("sources", []),
+            doi_validations=data.get("doi_validations", []),
+            source_filenames=data.get("source_filenames", []),
+            source_summary=data.get("source_summary", ""),
         )
 
     def _assemble_document(
         self,
         query: str,
         claims: List[VerifiedClaim],
+        sources: Optional[list] = None,
+        doi_validations: Optional[list] = None,
+        source_filenames: Optional[List[str]] = None,
+        source_summary: Optional[str] = None,
     ) -> str:
         """
         Assemble the final document from verified claims using a Jinja2 template.
@@ -390,6 +513,10 @@ class VerifiedDocumentService:
         Args:
             query: Original query (used for title)
             claims: List of verified claims
+            sources: Optional global sources list from sources_map
+            doi_validations: Optional DOI validation results from source document
+            source_filenames: Original filenames of uploaded source documents
+            source_summary: LLM-generated brief summary of the source document
 
         Returns:
             Formatted document text (markdown)
@@ -423,9 +550,16 @@ class VerifiedDocumentService:
                     "confidence": c.confidence,
                     "status": c.status.value,
                     "original_text": c.original_text,
+                    "evidence_sources": c.evidence_sources,
+                    "verification_type": c.verification_type,
+                    "verification_reason": c.verification_reason,
                 }
                 for c in claims
             ],
+            sources=sources or [],
+            doi_validations=doi_validations or [],
+            source_filenames=source_filenames or [],
+            source_summary=source_summary or "",
         ).strip()
 
 

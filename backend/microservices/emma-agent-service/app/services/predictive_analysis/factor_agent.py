@@ -323,9 +323,10 @@ class FactorAgent:
     async def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
         """Call LLM via shared client with fallback to raw vLLM."""
         try:
-            from app.agents.llm_client import get_llm_client
-            llm_client = await get_llm_client()
-            response = await llm_client.chat(
+            from app.agents.llm_router import get_llm_router
+            from app.agents.llm_client import ModelRole
+            router = await get_llm_router()
+            response = await router.chat(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -333,11 +334,12 @@ class FactorAgent:
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
                 enable_thinking=False,
+                role=ModelRole.CHAT,
             )
             if response and response.content:
                 return response.content.strip()
         except Exception as e:
-            logger.warning(f"⚠️ LLMClient failed ({e}), falling back to raw vLLM")
+            logger.warning(f"⚠️ LLM router failed ({e}), falling back to raw vLLM")
 
         # Fallback: direct vLLM
         try:

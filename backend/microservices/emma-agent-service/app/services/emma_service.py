@@ -51,13 +51,20 @@ from app.agents.langgraph import (
     LangGraphQueryResponse,
 )
 
-# NexusRouter: ML-based intent classification
-from app.services.nexus_router import (
-    nexus_router,
-    IntentClassification,
-    RequiredAction,
-    Intent,
-)
+# NexusRouter: Legacy — no longer initialized at startup.
+# LangGraph's IntentRouter handles classification. Kept for type references only.
+try:
+    from app.services.nexus_router import (
+        nexus_router,
+        IntentClassification,
+        RequiredAction,
+        Intent,
+    )
+except ImportError:
+    nexus_router = None
+    IntentClassification = None
+    RequiredAction = None
+    Intent = None
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +96,12 @@ class EmmaService:
         # Memory Protocol integration
         self._memory: MemoryService = get_memory_service()
 
-        # NexusRouter: ML-based intent classification (replaces hardcoded patterns)
+        # NexusRouter: Legacy — disabled. LangGraph IntentRouter handles classification.
         self._nexus_router = nexus_router
-        self._nexus_router_enabled = True  # Can be disabled via config if needed
+        self._nexus_router_enabled = False
 
         self._load_config()
-        logger.info("Initializing Emma AI Service (Emma primary, NexusRouter intent classification)")
+        logger.info("Initializing Emma AI Service (LangGraph primary, legacy fallback)")
 
     def _load_config(self):
         """Load Emma configuration from YAML"""
@@ -413,7 +420,7 @@ Responde SOLO una palabra:"""
             ]
             self._available_tools = legacy_tools + framework_tool_names
 
-            logger.info(f"✅ Emma AI initialized: Emma (primary) + NexusRouter (intent) + RAGPipeline (fallback)")
+            logger.info(f"✅ Emma AI initialized: LangGraph primary, legacy fallback available")
             self._initialized = True
 
         except Exception as e:
@@ -700,7 +707,7 @@ Responde SOLO una palabra:"""
 
             return EmmaResponse(
                 query=query.query,
-                answer=f"Lo siento, hubo un error procesando tu consulta. Por favor, intenta de nuevo. Error: {str(e)[:100]}",
+                answer="Lo siento, hubo un problema temporal procesando tu consulta. Por favor, inténtalo de nuevo en unos segundos.",
                 session_id=session_id,
                 tenant_id=query.tenant_id,
                 decision_path=["emma", "error"],

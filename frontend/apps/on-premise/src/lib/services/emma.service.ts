@@ -130,10 +130,10 @@ export interface ClarificationOption {
   description?: string
 }
 
-import { ReasoningStepType } from '@/lib/types/emma'
+import { ReasoningStepType, SLMThinkingStep, SLMThinkingStepType } from '@/lib/types/emma'
 
 export interface EmmaStreamEvent {
-  event: 'start' | 'planning' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'consolidating' | 'complete' | 'error' | 'token' | 'delegation' | 'first_token' | 'clarification_needed' | 'confirmation_needed' | 'suggestions_available' | 'progress' | 'slm_thinking' | 'slm_plan' | 'structural_step'
+  event: 'start' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'complete' | 'error' | 'token' | 'first_token' | 'clarification' | 'progress' | 'slm_thinking' | 'slm_plan' | 'structural_step'
   data: {
     message?: string
     text?: string // Token text for streaming events
@@ -159,14 +159,12 @@ export interface EmmaStreamEvent {
     session_id?: string
     tools_used?: string[] // Tools used during processing
     elapsed_ms?: number // Time elapsed for delegation events
-    // SLM Router chain-of-thought fields
-    stage?: string // Current stage: slm_reasoning, slm_plan_ready, slm_executing
-    slmIsThinking?: boolean // Whether SLM is currently reasoning
-    slmIsExecuting?: boolean // Whether SLM plan is executing
+    // LangGraph chain-of-thought fields
+    stage?: string // Current stage
+    slmIsThinking?: boolean // Whether LLM is currently reasoning
     slmThinkingStep?: SLMThinkingStep // Individual thinking step
     slmThinkingSteps?: SLMThinkingStep[] // All thinking steps so far
-    slmPlan?: SLMPlanReady // Generated plan
-    route?: string // TOON route for execution
+    route?: string // LangGraph execution route
     // Interleaved thinking / structural_step fields
     step_type?: ReasoningStepType
     content?: string
@@ -195,85 +193,11 @@ const BASE_API_URL = `${normalizedBaseUrl}${API_CONFIG.API_V1}`
 const STREAMING_API_URL = `${API_CONFIG.STREAMING_BASE_URL}/api/v1`
 const EMMA_QUERY_PATH = '/emma/query'
 const EMMA_QUERY_STREAM_PATH = '/emma/query/stream'
+const EMMA_QUERY_RESUME_STREAM_PATH = '/emma/query/resume/stream'
 const EMMA_TOOLS_PATH = '/emma/tools'
 
-// =============================================================================
-// SLM Router Types (Chain-of-Thought Reasoning)
-// =============================================================================
-
-// Extended to support all backend event types
-export type SLMThinkingStepType =
-  | 'entity_detection'
-  | 'intent_detection'
-  | 'route_decision'
-  | 'retrieval'
-  | 'domain_detection'
-  | 'agent_selection'
-  | 'agent_execution'
-  | 'structural'
-  | 'thinking'
-  | 'observation'
-  | 'tool_call'
-  | 'custom'
-
-export interface SLMThinkingStep {
-  step: number
-  type: SLMThinkingStepType
-  content: string
-  entities?: string[]
-  confidence?: number
-}
-
-export interface SLMPlanReady {
-  route: 'GRAPH_ONLY' | 'VECTOR_ONLY' | 'HYBRID' | 'ASK_CLARIFY'
-  confidence: number
-  entities_count: number
-  reasoning?: string
-}
-
-export interface SLMExecutionComplete {
-  success: boolean
-  context_for_llm?: string
-  graph_result?: Record<string, unknown>
-  graph_row_count?: number
-  vector_result_count?: number
-  time_ms: number
-  error?: string
-  clarification_question?: string
-  clarification_options?: string[]
-}
-
-export type SLMStreamEventType =
-  | 'thinking_start'
-  | 'thinking_step'
-  | 'plan_ready'
-  | 'execution_start'
-  | 'execution_complete'
-  | 'error'
-
-export interface SLMStreamEvent {
-  event: SLMStreamEventType
-  data: {
-    message?: string
-    step?: number
-    type?: SLMThinkingStepType
-    content?: string
-    entities?: string[]
-    confidence?: number
-    route?: string
-    entities_count?: number
-    reasoning?: string
-    success?: boolean
-    context_for_llm?: string
-    graph_result?: Record<string, unknown>
-    graph_row_count?: number
-    vector_result_count?: number
-    time_ms?: number
-    error?: string
-    clarification_question?: string
-    clarification_options?: string[]
-  }
-}
+// Re-export from canonical type definitions
+export type { SLMThinkingStepType, SLMThinkingStep } from '@/lib/types/emma'
 
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, useEmmaTimeout = false) => {
   const controller = new AbortController()
@@ -546,10 +470,112 @@ export function useEmmaService() {
     })
   }
 
+  /**
+   * Resume a paused graph after a HITL interrupt (e.g., clarification).
+   * Uses the same SSE event format as queryEmmaStreamGenerator.
+   */
+  async function* resumeQueryStreamGenerator(
+    threadId: string,
+    resumeValue: string,
+    tenantId: string,
+    userId?: string,
+  ): AsyncGenerator<EmmaStreamEvent, void, unknown> {
+    const token = getAccessToken()
+    const streamUrl = `${STREAMING_API_URL}${EMMA_QUERY_RESUME_STREAM_PATH}`
+
+    const response = await fetch(streamUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token || ''}`
+      },
+      body: JSON.stringify({
+        thread_id: threadId,
+        resume_value: resumeValue,
+        tenant_id: tenantId,
+        user_id: userId || undefined,
+      })
+    })
+
+    if (!response.ok) {
+      let errorDetail = ''
+      try {
+        const errorBody = await response.json()
+        errorDetail = errorBody?.detail || errorBody?.message || ''
+      } catch {
+        // Response body not JSON
+      }
+      throw new Error(errorDetail || `Resume stream failed: ${response.status}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('No response body')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let currentEvent = ''
+    let currentData = ''
+
+    const processLine = (line: string): EmmaStreamEvent | null => {
+      const normalized = line.replace(/\r$/, '')
+      if (normalized.startsWith(':')) return null
+      if (normalized.startsWith('event:')) {
+        currentEvent = normalized.slice('event:'.length).trim()
+      } else if (normalized.startsWith('data:')) {
+        const chunk = normalized.slice('data:'.length)
+        const dataPart = chunk.startsWith(' ') ? chunk.slice(1) : chunk
+        currentData = currentData ? `${currentData}\n${dataPart}` : dataPart
+      } else if (normalized.trim() === '' && currentData) {
+        const eventName = (currentEvent || 'progress') as EmmaStreamEvent['event']
+        try {
+          const parsed = JSON.parse(currentData)
+          const data = parsed && typeof parsed === 'object' ? parsed : { message: String(parsed) }
+          const event = { event: eventName, data } as EmmaStreamEvent
+          currentEvent = ''
+          currentData = ''
+          return event
+        } catch {
+          const event = { event: eventName, data: { message: currentData } } as EmmaStreamEvent
+          currentEvent = ''
+          currentData = ''
+          return event
+        }
+      }
+      return null
+    }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (value) buffer += decoder.decode(value, { stream: !done })
+        const lines = buffer.split('\n')
+        if (done) {
+          buffer = ''
+          for (const line of lines) {
+            const event = processLine(line)
+            if (event) yield event
+          }
+          const finalEvent = processLine('')
+          if (finalEvent) yield finalEvent
+          break
+        } else {
+          buffer = lines.pop() || ''
+          for (const line of lines) {
+            const event = processLine(line)
+            if (event) yield event
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock()
+    }
+  }
+
   return {
     queryEmma,
     queryEmmaStream,
     queryEmmaStreamGenerator,
+    resumeQueryStreamGenerator,
     uploadTempDocument,
     getAvailableAgents,
     sendMessage,

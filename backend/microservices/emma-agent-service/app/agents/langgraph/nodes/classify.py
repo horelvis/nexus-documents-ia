@@ -230,9 +230,14 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             },
         }
 
-    # Query clarification — detect ambiguous queries before wasting a search cycle
+    # Query clarification — detect ambiguous queries via interrupt() HITL pattern.
+    # When ambiguous, interrupt() pauses the graph and surfaces options to the user.
+    # On resume (Command(resume=selected_value)), the node re-executes from the
+    # beginning; interrupt() returns the user's selection which replaces the query.
+    # All code before interrupt() is idempotent (intent classification is read-only).
     if settings.react_query_clarification_enabled:
         try:
+            from langgraph.types import interrupt
             from ..clarification import detect_ambiguity
 
             # Build minimal history from state messages
@@ -250,27 +255,32 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             if is_ambiguous:
                 reasoning_steps.append({
                     "type": StepType.ROUTING.value,
-                    "content": f"Query clarification: ambiguous query detected",
+                    "content": "Query clarification: ambiguous query detected",
                 })
-                return {
-                    "fast_path_used": True,
-                    "fast_path_answer": clarification_msg,
-                    "is_complete": True,
-                    "final_answer": clarification_msg,
-                    "success": True,
-                    "messages": [AIMessage(content=clarification_msg)],
-                    "reasoning_steps": reasoning_steps,
-                    "metadata": {
-                        "classify_intent": intent,
-                        "classify_confidence": confidence,
-                        "classify_latency_ms": latency_ms,
-                        "query_clarification": True,
-                        "clarification_options": clarification_options,
-                        "_checkpoint_offsets": _checkpoint_offsets,
-                    },
-                }
+
+                # interrupt() pauses the graph on first run.
+                # On resume, returns the user's selected option value.
+                refined_query = interrupt({
+                    "type": "clarification",
+                    "question": clarification_msg,
+                    "options": clarification_options,
+                })
+
+                # After resume: refined_query = user's selected option
+                logger.info(f"Classify: clarification resolved → '{refined_query[:80]}'")
+                query = refined_query
+                # Re-classify with the refined query
+                intent, confidence = await _classify_intent(query, tenant_id)
+                reasoning_steps.append({
+                    "type": StepType.ROUTING.value,
+                    "content": f"Re-classified after clarification: intent={intent}",
+                })
         except Exception as e:
-            logger.debug(f"Query clarification check failed (non-blocking): {e}")
+            # Don't let clarification failure block the pipeline
+            if "GraphInterrupt" not in type(e).__name__:
+                logger.debug(f"Query clarification check failed (non-blocking): {e}")
+            else:
+                raise  # Re-raise GraphInterrupt — must propagate to runner
 
     # Assess complexity for swarm routing
     use_swarm = _assess_complexity(query, intent, confidence)
@@ -278,7 +288,7 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
 
     logger.info(f"Classify: intent={intent}, confidence={confidence:.2f} → {route_target}")
 
-    return {
+    result: Dict[str, Any] = {
         "fast_path_used": False,
         "use_swarm": use_swarm,
         "reasoning_steps": reasoning_steps,
@@ -290,3 +300,9 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             "_checkpoint_offsets": _checkpoint_offsets,
         },
     }
+
+    # If query was refined by clarification, propagate to state
+    if query != state.get("query", ""):
+        result["query"] = query
+
+    return result

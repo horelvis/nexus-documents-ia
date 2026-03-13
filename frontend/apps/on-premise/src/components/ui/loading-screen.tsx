@@ -1,5 +1,4 @@
 import { LogoSpinner } from './logo-spinner'
-import { ProgressDots } from './progress-dots'
 
 interface LoadingScreenProps {
   title?: string
@@ -18,15 +17,13 @@ export function LoadingScreen({
         <div className="absolute right-0 top-1/4 h-[600px] w-[600px] rounded-full bg-cyan-500/5 blur-[120px]" />
       </div>
 
-      <div className="relative flex flex-col items-center gap-6">
+      <div className="relative flex flex-col items-center gap-4">
         <LogoSpinner size="lg" />
 
-        <div className="text-center">
+        <div className="flex flex-col items-center gap-1">
           <p className="text-lg font-medium text-white">{title}</p>
-          <p className="mt-1 text-sm text-slate-400">{subtitle}</p>
+          <p className="text-sm text-slate-400">{subtitle}</p>
         </div>
-
-        <ProgressDots />
       </div>
     </div>
   )

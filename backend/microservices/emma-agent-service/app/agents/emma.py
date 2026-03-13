@@ -116,7 +116,7 @@ class EmmaConfig:
     enable_knowledge_source_routing: bool = True  # Route by knowledge source (tenant/public/hybrid)
     enable_skills: bool = False  # Skills deprecated (LangGraph only)
     enable_streaming: bool = True
-    enable_thinking: bool = True
+    enable_thinking: bool = False
     thread_ttl_seconds: int = THREAD_TTL_SECONDS
     max_skill_tokens: int = 2000  # Token budget for skill instructions
 

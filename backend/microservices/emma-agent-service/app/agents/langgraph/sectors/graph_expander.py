@@ -57,9 +57,11 @@ async def expand_with_sector_graph(
 
         client = get_knowledge_tree_client()
 
+        search_properties = sector_config.get("graph_search_properties")
+
         for entity_type, values in entities.items():
             for value in values[:5]:  # Limit per type
-                cypher = _build_cypher_query(graph_name, entity_type, value)
+                cypher = _build_cypher_query(graph_name, entity_type, value, search_properties)
                 if not cypher:
                     continue
 
@@ -92,23 +94,37 @@ async def expand_with_sector_graph(
     }
 
 
-def _build_cypher_query(graph_name: str, entity_type: str, value: str) -> Optional[str]:
-    """Build a Cypher query for an entity type and value."""
+_DEFAULT_GRAPH_PROPERTIES = ["name", "title"]
+
+
+def _build_cypher_query(
+    graph_name: str,
+    entity_type: str,
+    value: str,
+    search_properties: Optional[List[str]] = None,
+) -> Optional[str]:
+    """Build a Cypher query for an entity type and value.
+
+    Uses sector-specific graph_search_properties to build the WHERE clause,
+    so only relevant properties are searched per sector.
+
+    Args:
+        graph_name: Apache AGE graph name
+        entity_type: Entity type from extraction
+        value: Entity value to search
+        search_properties: Node properties to search (from SectorConfig.graph_search_properties)
+    """
     # Escape single quotes in value
     safe_value = value.replace("'", "\\'")
 
-    # Search across node properties for all sector graph types:
-    # - Legal: title, short_name, boe_id, domain (LegalLaw/LegalArticle)
-    # - Documental: name, associated_person (Persona, structural_document)
+    props = search_properties or _DEFAULT_GRAPH_PROPERTIES
+    where_clauses = [f"n.{prop} =~ '(?i).*{safe_value}.*'" for prop in props]
+    where_str = " OR ".join(where_clauses)
+
     return (
         f"SELECT * FROM cypher('{graph_name}', $$ "
         f"MATCH (n)-[r]-(m) "
-        f"WHERE n.title =~ '(?i).*{safe_value}.*' "
-        f"OR n.short_name =~ '(?i).*{safe_value}.*' "
-        f"OR n.boe_id =~ '(?i).*{safe_value}.*' "
-        f"OR n.domain =~ '(?i).*{safe_value}.*' "
-        f"OR n.name =~ '(?i).*{safe_value}.*' "
-        f"OR n.associated_person =~ '(?i).*{safe_value}.*' "
+        f"WHERE {where_str} "
         f"RETURN n, type(r) as rel, m LIMIT 10 "
         f"$$) AS (n agtype, rel agtype, m agtype)"
     )

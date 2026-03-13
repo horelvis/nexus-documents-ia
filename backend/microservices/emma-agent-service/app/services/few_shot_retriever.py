@@ -87,7 +87,7 @@ class FewShotRetriever:
             client = await self._get_http_client()
             response = await client.post(
                 f"{settings.weaviate_service_url}/embed",
-                json={"text": text},
+                json={"text": text, "task": "retrieval.query"},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
             )
 

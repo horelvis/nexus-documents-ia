@@ -236,10 +236,12 @@ async def _process_chunk(
     ]
 
     try:
+        from app.agents.llm_client import ModelRole
         response = await llm_client.chat(
             messages=messages,
             temperature=0.3,
             max_tokens=1024,
+            role=ModelRole.CHAT,
         )
         if response and response.content:
             return response.content
@@ -310,10 +312,12 @@ async def _aggregate_results(
         ]
 
         try:
+            from app.agents.llm_client import ModelRole
             response = await llm_client.chat(
                 messages=messages,
                 temperature=0.3,
                 max_tokens=2048,
+                role=ModelRole.CHAT,
             )
             if response and response.content:
                 return response.content
@@ -533,10 +537,11 @@ async def rlm_map_node(state: RAGState) -> Dict[str, Any]:
         return {"rlm_sub_results": [], "rlm_relevant_count": 0}
 
     try:
-        from app.agents.llm_client import get_llm_client
-        llm_client = await get_llm_client()
+        from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
+        llm_client = await get_llm_router()
     except Exception as e:
-        logger.error(f"RLM Map: Failed to get LLM client: {e}")
+        logger.error(f"RLM Map: Failed to get LLM router: {e}")
         tracker.add_error_step(f"No se pudo conectar al LLM: {e}")
         return {
             "rlm_sub_results": [],
@@ -665,10 +670,11 @@ async def rlm_reduce_node(state: RAGState) -> Dict[str, Any]:
     )
 
     try:
-        from app.agents.llm_client import get_llm_client
-        llm_client = await get_llm_client()
+        from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
+        llm_client = await get_llm_router()
     except Exception as e:
-        logger.error(f"RLM Reduce: Failed to get LLM client: {e}")
+        logger.error(f"RLM Reduce: Failed to get LLM router: {e}")
         # Fallback to concatenation
         final_result = "\n\n".join(relevant_texts)
         tracker.add_error_step(f"LLM no disponible, concatenando resultados: {e}")

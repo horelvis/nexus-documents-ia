@@ -38,6 +38,12 @@ SELECT create_vlabel('documental_graph', 'Categoria');
 SELECT create_vlabel('documental_graph', 'Flujo');
 SELECT create_vlabel('documental_graph', 'Ubicacion');
 
+-- Ontology proxy (for INSTANCE_OF edges to shared EntityType nodes)
+SELECT create_vlabel('documental_graph', 'EntityType');
+
+-- Memory Bank (MemoRAG-inspired document summaries for planner clue generation)
+SELECT create_vlabel('documental_graph', 'DocumentMemory');
+
 -- Create edge labels
 SELECT create_elabel('documental_graph', 'CONTIENE');
 SELECT create_elabel('documental_graph', 'CREADO_POR');
@@ -49,3 +55,8 @@ SELECT create_elabel('documental_graph', 'EN_FLUJO');
 SELECT create_elabel('documental_graph', 'ALMACENADO_EN');
 SELECT create_elabel('documental_graph', 'FIRMADO_POR');
 SELECT create_elabel('documental_graph', 'ASOCIADO_A');
+SELECT create_elabel('documental_graph', 'INSTANCE_OF');
+SELECT create_elabel('documental_graph', 'EXTRACTED_FROM');
+SELECT create_elabel('documental_graph', 'DEFINE');
+SELECT create_elabel('documental_graph', 'REFERENCIA');
+SELECT create_elabel('documental_graph', 'HAS_MEMORY');

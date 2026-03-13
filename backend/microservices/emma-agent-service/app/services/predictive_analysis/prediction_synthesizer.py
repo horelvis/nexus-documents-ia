@@ -254,10 +254,11 @@ async def _generate_recommendation(
     )
 
     try:
-        from app.agents.llm_client import get_llm_client
+        from app.agents.llm_router import get_llm_router
+        from app.agents.llm_client import ModelRole
 
-        llm_client = await get_llm_client()
-        response = await llm_client.chat(
+        router = await get_llm_router()
+        response = await router.chat(
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -265,6 +266,7 @@ async def _generate_recommendation(
             temperature=0.3,
             max_tokens=500,
             enable_thinking=False,
+            role=ModelRole.CHAT,
         )
 
         if response and response.content:

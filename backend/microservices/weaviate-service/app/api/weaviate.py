@@ -1,10 +1,11 @@
 """Weaviate API endpoints"""
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 import logging
 
 from app.core.security import verify_api_key
+from app.core.config import settings
 from app.services.weaviate_service import weaviate_service
 from app.schemas.weaviate import (
     DocumentCreate, DocumentResponse, SearchRequest, SearchResponse,
@@ -726,6 +727,76 @@ def _extract_person_from_path(folder_path: str) -> str:
     return ""
 
 
+async def _generate_document_memory(
+    tenant_id: str,
+    document_id: str,
+    document_text: str,
+    filename: str,
+    domain: str,
+    semantic_type: str,
+) -> None:
+    """Fire-and-forget call to emma-agent-service to generate a document memory."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.emma_agent_service_url}/emma/memory/generate",
+                json={
+                    "tenant_id": tenant_id,
+                    "document_id": document_id,
+                    "document_text": document_text[:8000],
+                    "filename": filename,
+                    "domain": domain,
+                    "semantic_type": semantic_type,
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
+                },
+            )
+            if response.status_code == 200:
+                logger.debug(f"Memory generated for doc {document_id}")
+            else:
+                logger.debug(f"Memory generation returned {response.status_code} for doc {document_id}")
+    except Exception as e:
+        logger.debug(f"Memory generation failed for doc {document_id}: {e}")
+
+
+async def _memorize_document(
+    tenant_id: str,
+    document_id: str,
+    document_text: str,
+    filename: str,
+    domain: str,
+    semantic_type: str,
+) -> None:
+    """Fire-and-forget call to emma-agent-service MemoRAG memorize endpoint."""
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.emma_agent_service_url}/emma/memorag/memorize",
+                json={
+                    "tenant_id": tenant_id,
+                    "document_id": document_id,
+                    "document_text": document_text[:8000],
+                    "filename": filename,
+                    "domain": domain,
+                    "semantic_type": semantic_type,
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
+                },
+            )
+            if response.status_code == 200:
+                logger.debug(f"MemoRAG memorized doc {document_id}")
+            else:
+                logger.debug(f"MemoRAG memorize returned {response.status_code} for doc {document_id}")
+    except Exception as e:
+        logger.debug(f"MemoRAG memorize failed for doc {document_id}: {e}")
+
+
 @router.post("/index/from-connector", response_model=ConnectorIndexResponse)
 async def index_from_connector(
     request: ConnectorIndexRequest,
@@ -982,6 +1053,32 @@ async def index_from_connector(
         if result.extracted_text:
             text_preview = result.extracted_text[:5000]
 
+        # Fire-and-forget: memorize document via MemoRAG (fallback to memory bank)
+        if result.extracted_text:
+            import asyncio
+            if settings.memorag_enabled:
+                asyncio.create_task(
+                    _memorize_document(
+                        tenant_id=request.tenant_id,
+                        document_id=request.document_id,
+                        document_text=result.extracted_text,
+                        filename=request.filename,
+                        domain=(request.learned_context.domain if request.learned_context else None) or result.contextual_domain or "",
+                        semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
+                    )
+                )
+            elif settings.memory_bank_enabled:
+                asyncio.create_task(
+                    _generate_document_memory(
+                        tenant_id=request.tenant_id,
+                        document_id=request.document_id,
+                        document_text=result.extracted_text,
+                        filename=request.filename,
+                        domain=(request.learned_context.domain if request.learned_context else None) or result.contextual_domain or "",
+                        semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
+                    )
+                )
+
         return ConnectorIndexResponse(
             success=True,
             document_id=request.document_id,
@@ -1204,9 +1301,9 @@ async def structural_summary(
     Get tenant structural summary (terminology) from SIL graph.
     """
     try:
-        from app.services.tenant_knowledge_service import tenant_knowledge_service
+        from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
-        summary = await tenant_knowledge_service.get_structural_summary(
+        summary = await knowledge_tree_legal_client.get_structural_summary(
             tenant_id=request.tenant_id
         )
         return StructuralSummaryResponse(summary=summary or "")
@@ -1296,6 +1393,9 @@ class HybridSearchRequest(BaseModel):
     domain_filter: Optional[str] = None
     semantic_type_filter: Optional[str] = None
     min_quality: Optional[float] = None
+    # Temporal filters
+    date_from: Optional[str] = Field(default=None, description="Filter docs created on or after this date (ISO 8601)")
+    date_to: Optional[str] = Field(default=None, description="Filter docs created on or before this date (ISO 8601)")
 
 
 @router.post("/collections/documents/hybrid", response_model=SearchResponse)
@@ -1327,6 +1427,8 @@ async def hybrid_search(
             domain_filter=request.domain_filter,
             semantic_type_filter=request.semantic_type_filter,
             min_quality=request.min_quality,
+            date_from=request.date_from,
+            date_to=request.date_to,
         )
 
         # Execute search

@@ -116,6 +116,9 @@ class SearchRequest(BaseModel):
     semantic_type_filter: Optional[str] = Field(default=None, description="Filter by semantic type (e.g., factura, contrato)")
     person_filter: Optional[str] = Field(default=None, description="Filter by associated person name")
     min_quality: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Minimum quality score threshold")
+    # Temporal filters
+    date_from: Optional[str] = Field(default=None, description="Filter docs created on or after this date (ISO 8601, e.g. '2026-02-01')")
+    date_to: Optional[str] = Field(default=None, description="Filter docs created on or before this date (ISO 8601, e.g. '2026-03-04')")
 
     class Config:
         json_schema_extra = {

@@ -115,12 +115,32 @@
     .status-verified { background: #dcfce7; color: #166534; }
     .status-corrected { background: #fef3c7; color: #92400e; }
     .status-rejected { background: #fee2e2; color: #991b1b; }
+    .verification-type {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-size: 7pt;
+      font-weight: 600;
+      text-transform: uppercase;
+      margin-left: 0.3em;
+    }
+    .vtype-corroborated { background: #dcfce7; color: #166534; }
+    .vtype-fidelity_only { background: #fef3c7; color: #92400e; }
+    .vtype-independent { background: #dbeafe; color: #1e40af; }
     .confidence-badge {
       font-size: 8pt;
       color: #64748b;
       margin-left: 0.5em;
     }
 
+    .claim-reason {
+      font-size: 8pt;
+      color: #475569;
+      font-style: italic;
+      margin-top: 0.3em;
+      padding-left: 0.6em;
+      border-left: 2px solid #cbd5e1;
+    }
     .claim-sources {
       font-size: 8pt;
       color: #64748b;
@@ -142,6 +162,23 @@
       color: #94a3b8;
       text-align: center;
     }
+    /* Source type badges (PDF-safe, no emoji) */
+    .src-badge {
+      display: inline-block;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 7pt;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    .src-web { background: #dbeafe; color: #1e40af; }
+    .src-upload { background: #fef3c7; color: #92400e; }
+    .src-juris { background: #f3e8ff; color: #6b21a8; }
+    .src-internal { background: #f1f5f9; color: #475569; }
+    .src-doi-ok { background: #dcfce7; color: #166534; }
+    .src-doi-bad { background: #fee2e2; color: #991b1b; }
+    .src-doi-mis { background: #fef3c7; color: #92400e; }
+    .src-cite-unk { background: #f1f5f9; color: #64748b; }
   </style>
 </head>
 <body>
@@ -152,7 +189,20 @@
       <span><strong>Fecha:</strong> {{ created_at }}</span>
       <span><strong>Sesión:</strong> {{ session_id[:16] }}…</span>
     </div>
+    {% if source_filenames %}
+    <div style="font-size: 9pt; color: #475569; margin-top: 0.4em;">
+      <strong>{{ 'Documento fuente:' if source_filenames | length == 1 else 'Documentos fuente:' }}</strong>
+      {{ source_filenames | join(", ") }}
+    </div>
+    {% endif %}
   </div>
+
+  {% if source_summary %}
+  <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; padding: 0.6em 0.8em; margin-bottom: 1em; font-size: 9pt;">
+    <div style="font-size: 7pt; font-weight: 600; color: #2563eb; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2em;">Resumen del documento fuente</div>
+    <div style="color: #475569;">{{ source_summary }}</div>
+  </div>
+  {% endif %}
 
   <div class="stats-grid">
     <div class="stat-card stat-verified">
@@ -183,7 +233,17 @@
     {{ claim.text }}
     <span class="confidence-badge">{{ "%.0f"|format(claim.confidence * 100) }}%</span>
     <span class="claim-status status-{{ claim.status }}">{{ claim.status }}</span>
-    {% if claim.evidence_document_ids %}
+    {% if claim.verification_type %}
+    <span class="verification-type vtype-{{ claim.verification_type }}">{% if claim.verification_type == 'corroborated' %}Corroborado{% elif claim.verification_type == 'fidelity_only' %}Fidelidad{% elif claim.verification_type == 'independent' %}Verificado{% endif %}</span>
+    {% endif %}
+    {% if claim.verification_reason %}
+    <div class="claim-reason">{{ claim.verification_reason }}</div>
+    {% endif %}
+    {% if claim.evidence_sources %}
+    <div class="claim-sources">
+      Fuentes: {% for src in claim.evidence_sources %}<span title="{{ src.id }}">{% if src.source == 'web' or src.source == 'public_knowledge' %}<span class="src-badge src-web">WEB</span>{% elif src.source == 'uploaded' %}<span class="src-badge src-upload">DOC</span>{% elif src.source == 'jurisprudence' %}<span class="src-badge src-juris">JUR</span>{% elif src.source == 'doi' or src.source == 'crossref' %}<span class="src-badge src-doi-ok">DOI ✓</span>{% elif src.source == 'doi_invalid' %}<span class="src-badge src-doi-bad">DOI ✗</span>{% elif src.source == 'doi_mismatch' %}<span class="src-badge src-doi-mis">DOI ≠</span>{% elif src.source == 'citation_unverified' %}<span class="src-badge src-cite-unk">CITA ?</span>{% else %}<span class="src-badge src-internal">INT</span>{% endif %} {{ src.title or src.id[:16] }}{% if src.roj %} ({{ src.roj }}){% endif %}</span>{% endfor %}
+    </div>
+    {% elif claim.evidence_document_ids %}
     <div class="claim-sources">
       Fuentes: {% for doc_id in claim.evidence_document_ids %}<span>{{ doc_id[:12] }}…</span>{% endfor %}
     </div>
@@ -205,7 +265,7 @@
       {% for src in sources %}
       <tr>
         <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
-          {% if src.source == 'web' %}🌐 Web{% elif src.source == 'uploaded' %}📎 Cargado{% else %}📄 Interno{% endif %}
+          {% if src.source == 'web' or src.source == 'public_knowledge' %}<span class="src-badge src-web">WEB</span>{% elif src.source == 'uploaded' %}<span class="src-badge src-upload">DOC</span>{% elif src.source == 'jurisprudence' %}<span class="src-badge src-juris">JUR</span>{% elif src.source == 'doi' %}<span class="src-badge src-doi-ok">DOI ✓</span>{% elif src.source == 'crossref' %}<span class="src-badge src-doi-ok">DOI ✓</span>{% elif src.source == 'doi_invalid' %}<span class="src-badge src-doi-bad">DOI ✗</span>{% elif src.source == 'doi_mismatch' %}<span class="src-badge src-doi-mis">DOI ≠</span>{% elif src.source == 'citation_unverified' %}<span class="src-badge src-cite-unk">CITA ?</span>{% else %}<span class="src-badge src-internal">INT</span>{% endif %}
         </td>
         <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">{{ src.title or src.id }}</td>
         <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em; word-break:break-all;">{{ src.url or '—' }}</td>
@@ -214,6 +274,82 @@
     </tbody>
   </table>
   {% endif %}
+
+  {% if doi_validations %}
+  <h2>Validación Bibliográfica ({{ doi_validations | selectattr("valid") | list | length }}/{{ doi_validations | length }} DOIs válidos)</h2>
+  <table style="width:100%; border-collapse:collapse; font-size:9pt;">
+    <thead>
+      <tr style="background:#f1f5f9;">
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:left; width:10%;">Estado</th>
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:left; width:30%;">DOI</th>
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:left;">Publicación</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for dv in doi_validations %}
+      <tr>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          {% if dv.valid %}<span class="src-badge src-doi-ok">✓ Válido</span>{% else %}<span class="src-badge src-doi-bad">✗ Inválido</span>{% endif %}
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em; font-family:monospace; font-size:8pt; word-break:break-all;">
+          {% if dv.valid %}<a href="https://doi.org/{{ dv.doi }}" style="color:#2563eb;">{{ dv.doi }}</a>{% else %}<span style="color:#dc2626;">{{ dv.doi }}</span>{% endif %}
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          {% if dv.metadata and dv.metadata.title %}{{ dv.metadata.title }}{% if dv.metadata.authors %} — {{ dv.metadata.authors[:3] | join(", ") }}{% endif %}{% if dv.metadata.year %} ({{ dv.metadata.year }}){% endif %}{% else %}<em style="color:#94a3b8;">No se pudo resolver</em>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <h2>Metodología de Verificación</h2>
+  <p style="font-size:9pt; color:#475569; margin-bottom:0.8em;">
+    Cada afirmación se evalúa en dos niveles independientes, siguiendo principios de
+    <em>SAFE</em> (Google DeepMind, 2024), <em>CoVe</em> (Meta, 2024) y <em>FFCI</em> (Koto et al.):
+  </p>
+  <table style="width:100%; border-collapse:collapse; font-size:9pt; margin-bottom:1em;">
+    <thead>
+      <tr style="background:#f1f5f9;">
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:left; width:22%;">Tipo</th>
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:left;">Significado</th>
+        <th style="border:1px solid #e2e8f0; padding:0.4em 0.6em; text-align:center; width:15%;">Confianza máx.</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          <span class="verification-type vtype-fidelity_only">Fidelidad</span>
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          La afirmación representa fielmente el documento fuente (NLI entailment), pero no se encontró evidencia independiente que la confirme.
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em; text-align:center; font-weight:bold; color:#92400e;">80%</td>
+      </tr>
+      <tr>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          <span class="verification-type vtype-corroborated">Corroborado</span>
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          La afirmación es fiel al documento fuente <strong>y además</strong> está respaldada por evidencia independiente (otros documentos, legislación, web).
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em; text-align:center; font-weight:bold; color:#166534;">100%</td>
+      </tr>
+      <tr>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          <span class="verification-type vtype-independent">Verificado</span>
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em;">
+          No hay documento fuente de referencia. La afirmación está respaldada exclusivamente por evidencia independiente externa.
+        </td>
+        <td style="border:1px solid #e2e8f0; padding:0.3em 0.6em; text-align:center; font-weight:bold; color:#1e40af;">100%</td>
+      </tr>
+    </tbody>
+  </table>
+  <p style="font-size:8pt; color:#64748b; line-height:1.5;">
+    <strong>Tier 1 — Fidelidad:</strong> Evaluación NLI (Natural Language Inference) que verifica si la afirmación está contenida (<em>entailed</em>) en el texto fuente, basada en el framework FACTS Grounding (Google DeepMind, 2024). La confianza se limita al 80% porque la fuente de generación y verificación coinciden.<br>
+    <strong>Tier 2 — Corroboración externa:</strong> Búsqueda en fuentes independientes (Weaviate excluyendo documentos fuente, legislación BOE, web, jurisprudencia CENDOJ), siguiendo el principio de verificación independiente de SAFE (Google DeepMind, 2024) y CoVe (Meta, 2024).
+  </p>
 
   <div class="footer">
     Generado por NouxCubeIA &mdash; Tiempo de ejecución: {{ execution_time_ms }}ms

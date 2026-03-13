@@ -86,7 +86,7 @@ class GraphEnhancedRetriever:
         self._min_entity_length = 3    # Min chars for entity detection
 
     async def initialize(self) -> None:
-        """Initialize the retriever and graph service."""
+        """Initialize the retriever with knowledge-tree HTTP client."""
         if self._initialized:
             return
 
@@ -95,27 +95,10 @@ class GraphEnhancedRetriever:
             return
 
         try:
-            if settings.rag_graph_use_age:
-                # Use Apache AGE backend (PostgreSQL native graph)
-                from ..knowledge.age_graph_service import age_knowledge_graph
-                self._graph_service = age_knowledge_graph
-                logger.info("📊 Using Apache AGE backend for knowledge graph")
-            else:
-                # Fallback to NetworkX + Redis backend
-                from ..knowledge.graph_service import knowledge_graph_service
-                self._graph_service = knowledge_graph_service
-                logger.info("📊 Using NetworkX+Redis backend for knowledge graph")
-
-            await self._graph_service.initialize()
-
-            # Initialize public legal graph service for PublicKnowledge queries
-            try:
-                from ..sil.legal_graph_service import legal_graph
-                await legal_graph.initialize()
-                self._legal_graph_service = legal_graph
-                logger.info("📊 Public legal graph available for query expansion")
-            except Exception as e:
-                logger.debug(f"Public legal graph not available: {e}")
+            from app.clients.knowledge_tree_client import knowledge_tree_legal_client
+            self._graph_service = knowledge_tree_legal_client
+            self._legal_graph_service = knowledge_tree_legal_client
+            logger.info("📊 Using knowledge-tree-service HTTP for graph expansion")
 
             self._initialized = True
             logger.info("✅ GraphEnhancedRetriever initialized")
@@ -157,78 +140,58 @@ class GraphEnhancedRetriever:
             return query_analysis
 
         try:
-            # Step 1: Detect entities in the query
+            # Use knowledge-tree-service HTTP to search entities in query
             query_text = query_analysis.original_query
-            detected = await self._graph_service.find_entities_in_text(
+
+            # Extract potential entity terms (words > 3 chars) and search graph
+            result = await self._graph_service.search_entity(
                 tenant_id=tenant_id,
-                text=query_text,
-                limit=5,
+                value=query_text,
+                max_depth=settings.rag_graph_traversal_depth,
+                limit=self._max_expansion_terms,
             )
 
-            if not detected:
+            entity = result.get("entity")
+            neighbors = result.get("neighbors", [])
+
+            if not entity and not neighbors:
                 logger.debug(f"No graph entities found in query: {query_text[:50]}...")
                 return query_analysis
 
-            logger.info(f"🔍 Graph expansion: found {len(detected)} entities in query")
+            logger.info(f"🔍 Graph expansion: found entity + {len(neighbors)} neighbors")
 
-            # Step 2: Get neighbors for each detected entity
-            all_neighbors: List[Dict[str, Any]] = []
-            seen_values: Set[str] = {d.get("entity_value", "").lower() for d in detected}
+            # Collect expansion terms from neighbors
+            seen_values: Set[str] = set()
+            if entity:
+                seen_values.add(entity.get("value", "").lower())
 
-            for entity in detected:
-                entity_id = entity.get("entity_id")
-                if not entity_id:
-                    continue
-
-                neighbors = await self._graph_service.get_neighbors(
-                    tenant_id=tenant_id,
-                    entity_id=entity_id,
-                    max_depth=settings.rag_graph_traversal_depth,
-                )
-
-                for neighbor in neighbors:
-                    value = neighbor.get("entity_value", "")
-                    if value.lower() not in seen_values:
-                        seen_values.add(value.lower())
-                        all_neighbors.append(neighbor)
-
-            if not all_neighbors:
-                logger.debug("No new neighbors found via graph traversal")
-                return query_analysis
-
-            # Step 3: Select best expansion terms
-            # Sort by relationship strength and select top N
-            all_neighbors.sort(key=lambda x: x.get("relationship_strength", 0), reverse=True)
-            expansion_terms = [
-                n.get("entity_value", "")
-                for n in all_neighbors[:self._max_expansion_terms]
-                if len(n.get("entity_value", "")) >= self._min_entity_length
-            ]
+            expansion_terms = []
+            for neighbor in neighbors:
+                value = neighbor.get("value", "") or neighbor.get("entity_value", "")
+                if value and value.lower() not in seen_values and len(value) >= self._min_entity_length:
+                    seen_values.add(value.lower())
+                    expansion_terms.append(value)
 
             if not expansion_terms:
                 return query_analysis
 
-            # Step 4: Create expanded query variation
-            expansion_text = " ".join(expansion_terms)
+            # Create expanded query variation
+            expansion_text = " ".join(expansion_terms[:self._max_expansion_terms])
             expanded_variation = f"{query_text} {expansion_text}"
 
-            # Add to query variations (will be searched alongside original)
             if expanded_variation not in query_analysis.query_variations:
                 query_analysis.query_variations.append(expanded_variation)
 
-            # Store graph expansion metadata
             if not hasattr(query_analysis, 'graph_expansion') or query_analysis.graph_expansion is None:
-                # Add metadata to the existing object
                 query_analysis.graph_expansion = {
                     "applied": True,
-                    "detected_entities": [e.get("entity_value") for e in detected],
+                    "detected_entities": [entity.get("value")] if entity else [],
                     "expanded_terms": expansion_terms,
                     "expansion_variation": expanded_variation,
                 }
 
             logger.info(
-                f"📊 Graph expansion: added {len(expansion_terms)} terms "
-                f"from {len(detected)} detected entities"
+                f"📊 Graph expansion: added {len(expansion_terms)} terms via knowledge-tree"
             )
 
             return query_analysis
@@ -257,9 +220,6 @@ class GraphEnhancedRetriever:
             boe_ids = boe_pattern.findall(query_text)
 
             # Also check for law short names (ET, LPRL, etc.)
-            from ..sil.legal_graph_service import legal_graph
-            # Try to find laws mentioned by short name
-            # This is a simple approach — check known abbreviations
             from app.api.boe_legislation import LAW_SHORT_NAMES
             short_to_boe = {v: k for k, v in LAW_SHORT_NAMES.items()}
 
@@ -271,12 +231,13 @@ class GraphEnhancedRetriever:
             if not boe_ids:
                 return query_analysis
 
-            # Get neighbors from legal graph
+            # Get neighbors from legal graph via HTTP client
+            from app.clients.knowledge_tree_client import knowledge_tree_legal_client
             all_neighbors = []
             seen = set(boe_ids)
 
             for bid in boe_ids:
-                neighbors = await legal_graph.get_law_neighbors(bid, max_depth=1)
+                neighbors = await knowledge_tree_legal_client.get_law_neighbors(bid, max_depth=1)
                 for n in neighbors:
                     n_id = n.get("boe_id", "")
                     if n_id and n_id not in seen:
@@ -346,46 +307,27 @@ class GraphEnhancedRetriever:
             return result
 
         try:
-            # Detect entities
-            detected = await self._graph_service.find_entities_in_text(
+            search_result = await self._graph_service.search_entity(
                 tenant_id=tenant_id,
-                text=query,
-                limit=5,
+                value=query,
+                max_depth=settings.rag_graph_traversal_depth,
+                limit=self._max_expansion_terms,
             )
-            result.detected_entities = detected
 
-            if not detected:
+            entity = search_result.get("entity")
+            neighbors = search_result.get("neighbors", [])
+
+            if entity:
+                result.detected_entities = [entity]
+            result.neighbor_entities = neighbors
+
+            if not neighbors:
                 return result
 
-            # Get all neighbors
-            all_neighbors = []
-            seen_values = {d.get("entity_value", "").lower() for d in detected}
-
-            for entity in detected:
-                entity_id = entity.get("entity_id")
-                if not entity_id:
-                    continue
-
-                neighbors = await self._graph_service.get_neighbors(
-                    tenant_id=tenant_id,
-                    entity_id=entity_id,
-                    max_depth=settings.rag_graph_traversal_depth,
-                )
-
-                for neighbor in neighbors:
-                    value = neighbor.get("entity_value", "")
-                    if value.lower() not in seen_values:
-                        seen_values.add(value.lower())
-                        all_neighbors.append(neighbor)
-
-            result.neighbor_entities = all_neighbors
-
-            # Build expansion terms
-            all_neighbors.sort(key=lambda x: x.get("relationship_strength", 0), reverse=True)
             expansion_terms = [
-                n.get("entity_value", "")
-                for n in all_neighbors[:self._max_expansion_terms]
-                if len(n.get("entity_value", "")) >= self._min_entity_length
+                n.get("value", "") or n.get("entity_value", "")
+                for n in neighbors[:self._max_expansion_terms]
+                if len(n.get("value", "") or n.get("entity_value", "")) >= self._min_entity_length
             ]
 
             result.expanded_terms = expansion_terms

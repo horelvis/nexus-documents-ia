@@ -28,7 +28,7 @@ fi
 cp "${LIVE_DIR}/fullchain.pem" "${CERT_DIR}/cert.pem"
 cp "${LIVE_DIR}/privkey.pem"   "${CERT_DIR}/key.pem"
 chmod 644 "${CERT_DIR}/cert.pem"
-chmod 600 "${CERT_DIR}/key.pem"
+chmod 644 "${CERT_DIR}/key.pem"
 
 echo "[deploy-hook] Certificates deployed. Signaling nginx reload..."
 touch "$TRIGGER"

@@ -18,7 +18,14 @@ logger = logging.getLogger(__name__)
 async def extract_item_node(state: dict) -> dict:
     """Extract next item via strategy, check duplicates."""
     strategy = get_strategy(state["mode"])
-    source_context = state.get("source_context", "")
+
+    # Use current section if available, full source_context as fallback
+    sections = state.get("source_sections", [])
+    section_idx = state.get("current_section_index", 0)
+    if sections and section_idx < len(sections):
+        source_context = sections[section_idx]
+    else:
+        source_context = state.get("source_context", "")
 
     try:
         item = await strategy.extract_item(state, source_context)

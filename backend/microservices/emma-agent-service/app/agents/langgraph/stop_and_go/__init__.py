@@ -25,7 +25,11 @@ Usage (from service layer):
 
 from .state import StopAndGoState, create_initial_state
 from .strategy import StopAndGoStrategy, register_strategy, get_strategy
-from .graph import create_stop_and_go_graph, get_stop_and_go_graph
+from .graph import (
+    create_stop_and_go_graph,
+    get_stop_and_go_graph,
+    get_stop_and_go_graph_hitl,
+)
 from .runner import stream_stop_and_go
 
 # Import strategies to trigger registration
@@ -37,6 +41,7 @@ __all__ = [
     "create_initial_state",
     "create_stop_and_go_graph",
     "get_stop_and_go_graph",
+    "get_stop_and_go_graph_hitl",
     "stream_stop_and_go",
     "register_strategy",
     "get_strategy",
