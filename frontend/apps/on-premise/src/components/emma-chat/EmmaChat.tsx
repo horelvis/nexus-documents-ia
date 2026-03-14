@@ -16,6 +16,8 @@ import { PredictiveAnalysisDialog } from './PredictiveAnalysisDialog'
 import { useVerifiedGeneration } from '@/contexts/verified-generation-context'
 import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata, PredictiveFactorInfo, PredictiveAnalysisMetadata } from '@/lib/types/emma'
 import { isDocGenResult, extractDocGenMetadata } from '@/lib/utils/docgen-detector'
+import { isForgeResult, extractForgeMetadata } from '@/lib/utils/forge-detector'
+import { getSessionInfo } from '@/lib/services/forge.service'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { IconBrain, IconBolt } from '@tabler/icons-react'
@@ -778,6 +780,52 @@ export function EmmaChat({
                   const finalSuggestions = Array.isArray(backendSuggestions) && backendSuggestions.length > 0
                     ? backendSuggestions
                     : getContextualSuggestions(query, finalContent, (data.final_result as any)?.tools_used)
+
+                  // Detect forge_document tool result
+                  if (isForgeResult({
+                    content: finalContent,
+                    toolsUsed: (data.final_result as any)?.tools_used,
+                  })) {
+                    const forgeMeta = extractForgeMetadata(finalContent, data.execution_time_ms)
+                    if (forgeMeta) {
+                      // Enrich with full session data via API (fire-and-forget)
+                      getSessionInfo(forgeMeta.session_id).then(resp => {
+                        if (resp.data) {
+                          // Update message in place with enriched data
+                          updateMessages(prev => prev.map(m =>
+                            m.id === msg.id ? {
+                              ...m,
+                              forge: {
+                                ...forgeMeta,
+                                fields: resp.data!.fields,
+                                source_title: resp.data!.source_title || forgeMeta.source_title,
+                                document_type: resp.data!.document_type || forgeMeta.document_type,
+                                confidence: resp.data!.confidence || forgeMeta.confidence,
+                                outputs: resp.data!.outputs,
+                                status: resp.data!.status as any,
+                              },
+                            } : m
+                          ))
+                        }
+                      })
+
+                      return {
+                        ...msg,
+                        type: 'forge_result' as const,
+                        content: finalContent,
+                        forge: forgeMeta,
+                        metadata: {
+                          processing_time: data.execution_time_ms,
+                          execution_time_ms: data.execution_time_ms,
+                          tools_used: (data.final_result as any)?.tools_used || [],
+                          slmThinkingSteps: finalSlmSteps.length > 0 ? finalSlmSteps : undefined,
+                          slmIsThinking: false,
+                          isStreaming: false,
+                        },
+                        suggestions: finalSuggestions,
+                      }
+                    }
+                  }
 
                   // Detect document generation results (logic in docgen-detector.ts)
                   if (isDocGenResult({
