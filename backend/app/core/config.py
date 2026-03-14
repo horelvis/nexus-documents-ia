@@ -217,6 +217,12 @@ class Settings(BaseSettings):
         "TEMPLATE_EDITOR_SERVICE_URL", "http://template-editor-service:8011"
     )
 
+    # Document Forge Service (template-based document generation)
+    DOCUMENT_FORGE_SERVICE_URL: str = os.getenv(
+        "DOCUMENT_FORGE_SERVICE_URL", "http://document-forge-service:8013"
+    )
+    DOCUMENT_FORGE_ENABLED: bool = os.getenv("DOCUMENT_FORGE_ENABLED", "true").lower() == "true"
+
     # LLM / AI providers
     # NOTE: Ollama was removed; vLLM is the default local provider.
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "vllm").lower()

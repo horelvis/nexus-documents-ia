@@ -197,3 +197,8 @@ logger.debug("Data Learning routes enabled")
 from app.api.v1 import prompts
 api_router.include_router(prompts.router)  # Router already has prefix="/prompts"
 logger.debug("Prompt management routes enabled")
+
+# Document Forge - Template-based document generation
+from app.api.v1 import forge
+api_router.include_router(forge.router, prefix="/forge", tags=["document-forge"])
+logger.debug("Document Forge routes enabled")
