@@ -14,6 +14,7 @@ import { ReasoningCollapsible } from './ReasoningCollapsible'
 import { VerifiedDocumentResult } from './VerifiedDocumentResult'
 import { PredictionResult } from './PredictionResult'
 import { DocGenResult } from './DocGenResult'
+import { ForgeResult } from './ForgeResult'
 
 interface EmmaRenderChatProps {
   messages: EmmaMessage[]
@@ -263,6 +264,34 @@ function MessageBubble({
               </div>
             </div>
           )}
+        </div>
+      </div>
+    )
+  }
+
+  // Document Forge result — analyze/render/persist
+  if (message.type === 'forge_result' && message.forge) {
+    const forgeSlmSteps = message.metadata?.slmThinkingSteps || []
+    return (
+      <div className="w-full">
+        <div className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
+          <div className="flex items-center gap-2">
+            <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+            <span className="text-xs font-mono text-primary uppercase tracking-wide">EMMA:</span>
+          </div>
+          {forgeSlmSteps.length > 0 && (
+            <ReasoningCollapsible
+              steps={forgeSlmSteps.map((s: SLMThinkingStep) => ({
+                type: s.type as ReasoningStep['type'],
+                content: s.content,
+                detail: s.detail,
+                entities: s.entities,
+                confidence: s.confidence,
+              }))}
+              isActive={false}
+            />
+          )}
+          <ForgeResult metadata={message.forge} />
         </div>
       </div>
     )
