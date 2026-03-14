@@ -1,5 +1,10 @@
 """PDF text replacement using PyMuPDF redact & insert strategy.
 
+Two search strategies:
+  1. Direct match: search_for(current_value) — for unique text values
+  2. Context-anchor: search_for(context_hint) to find the line, then locate
+     the dots/placeholder on that line — for form PDFs where all fields are "..."
+
 Three-phase algorithm per page:
   Phase 1 — Collect: search all fields, validate matches, capture font styles
   Phase 2 — Redact: batch all redactions, apply once per page
@@ -7,6 +12,7 @@ Three-phase algorithm per page:
 """
 
 import logging
+import re
 from dataclasses import dataclass
 
 import fitz  # PyMuPDF
@@ -48,56 +54,63 @@ _FONT_MAP = {
     "garamond": "tiro",
 }
 
-# Base14 font names recognized by PyMuPDF
 _BASE14_NAMES = {
-    "helv", "hebo", "heit", "hebi",  # Helvetica family
-    "tiro", "tibo", "tiit", "tibi",  # Times family
-    "cour", "cobo", "coit", "cobi",  # Courier family
-    "symb", "zadb",                   # Symbol, ZapfDingbats
+    "helv", "hebo", "heit", "hebi",
+    "tiro", "tibo", "tiit", "tibi",
+    "cour", "cobo", "coit", "cobi",
+    "symb", "zadb",
 }
+
+# Pattern to detect "dots-only" current_value (form placeholders)
+_DOTS_PATTERN = re.compile(r"^[.\s]+$")
+# Minimum dots sequence to search for in PDF
+_MIN_DOTS = "...."
 
 
 def _normalize_font_name(font_name: str) -> str:
-    """Normalize a PDF font name to a Base14 identifier.
-
-    Strips subset prefix (e.g., 'ABCDEF+ArialMT' → 'arialmt'),
-    lowercases, removes spaces. Falls back to 'helv' (Helvetica).
-    """
+    """Normalize a PDF font name to a Base14 identifier."""
     if not font_name:
         return "helv"
-
-    # Strip subset prefix (6 uppercase letters + '+')
     if "+" in font_name:
         font_name = font_name.split("+", 1)[1]
-
     normalized = font_name.lower().replace(" ", "")
-
-    # Already a Base14 name?
     if normalized in _BASE14_NAMES:
         return normalized
-
-    # Try exact match in font map
     if normalized in _FONT_MAP:
         return _FONT_MAP[normalized]
-
-    # Try prefix match (e.g., "arialmt-regular" → "arialmt")
     for key, value in _FONT_MAP.items():
         if normalized.startswith(key):
             return value
-
     return "helv"
+
+
+def _extract_context_anchor(context_hint: str) -> str:
+    """Extract a searchable text anchor from the context_hint.
+
+    Strips dots and takes the longest non-dots fragment (>5 chars).
+    """
+    if not context_hint:
+        return ""
+    # Split on runs of dots and take fragments
+    parts = re.split(r"\.{3,}", context_hint)
+    # Find longest non-trivial fragment
+    best = ""
+    for part in parts:
+        cleaned = part.strip()
+        if len(cleaned) > len(best) and len(cleaned) >= 5:
+            best = cleaned
+    return best
 
 
 @dataclass
 class PendingReplacement:
     """A text replacement waiting to be applied."""
-
     rect: fitz.Rect
     new_value: str
     font_size: float
-    font_name: str  # Base14 identifier
-    color: tuple  # RGB floats (0-1 range)
-    field_name: str  # for logging
+    font_name: str
+    color: tuple
+    field_name: str
 
 
 class PdfReplacer:
@@ -111,128 +124,198 @@ class PdfReplacer:
     ) -> tuple[bytes, int, list[str]]:
         """Replace field values in a PDF document.
 
-        Args:
-            pdf_bytes: Original PDF file bytes.
-            fields: Detected fields from analyzer (with current_value).
-            field_values: Map of field_name → new_value from user.
-
         Returns:
             Tuple of (modified_pdf_bytes, fields_replaced, failed_fields).
         """
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
-        # Build replacement list: (current_value, new_value, field_name)
-        replacements: list[tuple[str, str, str]] = []
+        # Build replacement list with context
+        replacements = []
         for f in fields:
             name = f.get("field_name", "")
             current = f.get("current_value", "")
+            hint = f.get("context_hint", "")
             if name in field_values and current:
-                replacements.append((current, field_values[name], name))
+                replacements.append({
+                    "field_name": name,
+                    "current_value": current,
+                    "new_value": field_values[name],
+                    "context_hint": hint,
+                    "is_dots": bool(_DOTS_PATTERN.match(current.strip())),
+                })
 
-        # Sort by current_value length descending (avoid partial matches)
-        replacements.sort(key=lambda x: len(x[0]), reverse=True)
+        # Sort: non-dots first (direct match), then dots (context-anchor)
+        # Within each group, sort by current_value length descending
+        replacements.sort(key=lambda x: (x["is_dots"], -len(x["current_value"])))
 
-        # Collect pending replacements per page
         pending: dict[int, list[PendingReplacement]] = {}
         replaced_fields: set[str] = set()
         failed_fields: list[str] = []
+        # Track which rects have been claimed to avoid double-replacement
+        claimed_rects: set[tuple[int, float, float, float, float]] = set()
 
-        # Phase 1: Collect matches across all pages
-        for current_value, new_value, field_name in replacements:
+        for repl in replacements:
             found = False
-            for page_num in range(len(doc)):
-                page = doc[page_num]
-                rects = page.search_for(current_value)
-                for rect in rects:
-                    # Validate: confirm the rect actually contains our text
-                    clip_text = page.get_text("text", clip=rect).strip()
-                    if not clip_text or current_value not in clip_text:
-                        logger.debug(
-                            "Skipping false match for '%s' on page %d: clip='%s'",
-                            field_name, page_num, clip_text[:50],
-                        )
-                        continue
-
-                    # Capture font properties
-                    font_size, font_name, color = self._extract_style(page, rect)
-
-                    if page_num not in pending:
-                        pending[page_num] = []
-                    pending[page_num].append(
-                        PendingReplacement(
-                            rect=rect,
-                            new_value=new_value,
-                            font_size=font_size,
-                            font_name=font_name,
-                            color=color,
-                            field_name=field_name,
-                        )
-                    )
-                    found = True
-
-            if found:
-                replaced_fields.add(field_name)
+            if repl["is_dots"]:
+                found = self._find_by_context(
+                    doc, repl, pending, claimed_rects,
+                )
             else:
-                failed_fields.append(field_name)
-                logger.warning(
-                    "Could not find text for field '%s': '%s'",
-                    field_name, current_value[:50],
+                found = self._find_by_direct_search(
+                    doc, repl, pending, claimed_rects,
                 )
 
-        # Phase 2 & 3: Redact and insert per page
-        for page_num, page_replacements in pending.items():
+            if found:
+                replaced_fields.add(repl["field_name"])
+            else:
+                failed_fields.append(repl["field_name"])
+                logger.warning(
+                    "Could not locate field '%s' in PDF", repl["field_name"],
+                )
+
+        # Phase 2 & 3: Cover and insert per page
+        # Strategy: white rectangle overlay + text insertion.
+        # This is more reliable than apply_redactions() which may not
+        # remove text from all PDF content stream formats.
+        for page_num in sorted(pending.keys()):
+            page_repls = pending[page_num]
             page = doc[page_num]
 
-            # Phase 2: Batch redactions
-            for repl in page_replacements:
-                page.add_redact_annot(repl.rect, text="", fill=(1, 1, 1))
-            page.apply_redactions()
+            # Phase 2: Draw white rectangles over old text
+            shape = page.new_shape()
+            for pr in page_repls:
+                # Expand rect slightly for clean coverage
+                cover = pr.rect + (-1, -1, 1, 1)
+                shape.draw_rect(cover)
+                shape.finish(fill=(1, 1, 1), color=(1, 1, 1), width=0)
+            shape.commit()
 
             # Phase 3: Insert new text
-            for repl in page_replacements:
-                # Baseline positioning: rect bottom minus descent estimate (~20%)
-                baseline_y = repl.rect.y1 - (repl.font_size * 0.2)
+            for pr in page_repls:
+                baseline_y = pr.rect.y1 - (pr.font_size * 0.15)
                 try:
                     page.insert_text(
-                        point=(repl.rect.x0, baseline_y),
-                        text=repl.new_value,
-                        fontsize=repl.font_size,
-                        fontname=repl.font_name,
-                        color=repl.color,
+                        point=(pr.rect.x0 + 1, baseline_y),
+                        text=pr.new_value,
+                        fontsize=pr.font_size,
+                        fontname=pr.font_name,
+                        color=pr.color,
                     )
                 except Exception as e:
-                    logger.error(
-                        "Failed to insert text for '%s': %s", repl.field_name, e,
-                    )
-                    # Try with fallback font
+                    logger.error("Insert failed for '%s': %s", pr.field_name, e)
                     try:
                         page.insert_text(
-                            point=(repl.rect.x0, baseline_y),
-                            text=repl.new_value,
-                            fontsize=repl.font_size,
+                            point=(pr.rect.x0 + 1, baseline_y),
+                            text=pr.new_value,
+                            fontsize=pr.font_size,
                             fontname="helv",
-                            color=repl.color,
+                            color=pr.color,
                         )
                     except Exception as e2:
-                        logger.error("Fallback insert also failed: %s", e2)
+                        logger.error("Fallback insert failed: %s", e2)
 
-        # Save modified PDF
         result_bytes = doc.tobytes()
         doc.close()
-
         return result_bytes, len(replaced_fields), failed_fields
+
+    def _find_by_direct_search(
+        self,
+        doc: fitz.Document,
+        repl: dict,
+        pending: dict[int, list[PendingReplacement]],
+        claimed: set,
+    ) -> bool:
+        """Strategy 1: Direct text search for unique values."""
+        found = False
+        current_value = repl["current_value"]
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            rects = page.search_for(current_value)
+            for rect in rects:
+                key = (page_num, round(rect.x0, 1), round(rect.y0, 1),
+                       round(rect.x1, 1), round(rect.y1, 1))
+                if key in claimed:
+                    continue
+                # Validate
+                clip = page.get_text("text", clip=rect).strip()
+                if not clip or current_value not in clip:
+                    continue
+                fs, fn, color = self._extract_style(page, rect)
+                pending.setdefault(page_num, []).append(
+                    PendingReplacement(
+                        rect=rect, new_value=repl["new_value"],
+                        font_size=fs, font_name=fn, color=color,
+                        field_name=repl["field_name"],
+                    )
+                )
+                claimed.add(key)
+                found = True
+        return found
+
+    def _find_by_context(
+        self,
+        doc: fitz.Document,
+        repl: dict,
+        pending: dict[int, list[PendingReplacement]],
+        claimed: set,
+    ) -> bool:
+        """Strategy 2: Context-anchor search for dots/placeholder fields.
+
+        1. Extract anchor text from context_hint (non-dots part)
+        2. Search for anchor to find the line (Y coordinate)
+        3. Find dots rects on that same line, to the right of the anchor
+        4. Claim the first unclaimed dots rect
+        """
+        anchor = _extract_context_anchor(repl["context_hint"])
+        if not anchor:
+            # Fallback: try direct search
+            return self._find_by_direct_search(doc, repl, pending, claimed)
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            anchor_rects = page.search_for(anchor)
+            if not anchor_rects:
+                continue
+
+            for ar in anchor_rects:
+                # Search for dots on the same line (similar Y)
+                dots_rects = page.search_for(_MIN_DOTS)
+                # Filter: same line (Y within 3pt) and to the right of anchor
+                same_line = []
+                for dr in dots_rects:
+                    if abs(dr.y0 - ar.y0) < 3 and dr.x0 >= ar.x0 - 5:
+                        key = (page_num, round(dr.x0, 1), round(dr.y0, 1),
+                               round(dr.x1, 1), round(dr.y1, 1))
+                        if key not in claimed:
+                            same_line.append((dr, key))
+
+                if not same_line:
+                    continue
+
+                # Take the first unclaimed dots rect (closest to anchor)
+                same_line.sort(key=lambda x: x[0].x0)
+                dots_rect, rect_key = same_line[0]
+
+                fs, fn, color = self._extract_style(page, dots_rect)
+                pending.setdefault(page_num, []).append(
+                    PendingReplacement(
+                        rect=dots_rect, new_value=repl["new_value"],
+                        font_size=fs, font_name=fn, color=color,
+                        field_name=repl["field_name"],
+                    )
+                )
+                claimed.add(rect_key)
+                return True
+
+        return False
 
     def _extract_style(
         self, page: fitz.Page, rect: fitz.Rect
     ) -> tuple[float, str, tuple]:
-        """Extract font size, name, and color from text in a rect.
-
-        Returns:
-            (font_size, base14_font_name, rgb_color_tuple)
-        """
+        """Extract font size, Base14 name, and RGB color from text in a rect."""
         font_size = 12.0
         font_name = "helv"
-        color = (0, 0, 0)  # black
+        color = (0, 0, 0)
 
         try:
             text_dict = page.get_text("dict", clip=rect)
@@ -242,7 +325,6 @@ class PdfReplacer:
                         font_size = span.get("size", 12.0)
                         raw_font = span.get("font", "")
                         font_name = _normalize_font_name(raw_font)
-                        # Color is an int in PyMuPDF — convert to RGB tuple
                         color_int = span.get("color", 0)
                         color = (
                             ((color_int >> 16) & 0xFF) / 255.0,
@@ -251,7 +333,7 @@ class PdfReplacer:
                         )
                         return font_size, font_name, color
         except Exception as e:
-            logger.warning("Could not extract style from rect: %s", e)
+            logger.warning("Could not extract style: %s", e)
 
         return font_size, font_name, color
 
