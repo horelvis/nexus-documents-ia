@@ -30,18 +30,26 @@ async def persist_document(
             detail=f"Session must be rendered before persisting. Current: {session.status}",
         )
 
-    # Get rendered outputs
+    # Get rendered outputs — format-aware
     docx_bytes = None
     pdf_bytes = None
+    source_format = getattr(session, "source_format", "docx")
 
-    if "docx" in request.persist_formats:
+    # Default persist formats to source format if caller sends default ["docx"]
+    persist_formats = request.persist_formats
+    if persist_formats == ["docx"] and source_format == "pdf":
+        persist_formats = ["pdf"]
+
+    if "docx" in persist_formats:
         docx_bytes = await store.get_blob(request.session_id, "docx")
-        if not docx_bytes:
+        if not docx_bytes and source_format == "docx":
             raise HTTPException(status_code=404, detail="No DOCX output in session")
 
-    if "pdf" in request.persist_formats:
+    if "pdf" in persist_formats:
         pdf_bytes = await store.get_blob(request.session_id, "pdf")
-        if not pdf_bytes:
+        if not pdf_bytes and source_format == "pdf":
+            raise HTTPException(status_code=404, detail="No PDF output in session")
+        elif not pdf_bytes:
             logger.warning("No PDF output in session, skipping PDF persistence")
 
     doc_title = session.document_title or session.source_title.rsplit(".", 1)[0]

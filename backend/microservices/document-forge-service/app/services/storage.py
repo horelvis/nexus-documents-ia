@@ -65,16 +65,29 @@ class StorageService:
             if upload_result:
                 result["gcs_paths"]["pdf"] = upload_result.get("file_path", "")
 
-        # Index in Weaviate
-        if index_in_weaviate and docx_bytes and result.get("gcs_paths", {}).get("docx"):
+        # Index in Weaviate — accept either DOCX or PDF
+        has_docx = docx_bytes and result.get("gcs_paths", {}).get("docx")
+        has_pdf = pdf_bytes and result.get("gcs_paths", {}).get("pdf")
+
+        if index_in_weaviate and (has_docx or has_pdf):
+            # Prefer DOCX for indexing; fall back to PDF
+            if has_docx:
+                index_name = f"{document_title}.docx"
+                index_path = result["gcs_paths"]["docx"]
+                index_type = DOCX_CONTENT_TYPE
+            else:
+                index_name = f"{document_title}.pdf"
+                index_path = result["gcs_paths"]["pdf"]
+                index_type = PDF_CONTENT_TYPE
+
             weaviate = get_weaviate_client()
             index_result = await weaviate.index_document(
                 tenant_id=tenant_id,
                 document_data={
                     "document_id": result.get("document_id", ""),
-                    "file_name": f"{document_title}.docx",
-                    "file_path": result["gcs_paths"]["docx"],
-                    "content_type": DOCX_CONTENT_TYPE,
+                    "file_name": index_name,
+                    "file_path": index_path,
+                    "content_type": index_type,
                     "user_id": user_id,
                     "folder_path": folder_path,
                 },

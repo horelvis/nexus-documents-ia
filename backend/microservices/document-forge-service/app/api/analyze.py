@@ -12,6 +12,7 @@ from app.core.config import get_settings
 from app.core.security import verify_api_key
 from app.schemas.analyze import AnalyzeResponse
 from app.services.analyzer import get_analyzer
+from app.services.pdf_extractor import extract_text_from_pdf
 from app.services.session_store import get_session_store
 from app.schemas.session import SessionStatus
 
@@ -60,6 +61,29 @@ def _extract_title_from_docx(docx_bytes: bytes, fallback: str = "document") -> s
     return fallback
 
 
+def _detect_format(filename: str, content: bytes) -> str:
+    """Auto-detect document format from filename and magic bytes.
+
+    Returns: 'pdf' or 'docx'
+    """
+    # 1. Extension
+    if filename:
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext == "pdf":
+            return "pdf"
+        if ext in ("docx", "doc"):
+            return "docx"
+
+    # 2. Magic bytes
+    if content[:5] == b"%PDF-":
+        return "pdf"
+    if content[:4] == b"PK\x03\x04":  # ZIP (DOCX is a ZIP archive)
+        return "docx"
+
+    # Default
+    return "docx"
+
+
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_document(
     tenant_id: str = Form(...),
@@ -77,7 +101,7 @@ async def analyze_document(
     - document_id to fetch from storage
     """
     settings = get_settings()
-    docx_bytes: bytes | None = None
+    file_bytes: bytes | None = None
     source_title = "document"
 
     # Path 1: Direct upload
@@ -88,7 +112,7 @@ async def analyze_document(
                 status_code=413,
                 detail=f"File exceeds {settings.max_document_size_mb}MB limit",
             )
-        docx_bytes = content
+        file_bytes = content
         source_title = file.filename or "uploaded_document"
 
     # Path 2: Fetch by document_id
@@ -105,28 +129,34 @@ async def analyze_document(
         source_title = metadata.get("file_name", metadata.get("title", "document"))
 
         storage = get_storage_client()
-        docx_bytes = await storage.download_document(file_path, tenant_id)
-        if not docx_bytes:
+        file_bytes = await storage.download_document(file_path, tenant_id)
+        if not file_bytes:
             raise HTTPException(status_code=404, detail="Could not download document")
     else:
         raise HTTPException(
             status_code=400, detail="Provide either a file upload or document_id"
         )
 
-    # Extract text from DOCX
-    try:
-        document_text = _extract_text_from_docx(docx_bytes)
-    except Exception as e:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Could not parse DOCX: {e}",
-        )
+    # Auto-detect format
+    source_format = _detect_format(source_title, file_bytes)
+
+    # Extract text based on format
+    if source_format == "pdf":
+        try:
+            document_text, title = extract_text_from_pdf(
+                file_bytes, max_chars=settings.max_source_chars,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Could not parse PDF: {e}")
+    else:
+        try:
+            document_text = _extract_text_from_docx(file_bytes)
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Could not parse DOCX: {e}")
+        title = _extract_title_from_docx(file_bytes, source_title)
 
     if not document_text.strip():
         raise HTTPException(status_code=422, detail="Document contains no extractable text")
-
-    # Try to get a better title
-    title = _extract_title_from_docx(docx_bytes, source_title)
 
     # LLM analysis
     analyzer = get_analyzer()
@@ -137,18 +167,19 @@ async def analyze_document(
         max_fields=max_fields,
     )
 
-    # Create session and store source DOCX
+    # Create session and store source bytes
     store = get_session_store()
     session = await store.create_session(tenant_id, user_id)
     session.source_title = source_title
+    session.source_format = source_format
     session.document_type = result.get("document_type", "")
     session.fields = result.get("fields", [])
     session.confidence = result.get("confidence", 0.0)
     session.status = SessionStatus.ANALYZED
     await store.update_session(session)
 
-    # Store original DOCX bytes for later preparation
-    await store.store_blob(session.session_id, "source", docx_bytes)
+    # Store original file bytes for later rendering
+    await store.store_blob(session.session_id, "source", file_bytes)
 
     return AnalyzeResponse(
         session_id=session.session_id,

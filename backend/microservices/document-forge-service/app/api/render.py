@@ -16,6 +16,7 @@ from app.schemas.session import SessionStatus
 from app.services.converter import get_converter
 from app.services.renderer import get_renderer
 from app.services.session_store import get_session_store
+from app.services.pdf_replacer import get_pdf_replacer
 from app.services.template_preparer import get_template_preparer
 
 logger = logging.getLogger(__name__)
@@ -78,6 +79,54 @@ async def render_document(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found or expired")
 
+    # --- PDF pipeline: direct redact & insert (no prepare phase) ---
+    if getattr(session, "source_format", "docx") == "pdf":
+        if session.status not in (SessionStatus.ANALYZED, SessionStatus.RENDERED):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Session in wrong state: {session.status}. Expected: analyzed",
+            )
+
+        source_bytes = await store.get_blob(session.session_id, "source")
+        if not source_bytes:
+            raise HTTPException(status_code=404, detail="Source PDF not found")
+
+        replacer = get_pdf_replacer()
+        pdf_bytes, replaced_count, failed = replacer.replace(
+            pdf_bytes=source_bytes,
+            fields=session.fields,
+            field_values=request.field_values,
+        )
+
+        # Store rendered PDF
+        await store.store_blob(session.session_id, "pdf", pdf_bytes)
+
+        doc_title = request.document_title or session.source_title.rsplit(".", 1)[0]
+
+        outputs: dict[str, OutputInfo] = {
+            "pdf": OutputInfo(
+                size_bytes=len(pdf_bytes),
+                download_url=f"/sessions/{session.session_id}/download?format=pdf",
+            )
+        }
+
+        if failed:
+            logger.warning("PDF render: %d fields failed: %s", len(failed), failed)
+
+        # Update session
+        session.status = SessionStatus.RENDERED
+        session.field_values = request.field_values
+        session.document_title = doc_title
+        await store.update_session(session)
+
+        return RenderResponse(
+            session_id=session.session_id,
+            outputs=outputs,
+            fields_filled=replaced_count,
+            document_title=doc_title,
+        )
+
+    # --- DOCX pipeline: existing prepare + docxtpl render ---
     # Allow rendering from either PREPARED or ANALYZED state
     # If ANALYZED, we auto-prepare first (mark all fields)
     if session.status == SessionStatus.ANALYZED:

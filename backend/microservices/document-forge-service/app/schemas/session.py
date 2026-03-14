@@ -25,6 +25,7 @@ class ForgeSession(BaseModel):
     field_values: dict[str, str] = Field(default_factory=dict)
     document_title: str = ""
     confidence: float = 0.0
+    source_format: str = "docx"  # "pdf" or "docx"
     created_at: str = ""
     updated_at: str = ""
 
