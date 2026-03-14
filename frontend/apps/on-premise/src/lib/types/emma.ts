@@ -15,6 +15,7 @@ export type EmmaMessageType =
   | 'verified_result'
   | 'predictive_result'
   | 'docgen_result'
+  | 'forge_result'
 
 export interface Citation {
   id?: string
@@ -250,6 +251,49 @@ export interface DocGenMetadata {
   generated_doc_id?: string
 }
 
+// --- Document Forge (template-based document modification) ---
+
+export type ForgeFieldType = 'text' | 'date' | 'number' | 'currency' | 'name' | 'address' | 'email' | 'phone' | 'enum'
+export type ForgeSessionStatus = 'analyzed' | 'prepared' | 'rendered' | 'persisted'
+export type ForgeAction = 'analyze' | 'render' | 'persist'
+
+export interface ForgeField {
+  field_name: string
+  label: string
+  field_type: ForgeFieldType
+  current_value: string
+  required: boolean
+  description?: string
+  context_hint?: string
+  suggested_value?: string
+  options?: string[]
+}
+
+export interface ForgeOutputInfo {
+  download_url: string
+  size_bytes: number
+  format: string
+}
+
+export interface ForgeMetadata {
+  action: ForgeAction
+  session_id: string
+  source_title: string
+  document_type: string
+  confidence: number
+  fields: ForgeField[]
+  status: ForgeSessionStatus
+  field_values?: Record<string, string>
+  outputs?: Record<string, ForgeOutputInfo>
+  created_at?: string
+  updated_at?: string
+  fields_filled?: number
+  document_title?: string
+  document_id?: string
+  gcs_paths?: Record<string, string>
+  weaviate_indexed?: boolean
+}
+
 export interface EmmaMessage {
   id: string
   type: EmmaMessageType
@@ -258,6 +302,7 @@ export interface EmmaMessage {
   verified?: VerifiedGenerationMetadata
   predictive?: PredictiveAnalysisMetadata
   docgen?: DocGenMetadata
+  forge?: ForgeMetadata
   metadata?: {
     confidence_score?: number
     decision_path?: string[]

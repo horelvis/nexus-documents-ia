@@ -77,6 +77,13 @@ export const API_CONFIG = {
     EMMA_NOTIFICATION_READ: (id: string) => `/emma/notifications/${id}/read`,
     EMMA_NOTIFICATIONS_READ_ALL: '/emma/notifications/read-all',
 
+    // Document Forge
+    FORGE_ANALYZE: '/forge/analyze',
+    FORGE_RENDER: '/forge/render',
+    FORGE_PERSIST: '/forge/persist',
+    FORGE_SESSION_INFO: (id: string) => `/forge/sessions/${id}/info`,
+    FORGE_SESSION_DOWNLOAD: (id: string, format: string) => `/forge/sessions/${id}/download?format=${format}`,
+
     // Connectors
     CONNECTORS: '/connectors',
     CONNECTORS_ADMIN: '/connectors/admin',
