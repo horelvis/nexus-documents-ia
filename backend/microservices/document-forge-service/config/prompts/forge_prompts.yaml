@@ -26,7 +26,8 @@ forge:
       - context_hint: A short excerpt showing where the field appears (include surrounding text)
       - suggested_value: If the user intent suggests a new value, provide it; otherwise null
 
-      Return a JSON object with this structure:
+      You MUST respond with ONLY a JSON object (no markdown, no explanation, no thinking).
+      The JSON structure:
       {
         "document_type": "contrato | factura | carta | informe | acuerdo | otro",
         "fields": [ ... ],
@@ -36,6 +37,8 @@ forge:
       Be thorough but avoid false positives. Only include fields that genuinely vary
       between document versions. Do NOT include boilerplate text, section headers, or
       static legal language as fields.
+
+      CRITICAL: Your entire response must be valid JSON. Nothing else.
 
     user: |
       Document title: {{title}}
