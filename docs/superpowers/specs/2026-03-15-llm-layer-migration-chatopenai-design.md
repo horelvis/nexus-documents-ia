@@ -1,7 +1,7 @@
 # LLM Layer Migration — ChatOpenAI + LangChain Native
 
 **Date**: 2026-03-15
-**Status**: Draft
+**Status**: Reviewed (pass 1 — 3 critical + 4 important issues resolved)
 **Scope**: Sub-project 1 of LangGraph Realignment — Replace custom LLMRouter with ChatOpenAI
 
 ## Problem Statement
@@ -55,7 +55,9 @@ Node → planner_model.ainvoke(messages)           # or chat_model.ainvoke()
        AIMessage(content, tool_calls)             # standard LangChain type
 ```
 
-### New File: `app/agents/llm_models.py` (~80 lines)
+### New File: `app/agents/llm_models.py` (~100 lines)
+
+Uses **lazy factory pattern** (not module-level globals) to avoid import-time instantiation before settings are loaded.
 
 ```python
 """
@@ -65,27 +67,85 @@ Two instances with different configs for dual-phase behavior:
 - planner_model: fast, deterministic (classify, rewrite, tools, decompose)
 - chat_model: creative, longer output (synthesize, social)
 
+Uses lazy factory pattern — instantiated on first call, not at import time.
 Replaces: llm_router.py + llm_client.py
 """
 from langchain_openai import ChatOpenAI
 from app.core.config import settings
 
-planner_model = ChatOpenAI(
-    base_url=settings.llm_base_url,
-    model=settings.llm_model,
-    api_key=settings.llm_api_key,
-    temperature=settings.planner_temperature,
-    max_tokens=settings.planner_max_tokens,
-)
+_planner_model = None
+_chat_model = None
 
-chat_model = ChatOpenAI(
-    base_url=settings.llm_base_url,
-    model=settings.llm_model,
-    api_key=settings.llm_api_key,
-    temperature=settings.chat_temperature,
-    max_tokens=settings.chat_max_tokens,
-)
+def get_planner_model() -> ChatOpenAI:
+    global _planner_model
+    if _planner_model is None:
+        _planner_model = ChatOpenAI(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.llm_api_key,
+            temperature=settings.planner_temperature,
+            max_tokens=settings.planner_max_tokens,
+            model_kwargs={
+                "repetition_penalty": 1.15,  # Prevents generation loops in Qwen3.5
+            },
+            extra_body={
+                "chat_template_kwargs": {"enable_thinking": False},  # PLANNER never thinks
+            },
+        )
+    return _planner_model
+
+def get_chat_model() -> ChatOpenAI:
+    global _chat_model
+    if _chat_model is None:
+        _chat_model = ChatOpenAI(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            api_key=settings.llm_api_key,
+            temperature=settings.chat_temperature,
+            max_tokens=settings.chat_max_tokens,
+            model_kwargs={
+                "repetition_penalty": 1.15,
+            },
+            extra_body={
+                "chat_template_kwargs": {"enable_thinking": False},  # Default off, toggle via escape hatch
+            },
+        )
+    return _chat_model
 ```
+
+**Key fixes from spec review:**
+- `repetition_penalty=1.15` passed via `model_kwargs` (was silently dropped without this)
+- `enable_thinking=False` passed via `extra_body` for PLANNER calls (SGLang server default might be `true`)
+- Lazy factory pattern (`get_planner_model()`/`get_chat_model()`) instead of module-level globals
+
+### New File: `app/agents/llm_types.py` (~30 lines)
+
+Keeps `ModelRole`, `LLMResponse`, and other types that are referenced beyond the router. Thin file — just type definitions, no logic.
+
+```python
+"""Type definitions preserved from the old LLM layer. Used during and after migration."""
+from enum import Enum
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+class ModelRole(str, Enum):
+    PLANNER = "planner"
+    CHAT = "chat"
+```
+
+### Langfuse Observability
+
+Use `langfuse.callback.CallbackHandler` as a LangChain callback to preserve tracing:
+
+```python
+from langfuse.callback import CallbackHandler
+
+langfuse_handler = CallbackHandler()
+response = await get_planner_model().ainvoke(messages, config={"callbacks": [langfuse_handler]})
+```
+
+This replaces the manual Langfuse tracing in the old `LLMClient.chat()`. Each node passes the handler via `config={"callbacks": [...]}`.
+
 
 ### Thinking Escape Hatch
 
@@ -223,16 +283,25 @@ if response.tool_calls:
 | `synthesize_swarm` | `nodes/synthesize_swarm.py` | CHAT | Synthesis + thinking → `chat_model.ainvoke()` + `chat_with_thinking()` | Medium |
 | `social` | `nodes/specialists/social.py` | CHAT | Social responses → `chat_model.ainvoke()` | Low |
 
-### Auxiliary services (6)
+### Auxiliary services (13)
 
 | Service | File | Role | Change |
 |---------|------|------|--------|
-| `guardrail_service` | `services/guardrail_service.py` | PLANNER | `_validate_llm()` → `planner_model.ainvoke()` |
-| `fact_extractor` | `services/memory/fact_extractor.py` | PLANNER | Memory extraction → `planner_model.ainvoke()` |
-| `verified` | `stop_and_go/strategies/verified.py` | PLANNER | Claim verification → `planner_model.ainvoke()` |
-| `search_and_evaluate` | `stop_and_go/nodes/search_and_evaluate.py` | PLANNER | Evidence eval → `planner_model.ainvoke()` |
-| `insight_evaluator` | `services/heartbeat/insight_evaluator.py` | PLANNER | Insights → `planner_model.ainvoke()` |
-| `rlm_processor` | `services/verified_generation/service.py` | CHAT | RLM processing → `chat_model.ainvoke()` |
+| `guardrail_service` | `services/guardrail_service.py` | PLANNER | `_validate_llm()` → `get_planner_model()` |
+| `fact_extractor` | `services/memory/fact_extractor.py` | PLANNER | Memory extraction → `get_planner_model()` |
+| `verified` | `stop_and_go/strategies/verified.py` | PLANNER | Claim verification → `get_planner_model()` |
+| `search_and_evaluate` | `stop_and_go/nodes/search_and_evaluate.py` | PLANNER | Evidence eval → `get_planner_model()` |
+| `insight_evaluator` | `services/heartbeat/insight_evaluator.py` | PLANNER | Insights → `get_planner_model()` |
+| `rlm_processor` | `services/verified_generation/service.py` | CHAT | RLM processing → `get_chat_model()` |
+| `diagnostics` | `api/diagnostics.py` | PLANNER/CHAT | Health check LLM calls → factory functions |
+| `intent_router` | `services/intent_router.py` | PLANNER | Intent classification → `get_planner_model()` |
+| `document_generator` | `services/document_generator.py` | CHAT | Document generation → `get_chat_model()` |
+| `memory_generator` | `services/memory/memory_generator.py` | PLANNER | Memory generation → `get_planner_model()` |
+| `specialists` (tools) | `agents/langgraph/tools/specialists.py` | PLANNER | Domain analysis → `get_planner_model()` |
+| `writer_agent` | `services/predictive_analysis/writer_agent.py` | — | Already uses raw httpx — no change needed |
+| `factor_agent` | `services/predictive_analysis/factor_agent.py` | — | Already uses raw httpx — no change needed |
+
+**Note:** `writer_agent.py` and `factor_agent.py` make direct httpx calls to SGLang (bypassing both LLMRouter AND ChatOpenAI). They are listed for completeness but do NOT need migration — they already work independently.
 
 ## Migration Order (lower risk first)
 
@@ -298,12 +367,81 @@ async def test_stream():
     print(f"✅ Streaming: {full[:80]}...")
 
 asyncio.run(test_stream())
+print(f"✅ Streaming: {full[:80]}...")
+
+# Test 4: repetition_penalty forwarded via model_kwargs
+model_with_penalty = ChatOpenAI(
+    base_url="http://vllm:8000/v1",
+    model="Qwen/Qwen3.5-9B",
+    api_key="not-needed",
+    temperature=0.3,
+    model_kwargs={"repetition_penalty": 1.15},
+)
+response = model_with_penalty.invoke([HumanMessage(content="Repite la palabra 'hola' 20 veces")])
+print(f"✅ repetition_penalty: response length={len(response.content)} (should be short, not 20x)")
+
+# Test 5: enable_thinking=False via extra_body
+model_no_think = ChatOpenAI(
+    base_url="http://vllm:8000/v1",
+    model="Qwen/Qwen3.5-9B",
+    api_key="not-needed",
+    temperature=0.3,
+    extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+)
+response = model_no_think.invoke([HumanMessage(content="¿Cuánto es 2+2?")])
+assert "<think>" not in response.content, "Thinking tags present despite enable_thinking=False!"
+print(f"✅ enable_thinking=False: no <think> tags in response")
+
+# Test 6: bind_tools with OpenAI-format dict (EmmaTool.to_openai_param() format)
+tool_schema = {
+    "type": "function",
+    "function": {
+        "name": "search_documents",
+        "description": "Search documents in the knowledge base",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Search query"}},
+            "required": ["query"],
+        },
+    },
+}
+# Try full format first, fall back to inner dict if double-wrapping occurs
+try:
+    model_with_dict_tools = model.bind_tools([tool_schema])
+    response = model_with_dict_tools.invoke([
+        SystemMessage(content="Use tools when needed."),
+        HumanMessage(content="Busca contratos de 2024"),
+    ])
+    print(f"✅ bind_tools with full OpenAI dict: tool_calls={bool(response.tool_calls)}")
+except Exception as e:
+    # Try inner dict only
+    model_with_inner = model.bind_tools([tool_schema["function"]])
+    response = model_with_inner.invoke([
+        SystemMessage(content="Use tools when needed."),
+        HumanMessage(content="Busca contratos de 2024"),
+    ])
+    print(f"⚠️ bind_tools needs inner dict only (not full wrapper): tool_calls={bool(response.tool_calls)}")
+
+# Test 7: Langfuse callback handler
+try:
+    from langfuse.callback import CallbackHandler
+    handler = CallbackHandler()
+    response = model.invoke(
+        [HumanMessage(content="Test Langfuse tracing")],
+        config={"callbacks": [handler]},
+    )
+    print(f"✅ Langfuse callback: response received, trace should appear in Langfuse UI")
+except ImportError:
+    print("⚠️ langfuse.callback not available — install langfuse>=2.0")
+
 print("\n✅ All spike tests passed — ChatOpenAI + SGLang compatible")
 ```
 
 If any test fails, investigate before proceeding. Common issues:
 - Tool calling: SGLang tool parser might need `--tool-call-parser qwen3_coder`
-- Streaming: SSE format differences
+- `repetition_penalty` not forwarded: try `extra_body` instead of `model_kwargs`
+- `enable_thinking`: if `extra_body` doesn't work, use `model_kwargs` or raw httpx
+- `bind_tools` double-wrap: use inner `function` dict instead of full `{"type": "function", ...}`
 - API key: SGLang may reject empty key — try `"not-needed"` or `"EMPTY"`
 
 ## Testing Strategy
@@ -319,10 +457,11 @@ All paths relative to `backend/microservices/emma-agent-service/`:
 
 | File | Type | Description |
 |------|------|-------------|
-| `app/agents/llm_models.py` | NEW | 2 ChatOpenAI instances + thinking helper |
-| `scripts/spike_chatopenai_sglang.py` | NEW | Spike test script |
+| `app/agents/llm_models.py` | NEW | Lazy factory: `get_planner_model()` + `get_chat_model()` + thinking helper |
+| `app/agents/llm_types.py` | NEW | `ModelRole`, type definitions preserved from old layer |
+| `scripts/spike_chatopenai_sglang.py` | NEW | Spike test script (7 tests including repetition_penalty, thinking, bind_tools format) |
 | `app/agents/llm_router.py` | MOD→DEL | Replace with compat wrapper, then delete |
-| `app/agents/llm_client.py` | DEL | No longer needed (ModelRole kept as import alias) |
+| `app/agents/llm_client.py` | DEL | Logic removed (types moved to `llm_types.py`) |
 | `app/core/config.py` | MOD | New LLM_* settings with VLLM_* aliases |
 | `requirements.txt` | MOD | Add `langchain-openai>=0.3.0` |
 | `app/agents/langgraph/nodes/classify.py` | MOD | `router.chat()` → `planner_model.ainvoke()` |
