@@ -570,24 +570,37 @@ Replace `_validate_llm()` method (lines 285-333):
         content: str,
         config: Dict[str, Any],
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        """Validate content using LLM-based validation via LLMRouter."""
-        # Resolve prompt: Langfuse first, then config fallback
-        validation_prompt = None
+        """Validate content using LLM-based validation via LLMRouter.
+
+        Prompt resolution:
+        1. If langfuse_prompt_key set → fetch system + user prompts from Langfuse
+           (keys: "{key}" for system, "{key}" with "_system" replaced by "_user" for user)
+        2. Fallback: config["validation_prompt"] used as user message
+        """
+        system_prompt = None
+        user_prompt = None
         langfuse_key = config.get("langfuse_prompt_key")
 
         if langfuse_key:
             try:
                 from app.services.langfuse_prompt_client import get_langfuse_prompt_client
                 client = get_langfuse_prompt_client()
-                validation_prompt = await client.get_prompt(langfuse_key)
+                system_prompt = await client.get_prompt(langfuse_key)
+                # Derive user key: guardrail_medical_dosage_system → guardrail_medical_dosage_user
+                user_key = langfuse_key.replace("_system", "_user")
+                if user_key != langfuse_key:
+                    user_prompt_template = await client.get_prompt(user_key)
+                    if user_prompt_template:
+                        user_prompt = user_prompt_template.replace("{content}", content[:2000])
             except Exception as e:
                 logger.warning(f"Langfuse prompt '{langfuse_key}' not found, using fallback: {e}")
 
-        if not validation_prompt:
-            validation_prompt = config.get("validation_prompt")
-
-        if not validation_prompt:
-            return False, None, None
+        # Fallback: hardcoded system + config validation_prompt
+        if not system_prompt:
+            system_prompt = "You are a content validator. Respond with only 'PASS' or 'FAIL: <reason>'."
+        if not user_prompt:
+            validation_prompt = config.get("validation_prompt", "Validate the following content:")
+            user_prompt = f"{validation_prompt}\n\nContent to validate:\n{content[:2000]}"
 
         try:
             from app.agents.llm_router import get_llm_router
@@ -596,8 +609,8 @@ Replace `_validate_llm()` method (lines 285-333):
             router = await get_llm_router()
             response = await router.chat(
                 messages=[
-                    {"role": "system", "content": "You are a content validator. Respond with only 'PASS' or 'FAIL: <reason>'."},
-                    {"role": "user", "content": f"{validation_prompt}\n\nContent to validate:\n{content[:2000]}"},
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
                 ],
                 role=ModelRole.PLANNER,
                 max_tokens=100,
