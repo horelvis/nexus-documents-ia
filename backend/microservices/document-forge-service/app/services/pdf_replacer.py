@@ -284,13 +284,18 @@ class PdfReplacer:
                         "true", "1", "yes", "sí", "si", "x", "on", "checked",
                     )
                     if truthy:
+                        # Low-level: set /AS and /V via xref_set_key
+                        # widget.update() doesn't handle encoded names (e.g. S#ED)
                         try:
-                            w.field_value = w.on_state()
+                            on = w.on_state()
+                            doc.xref_set_key(w.xref, "AS", "/" + on)
+                            doc.xref_set_key(w.xref, "V", "/" + on)
                         except Exception:
                             w.field_value = "Yes"
+                            w.update()
                     else:
-                        w.field_value = ""  # unchecked
-                    w.update()
+                        doc.xref_set_key(w.xref, "AS", "/Off")
+                        doc.xref_set_key(w.xref, "V", "/Off")
                     logger.info(
                         "CheckBox %s: %s (was '%s')",
                         w.field_name,

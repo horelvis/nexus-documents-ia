@@ -67,9 +67,16 @@ def extract_widgets_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
             left_rect = fitz.Rect(0, w.rect.y0 - 2, w.rect.x0, w.rect.y1 + 2)
             left_text = page.get_text("text", clip=left_rect).strip().replace("\n", " ")
 
+            # Sanitize widget_value — PyMuPDF may return surrogates for encoded PDF names
+            raw_value = w.field_value or ""
+            try:
+                raw_value.encode("utf-8")
+            except UnicodeEncodeError:
+                raw_value = raw_value.encode("utf-8", errors="replace").decode("utf-8")
+
             widget_info: dict[str, Any] = {
                 "widget_name": w.field_name,
-                "widget_value": w.field_value or "",
+                "widget_value": raw_value,
                 "widget_type": wtype,
                 "label": left_text[:80] if left_text else w.field_name,
                 "page": page_num,
@@ -81,7 +88,11 @@ def extract_widgets_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
                 widget_info["max_len"] = getattr(w, "text_maxlen", 0) or 0
             elif wtype == "CheckBox":
                 try:
-                    widget_info["on_state"] = w.on_state()
+                    on = w.on_state()
+                    # on_state may contain surrogates (e.g. S#ED → \udced)
+                    # Store ONLY the JSON-safe version in widget info
+                    # The replacer will call w.on_state() directly at render time
+                    widget_info["on_state"] = on.encode("utf-8", errors="replace").decode("utf-8")
                 except Exception:
                     widget_info["on_state"] = "Yes"
 
