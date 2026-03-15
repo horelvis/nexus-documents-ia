@@ -1,7 +1,7 @@
 # Sector-Aware Guardrails & Medical Safety — Design Spec
 
 **Date**: 2026-03-15
-**Status**: Draft
+**Status**: Reviewed (spec-reviewer pass 1 — 4 critical + 5 important issues resolved)
 **Scope**: Phase 1 — Minimum Viable Safe for Medical Sector + Guardrail improvements across all sectors
 
 ## Problem Statement
@@ -117,7 +117,7 @@ def get_guardrails_for_sector(sector: str | None) -> list[dict]:
 | `medical_no_prescription` | KEYWORD | BLOCK | `blocked_words: ["le receto", "debe tomar", "prescripción:", "le prescribo", "tome X mg"]` |
 | `medical_disclaimer` | FORMAT | WARN | `inject_text: "⚕️ Esta información es documental y no sustituye el criterio médico profesional."` |
 | `medical_dosage_check` | LLM_VALIDATOR | WARN | `langfuse_prompt_key: "guardrail_medical_dosage_system"` |
-| `medical_sensitive_topics` | SEMANTIC | BLOCK | `forbidden_topics: ["suicidio", "autolesión", "eutanasia sin contexto legal"]` |
+| `medical_sensitive_topics` | SEMANTIC | WARN | `forbidden_topics: ["suicidio", "autolesión", "eutanasia sin contexto legal"], similarity_threshold: 0.90` — WARN (not BLOCK) to avoid false positives on legitimate psychiatric/occupational health documentation |
 | `medical_patient_data` | REGEX | REDACT | Date of birth patterns + clinical data identifiers |
 
 **Legal (3)** — `ACTIVE_SECTOR=legal`:
@@ -163,17 +163,28 @@ hitl_default: bool = False
 **Modified file**: `emma-agent-service/app/services/guardrail_service.py`
 
 Changes:
+
 1. **`validate()` signature** — add `sector: str | None = None` parameter
-2. **`_load_guardrails()`** — merge registry baseline + DB overrides (DB wins on name collision; admin `is_active=False` respected)
-3. **`OverallValidationResult`** — add `disclaimers: list[str]` field
-4. **FORMAT guardrails** — support `inject_text` config key for disclaimer injection
-5. **Cache key** — change from `tenant_id` to `(tenant_id, sector)` tuple
+2. **`_load_guardrails(tenant_id, sector)`** — merge registry baseline + DB overrides:
+   - Step 1: `get_guardrails_for_sector(sector)` — in-memory, no network call
+   - Step 2: `GET /api/v1/prompts/guardrails?active_only=true&sector={sector}` — DB via Main API
+   - Step 3: Merge by `guardrail_name` — DB wins on collision
+3. **`OverallValidationResult`** — add `disclaimers: list[str]` field (default `[]`)
+4. **`_validate_format()` extended** — 2 new config keys:
+   - `inject_text: str` — when FORMAT+WARN triggers and text is missing, the disclaimer text is added to `result.disclaimers[]` (not `matched_content`). Flow: `_validate_format()` returns `(matched=True, details, None)` → in the main validation loop, if `action==WARN` and `config.get("inject_text")`, append to `result.disclaimers`.
+   - `require_pattern: str` — regex pattern that MUST be present in content. If absent, guardrail triggers. Used by `legal_source_citation`.
+5. **`_validate_regex()` fix for REDACT** — replace `re.search()` + `str.replace()` with `re.sub(pattern, "[REDACTED]", content)` to catch ALL occurrences. Critical for PHI where multiple NHC/phone numbers may appear.
+6. **`_validate_llm()` Langfuse integration** — check `config.get("langfuse_prompt_key")` first → resolve via `get_langfuse_prompt_client().get_prompt(key)` → fall back to `config.get("validation_prompt")`. Route through `LLMRouter` with `ModelRole.PLANNER` instead of raw HTTP.
+7. **Cache key** — change from `tenant_id` to `(tenant_id, sector)` tuple
+8. **Early exit** — `apply_guardrails()` helper checks `settings.guardrails_enabled` first and returns no-op `(content, {})` immediately if disabled
 
 Merge priority:
-1. Registry guardrails (baseline, `is_system=True`)
+1. Registry guardrails (baseline, `is_system=True` — handled in-memory, not stored in DB column)
 2. DB guardrails with same name (admin override, wins)
 3. DB guardrails with new names (admin additions)
-4. Admin deactivations (`is_active=False`) remove registry entries
+4. Admin deactivations (`is_active=False` in DB) remove registry entries with same name
+
+**Note on `is_system`**: This flag is NOT a DB column — it exists only in-memory on `GuardrailEntry`. Registry entries are always `is_system=True`. DB-only entries (created by admin via API) are implicitly `is_system=False`. The merge logic uses `guardrail_name` matching, not a DB flag.
 
 ### 4. Graph Integration — 3 Synthesis Nodes
 
@@ -209,6 +220,8 @@ async def apply_guardrails(content: str, state: dict) -> tuple[str, dict]:
 | `synthesize_react_node` | `nodes/synthesize_react.py` | After formatting final response |
 | `synthesize_swarm_node` | `nodes/synthesize_swarm.py` | After LLM synthesis of worker results |
 | `classify_node` | `nodes/classify.py` | Only on fast-path responses (greetings, identity) |
+
+**SSE event mapping for guardrail metadata**: Each node stores guardrail metadata in state (e.g., `state["guardrail_metadata"]`). In `_generate_langgraph_sse()`, when the final state snapshot contains `guardrail_metadata`, the SSE mapper emits the corresponding events. For classify fast-path, the returned state dict includes `guardrail_metadata` alongside `final_answer` and `is_fast_path`, which `_generate_langgraph_sse()` picks up from the state diff.
 
 ### 5. Verified Generation — Sector Overrides
 
@@ -278,22 +291,33 @@ Flow:
 
 ## Files Changed Summary
 
+All paths relative to `backend/microservices/emma-agent-service/`:
+
 | File | Type | Description |
 |------|------|-------------|
-| `services/guardrail_registry.py` | NEW | 18 guardrail entries, `get_guardrails_for_sector()` |
+| `app/services/guardrail_registry.py` | NEW | 18 guardrail entries, `get_guardrails_for_sector()` |
 | `scripts/seed_guardrails.py` | NEW | Seed script for SQL + Langfuse |
-| `nodes/guardrail_helper.py` | NEW | `apply_guardrails()` shared helper |
-| `services/guardrail_service.py` | MOD | Sector param, registry merge, disclaimers, cache key |
-| `sectors/config.py` | MOD | 4 new fields on SectorConfig |
-| `sectors/registry.py` | MOD | Sector values (caps, evidence, HITL) |
-| `services/verified_generation/service.py` | MOD | Sector overrides in mode_config + HITL |
-| `stop_and_go/strategies/verified.py` | MOD | Dynamic `_get_fidelity_cap()` |
-| `stop_and_go/nodes/search_and_evaluate.py` | MOD | Dynamic `max_external` |
-| `nodes/synthesize_react.py` | MOD | Call `apply_guardrails()` |
-| `nodes/synthesize_swarm.py` | MOD | Call `apply_guardrails()` |
-| `nodes/classify.py` | MOD | Call `apply_guardrails()` on fast-path |
-| `api/emma.py` | MOD | SSE events for guardrail actions |
-| `services/prompt_registry.py` | MOD | 2 new entries for dosage validator |
+| `app/agents/langgraph/nodes/guardrail_helper.py` | NEW | `apply_guardrails()` shared helper with early-exit check |
+| `app/services/guardrail_service.py` | MOD | Sector param, registry merge, disclaimers, cache key, `re.sub()` fix, Langfuse in `_validate_llm()`, `inject_text`/`require_pattern` in `_validate_format()` |
+| `app/agents/langgraph/sectors/config.py` | MOD | 4 new scalar fields on `SectorConfig` (frozen=True safe) |
+| `app/agents/langgraph/sectors/registry.py` | MOD | Sector values (caps, evidence, HITL) |
+| `app/services/verified_generation/service.py` | MOD | Sector overrides in mode_config + HITL |
+| `app/agents/langgraph/stop_and_go/strategies/verified.py` | MOD | Dynamic `_get_fidelity_cap()` |
+| `app/agents/langgraph/stop_and_go/nodes/search_and_evaluate.py` | MOD | Dynamic `max_external` |
+| `app/agents/langgraph/nodes/synthesize_react.py` | MOD | Call `apply_guardrails()`, store metadata in state |
+| `app/agents/langgraph/nodes/synthesize_swarm.py` | MOD | Call `apply_guardrails()`, store metadata in state |
+| `app/agents/langgraph/nodes/classify.py` | MOD | Call `apply_guardrails()` on fast-path |
+| `app/api/emma.py` | MOD | SSE events for guardrail actions from `guardrail_metadata` state |
+| `app/services/prompt_registry.py` | MOD | 2 new entries for dosage validator |
+| `app/core/config.py` | MOD | Add `VERIFIED_HITL_TIMEOUT_SECONDS` setting (default 300) |
+| `config/prompts/emma_prompts.yaml` | MOD | Add `guardrails.medical_dosage.system` and `.user` YAML fallback content |
+
+Paths relative to `backend/`:
+
+| File | Type | Description |
+|------|------|-------------|
+| `alembic/versions/XXXX_add_sector_to_guardrails.py` | NEW | Migration: add `sector VARCHAR(50)` column to `emma_guardrails` table + index |
+| `app/api/v1/prompts.py` | MOD | Add `sector` query parameter to `GET /guardrails` endpoint |
 
 ## Testing Strategy
 
@@ -324,12 +348,44 @@ Flow:
 |------|-----------|
 | KEYWORD false positives ("diagnóstico" in legitimate context) | Use phrase-level keywords ("el diagnóstico es") not single words; WARN action for borderline cases |
 | Guardrail latency on every response | REGEX/KEYWORD/LENGTH/FORMAT are <5ms; SEMANTIC ~20ms (BGE-M3 already loaded); LLM_VALIDATOR ~200ms but only for medical. Total expected: <50ms for non-medical, <250ms for medical |
-| HITL breaks SSE flow without frontend UI | SSE emits `review_required` event; without UI, the flow pauses indefinitely. Document that frontend HITL UI is required for medical verified generation |
-| Admin accidentally deactivates critical medical guardrail | `is_system=True` guardrails show warning in API response when deactivated; seed script `--force` can restore |
+| HITL breaks SSE flow without frontend UI | SSE emits `review_required` event; add `VERIFIED_HITL_TIMEOUT_SECONDS=300` (5 min) config — auto-approves all claims if no human review within timeout, so system doesn't hang permanently. Document that frontend HITL UI is required for full medical verified generation |
+| Admin accidentally deactivates critical medical guardrail | Registry entries are baseline; seed script `--force` can restore. API response includes `is_system_override: true` warning when deactivating a registry-defined guardrail |
+| REDACT misses PII occurrences | Fixed: `_validate_regex()` now uses `re.sub()` instead of `re.search()` + `str.replace()` to catch ALL matches |
+| Source metadata contains PII | Guardrails validate `content` (LLM response) only. Source document titles/snippets in `sources[]` are NOT redacted. For medical compliance, a future phase should extend redaction to source metadata |
 
 ## Migration
 
-- No database migrations required — uses existing `guardrails` table schema
+### Database Migration Required
+
+New Alembic migration `XXXX_add_sector_to_guardrails.py`:
+
+```python
+def upgrade():
+    op.add_column('emma_guardrails', sa.Column('sector', sa.String(50), nullable=True))
+    op.create_index('ix_emma_guardrails_sector', 'emma_guardrails', ['sector'])
+
+def downgrade():
+    op.drop_index('ix_emma_guardrails_sector', table_name='emma_guardrails')
+    op.drop_column('emma_guardrails', 'sector')
+```
+
+- `sector` is nullable — `NULL` means global (applies to all sectors)
+- Index on `sector` for efficient filtering in `GET /guardrails?sector=medical`
+- Main API `GET /guardrails` endpoint gains `sector: Optional[str]` query param — filters `WHERE sector = :sector OR sector IS NULL`
+
+### Behavioral Compatibility
+
 - Seed script is additive (safe by default)
 - `SectorConfig` new fields have defaults matching current behavior (no behavioral change for legal/documental without explicit opt-in)
 - `FIDELITY_CONFIDENCE_CAP` constant kept as fallback when `mode_config` doesn't have override
+- Existing guardrails in DB (if any) have `sector=NULL` → treated as global → no behavioral change
+
+### Testing: Merge Logic Edge Cases
+
+Specific test cases for the merge logic:
+
+1. Registry entry `medical_disclaimer` + no DB entry → registry wins
+2. Registry entry `medical_disclaimer` + DB entry with same name, `is_active=True` → DB config wins
+3. Registry entry `medical_disclaimer` + DB entry with same name, `is_active=False` → guardrail removed (admin deactivation respected)
+4. No registry entry + DB entry `custom_medical_rule` → DB entry added (admin custom)
+5. Registry entry `global_pii_email` + DB entry `global_pii_email` with different `config` → DB config wins (admin override)
