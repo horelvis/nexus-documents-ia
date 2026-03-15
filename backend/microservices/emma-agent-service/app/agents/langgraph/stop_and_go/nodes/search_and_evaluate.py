@@ -563,12 +563,15 @@ async def _search_evidence(
     external_evidence: List[Dict] = []
     source_ids_set = set(source_document_ids or [])
 
+    # Sector-aware evidence limit (from mode_config, default 5)
+    max_evidence = mode_config.get("max_evidence", 5)
+
     # --- Uploaded documents (RLM-powered filtering) → always "source" tier ---
     if uploaded_texts:
         try:
             from app.services.verified_generation.service import _rlm_filter_evidence
             source_evidence = await _rlm_filter_evidence(
-                query_text, uploaded_texts, max_evidence=5
+                query_text, uploaded_texts, max_evidence=max_evidence
             )
         except Exception as e:
             logger.warning(f"RLM evidence filtering failed: {e}")
@@ -716,13 +719,12 @@ async def _search_evidence(
         except Exception as e:
             logger.warning(f"Web search failed (non-fatal): {e}")
 
-    # Cap external evidence — diminishing returns beyond 5 items and
+    # Cap external evidence — diminishing returns beyond the limit and
     # longer context hurts LLM attention in the verification prompt.
-    MAX_EXTERNAL = 5
-    if len(external_evidence) > MAX_EXTERNAL:
+    if len(external_evidence) > max_evidence:
         # Prioritize by similarity score (DOI/crossref have fixed scores)
         external_evidence.sort(key=lambda e: e.get("similarity_score", 0), reverse=True)
-        external_evidence = external_evidence[:MAX_EXTERNAL]
+        external_evidence = external_evidence[:max_evidence]
 
     logger.info(
         f"Evidence for '{query_text[:60]}...': "

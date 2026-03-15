@@ -293,6 +293,7 @@ class Settings(BaseSettings):
     # HITL — Human-in-the-Loop review before document assembly
     verified_hitl_enabled: bool = os.getenv("VERIFIED_HITL_ENABLED", "false").lower() == "true"
     verified_hitl_confidence_threshold: float = float(os.getenv("VERIFIED_HITL_CONFIDENCE_THRESHOLD", "0.75"))
+    verified_hitl_timeout_seconds: int = int(os.getenv("VERIFIED_HITL_TIMEOUT_SECONDS", "300"))
 
     # ==========================================================================
     # Web Search (Tavily primary, DuckDuckGo fallback)

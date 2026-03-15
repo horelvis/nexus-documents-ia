@@ -261,8 +261,9 @@ class VerifiedStrategy:
             external = await self._llm_external_verify(claim_text, external_evidence)
 
         # --- Combine verdicts ---
+        fidelity_cap = self._get_fidelity_cap(state)
         verification_type, combined_confidence, reason, correction = self._combine_verdicts(
-            faithfulness, external
+            faithfulness, external, fidelity_cap=fidelity_cap
         )
 
         logger.info(
@@ -279,7 +280,7 @@ class VerifiedStrategy:
                 verification_type = "fidelity_only"
                 combined_confidence = min(
                     faithfulness.get("confidence", 0.5) if faithfulness else 0.5,
-                    FIDELITY_CONFIDENCE_CAP,
+                    fidelity_cap,
                 )
                 logger.info(
                     f"Unsupported claim corrected by faithfulness tier → "
@@ -574,10 +575,16 @@ class VerifiedStrategy:
     # Private helpers — Two-tier verification
     # =========================================================================
 
+    def _get_fidelity_cap(self, state: dict) -> float:
+        """Get fidelity confidence cap — sector override or default."""
+        mode_config = state.get("mode_config", {})
+        return mode_config.get("fidelity_confidence_cap", FIDELITY_CONFIDENCE_CAP)
+
     @staticmethod
     def _combine_verdicts(
         faithfulness: Dict[str, Any] | None,
         external: Dict[str, Any] | None,
+        fidelity_cap: float = FIDELITY_CONFIDENCE_CAP,
     ) -> tuple:
         """Combine faithfulness and external verification into a final verdict.
 
@@ -603,7 +610,7 @@ class VerifiedStrategy:
             # Source-faithful but no external evidence
             return (
                 "fidelity_only",
-                min(f_conf, FIDELITY_CONFIDENCE_CAP),
+                min(f_conf, fidelity_cap),
                 f"Fiel al documento fuente (sin corroboración externa). {f_reason}".strip(),
                 correction,
             )
