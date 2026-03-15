@@ -100,3 +100,78 @@ def has_form_fields(pdf_bytes: bytes) -> bool:
             return True
     doc.close()
     return False
+
+
+def widgets_to_fields(widgets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert raw widget list into forge-compatible fields.
+
+    Each widget becomes a field with field_name = widget_name.
+    Single-digit Cifra fields (max_len=1) on the same line are grouped
+    into a composite field.
+
+    Returns list of field dicts ready for session.fields.
+    """
+    fields = []
+    used_widgets: set[str] = set()
+
+    # Group single-digit fields by Y position (same line = same composite)
+    digit_groups: dict[tuple[int, int], list[dict]] = {}  # (page, y) → widgets
+    for w in widgets:
+        if w["widget_type"] == "Text" and w.get("max_len") == 1:
+            key = (w["page"], w["rect"][1])  # group by page + y position
+            digit_groups.setdefault(key, []).append(w)
+
+    # Create composite fields from digit groups (≥2 digits)
+    for (page, y), group in digit_groups.items():
+        if len(group) < 2:
+            continue
+        # Sort by x position (left to right)
+        group.sort(key=lambda w: w["rect"][0])
+        # Use first widget's label, composite name
+        first = group[0]
+        # Unique composite name using first widget name
+        composite_name = first["widget_name"] + "_to_" + group[-1]["widget_name"]
+        # Combine current values
+        current = "".join((w["widget_value"] or " ").strip() or " " for w in group).strip()
+        # Get label from the leftmost widget
+        label = first.get("label", "") or composite_name
+
+        fields.append({
+            "field_name": composite_name,
+            "label": label,
+            "current_value": current,
+            "field_type": "text",
+            "required": False,
+            "context_hint": f"Composite of {len(group)} digit fields: {', '.join(w['widget_name'] for w in group)}",
+            "suggested_value": None,
+            "widget_name": composite_name,
+            "widget_names": [w["widget_name"] for w in group],  # all widget names in order
+        })
+        for w in group:
+            used_widgets.add(w["widget_name"])
+
+    # Add remaining widgets as individual fields
+    for w in widgets:
+        if w["widget_name"] in used_widgets:
+            continue
+
+        field_type = "text"
+        if w["widget_type"] == "CheckBox":
+            field_type = "checkbox"
+        elif w.get("max_len") == 1:
+            field_type = "number"
+
+        current_value = (w["widget_value"] or "").strip()
+
+        fields.append({
+            "field_name": w["widget_name"],
+            "label": w.get("label", "") or w["widget_name"],
+            "current_value": current_value,
+            "field_type": field_type,
+            "required": False,
+            "context_hint": "",
+            "suggested_value": None,
+            "widget_name": w["widget_name"],
+        })
+
+    return fields

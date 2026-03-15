@@ -15,6 +15,7 @@ class FieldType(str, Enum):
     ADDRESS = "address"
     EMAIL = "email"
     PHONE = "phone"
+    CHECKBOX = "checkbox"
 
 
 class UserIntent(str, Enum):
@@ -24,6 +25,8 @@ class UserIntent(str, Enum):
 
 
 class DetectedField(BaseModel):
+    model_config = {"extra": "allow"}  # Allow widget_name, widget_names, etc.
+
     field_name: str = Field(..., description="Machine key, e.g. 'fecha_vencimiento'")
     label: str = Field(..., description="Human-readable label")
     current_value: str = Field(..., description="Current value found in the document")
@@ -34,6 +37,12 @@ class DetectedField(BaseModel):
     )
     suggested_value: Optional[str] = Field(
         default=None, description="LLM suggestion based on intent"
+    )
+    widget_name: Optional[str] = Field(
+        default=None, description="AcroForm widget name (PDF forms only)"
+    )
+    widget_names: Optional[list[str]] = Field(
+        default=None, description="Composite digit widget names (PDF forms only)"
     )
 
 

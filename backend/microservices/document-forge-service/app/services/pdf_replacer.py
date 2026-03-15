@@ -249,8 +249,21 @@ class PdfReplacer:
         for f in fields:
             name = f.get("field_name", "")
             wn = f.get("widget_name", "")
-            if name in field_values and wn:
-                widget_targets[wn] = (field_values[name], name)
+            widget_names = f.get("widget_names")  # composite digit fields
+
+            if name not in field_values:
+                continue
+
+            new_val = field_values[name]
+
+            if widget_names:
+                # Composite digit field: distribute characters across widgets
+                for i, sub_wn in enumerate(widget_names):
+                    char = new_val[i] if i < len(new_val) else ""
+                    widget_targets[sub_wn] = (char, name)
+                filled.add(name)
+            elif wn:
+                widget_targets[wn] = (new_val, name)
                 filled.add(name)
 
         if not widget_targets:

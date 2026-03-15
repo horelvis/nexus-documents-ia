@@ -12,7 +12,12 @@ from app.core.config import get_settings
 from app.core.security import verify_api_key
 from app.schemas.analyze import AnalyzeResponse
 from app.services.analyzer import get_analyzer
-from app.services.pdf_extractor import extract_text_from_pdf, extract_widgets_from_pdf, has_form_fields
+from app.services.pdf_extractor import (
+    extract_text_from_pdf,
+    extract_widgets_from_pdf,
+    has_form_fields,
+    widgets_to_fields,
+)
 from app.services.session_store import get_session_store
 from app.schemas.session import SessionStatus
 
@@ -84,49 +89,49 @@ def _detect_format(filename: str, content: bytes) -> str:
     return "docx"
 
 
-def _match_field_to_widget(field: dict, widgets: list[dict]) -> str | None:
-    """Match a detected field to a PDF widget by value, name, or label.
+def _enrich_widget_fields(
+    widget_fields: list[dict],
+    llm_fields: list[dict],
+    widgets: list[dict],
+) -> None:
+    """Enrich widget-based fields with LLM-detected labels and types.
 
-    Returns widget_name if matched, None otherwise.
+    Matches LLM fields to widget fields by value, then applies the
+    LLM's label, field_type, context_hint, and suggested_value.
+    Widget fields keep their widget_name as field_name (no renaming).
     """
-    cv = (field.get("current_value") or "").strip()
-    hint = (field.get("context_hint") or "").lower()
-    field_name = field.get("field_name", "")
+    # Build value → widget_field index (for filled widgets)
+    value_index: dict[str, dict] = {}
+    for wf in widget_fields:
+        cv = (wf.get("current_value") or "").strip()
+        if cv and len(cv) > 1:
+            value_index[cv] = wf
 
-    # 1. Exact field_name match (LLM used widget_name directly as field_name)
-    for w in widgets:
-        if w["widget_name"] == field_name:
-            logger.info("Widget match by name: %s → %s", field_name, w["widget_name"])
-            return w["widget_name"]
+    matched_widget_names: set[str] = set()
 
-    # 2. Exact value match (for filled fields like dates, NIF)
-    if cv and not cv.startswith(".") and len(cv) > 1:
-        for w in widgets:
-            wv = (w.get("widget_value") or "").strip()
-            if wv and wv == cv:
-                logger.info("Widget match by value: %s → %s (cv='%s')",
-                            field_name, w["widget_name"], cv[:20])
-                return w["widget_name"]
+    for lf in llm_fields:
+        lcv = (lf.get("current_value") or "").strip()
+        target = None
 
-    # 3. Case-insensitive name match
-    fn_lower = field_name.lower()
-    for w in widgets:
-        wn_lower = w["widget_name"].lower()
-        if wn_lower == fn_lower or wn_lower in fn_lower or fn_lower in wn_lower:
-            logger.info("Widget match by name (fuzzy): %s → %s", field_name, w["widget_name"])
-            return w["widget_name"]
+        # Match by value
+        if lcv and lcv in value_index:
+            target = value_index[lcv]
 
-    # 4. Label overlap (check if widget label words appear in context_hint)
-    if hint:
-        for w in widgets:
-            wlabel = (w.get("label") or "").lower()
-            if wlabel and len(wlabel) > 3:
-                words = [word for word in wlabel.split() if len(word) > 3]
-                if words and all(word in hint for word in words[:3]):
-                    logger.info("Widget match by label: %s → %s", field_name, w["widget_name"])
-                    return w["widget_name"]
-
-    return None
+        if target and target.get("widget_name") not in matched_widget_names:
+            # Apply LLM enrichment
+            if lf.get("label"):
+                target["label"] = lf["label"]
+            if lf.get("field_type") and target.get("field_type") != "checkbox":
+                target["field_type"] = lf["field_type"]
+            if lf.get("context_hint"):
+                target["context_hint"] = lf["context_hint"]
+            if lf.get("suggested_value"):
+                target["suggested_value"] = lf["suggested_value"]
+            matched_widget_names.add(target.get("widget_name", ""))
+            logger.info(
+                "Enriched widget %s with LLM label '%s'",
+                target.get("widget_name"), lf.get("label", "")[:30],
+            )
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
@@ -184,8 +189,6 @@ async def analyze_document(
 
     # Auto-detect format
     source_format = _detect_format(source_title, file_bytes)
-    pdf_has_widgets = False
-    widget_map: dict[str, str] = {}  # field_name → widget_name
 
     # Extract text based on format
     if source_format == "pdf":
@@ -195,30 +198,6 @@ async def analyze_document(
             )
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Could not parse PDF: {e}")
-
-        # Check for AcroForm fields
-        pdf_has_widgets = has_form_fields(file_bytes)
-        if pdf_has_widgets:
-            widgets = extract_widgets_from_pdf(file_bytes)
-            logger.info("PDF has %d form widgets", len(widgets))
-            # Append widget info to document text for LLM context
-            widget_section = "\n\n--- EDITABLE FORM FIELDS ---\n"
-            widget_section += "These are the fillable fields in the PDF form. Use widget_name as field_name.\n"
-            widget_section += "For CheckBox fields, value should be 'true' or 'false'.\n"
-            widget_section += "For Cifra fields (max_len=1), value is a single digit.\n\n"
-            for w in widgets:
-                extra = ""
-                if w.get("max_len"):
-                    extra = f" | max_len: {w['max_len']}"
-                if w["widget_type"] == "CheckBox":
-                    extra = " | values: true/false"
-                widget_section += (
-                    f"Widget: {w['widget_name']} | "
-                    f"Label: {w['label']} | "
-                    f"Value: \"{w['widget_value']}\" | "
-                    f"Type: {w['widget_type']}{extra}\n"
-                )
-            document_text += widget_section
     else:
         try:
             document_text = _extract_text_from_docx(file_bytes)
@@ -229,24 +208,42 @@ async def analyze_document(
     if not document_text.strip():
         raise HTTPException(status_code=422, detail="Document contains no extractable text")
 
-    # LLM analysis
-    analyzer = get_analyzer()
-    result = await analyzer.analyze(
-        document_text=document_text,
-        document_title=title,
-        user_intent=user_intent,
-        max_fields=max_fields,
-    )
-
-    # For PDF with widgets: map detected fields to widget names by matching
-    # current_value or by label similarity
-    if pdf_has_widgets:
+    # --- PDF with AcroForms: use widgets directly as fields ---
+    if source_format == "pdf" and has_form_fields(file_bytes):
         widgets = extract_widgets_from_pdf(file_bytes)
-        for field in result.get("fields", []):
-            matched_widget = _match_field_to_widget(field, widgets)
-            if matched_widget:
-                widget_map[field["field_name"]] = matched_widget
-                field["widget_name"] = matched_widget
+        logger.info("PDF form detected: %d widgets", len(widgets))
+
+        # Convert widgets to fields (groups single-digit Cifras)
+        fields = widgets_to_fields(widgets)
+        logger.info("Converted to %d fields", len(fields))
+
+        # Use LLM to enrich labels for the most important fields
+        analyzer = get_analyzer()
+        enrichment = await analyzer.analyze(
+            document_text=document_text,
+            document_title=title,
+            user_intent=user_intent,
+            max_fields=max_fields,
+        )
+
+        # Apply LLM labels/types to widget fields by matching
+        llm_fields = enrichment.get("fields", [])
+        _enrich_widget_fields(fields, llm_fields, widgets)
+
+        result = {
+            "document_type": enrichment.get("document_type", ""),
+            "fields": fields,
+            "confidence": enrichment.get("confidence", 0.0),
+        }
+    else:
+        # --- Standard flow: LLM detects fields ---
+        analyzer = get_analyzer()
+        result = await analyzer.analyze(
+            document_text=document_text,
+            document_title=title,
+            user_intent=user_intent,
+            max_fields=max_fields,
+        )
 
     # Create session and store source bytes
     store = get_session_store()
