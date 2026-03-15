@@ -19,6 +19,7 @@ from langchain_core.messages import AIMessage
 from app.core.config import settings
 from ..state import ReActState
 from ..reasoning_tracker import ReasoningTracker, StepType
+from .guardrail_helper import apply_guardrails
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,9 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             user_memory=user_memory,
         )
 
+        # Guardrail validation (fast-path)
+        answer, guardrail_metadata = await apply_guardrails(answer, state)
+
         reasoning_steps.append({
             "type": StepType.RESPONSE.value,
             "content": f"Fast-path: {intent}",
@@ -222,6 +226,7 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             "success": True,
             "messages": [AIMessage(content=answer)],
             "reasoning_steps": reasoning_steps,
+            "guardrail_metadata": guardrail_metadata,
             "metadata": {
                 "classify_intent": intent,
                 "classify_confidence": confidence,

@@ -17,6 +17,7 @@ from typing import Any, Dict, List
 from langchain_core.messages import AIMessage, ToolMessage
 
 from ..state import ReActState
+from .guardrail_helper import apply_guardrails
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,9 @@ async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
         elif not key:
             unique_sources.append(src)
 
+    # Guardrail validation
+    final_answer, guardrail_metadata = await apply_guardrails(final_answer, state)
+
     latency_ms = (time.time() - start) * 1000
 
     # Only add AIMessage if react_loop didn't already set one with the same content
@@ -82,6 +86,7 @@ async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
             "type": "response",
             "content": f"Synthesize: {len(unique_sources)} sources, answer length={len(final_answer)}",
         }],
+        "guardrail_metadata": guardrail_metadata,
         "metadata": {
             "synthesize_latency_ms": latency_ms,
             "source_count": len(unique_sources),

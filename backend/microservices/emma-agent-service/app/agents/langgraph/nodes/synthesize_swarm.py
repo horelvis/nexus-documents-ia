@@ -25,6 +25,7 @@ from app.core.config import settings
 from app.core.langfuse_config import observe
 from ..state import ReActState
 from ..reasoning_tracker import StepType
+from .guardrail_helper import apply_guardrails
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,10 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
     # Single worker — use answer directly (no synthesis LLM call needed)
     if len(successful) == 1:
         answer = successful[0].get("answer", "")
+
+        # Guardrail validation
+        answer, guardrail_metadata = await apply_guardrails(answer, state)
+
         latency_ms = (time.time() - start) * 1000
 
         reasoning_steps.append({
@@ -178,6 +183,7 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
             "success": True,
             "messages": [AIMessage(content=answer)],
             "reasoning_steps": reasoning_steps,
+            "guardrail_metadata": guardrail_metadata,
             "metadata": {
                 "swarm_workers_total": len(results),
                 "swarm_workers_successful": 1,
@@ -290,6 +296,9 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
             for r in successful
         )
 
+    # Guardrail validation
+    synthesized_answer, guardrail_metadata = await apply_guardrails(synthesized_answer, state)
+
     latency_ms = (time.time() - start) * 1000
 
     reasoning_steps.append({
@@ -313,6 +322,7 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
         "success": True,
         "messages": [AIMessage(content=synthesized_answer)],
         "reasoning_steps": reasoning_steps,
+        "guardrail_metadata": guardrail_metadata,
         "metadata": {
             "swarm_workers_total": len(results),
             "swarm_workers_successful": len(successful),

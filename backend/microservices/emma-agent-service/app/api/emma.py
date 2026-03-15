@@ -754,6 +754,15 @@ async def _generate_langgraph_sse(
                 yield f"event: progress\ndata: {_dumps({'message': 'Generando respuesta...', 'stage': 'synthesizing', 'progress': 90, 'slmIsThinking': False})}\n\n"
                 yield f"event: complete\ndata: {_dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'tools_used': data.get('agents_used', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id), 'domains': data.get('domains', []), 'final_result': data, 'suggestions': suggestions})}\n\n"
 
+                # Guardrail SSE events
+                guardrail_meta = data.get("guardrail_metadata") or {}
+                if guardrail_meta.get("guardrail_blocked"):
+                    yield f"event: guardrail_blocked\ndata: {_dumps({'sector': data.get('metadata', {}).get('sector') if isinstance(data.get('metadata'), dict) else None, 'warnings': guardrail_meta.get('guardrail_warnings', [])})}\n\n"
+                elif guardrail_meta.get("guardrail_redacted"):
+                    yield f"event: guardrail_redacted\ndata: {_dumps({'warnings': guardrail_meta.get('guardrail_warnings', [])})}\n\n"
+                elif guardrail_meta.get("guardrail_warnings"):
+                    yield f"event: guardrail_warning\ndata: {_dumps({'warnings': guardrail_meta.get('guardrail_warnings', [])})}\n\n"
+
                 # Fire-and-forget: extract user facts from conversation
                 if query.user_id and settings.user_memory_enabled:
                     try:

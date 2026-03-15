@@ -526,6 +526,11 @@ class ReActState(TypedDict, total=False):
     metadata: Annotated[Dict[str, Any], merge_dicts]
 
     # =========================================================================
+    # Guardrail Metadata (populated by synthesis nodes)
+    # =========================================================================
+    guardrail_metadata: dict
+
+    # =========================================================================
     # Features (derived from request context)
     # =========================================================================
     features: Dict[str, bool]

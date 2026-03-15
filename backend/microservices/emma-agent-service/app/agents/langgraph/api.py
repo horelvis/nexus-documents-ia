@@ -470,6 +470,7 @@ async def stream_react_query(
                         "total_steps": event.get("current_step", 0),
                         "graph_type": "react",
                         "metadata": event_metadata,
+                        "guardrail_metadata": event.get("guardrail_metadata"),
                     },
                 }
                 break
@@ -626,6 +627,7 @@ async def resume_react_query(
                         "total_steps": event.get("current_step", 0),
                         "graph_type": "react_resume",
                         "metadata": event.get("metadata", {}),
+                        "guardrail_metadata": event.get("guardrail_metadata"),
                     },
                 }
                 break
