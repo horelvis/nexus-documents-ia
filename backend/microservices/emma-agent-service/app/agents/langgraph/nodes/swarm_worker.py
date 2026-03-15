@@ -181,19 +181,20 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
 
     # Mini-ReAct loop
     try:
-        for step in range(max_steps):
-            # LLM call with focused tools
-            from app.agents.llm_router import get_llm_router
-            from app.agents.llm_client import ModelRole
-            router = await get_llm_router()
+        from langchain_core.messages import SystemMessage, HumanMessage, AIMessage as AIM, ToolMessage
+        from app.agents.llm_models import get_planner_model
 
+        # Build LangChain messages from dict messages
+        lc_messages = [
+            SystemMessage(content=messages[0]["content"]),
+            HumanMessage(content=messages[1]["content"]),
+        ]
+
+        model_with_tools = get_planner_model().bind_tools(tool_schemas)
+
+        for step in range(max_steps):
             response = await asyncio.wait_for(
-                router.chat(
-                    messages=messages,
-                    tools=tool_schemas,
-                    max_tokens=settings.react_max_completion_tokens,
-                    role=profile.model_role,
-                ),
+                model_with_tools.ainvoke(lc_messages),
                 timeout=settings.swarm_worker_timeout_seconds,
             )
 
@@ -208,69 +209,51 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
                 })
 
             # No tool calls → agent wants to respond directly
-            if not response.has_tool_calls:
+            if not response.tool_calls:
                 content = re.sub(r"</?tool_call>", "", content).strip()
                 answer = content
                 break
 
-            # Process tool calls
+            # Process tool calls (ChatOpenAI format: list of dicts with name/args/id)
             terminate_found = False
 
             for tc in response.tool_calls:
+                tc_name = tc["name"]
+                tc_args = tc["args"]
+                tc_id = tc.get("id", "")
+
                 reasoning_steps.append({
                     "type": StepType.TOOL_CALL.value,
-                    "content": f"[Worker {worker_id}] {tc.name}({_summarize_args(tc.arguments)})",
+                    "content": f"[Worker {worker_id}] {tc_name}({_summarize_args(tc_args)})",
                 })
 
-                if tc.name == "terminate":
-                    answer = tc.arguments.get("answer", "")
-                    sources = tc.arguments.get("sources", [])
+                if tc_name == "terminate":
+                    answer = tc_args.get("answer", "")
+                    sources = tc_args.get("sources", [])
                     if sources:
                         collected_sources.extend(sources)
                     terminate_found = True
 
                     # Execute terminate for proper message format
-                    result = await registry.execute(tc.name, tc.arguments, context=tool_context)
-                    messages.append({
-                        "role": "assistant",
-                        "content": content,
-                        "tool_calls": [{
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
-                        }],
-                    })
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result.output,
-                    })
+                    result = await registry.execute(tc_name, tc_args, context=tool_context)
+                    lc_messages.append(response)  # AIMessage with tool_calls
+                    lc_messages.append(ToolMessage(
+                        content=result.output,
+                        tool_call_id=tc_id,
+                    ))
                     break
 
             if terminate_found:
                 break
 
             # Execute non-terminate tools in parallel
-            regular_tcs = [tc for tc in response.tool_calls if tc.name != "terminate"]
+            regular_tcs = [tc for tc in response.tool_calls if tc["name"] != "terminate"]
             if regular_tcs:
-                # Build AI message with tool calls
-                ai_tool_calls = [{
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.name,
-                        "arguments": json.dumps(tc.arguments) if isinstance(tc.arguments, dict) else tc.arguments,
-                    },
-                } for tc in regular_tcs]
-
-                messages.append({
-                    "role": "assistant",
-                    "content": content,
-                    "tool_calls": ai_tool_calls,
-                })
+                # Append the AIMessage with tool_calls
+                lc_messages.append(response)
 
                 async def _run_tool(tc):
-                    return tc, await registry.execute(tc.name, tc.arguments, context=tool_context)
+                    return tc, await registry.execute(tc["name"], tc["args"], context=tool_context)
 
                 results = await asyncio.gather(
                     *[_run_tool(tc) for tc in regular_tcs],
@@ -288,11 +271,10 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
                     if len(observation) > max_observe:
                         observation = observation[:max_observe] + "\n[... truncado]"
 
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": observation,
-                    })
+                    lc_messages.append(ToolMessage(
+                        content=observation,
+                        tool_call_id=tc.get("id", ""),
+                    ))
 
                     if result.sources:
                         collected_sources.extend(result.sources)
@@ -300,7 +282,7 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
                     reasoning_steps.append({
                         "type": StepType.OBSERVATION.value,
                         "content": f"[Worker {worker_id}] {observation[:200]}",
-                        "source": tc.name,
+                        "source": tc["name"],
                     })
 
     except asyncio.TimeoutError:
