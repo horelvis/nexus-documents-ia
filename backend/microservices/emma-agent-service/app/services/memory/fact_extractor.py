@@ -109,21 +109,18 @@ async def _extract_inferred_facts(
     Returns list of fact dicts with confidence < 1.0.
     """
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import HumanMessage
+        from app.agents.llm_models import get_planner_model
 
         prompt = _LLM_EXTRACTION_PROMPT.format(
             user_message=user_message[:500],
             assistant_response=assistant_response[:500],
         )
 
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=300,
-            role=ModelRole.PLANNER,
-        )
+        model = get_planner_model().bind(temperature=0.1, max_tokens=300)
+        response = await model.ainvoke([
+            HumanMessage(content=prompt),
+        ])
 
         content = (response.content or "").strip()
 

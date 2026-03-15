@@ -122,19 +122,14 @@ FORMATO DE RESPUESTA (JSON):
         system_prompt = await self._get_system_prompt()
 
         try:
-            from app.agents.llm_router import get_llm_router
-            from app.agents.llm_client import ModelRole
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.agents.llm_models import get_planner_model
 
-            router = await get_llm_router()
-            response = await router.chat(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.3,
-                max_tokens=2048,
-                role=ModelRole.PLANNER,
-            )
+            model = get_planner_model().bind(temperature=0.3, max_tokens=2048)
+            response = await model.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=prompt),
+            ])
 
             raw_response = response.content
             return self._parse_llm_response(raw_response)

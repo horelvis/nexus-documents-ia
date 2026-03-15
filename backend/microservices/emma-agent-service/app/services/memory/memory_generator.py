@@ -78,19 +78,14 @@ async def generate_document_memory(
     )
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_planner_model
 
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=[
-                {"role": "system", "content": _MEMORY_SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.1,
-            max_tokens=500,
-            role=ModelRole.PLANNER,
-        )
+        model = get_planner_model().bind(temperature=0.1, max_tokens=500)
+        response = await model.ainvoke([
+            SystemMessage(content=_MEMORY_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ])
 
         content = (response.content or "").strip()
         if not content:

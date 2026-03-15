@@ -26,7 +26,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from app.agents.llm_client import ModelRole
+from app.agents.llm_types import ModelRole
 
 logger = logging.getLogger(__name__)
 

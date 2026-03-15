@@ -168,8 +168,6 @@ class AnalyzeDomainTool(EmmaTool):
         return AnalyzeDomainInput
 
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
-        from app.agents.llm_router import get_llm_router
-
         domain = arguments["domain"].lower().strip()
         question = arguments["question"]
         provided_context = arguments.get("context", "") or ""
@@ -191,15 +189,14 @@ class AnalyzeDomainTool(EmmaTool):
         if provided_context:
             user_content = f"**Contexto disponible**:\n{provided_context[:6000]}\n\n{user_content}"
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-
         try:
-            from app.agents.llm_client import ModelRole
-            router = await get_llm_router()
-            response = await router.chat(messages=messages, max_tokens=2048, role=ModelRole.CHAT)
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.agents.llm_models import get_chat_model
+            model = get_chat_model().bind(max_tokens=2048)
+            response = await model.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_content),
+            ])
         except Exception as e:
             logger.error(f"analyze_domain({domain}) LLM call failed: {e}")
             return ToolResult.from_error(
