@@ -532,19 +532,21 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             )
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
-        router = await get_llm_router()
-        llm_kwargs = {
-            "messages": llm_messages,
-            "tools": tool_schemas if tool_schemas else None,
-            "max_tokens": effective_max_tokens,
-            "role": ModelRole.PLANNER,
-        }
+        from app.agents.llm_models import get_planner_model
+
+        model = get_planner_model()
+        if tool_schemas:
+            model = model.bind_tools(tool_schemas)
+        model = model.bind(max_tokens=effective_max_tokens)
+
         per_request_thinking = state.get("enable_thinking")
-        if per_request_thinking is not None:
-            llm_kwargs["enable_thinking"] = per_request_thinking
-        response = await router.chat(**llm_kwargs)
+        if per_request_thinking:
+            model = model.bind(extra_body={
+                "repetition_penalty": 1.15,
+                "chat_template_kwargs": {"enable_thinking": True},
+            })
+
+        response = await model.ainvoke(llm_messages)
     except Exception as e:
         error_str = str(e)
         logger.error(f"ReAct loop: LLM call failed at step {step}: {error_str}")
@@ -569,15 +571,17 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             trimmed = system_msgs + non_system[cut:]
             # Retry with trimmed messages and minimum completion tokens
             try:
-                retry_kwargs = {
-                    "messages": trimmed,
-                    "tools": tool_schemas if tool_schemas else None,
-                    "max_tokens": 512,
-                    "role": ModelRole.PLANNER,
-                }
-                if per_request_thinking is not None:
-                    retry_kwargs["enable_thinking"] = per_request_thinking
-                response = await router.chat(**retry_kwargs)
+                from app.agents.llm_models import get_planner_model as _get_planner
+                retry_model = _get_planner()
+                if tool_schemas:
+                    retry_model = retry_model.bind_tools(tool_schemas)
+                retry_model = retry_model.bind(max_tokens=512)
+                if per_request_thinking:
+                    retry_model = retry_model.bind(extra_body={
+                        "repetition_penalty": 1.15,
+                        "chat_template_kwargs": {"enable_thinking": True},
+                    })
+                response = await retry_model.ainvoke(trimmed)
                 logger.info(
                     f"ReAct step {step}: retry succeeded after trimming "
                     f"({len(llm_messages)}→{len(trimmed)} messages)"
@@ -628,17 +632,18 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             "content": thinking[:500],
         })
 
-    # Also capture explicit thinking from LLMResponse
-    if response.thinking and response.thinking != thinking:
+    # Also capture explicit thinking from response (if available)
+    resp_thinking = getattr(response, "thinking", None)
+    if resp_thinking and resp_thinking != thinking:
         reasoning_steps.append({
             "type": StepType.THINKING.value,
-            "content": response.thinking[:500],
+            "content": resp_thinking[:500],
         })
 
     latency_ms = (time.time() - start) * 1000
 
     # ─── No tool calls → agent wants to respond directly ───
-    if not response.has_tool_calls:
+    if not response.tool_calls:
         intent = (state.get("metadata") or {}).get("classify_intent", "")
         metadata = state.get("metadata") or {}
 
@@ -697,18 +702,10 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         }
 
     # ─── Execute tools ───
-    # Build AIMessage with tool_calls for the message history
-    ai_tool_calls = [
-        {
-            "id": tc.id,
-            "name": tc.name,
-            "args": tc.arguments,
-        }
-        for tc in response.tool_calls
-    ]
+    # response is an AIMessage with .tool_calls (list of dicts: name/args/id)
     ai_message = AIMessage(
         content=content,
-        tool_calls=ai_tool_calls,
+        tool_calls=response.tool_calls,
     )
 
     new_messages = [ai_message]
@@ -718,18 +715,22 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     terminate_tc = None
     regular_tcs = []
     for tc in response.tool_calls:
+        tc_name = tc["name"]
+        tc_args = tc["args"]
+        tc_id = tc.get("id", "")
+
         reasoning_steps.append({
             "type": StepType.TOOL_CALL.value,
-            "content": f"{tc.name}({_summarize_args(tc.arguments)})",
+            "content": f"{tc_name}({_summarize_args(tc_args)})",
         })
         # Track for stuck detection
         tool_calls_history.append({
-            "name": tc.name,
-            "args": tc.arguments,
+            "name": tc_name,
+            "args": tc_args,
             "step": step,
         })
 
-        if tc.name == "terminate":
+        if tc_name == "terminate":
             terminate_tc = tc
         else:
             regular_tcs.append(tc)
@@ -739,7 +740,10 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
 
     # If terminate found, execute it and return immediately
     if terminate_tc:
-        answer = terminate_tc.arguments.get("answer", "")
+        t_name = terminate_tc["name"]
+        t_args = terminate_tc["args"]
+        t_id = terminate_tc.get("id", "")
+        answer = t_args.get("answer", "")
 
         # Gate 2: Low-quality terminate retry (CRAG quality gate)
         if settings.react_quality_gate_enabled:
@@ -765,7 +769,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
                     "current_step": step + 1,
                     "messages": [
                         ai_message,
-                        ToolMessage(content="[Terminate bloqueado por quality gate]", tool_call_id=terminate_tc.id),
+                        ToolMessage(content="[Terminate bloqueado por quality gate]", tool_call_id=t_id),
                         HumanMessage(content=corrective_msg),
                     ],
                     "tool_calls_history": tool_calls_history,
@@ -783,11 +787,11 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
                     },
                 }
 
-        result = await registry.execute(terminate_tc.name, terminate_tc.arguments, context=tool_context)
+        result = await registry.execute(t_name, t_args, context=tool_context)
 
         new_messages.append(ToolMessage(
             content=result.output,
-            tool_call_id=terminate_tc.id,
+            tool_call_id=t_id,
         ))
 
         reasoning_steps.append({
@@ -799,7 +803,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         # The LLM often misattributes metadata (e.g., assigns boe_id from legislation
         # to tenant documents). Tool results have correct source_type/boe_id.
         accumulated_sources = state.get("sources", [])
-        terminate_sources = terminate_tc.arguments.get("sources", []) or result.sources
+        terminate_sources = t_args.get("sources", []) or result.sources
         final_sources = accumulated_sources if accumulated_sources else terminate_sources
 
         return {
@@ -822,7 +826,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
 
     # Execute non-terminate tools in parallel
     async def _run_tool(tc):
-        return tc, await registry.execute(tc.name, tc.arguments, context=tool_context)
+        return tc, await registry.execute(tc["name"], tc["args"], context=tool_context)
 
     results = await asyncio.gather(*[_run_tool(tc) for tc in regular_tcs])
 
@@ -830,6 +834,9 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     last_retrieval_quality = None
     email_preview_pending = None  # Track email preview for HITL interrupt
     for tc, result in results:
+        tc_name = tc["name"]
+        tc_id = tc.get("id", "")
+
         # Truncate large observations (OpenManus max_observe pattern)
         observation = result.output
         max_observe = settings.react_max_observe_length
@@ -838,7 +845,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
 
         new_messages.append(ToolMessage(
             content=observation,
-            tool_call_id=tc.id,
+            tool_call_id=tc_id,
         ))
 
         # Collect sources
@@ -846,11 +853,11 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             new_sources.extend(result.sources)
 
         # Extract retrieval quality from smart_search for Quality Gate 4
-        if tc.name == "smart_search" and result.data and result.data.get("retrieval_quality"):
+        if tc_name == "smart_search" and result.data and result.data.get("retrieval_quality"):
             last_retrieval_quality = result.data["retrieval_quality"]
 
         # Detect send_email preview → will trigger HITL interrupt
-        if tc.name == "send_email" and result.data and result.data.get("preview"):
+        if tc_name == "send_email" and result.data and result.data.get("preview"):
             email_preview_pending = {
                 "tool_call": tc,
                 "result": result,
@@ -859,7 +866,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         reasoning_steps.append({
             "type": StepType.OBSERVATION.value,
             "content": observation[:300],
-            "source": tc.name,
+            "source": tc_name,
         })
 
     # ─── HITL: Email confirmation interrupt ────────────────────────────
@@ -869,6 +876,8 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     if email_preview_pending:
         from langgraph.types import interrupt
         tc = email_preview_pending["tool_call"]
+        tc_args = tc["args"]
+        tc_id = tc.get("id", "")
         result = email_preview_pending["result"]
         to_addr = result.data.get("to", "")
 
@@ -885,10 +894,10 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             ],
             # Pass original args so we can re-invoke with confirmed=true
             "_email_args": {
-                "to": tc.arguments.get("to"),
-                "subject": tc.arguments.get("subject"),
-                "body": tc.arguments.get("body"),
-                "attachment_id": tc.arguments.get("attachment_id"),
+                "to": tc_args.get("to"),
+                "subject": tc_args.get("subject"),
+                "body": tc_args.get("body"),
+                "attachment_id": tc_args.get("attachment_id"),
             },
         })
 
@@ -898,25 +907,25 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             registry = await get_tool_registry()
             send_result = await registry.execute(
                 "send_email",
-                {**tc.arguments, "confirmed": True},
+                {**tc_args, "confirmed": True},
                 context=tool_context,
             )
             # Replace the preview ToolMessage with the send result
             for i, m in enumerate(new_messages):
-                if hasattr(m, "tool_call_id") and m.tool_call_id == tc.id:
+                if hasattr(m, "tool_call_id") and m.tool_call_id == tc_id:
                     new_messages[i] = ToolMessage(
                         content=send_result.output,
-                        tool_call_id=tc.id,
+                        tool_call_id=tc_id,
                     )
                     break
             logger.info(f"ReAct loop: email sent successfully to {to_addr}")
         else:
             logger.info(f"ReAct loop: email cancelled by user")
             for i, m in enumerate(new_messages):
-                if hasattr(m, "tool_call_id") and m.tool_call_id == tc.id:
+                if hasattr(m, "tool_call_id") and m.tool_call_id == tc_id:
                     new_messages[i] = ToolMessage(
                         content="El usuario ha cancelado el envío del email.",
-                        tool_call_id=tc.id,
+                        tool_call_id=tc_id,
                     )
                     break
 
