@@ -83,6 +83,12 @@ class SectorConfig:
     })
     graph_search_properties: List[str] = field(default_factory=lambda: ["name", "title"])
 
+    # Guardrail & Verification overrides
+    guardrail_profile: str = "global"
+    fidelity_confidence_cap: float = 0.80
+    max_evidence: int = 5
+    hitl_default: bool = False
+
     def __post_init__(self) -> None:
         """Validate rerank_weights keys on construction."""
         if self.rerank_weights:

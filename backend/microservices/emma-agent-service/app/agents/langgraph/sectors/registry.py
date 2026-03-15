@@ -73,6 +73,10 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
             "recency": 0.05, "entity": 0.15,
         },
         graph_search_properties=["title", "short_name", "boe_id", "domain"],
+        guardrail_profile="legal",
+        fidelity_confidence_cap=0.80,
+        max_evidence=5,
+        hitl_default=False,
     ),
 
     # -----------------------------------------------------------------
@@ -117,6 +121,10 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
             "recency": 0.10, "entity": 0.10,
         },
         graph_search_properties=["name", "code", "title"],
+        guardrail_profile="medical",
+        fidelity_confidence_cap=0.60,
+        max_evidence=15,
+        hitl_default=True,
     ),
 
     # -----------------------------------------------------------------
@@ -171,6 +179,10 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
             "recency": 0.15, "entity": 0.15,
         },
         graph_search_properties=["name", "associated_person", "title"],
+        guardrail_profile="documental",
+        fidelity_confidence_cap=0.80,
+        max_evidence=5,
+        hitl_default=False,
     ),
 }
 
