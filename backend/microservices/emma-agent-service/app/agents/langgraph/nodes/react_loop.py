@@ -883,27 +883,32 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
 
         logger.info(f"ReAct loop: email preview detected → HITL interrupt (to={to_addr})")
 
-        # Return current state with messages so far, then interrupt
-        # The interrupt surfaces the preview + confirmation buttons to the frontend
-        confirmed = interrupt({
-            "type": "confirmation",
-            "question": result.output,
-            "options": [
-                {"label": "✉️ Confirmar envío", "value": "confirm_send"},
-                {"label": "Cancelar", "value": "cancel_send"},
-            ],
-            # Pass original args so we can re-invoke with confirmed=true
-            "_email_args": {
-                "to": tc_args.get("to"),
-                "subject": tc_args.get("subject"),
-                "body": tc_args.get("body"),
-                "attachment_id": tc_args.get("attachment_id"),
+        # Return current state with messages so far, then interrupt.
+        # Uses HITLReviewRequest schema so frontend can render the review card.
+        decision = interrupt({
+            "type": "hitl_review",
+            "action_request": {
+                "name": "send_email",
+                "args": tc_args,
+                "description": f"Enviar email a {to_addr}",
+            },
+            "review_config": {
+                "allowed_decisions": ["approve", "edit", "reject"],
+                "editable_fields": ["to", "subject", "body"],
             },
         })
 
-        # After resume: user selected an option
-        if confirmed == "confirm_send":
-            logger.info(f"ReAct loop: email confirmed by user → sending to {to_addr}")
+        # After resume: determine decision type.
+        # Backwards compat: old frontend sends "confirm_send"/"cancel_send" strings
+        if isinstance(decision, str):
+            decision_type = "approve" if decision == "confirm_send" else "reject"
+        elif isinstance(decision, dict):
+            decision_type = decision.get("type", "approve")
+        else:
+            decision_type = "approve"
+
+        if decision_type == "approve":
+            logger.info(f"ReAct loop: email approved by user → sending to {to_addr}")
             registry = await get_tool_registry()
             send_result = await registry.execute(
                 "send_email",
@@ -919,12 +924,37 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
                     )
                     break
             logger.info(f"ReAct loop: email sent successfully to {to_addr}")
-        else:
-            logger.info(f"ReAct loop: email cancelled by user")
+
+        elif decision_type == "edit":
+            # User edited the email args before approving
+            edited_args = decision.get("edited_args", tc_args) if isinstance(decision, dict) else tc_args
+            logger.info(f"ReAct loop: email edited by user → sending to {edited_args.get('to', to_addr)}")
+            registry = await get_tool_registry()
+            send_result = await registry.execute(
+                "send_email",
+                {**edited_args, "confirmed": True},
+                context=tool_context,
+            )
             for i, m in enumerate(new_messages):
                 if hasattr(m, "tool_call_id") and m.tool_call_id == tc_id:
                     new_messages[i] = ToolMessage(
-                        content="El usuario ha cancelado el envío del email.",
+                        content=send_result.output,
+                        tool_call_id=tc_id,
+                    )
+                    break
+            logger.info(f"ReAct loop: edited email sent successfully")
+
+        else:
+            # reject (or any unknown decision type)
+            feedback = decision.get("message", "") if isinstance(decision, dict) else ""
+            rejection_msg = "El usuario ha cancelado el envío del email."
+            if feedback:
+                rejection_msg += f" Motivo: {feedback}"
+            logger.info(f"ReAct loop: email rejected by user")
+            for i, m in enumerate(new_messages):
+                if hasattr(m, "tool_call_id") and m.tool_call_id == tc_id:
+                    new_messages[i] = ToolMessage(
+                        content=rejection_msg,
                         tool_call_id=tc_id,
                     )
                     break
