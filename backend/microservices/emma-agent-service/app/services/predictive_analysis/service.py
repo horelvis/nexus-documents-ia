@@ -505,19 +505,14 @@ class PredictiveAnalysisService:
         )
 
         try:
-            from app.agents.llm_router import get_llm_router
-            from app.agents.llm_client import ModelRole
-            router = await get_llm_router()
-            response = await router.chat(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.1,
-                max_tokens=200,
-                enable_thinking=False,
-                role=ModelRole.PLANNER,
-            )
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.agents.llm_models import get_planner_model
+
+            model = get_planner_model().bind(temperature=0.1, max_tokens=200)
+            response = await model.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ])
 
             if response and response.content:
                 content = response.content.strip()

@@ -254,20 +254,14 @@ async def _generate_recommendation(
     )
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_chat_model
 
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.3,
-            max_tokens=500,
-            enable_thinking=False,
-            role=ModelRole.CHAT,
-        )
+        model = get_chat_model().bind(temperature=0.3, max_tokens=500)
+        response = await model.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ])
 
         if response and response.content:
             text = response.content.strip()

@@ -230,19 +230,14 @@ async def _process_chunk(
             "Extrae SOLO la información presente en esta sección."
         )
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_message},
-    ]
-
     try:
-        from app.agents.llm_client import ModelRole
-        response = await llm_client.chat(
-            messages=messages,
-            temperature=0.3,
-            max_tokens=1024,
-            role=ModelRole.CHAT,
-        )
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        model = llm_client.bind(temperature=0.3, max_tokens=1024)
+        response = await model.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ])
         if response and response.content:
             return response.content
         return f"[Sin resultado para sección {idx + 1}]"
@@ -306,19 +301,14 @@ async def _aggregate_results(
                 "Genera una respuesta basada exclusivamente en los resultados anteriores."
             )
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message},
-        ]
-
         try:
-            from app.agents.llm_client import ModelRole
-            response = await llm_client.chat(
-                messages=messages,
-                temperature=0.3,
-                max_tokens=2048,
-                role=ModelRole.CHAT,
-            )
+            from langchain_core.messages import SystemMessage, HumanMessage
+
+            model = llm_client.bind(temperature=0.3, max_tokens=2048)
+            response = await model.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_message),
+            ])
             if response and response.content:
                 return response.content
         except Exception as e:
@@ -537,11 +527,10 @@ async def rlm_map_node(state: RAGState) -> Dict[str, Any]:
         return {"rlm_sub_results": [], "rlm_relevant_count": 0}
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
-        llm_client = await get_llm_router()
+        from app.agents.llm_models import get_chat_model
+        llm_client = get_chat_model()
     except Exception as e:
-        logger.error(f"RLM Map: Failed to get LLM router: {e}")
+        logger.error(f"RLM Map: Failed to get LLM model: {e}")
         tracker.add_error_step(f"No se pudo conectar al LLM: {e}")
         return {
             "rlm_sub_results": [],
@@ -670,11 +659,10 @@ async def rlm_reduce_node(state: RAGState) -> Dict[str, Any]:
     )
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
-        llm_client = await get_llm_router()
+        from app.agents.llm_models import get_chat_model
+        llm_client = get_chat_model()
     except Exception as e:
-        logger.error(f"RLM Reduce: Failed to get LLM router: {e}")
+        logger.error(f"RLM Reduce: Failed to get LLM model: {e}")
         # Fallback to concatenation
         final_result = "\n\n".join(relevant_texts)
         tracker.add_error_step(f"LLM no disponible, concatenando resultados: {e}")

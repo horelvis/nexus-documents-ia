@@ -152,20 +152,14 @@ async def _call_llm_evaluation(
     }
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_planner_model
 
-        router = await get_llm_router()
-        llm_response = await router.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.1,
-            max_tokens=300,
-            enable_thinking=False,
-            role=ModelRole.PLANNER,
-        )
+        model = get_planner_model().bind(temperature=0.1, max_tokens=300)
+        llm_response = await model.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ])
 
         if llm_response and llm_response.content:
             content = llm_response.content.strip()

@@ -552,18 +552,14 @@ class VerifiedStrategy:
                 variables={"document_text": preview},
             )
 
-            from app.agents.llm_router import get_llm_router
-            from app.agents.llm_client import ModelRole
-            router = await get_llm_router()
-            response = await router.chat(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                max_tokens=200,
-                temperature=0.1,
-                role=ModelRole.CHAT,
-            )
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.agents.llm_models import get_chat_model
+
+            model = get_chat_model().bind(max_tokens=200, temperature=0.1)
+            response = await model.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ])
             summary = response.content.strip() if response and response.content else ""
             logger.info(f"Source summary generated: {len(summary)} chars")
             return summary
@@ -772,21 +768,14 @@ class VerifiedStrategy:
     ) -> Dict[str, Any]:
         """Call LLM and parse JSON response with robust fallback parsing."""
         try:
-            from app.agents.llm_router import get_llm_router
-            from app.agents.llm_client import ModelRole
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.agents.llm_models import get_planner_model
 
-            router = await get_llm_router()
-            llm_response = await router.chat(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.0,
-                max_tokens=500,
-                enable_thinking=False,
-                seed=42,
-                role=ModelRole.PLANNER,
-            )
+            model = get_planner_model().bind(temperature=0.0, max_tokens=500, seed=42)
+            llm_response = await model.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ])
 
             if llm_response and llm_response.content:
                 content = llm_response.content.strip()

@@ -81,8 +81,8 @@ class GenerateDocumentTool(EmmaTool):
 
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
         from app.clients.weaviate_client import get_weaviate_client
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_chat_model
 
         tenant_id = context.get("tenant_id", "")
         if not tenant_id:
@@ -163,18 +163,12 @@ class GenerateDocumentTool(EmmaTool):
             f"Reescribe el documento completo aplicando las modificaciones indicadas."
         )
 
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ]
-
         try:
-            router = await get_llm_router()
-            response = await router.chat(
-                messages=messages,
-                max_tokens=MAX_COMPLETION_TOKENS,
-                role=ModelRole.CHAT,
-            )
+            model = get_chat_model().bind(max_tokens=MAX_COMPLETION_TOKENS)
+            response = await model.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ])
         except Exception as e:
             logger.error(f"generate_document: LLM rewrite failed: {e}")
             return ToolResult.from_error(

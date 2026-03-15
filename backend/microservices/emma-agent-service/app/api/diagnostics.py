@@ -255,19 +255,14 @@ async def _check_llm_planner() -> Dict[str, Any]:
     """Verify PLANNER model generates valid JSON."""
     t0 = time.time()
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_planner_model
 
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=[
-                {"role": "system", "content": "Responde solo JSON."},
-                {"role": "user", "content": '/no_think\nClasifica: "hola" → {"intent": "greeting" | "query"}'},
-            ],
-            temperature=0.1,
-            max_tokens=50,
-            role=ModelRole.PLANNER,
-        )
+        model = get_planner_model().bind(temperature=0.1, max_tokens=50)
+        response = await model.ainvoke([
+            SystemMessage(content="Responde solo JSON."),
+            HumanMessage(content='/no_think\nClasifica: "hola" → {"intent": "greeting" | "query"}'),
+        ])
         ms = (time.time() - t0) * 1000
         content = (response.content or "").strip()
         if content:
@@ -281,18 +276,13 @@ async def _check_llm_chat() -> Dict[str, Any]:
     """Verify CHAT model generates coherent text."""
     t0 = time.time()
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import HumanMessage
+        from app.agents.llm_models import get_chat_model
 
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=[
-                {"role": "user", "content": "/no_think\nDi solo 'diagnostics ok' sin nada mas."},
-            ],
-            temperature=0.1,
-            max_tokens=20,
-            role=ModelRole.CHAT,
-        )
+        model = get_chat_model().bind(temperature=0.1, max_tokens=20)
+        response = await model.ainvoke([
+            HumanMessage(content="/no_think\nDi solo 'diagnostics ok' sin nada mas."),
+        ])
         ms = (time.time() - t0) * 1000
         content = (response.content or "").strip()
         if content:

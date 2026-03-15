@@ -323,19 +323,17 @@ class FactorAgent:
     async def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
         """Call LLM via shared client with fallback to raw vLLM."""
         try:
-            from app.agents.llm_router import get_llm_router
-            from app.agents.llm_client import ModelRole
-            router = await get_llm_router()
-            response = await router.chat(
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.agents.llm_models import get_chat_model
+
+            model = get_chat_model().bind(
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
-                enable_thinking=False,
-                role=ModelRole.CHAT,
             )
+            response = await model.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt),
+            ])
             if response and response.content:
                 return response.content.strip()
         except Exception as e:

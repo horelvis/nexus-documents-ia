@@ -1820,8 +1820,8 @@ async def get_welcome_message(
 
     # 3. Generate via LLM
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_planner_model
 
         system_prompt = (
             "Eres Emma, asistente de inteligencia empresarial. "
@@ -1836,16 +1836,11 @@ async def get_welcome_message(
         user_prompt += "\n\n".join(context_parts)
         logger.info(f"Welcome context for {user_name}: {context_parts}")
 
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.7,
-            max_tokens=80,
-            role=ModelRole.PLANNER,
-        )
+        model = get_planner_model().bind(temperature=0.7, max_tokens=80)
+        response = await model.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ])
 
         welcome_msg = response.content.strip().strip('"')
 
