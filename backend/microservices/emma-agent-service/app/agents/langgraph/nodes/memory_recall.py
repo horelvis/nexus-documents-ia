@@ -128,24 +128,22 @@ async def _generate_clues(query: str, memories_text: str) -> Optional[str]:
 
     Returns the clue text, or None if generation fails or no relevant clues.
     """
-    from app.agents.llm_router import get_llm_router
-    from app.agents.llm_client import ModelRole
+    from langchain_core.messages import SystemMessage, HumanMessage
+    from app.agents.llm_models import get_planner_model
 
     system_prompt = await _load_clue_system_prompt()
     user_msg = f"Consulta del usuario: {query}\n\nDocumentos disponibles:\n{memories_text}"
 
     try:
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_msg},
-            ],
+        lc_messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_msg),
+        ]
+        model = get_planner_model().bind(
             temperature=0.0,
             max_tokens=settings.memory_recall_max_clue_tokens,
-            enable_thinking=False,
-            role=ModelRole.PLANNER,
         )
+        response = await model.ainvoke(lc_messages)
         clues = (response.content or "").strip()
 
         # Filter out empty or "no clues" responses

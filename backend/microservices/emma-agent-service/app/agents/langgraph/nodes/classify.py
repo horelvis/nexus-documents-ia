@@ -55,8 +55,9 @@ async def _generate_conversational_response(
     Includes conversation history and user memory for contextual replies.
     Falls back to a simple greeting if the LLM call fails.
     """
-    from app.agents.llm_router import get_llm_router
-    from app.agents.llm_client import ModelRole
+    from langchain_core.messages import SystemMessage as SM, HumanMessage as HM, AIMessage as AIM
+
+    from app.agents.llm_models import get_planner_model
 
     system_msg = _CONVERSATIONAL_SYSTEM_PROMPT
     if user_name:
@@ -64,22 +65,22 @@ async def _generate_conversational_response(
     if user_memory:
         system_msg += f"\n\n{user_memory}"
 
-    messages: List[Dict[str, str]] = [{"role": "system", "content": system_msg}]
+    lc_messages = [SM(content=system_msg)]
 
     # Include prior conversation for context (last 6 messages max)
     if conversation_history:
-        messages.extend(conversation_history[-6:])
+        for m in conversation_history[-6:]:
+            role = m.get("role", "user")
+            if role == "assistant":
+                lc_messages.append(AIM(content=m.get("content", "")))
+            else:
+                lc_messages.append(HM(content=m.get("content", "")))
 
-    messages.append({"role": "user", "content": query})
+    lc_messages.append(HM(content=query))
 
     try:
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=messages,
-            temperature=0.7,
-            max_tokens=150,
-            role=ModelRole.PLANNER,
-        )
+        model = get_planner_model().bind(temperature=0.7, max_tokens=150)
+        response = await model.ainvoke(lc_messages)
         answer = (response.content or "").strip()
         if answer:
             return answer

@@ -113,16 +113,15 @@ async def rewrite_node(state: ReActState) -> Dict[str, Any]:
     ]
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_planner_model
 
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=llm_messages,
-            temperature=0.1,
-            max_tokens=200,
-            role=ModelRole.PLANNER,
-        )
+        lc_messages = [
+            SystemMessage(content=llm_messages[0]["content"]),
+            HumanMessage(content=llm_messages[1]["content"]),
+        ]
+        model = get_planner_model().bind(temperature=0.1, max_tokens=200)
+        response = await model.ainvoke(lc_messages)
         rewritten = (response.content or "").strip().strip('"').strip("'")
 
         latency_ms = (time.time() - start) * 1000

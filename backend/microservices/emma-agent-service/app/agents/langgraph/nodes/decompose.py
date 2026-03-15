@@ -219,15 +219,15 @@ async def decompose_node(state: ReActState) -> Dict[str, Any]:
     ]
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
-        router = await get_llm_router()
-        response = await router.chat(
-            messages=messages,
-            temperature=0.3,
-            max_tokens=1024,
-            role=ModelRole.PLANNER,
-        )
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_planner_model
+
+        lc_messages = [
+            SystemMessage(content=messages[0]["content"]),
+            HumanMessage(content=messages[1]["content"]),
+        ]
+        model = get_planner_model()
+        response = await model.ainvoke(lc_messages)
     except Exception as e:
         logger.error(f"Decompose: LLM call failed: {e}")
         reasoning_steps.append({
@@ -245,24 +245,22 @@ async def decompose_node(state: ReActState) -> Dict[str, Any]:
     raw_tasks = _extract_json_array(content)
 
     # Qwen3 may put JSON inside <think> tags — check thinking as fallback
-    if raw_tasks is None and response.thinking:
+    thinking = getattr(response, "thinking", None)
+    if raw_tasks is None and thinking:
         logger.debug("Decompose: trying thinking content as JSON fallback")
-        raw_tasks = _extract_json_array(response.thinking)
+        raw_tasks = _extract_json_array(thinking)
 
     # Retry once on empty response (known OpenRouter/Qwen3 issue)
-    if raw_tasks is None and not content and not response.thinking:
+    if raw_tasks is None and not content and not thinking:
         logger.info("Decompose: empty response, retrying once...")
         try:
-            response = await router.chat(
-                messages=messages,
-                temperature=0.5,
-                max_tokens=1024,
-                role=ModelRole.PLANNER,
-            )
+            retry_model = model.bind(temperature=0.5)
+            response = await retry_model.ainvoke(lc_messages)
             content = response.content or ""
             raw_tasks = _extract_json_array(content)
-            if raw_tasks is None and response.thinking:
-                raw_tasks = _extract_json_array(response.thinking)
+            thinking = getattr(response, "thinking", None)
+            if raw_tasks is None and thinking:
+                raw_tasks = _extract_json_array(thinking)
         except Exception as e:
             logger.warning(f"Decompose: retry also failed: {e}")
 
