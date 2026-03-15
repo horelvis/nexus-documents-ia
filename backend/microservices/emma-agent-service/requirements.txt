@@ -25,6 +25,7 @@ openai>=1.0.0  # For vLLM OpenAI-compatible API
 # State-based graph execution for multi-agent workflows
 # Documentation: https://langchain-ai.github.io/langgraph/
 langgraph>=1.0.0
+langchain-openai>=0.3.0  # ChatOpenAI for LangGraph native tool calling + streaming
 langgraph-checkpoint-postgres>=3.0.0
 psycopg-binary>=3.2.0  # Bundled libpq — avoids needing libpq-dev in Docker image
 # langchain-core is a transitive dependency of langgraph (message types only)

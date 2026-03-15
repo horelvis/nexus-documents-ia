@@ -85,10 +85,8 @@ def get_planner_model() -> ChatOpenAI:
             api_key=settings.llm_api_key,
             temperature=settings.planner_temperature,
             max_tokens=settings.planner_max_tokens,
-            model_kwargs={
-                "repetition_penalty": 1.15,  # Prevents generation loops in Qwen3.5
-            },
             extra_body={
+                "repetition_penalty": 1.15,  # Prevents generation loops in Qwen3.5 (must be extra_body, not model_kwargs)
                 "chat_template_kwargs": {"enable_thinking": False},  # PLANNER never thinks
             },
         )
@@ -103,10 +101,8 @@ def get_chat_model() -> ChatOpenAI:
             api_key=settings.llm_api_key,
             temperature=settings.chat_temperature,
             max_tokens=settings.chat_max_tokens,
-            model_kwargs={
-                "repetition_penalty": 1.15,
-            },
             extra_body={
+                "repetition_penalty": 1.15,  # Must be extra_body (model_kwargs rejected by openai client)
                 "chat_template_kwargs": {"enable_thinking": False},  # Default off, toggle via escape hatch
             },
         )
