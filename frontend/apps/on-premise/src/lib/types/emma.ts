@@ -11,6 +11,7 @@ export type EmmaMessageType =
   | 'info'
   | 'progress'
   | 'clarification'
+  | 'hitl_review'
   | 'verified_progress'
   | 'verified_result'
   | 'predictive_result'
@@ -57,6 +58,47 @@ export interface ClarificationData {
   severity?: 'info' | 'warning' | 'critical'
   type?: 'clarification' | 'confirmation' | 'suggestion'
 }
+
+// ── HITL Protocol Types (Phase 1) ──
+
+export interface ActionRequest {
+  name: string
+  args: Record<string, unknown>
+  description?: string
+}
+
+export interface ReviewConfig {
+  allowed_decisions: ('approve' | 'edit' | 'reject')[]
+  editable_fields?: string[]
+}
+
+export interface HITLReviewRequest {
+  type: 'hitl_review'
+  action_request: ActionRequest
+  review_config: ReviewConfig
+}
+
+export interface HITLClarificationRequest {
+  type: 'clarification'
+  question: string
+  options: Array<{ label: string; value: string }>
+}
+
+export interface HITLConfirmationRequest {
+  type: 'confirmation'
+  question: string
+  options: Array<{ label: string; value: string }>
+}
+
+export type InterruptValue =
+  | HITLReviewRequest
+  | HITLClarificationRequest
+  | HITLConfirmationRequest
+
+export type HITLDecision =
+  | { type: 'approve' }
+  | { type: 'edit'; edited_args: Record<string, unknown> }
+  | { type: 'reject'; message?: string }
 
 export interface WorkflowStep {
   index: number
@@ -330,6 +372,8 @@ export interface EmmaMessage {
     failedQuery?: string
     // Human-in-the-Loop clarification
     clarification?: ClarificationData
+    // Human-in-the-Loop review (HITL Protocol Phase 1)
+    hitl_review?: HITLReviewRequest
     // LangGraph chain-of-thought
     slmIsThinking?: boolean
     slmThinkingSteps?: SLMThinkingStep[]
