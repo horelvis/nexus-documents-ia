@@ -56,6 +56,7 @@ class OverallValidationResult:
     should_block: bool = False
     should_warn: bool = False
     redacted_content: Optional[str] = None
+    disclaimers: List[str] = field(default_factory=list)
     processing_time_ms: float = 0.0
 
     @property
@@ -74,14 +75,15 @@ class GuardrailService:
     """
     Service for validating LLM outputs against guardrails.
 
-    Guardrails are loaded from the database and cached.
+    Guardrails are loaded from the registry (baseline) and database (overrides),
+    merged with DB winning on name collision.
     Each guardrail specifies a type, configuration, and action on match.
     """
 
     def __init__(self):
-        self._guardrails_cache: Dict[Optional[UUID], List[Dict[str, Any]]] = {}
+        self._guardrails_cache: Dict[tuple, List[Dict[str, Any]]] = {}
         self._cache_ttl = 300  # 5 minutes
-        self._cache_time: Dict[Optional[UUID], float] = {}
+        self._cache_time: Dict[tuple, float] = {}
         self._http_client: Optional[httpx.AsyncClient] = None
         self._db_session = None
         self._embedding_cache: Dict[str, List[float]] = {}
@@ -92,65 +94,68 @@ class GuardrailService:
             self._http_client = httpx.AsyncClient(timeout=30.0)
         return self._http_client
 
-    async def _load_guardrails(self, tenant_id: Optional[UUID] = None) -> List[Dict[str, Any]]:
-        """Load active guardrails for tenant via Main API (HTTP proxy pattern)."""
+    async def _load_guardrails(self, tenant_id: Optional[UUID] = None, sector: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Load guardrails: registry baseline merged with DB overrides."""
         import time as time_module
+        from app.services.guardrail_registry import get_guardrails_for_sector
 
-        cache_key = tenant_id
+        cache_key = (tenant_id, sector)
         now = time_module.time()
 
-        # Check cache
         if cache_key in self._guardrails_cache:
             if (now - self._cache_time.get(cache_key, 0)) < self._cache_ttl:
                 return self._guardrails_cache[cache_key]
 
+        # Step 1: Registry baseline (in-memory)
+        registry_guardrails = get_guardrails_for_sector(sector)
+
+        # Step 2: DB overrides (via Main API HTTP)
+        db_guardrails = []
         try:
             client = await self._get_http_client()
-            headers = {
-                "X-API-Key": settings.MICROSERVICES_API_KEY,
-                "Content-Type": "application/json",
-            }
+            headers = {"X-API-Key": settings.MICROSERVICES_API_KEY, "Content-Type": "application/json"}
             if tenant_id:
                 headers["X-Tenant-ID"] = str(tenant_id)
-
-            # Call Main API to get guardrails
             url = f"{settings.api_url}/api/v1/prompts/guardrails"
-            response = await client.get(url, headers=headers, params={"active_only": "true"})
+            params = {"active_only": "true"}
+            if sector:
+                params["sector"] = sector
+            response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
-
             guardrails_data = response.json()
-
-            # Convert to internal format (handle both list and dict responses)
-            guardrails = []
             items = guardrails_data if isinstance(guardrails_data, list) else guardrails_data.get("guardrails", [])
-
             for g in items:
-                guardrails.append({
-                    "id": g.get("id"),
-                    "tenant_id": g.get("tenant_id"),
-                    "guardrail_name": g.get("guardrail_name"),
-                    "description": g.get("description"),
-                    "guardrail_type": g.get("guardrail_type"),
-                    "config": g.get("config", {}),
-                    "action_on_match": g.get("action_on_match"),
-                    "applies_to": g.get("applies_to", []),
-                    "priority": g.get("priority", 100),
-                    "is_active": g.get("is_active", True),
+                db_guardrails.append({
+                    "id": g.get("id"), "tenant_id": g.get("tenant_id"),
+                    "guardrail_name": g.get("guardrail_name"), "description": g.get("description"),
+                    "guardrail_type": g.get("guardrail_type"), "config": g.get("config", {}),
+                    "action_on_match": g.get("action_on_match"), "applies_to": g.get("applies_to", []),
+                    "priority": g.get("priority", 100), "is_active": g.get("is_active", True),
+                    "sector": g.get("sector"),
                 })
-
-            # Cache results
-            self._guardrails_cache[cache_key] = guardrails
-            self._cache_time[cache_key] = now
-
-            logger.debug(f"Loaded {len(guardrails)} guardrails for tenant {tenant_id} via Main API")
-            return guardrails
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Main API returned error loading guardrails: {e.response.status_code}")
-            return self._guardrails_cache.get(cache_key, [])
         except Exception as e:
-            logger.error(f"Failed to load guardrails via Main API: {e}")
-            return self._guardrails_cache.get(cache_key, [])
+            logger.warning(f"Failed to load DB guardrails: {e}. Using registry only.")
+
+        # Step 3: Merge — DB wins on name collision
+        db_by_name = {g["guardrail_name"]: g for g in db_guardrails}
+        merged = []
+        for rg in registry_guardrails:
+            name = rg["guardrail_name"]
+            if name in db_by_name:
+                db_entry = db_by_name.pop(name)
+                if db_entry.get("is_active", True):
+                    merged.append(db_entry)
+            else:
+                merged.append(rg)
+        for db_entry in db_by_name.values():
+            if db_entry.get("is_active", True):
+                merged.append(db_entry)
+        merged.sort(key=lambda g: g.get("priority", 100))
+
+        self._guardrails_cache[cache_key] = merged
+        self._cache_time[cache_key] = now
+        logger.debug(f"Loaded {len(merged)} guardrails (registry={len(registry_guardrails)}, db={len(db_guardrails)}) for tenant={tenant_id}, sector={sector}")
+        return merged
 
     def _applies_to_agent(self, guardrail: Dict[str, Any], agent_name: Optional[str]) -> bool:
         """Check if guardrail applies to the given agent."""
@@ -183,9 +188,9 @@ class GuardrailService:
             flags |= re.DOTALL
 
         try:
-            match = re.search(pattern, content, flags)
-            if match:
-                return True, f"Regex pattern matched: {pattern}", match.group(0)
+            matches = list(re.finditer(pattern, content, flags))
+            if matches:
+                return True, f"Regex pattern matched {len(matches)} time(s): {pattern}", pattern
             return False, None, None
         except re.error as e:
             logger.warning(f"Invalid regex pattern: {e}")
@@ -287,47 +292,48 @@ class GuardrailService:
         content: str,
         config: Dict[str, Any],
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        """Validate content using LLM-based validation."""
-        validation_prompt = config.get("validation_prompt")
-        if not validation_prompt:
-            return False, None, None
+        """Validate content using LLM via LLMRouter with Langfuse prompt support."""
+        system_prompt = None
+        user_prompt = None
+        langfuse_key = config.get("langfuse_prompt_key")
 
-        threshold = config.get("threshold", 0.9)
+        if langfuse_key:
+            try:
+                from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+                client = get_langfuse_prompt_client()
+                system_prompt = await client.get_prompt(langfuse_key)
+                user_key = langfuse_key.replace("_system", "_user")
+                if user_key != langfuse_key:
+                    user_prompt_template = await client.get_prompt(user_key)
+                    if user_prompt_template:
+                        user_prompt = user_prompt_template.replace("{content}", content[:2000])
+            except Exception as e:
+                logger.warning(f"Langfuse prompt '{langfuse_key}' not found, using fallback: {e}")
+
+        if not system_prompt:
+            system_prompt = "You are a content validator. Respond with only 'PASS' or 'FAIL: <reason>'."
+        if not user_prompt:
+            validation_prompt = config.get("validation_prompt", "Validate the following content:")
+            user_prompt = f"{validation_prompt}\n\nContent to validate:\n{content[:2000]}"
 
         try:
-            client = await self._get_http_client()
-
-            # Call Emma for validation
-            response = await client.post(
-                f"{settings.vllm_base_url}/chat/completions",
-                json={
-                    "model": settings.vllm_model,
-                    "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are a content validator. Respond with only 'PASS' or 'FAIL: <reason>'."
-                        },
-                        {
-                            "role": "user",
-                            "content": f"{validation_prompt}\n\nContent to validate:\n{content[:2000]}"
-                        },
-                    ],
-                    "max_tokens": 100,
-                    "temperature": 0.1,
-                },
-                timeout=30.0,
+            from app.agents.llm_router import get_llm_router
+            from app.agents.llm_client import ModelRole
+            router = await get_llm_router()
+            response = await router.chat(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                role=ModelRole.PLANNER,
+                max_tokens=100,
+                temperature=0.1,
             )
-
-            if response.status_code == 200:
-                data = response.json()
-                reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-
-                if reply.strip().upper().startswith("FAIL"):
-                    reason = reply.replace("FAIL:", "").replace("FAIL", "").strip()
-                    return True, f"LLM validation failed: {reason}", None
-
+            reply = response.content or ""
+            if reply.strip().upper().startswith("FAIL"):
+                reason = reply.replace("FAIL:", "").replace("FAIL", "").strip()
+                return True, f"LLM validation failed: {reason}", None
             return False, None, None
-
         except Exception as e:
             logger.error(f"LLM validation error: {e}")
             return False, None, None
@@ -395,6 +401,22 @@ class GuardrailService:
             if section.lower() not in content.lower():
                 issues.append(f"Missing required section: {section}")
 
+        # Check required regex pattern (e.g., legal citations)
+        require_pattern = config.get("require_pattern")
+        if require_pattern:
+            try:
+                if not re.search(require_pattern, content, re.IGNORECASE):
+                    issues.append(f"Required pattern not found: {require_pattern}")
+            except re.error:
+                pass
+
+        # Check inject_text — triggers if disclaimer text is absent
+        inject_text = config.get("inject_text")
+        check_absent = config.get("check_absent")
+        if inject_text and check_absent:
+            if check_absent.lower() not in content.lower():
+                issues.append(f"Disclaimer missing (will inject): {check_absent}")
+
         if issues:
             return True, "; ".join(issues), None
 
@@ -406,6 +428,7 @@ class GuardrailService:
         *,
         agent_name: Optional[str] = None,
         tenant_id: Optional[UUID] = None,
+        sector: Optional[str] = None,
     ) -> OverallValidationResult:
         """
         Validate content against all applicable guardrails.
@@ -414,6 +437,7 @@ class GuardrailService:
             content: The LLM output to validate
             agent_name: The agent that produced the content (for filtering)
             tenant_id: Tenant ID for tenant-specific guardrails
+            sector: Active sector for sector-specific guardrails
 
         Returns:
             OverallValidationResult with all validation results
@@ -422,12 +446,13 @@ class GuardrailService:
             return OverallValidationResult()
 
         start_time = time.time()
-        guardrails = await self._load_guardrails(tenant_id)
+        guardrails = await self._load_guardrails(tenant_id, sector)
 
         results = []
         should_block = False
         should_warn = False
         redacted_content = content
+        disclaimers: List[str] = []
 
         for guardrail in guardrails:
             # Check if guardrail applies to this agent
@@ -474,16 +499,34 @@ class GuardrailService:
 
             if matched:
                 logger.warning(
-                    f"🛡️ Guardrail '{guardrail['guardrail_name']}' triggered: {details}"
+                    f"Guardrail '{guardrail['guardrail_name']}' triggered: {details}"
                 )
 
                 if action == GuardrailAction.BLOCK:
                     should_block = True
                 elif action == GuardrailAction.WARN:
                     should_warn = True
+                    # Check for inject_text disclaimer
+                    inject_text = config.get("inject_text")
+                    if inject_text:
+                        disclaimers.append(inject_text)
                 elif action == GuardrailAction.REDACT and matched_content:
-                    # Redact the matched content
-                    redacted_content = redacted_content.replace(matched_content, "[REDACTED]")
+                    # Redact the matched content using re.sub for regex patterns
+                    if guardrail_type == GuardrailType.REGEX:
+                        flags = 0
+                        flag_str = config.get("flags", "")
+                        if "i" in flag_str:
+                            flags |= re.IGNORECASE
+                        if "m" in flag_str:
+                            flags |= re.MULTILINE
+                        if "s" in flag_str:
+                            flags |= re.DOTALL
+                        try:
+                            redacted_content = re.sub(matched_content, "[REDACTED]", redacted_content, flags=flags)
+                        except re.error:
+                            redacted_content = redacted_content.replace(matched_content, "[REDACTED]")
+                    else:
+                        redacted_content = redacted_content.replace(matched_content, "[REDACTED]")
 
         elapsed_ms = (time.time() - start_time) * 1000
 
@@ -492,6 +535,7 @@ class GuardrailService:
             should_block=should_block,
             should_warn=should_warn,
             redacted_content=redacted_content if redacted_content != content else None,
+            disclaimers=disclaimers,
             processing_time_ms=elapsed_ms,
         )
 
@@ -536,16 +580,17 @@ class GuardrailService:
 
         return None
 
-    def invalidate_cache(self, tenant_id: Optional[UUID] = None) -> None:
+    def invalidate_cache(self, tenant_id: Optional[UUID] = None, sector: Optional[str] = None) -> None:
         """Invalidate guardrails cache."""
-        if tenant_id is None:
+        cache_key = (tenant_id, sector)
+        if tenant_id is None and sector is None:
             self._guardrails_cache.clear()
             self._cache_time.clear()
-            logger.info("🗑️ Invalidated all guardrails cache")
+            logger.info("Invalidated all guardrails cache")
         else:
-            self._guardrails_cache.pop(tenant_id, None)
-            self._cache_time.pop(tenant_id, None)
-            logger.info(f"🗑️ Invalidated guardrails cache for tenant {tenant_id}")
+            self._guardrails_cache.pop(cache_key, None)
+            self._cache_time.pop(cache_key, None)
+            logger.info(f"Invalidated guardrails cache for tenant={tenant_id}, sector={sector}")
 
     async def close(self) -> None:
         """Clean up resources."""
