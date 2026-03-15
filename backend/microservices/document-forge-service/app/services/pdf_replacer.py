@@ -114,7 +114,13 @@ class PendingReplacement:
 
 
 class PdfReplacer:
-    """Performs text replacement in PDF files via redact & insert."""
+    """Performs text replacement in PDF files.
+
+    Three strategies (tried in order per field):
+    1. Widget fill: if field has widget_name, fill the AcroForm widget directly
+    2. Direct search: search_for(current_value) for unique text values
+    3. Context-anchor: use context_hint to locate dots/placeholder fields
+    """
 
     def replace(
         self,
@@ -129,13 +135,17 @@ class PdfReplacer:
         """
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
-        # Build replacement list with context
+        # Phase 0: Widget fill — direct AcroForm field filling
+        widget_filled: set[str] = set()
+        self._fill_widgets(doc, fields, field_values, widget_filled)
+
+        # Build replacement list for remaining fields (non-widget)
         replacements = []
         for f in fields:
             name = f.get("field_name", "")
             current = f.get("current_value", "")
             hint = f.get("context_hint", "")
-            if name in field_values and current:
+            if name in field_values and name not in widget_filled and current:
                 replacements.append({
                     "field_name": name,
                     "current_value": current,
@@ -216,7 +226,46 @@ class PdfReplacer:
 
         result_bytes = doc.tobytes()
         doc.close()
-        return result_bytes, len(replaced_fields), failed_fields
+
+        all_replaced = replaced_fields | widget_filled
+        return result_bytes, len(all_replaced), failed_fields
+
+    def _fill_widgets(
+        self,
+        doc: fitz.Document,
+        fields: list[dict],
+        field_values: dict[str, str],
+        filled: set[str],
+    ) -> None:
+        """Fill AcroForm widgets directly by widget_name mapping.
+
+        Fields with a 'widget_name' key (set by analyze) are filled directly
+        via the widget API. This is the most reliable method for form PDFs.
+        """
+        # Build widget_name → field_name mapping
+        widget_targets: dict[str, str] = {}  # widget_name → new_value
+        for f in fields:
+            name = f.get("field_name", "")
+            wn = f.get("widget_name", "")
+            if name in field_values and wn:
+                widget_targets[wn] = field_values[name]
+                filled.add(name)  # Mark as handled (even if widget not found)
+
+        if not widget_targets:
+            return
+
+        for page_num in range(len(doc)):
+            page = doc[page_num]
+            for w in page.widgets():
+                if w.field_name in widget_targets:
+                    old_val = w.field_value or ""
+                    new_val = widget_targets[w.field_name]
+                    w.field_value = new_val
+                    w.update()
+                    logger.info(
+                        "Widget filled: %s = '%s' (was '%s')",
+                        w.field_name, new_val[:30], old_val[:30],
+                    )
 
     def _find_by_direct_search(
         self,

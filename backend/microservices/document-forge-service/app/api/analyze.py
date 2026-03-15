@@ -12,7 +12,7 @@ from app.core.config import get_settings
 from app.core.security import verify_api_key
 from app.schemas.analyze import AnalyzeResponse
 from app.services.analyzer import get_analyzer
-from app.services.pdf_extractor import extract_text_from_pdf
+from app.services.pdf_extractor import extract_text_from_pdf, extract_widgets_from_pdf, has_form_fields
 from app.services.session_store import get_session_store
 from app.schemas.session import SessionStatus
 
@@ -84,6 +84,43 @@ def _detect_format(filename: str, content: bytes) -> str:
     return "docx"
 
 
+def _match_field_to_widget(field: dict, widgets: list[dict]) -> str | None:
+    """Match a detected field to a PDF widget by value or label.
+
+    Returns widget_name if matched, None otherwise.
+    """
+    cv = (field.get("current_value") or "").strip()
+    hint = (field.get("context_hint") or "").lower()
+
+    # 1. Exact value match (for filled fields like dates, NIF)
+    if cv and not cv.startswith("."):
+        for w in widgets:
+            wv = (w.get("widget_value") or "").strip()
+            if wv and wv == cv:
+                logger.info("Widget match by value: %s → %s (cv='%s')",
+                            field.get("field_name"), w["widget_name"], cv[:20])
+                return w["widget_name"]
+
+    # 2. Widget name mentioned in field data (LLM may have picked it up)
+    field_name = field.get("field_name", "")
+    for w in widgets:
+        wn = w["widget_name"].lower()
+        if wn in field_name.lower() or field_name.lower() in wn:
+            return w["widget_name"]
+
+    # 3. Label overlap (fuzzy: check if widget label words appear in field hint)
+    if hint:
+        for w in widgets:
+            wlabel = (w.get("label") or "").lower()
+            if wlabel and len(wlabel) > 3:
+                # Check if significant words from widget label appear in context_hint
+                words = [word for word in wlabel.split() if len(word) > 3]
+                if words and all(word in hint for word in words[:3]):
+                    return w["widget_name"]
+
+    return None
+
+
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_document(
     tenant_id: str = Form(...),
@@ -139,6 +176,8 @@ async def analyze_document(
 
     # Auto-detect format
     source_format = _detect_format(source_title, file_bytes)
+    pdf_has_widgets = False
+    widget_map: dict[str, str] = {}  # field_name → widget_name
 
     # Extract text based on format
     if source_format == "pdf":
@@ -148,6 +187,22 @@ async def analyze_document(
             )
         except Exception as e:
             raise HTTPException(status_code=422, detail=f"Could not parse PDF: {e}")
+
+        # Check for AcroForm fields
+        pdf_has_widgets = has_form_fields(file_bytes)
+        if pdf_has_widgets:
+            widgets = extract_widgets_from_pdf(file_bytes)
+            logger.info("PDF has %d form widgets", len(widgets))
+            # Append widget info to document text for LLM context
+            widget_section = "\n\n--- EDITABLE FORM FIELDS ---\n"
+            for w in widgets:
+                widget_section += (
+                    f"Widget: {w['widget_name']} | "
+                    f"Label: {w['label']} | "
+                    f"Value: \"{w['widget_value']}\" | "
+                    f"Type: {w['widget_type']}\n"
+                )
+            document_text += widget_section
     else:
         try:
             document_text = _extract_text_from_docx(file_bytes)
@@ -166,6 +221,16 @@ async def analyze_document(
         user_intent=user_intent,
         max_fields=max_fields,
     )
+
+    # For PDF with widgets: map detected fields to widget names by matching
+    # current_value or by label similarity
+    if pdf_has_widgets:
+        widgets = extract_widgets_from_pdf(file_bytes)
+        for field in result.get("fields", []):
+            matched_widget = _match_field_to_widget(field, widgets)
+            if matched_widget:
+                widget_map[field["field_name"]] = matched_widget
+                field["widget_name"] = matched_widget
 
     # Create session and store source bytes
     store = get_session_store()
