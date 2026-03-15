@@ -100,6 +100,7 @@ class GuardrailCreate(BaseModel):
     applies_to: Optional[List[str]] = None
     priority: int = 100
     is_active: bool = True
+    sector: Optional[str] = None
 
 
 class GuardrailResponse(BaseModel):
@@ -113,6 +114,7 @@ class GuardrailResponse(BaseModel):
     applies_to: Optional[List[str]] = None
     priority: int
     is_active: bool
+    sector: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -634,10 +636,10 @@ def create_guardrail(
     try:
         query = text("""
             INSERT INTO emma_guardrails
-                (tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active)
+                (tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector)
             VALUES
-                (:tenant_id, :guardrail_name, :description, :guardrail_type, CAST(:config AS jsonb), :action_on_match, :applies_to, :priority, :is_active)
-            RETURNING id, tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, created_at, updated_at
+                (:tenant_id, :guardrail_name, :description, :guardrail_type, CAST(:config AS jsonb), :action_on_match, :applies_to, :priority, :is_active, :sector)
+            RETURNING id, tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector, created_at, updated_at
         """)
 
         result = db.execute(
@@ -652,6 +654,7 @@ def create_guardrail(
                 "applies_to": guardrail.applies_to,
                 "priority": guardrail.priority,
                 "is_active": guardrail.is_active,
+                "sector": guardrail.sector,
             },
         )
         row = result.fetchone()
@@ -668,8 +671,9 @@ def create_guardrail(
             applies_to=row[7],
             priority=row[8],
             is_active=row[9],
-            created_at=row[10],
-            updated_at=row[11],
+            sector=row[10],
+            created_at=row[11],
+            updated_at=row[12],
         )
 
     except Exception as e:
@@ -681,22 +685,28 @@ def create_guardrail(
 def list_guardrails(
     tenant_id: Optional[UUID] = Depends(get_tenant_id),
     active_only: bool = Query(True),
+    sector: Optional[str] = Query(None, description="Filter by sector (legal, medical, documental). Returns sector-specific + global guardrails."),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
 ):
-    """List guardrails for tenant."""
+    """List guardrails for tenant, optionally filtered by sector."""
     try:
         query = text("""
-            SELECT id, tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, created_at, updated_at
+            SELECT id, tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector, created_at, updated_at
             FROM emma_guardrails
             WHERE (tenant_id = :tenant_id OR tenant_id IS NULL)
               AND (:active_only = false OR is_active = true)
+              AND (:sector IS NULL OR sector = :sector OR sector IS NULL)
             ORDER BY priority ASC
         """)
 
         result = db.execute(
             query,
-            {"tenant_id": str(tenant_id) if tenant_id else None, "active_only": active_only},
+            {
+                "tenant_id": str(tenant_id) if tenant_id else None,
+                "active_only": active_only,
+                "sector": sector,
+            },
         )
         rows = result.fetchall()
 
@@ -712,8 +722,9 @@ def list_guardrails(
                 applies_to=row[7],
                 priority=row[8],
                 is_active=row[9],
-                created_at=row[10],
-                updated_at=row[11],
+                sector=row[10],
+                created_at=row[11],
+                updated_at=row[12],
             )
             for row in rows
         ]
