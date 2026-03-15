@@ -11,10 +11,11 @@ import { queryVerifiedStream, mapEventToClaim, VerifiedStreamEvent, recoverVerif
 import { queryPredictiveStream, PredictiveStreamEvent } from '@/lib/services/predictive-analysis.service'
 import { EmmaQueryInput } from './EmmaQueryInput'
 import { EmmaRenderChat } from './EmmaRenderChat'
+import { HITLReviewCard } from './HITLReviewCard'
 import { PDFPreviewModal } from './PDFPreviewModal'
 import { PredictiveAnalysisDialog } from './PredictiveAnalysisDialog'
 import { useVerifiedGeneration } from '@/contexts/verified-generation-context'
-import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata, PredictiveFactorInfo, PredictiveAnalysisMetadata } from '@/lib/types/emma'
+import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata, PredictiveFactorInfo, PredictiveAnalysisMetadata, HITLReviewRequest, HITLDecision } from '@/lib/types/emma'
 import { isDocGenResult, extractDocGenMetadata } from '@/lib/utils/docgen-detector'
 import { isForgeResult, extractForgeMetadata } from '@/lib/utils/forge-detector'
 import { getSessionInfo } from '@/lib/services/forge.service'
@@ -40,6 +41,167 @@ function hasValidToken(): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * Helper to process SSE events from a resume stream (clarification or HITL decision).
+ * Extracted to share between handleClarificationResume and handleHITLDecision.
+ */
+async function processResumeEvents(
+  generator: AsyncGenerator<EmmaStreamEvent, void, unknown>,
+  progressMessageId: string,
+  updateMessagesFn: (updater: (prev: EmmaMessage[]) => EmmaMessage[], immediate?: boolean) => void,
+): Promise<{ streamCompleted: boolean }> {
+  let streamedAnswer = ''
+  let slmThinkingSteps: SLMThinkingStep[] = []
+  let streamCompleted = false
+
+  for await (const event of generator) {
+    const data = (event.data || {}) as Record<string, any>
+
+    // Token streaming
+    if (event.event === 'token' && data.text) {
+      streamedAnswer += data.text
+      updateMessagesFn(
+        (prev) =>
+          prev.map((msg) =>
+            msg.id === progressMessageId
+              ? {
+                  ...msg,
+                  metadata: {
+                    ...msg.metadata,
+                    isStreaming: true,
+                    streaming_text: streamedAnswer,
+                  },
+                }
+              : msg
+          ),
+        true
+      )
+      continue
+    }
+
+    // SLM thinking
+    if (event.event === 'slm_thinking') {
+      const inlineStepType = data.step_type || data.type
+      if (inlineStepType) {
+        const newStep: SLMThinkingStep = {
+          step: typeof data.step === 'number' ? data.step : slmThinkingSteps.length + 1,
+          type: inlineStepType as SLMThinkingStep['type'],
+          content: data.content || data.message || '',
+          detail: data.detail,
+          confidence: data.confidence,
+        }
+        slmThinkingSteps = [...slmThinkingSteps, newStep]
+        updateMessagesFn((prev) =>
+          prev.map((msg) =>
+            msg.id === progressMessageId
+              ? {
+                  ...msg,
+                  content: data.message || msg.content,
+                  metadata: {
+                    ...msg.metadata,
+                    slmIsThinking: data.slmIsThinking !== false,
+                    slmThinkingSteps: [...slmThinkingSteps],
+                  },
+                }
+              : msg
+          )
+        )
+        continue
+      }
+    }
+
+    // Completion
+    if (event.event === 'complete') {
+      streamCompleted = true
+      const answerFromServer =
+        typeof data.answer === 'string' && data.answer.trim()
+          ? data.answer
+          : data.final_result?.summary || null
+
+      const apiSources = (data.final_result?.sources || data.sources || [])
+        .map((src: any) => ({
+          name: src.title || src.name || src.document_id || src.id || 'Fuente',
+          id: src.document_id || src.id,
+          url: src.url,
+          boe_id: src.boe_id,
+          graph_link: src.graph_link,
+          source_type: src.source_type || src.type,
+          fileType: src.file_type || src.mime_type,
+          relevanceScore: src.score || src.relevance,
+        }))
+        .filter((s: any) => s.name && s.name !== 'Fuente')
+
+      updateMessagesFn((prev) =>
+        prev.map((msg) => {
+          if (msg.id !== progressMessageId) return msg
+          const finalContent =
+            answerFromServer || msg.metadata?.streaming_text || msg.content || 'Analisis completado'
+          const finalSlmSteps =
+            slmThinkingSteps.length > 0 ? [...slmThinkingSteps] : msg.metadata?.slmThinkingSteps || []
+          return {
+            ...msg,
+            type: 'result' as const,
+            content: finalContent,
+            isStreaming: false,
+            documents: apiSources.length > 0 ? apiSources : undefined,
+            suggestions: data.suggestions || data.final_result?.suggestions,
+            metadata: {
+              ...msg.metadata,
+              progress: 100,
+              isStreaming: false,
+              streaming_text: undefined,
+              slmIsThinking: false,
+              slmThinkingSteps: finalSlmSteps,
+            },
+          }
+        })
+      )
+      continue
+    }
+
+    // Error
+    if (event.event === 'error') {
+      streamCompleted = true
+      updateMessagesFn((prev) =>
+        prev.map((msg) =>
+          msg.id === progressMessageId
+            ? {
+                ...msg,
+                type: 'error' as const,
+                content: data.message || 'Error procesando la respuesta.',
+                isStreaming: false,
+                metadata: { ...msg.metadata, isStreaming: false, slmIsThinking: false },
+              }
+            : msg
+        )
+      )
+      continue
+    }
+
+    // Progress events
+    if (!['complete', 'error', 'token', 'slm_thinking'].includes(event.event)) {
+      updateMessagesFn((prev) =>
+        prev.map((msg) =>
+          msg.id === progressMessageId
+            ? {
+                ...msg,
+                content: data.message || msg.content,
+                metadata: {
+                  ...msg.metadata,
+                  progress: data.progress,
+                  agent: data.agent,
+                  ...(data.slmIsThinking !== undefined && { slmIsThinking: data.slmIsThinking }),
+                },
+              }
+            : msg
+        )
+      )
+    }
+  }
+
+  return { streamCompleted }
 }
 
 export function EmmaChat({
@@ -690,10 +852,46 @@ export function EmmaChat({
               return
             }
 
+            // Handle HITL review event (Approve/Edit/Reject for tool calls)
+            if (event.event === 'hitl_review') {
+              streamCompleted = true
+              const hitlData = data as unknown as HITLReviewRequest
+              const threadId = (data as any).thread_id as string | undefined
+
+              // Store pending review for resume (same ref as clarification)
+              if (threadId) {
+                pendingClarificationRef.current = {
+                  threadId,
+                  progressMessageId,
+                }
+              }
+
+              updateMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === progressMessageId
+                    ? {
+                        ...msg,
+                        type: 'clarification' as const,
+                        content: hitlData.action_request?.description || hitlData.action_request?.name || 'Accion pendiente de revision',
+                        isStreaming: false,
+                        metadata: {
+                          ...msg.metadata,
+                          isStreaming: false,
+                          slmIsThinking: false,
+                          hitl_review: hitlData,
+                        },
+                      }
+                    : msg
+                )
+              )
+              setIsLoading(false)
+              return
+            }
+
             // Handle other progress events (progress, start, delegation, first_token, etc.)
             // Also handles slm_reasoning and slm_executing stages via progress events
             if (
-              !['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'token', 'slm_thinking', 'slm_plan', 'clarification'].includes(
+              !['plan_created', 'step_start', 'step_complete', 'step_error', 'complete', 'error', 'token', 'slm_thinking', 'slm_plan', 'clarification', 'hitl_review'].includes(
                 event.event
               )
             ) {
@@ -1548,7 +1746,7 @@ export function EmmaChat({
       if (!pending || !user?.id || !tenantId) return
 
       pendingClarificationRef.current = null // Clear — only resume once
-      const { threadId, progressMessageId } = pending
+      const { threadId } = pending
 
       // Add user message showing what they selected
       const userMessage: EmmaMessage = {
@@ -1559,12 +1757,12 @@ export function EmmaChat({
       }
       updateMessages((prev) => [...prev, userMessage])
 
-      // Reuse existing progress message or create a new one for resume stream
+      // Create a new progress message for resume stream
       const resumeProgressId = (Date.now() + 1).toString()
       const resumeProgress: EmmaMessage = {
         id: resumeProgressId,
         type: 'progress',
-        content: 'Procesando tu selección...',
+        content: 'Procesando tu seleccion...',
         timestamp: new Date(),
         metadata: { progress: 0, streaming_text: '' },
       }
@@ -1572,179 +1770,94 @@ export function EmmaChat({
       setIsLoading(true)
       setError(null)
 
-      let streamedAnswer = ''
-      let slmThinkingSteps: SLMThinkingStep[] = []
-      let streamCompleted = false
-
       try {
-        for await (const event of resumeQueryStreamGenerator(threadId, selectedValue, tenantId, user.id)) {
-          const { data } = event
-
-          // Token streaming
-          if (event.event === 'token' && data.text) {
-            streamedAnswer += data.text
-            updateMessages(
-              (prev) =>
-                prev.map((msg) =>
-                  msg.id === resumeProgressId
-                    ? {
-                        ...msg,
-                        metadata: {
-                          ...msg.metadata,
-                          isStreaming: true,
-                          streaming_text: streamedAnswer,
-                        },
-                      }
-                    : msg
-                ),
-              true
-            )
-            continue
-          }
-
-          // SLM thinking
-          if (event.event === 'slm_thinking') {
-            const inlineStepType = data.step_type || (data as any).type
-            if (inlineStepType) {
-              const newStep: SLMThinkingStep = {
-                step: typeof data.step === 'number' ? data.step : slmThinkingSteps.length + 1,
-                type: inlineStepType as SLMThinkingStep['type'],
-                content: data.content || data.message || '',
-                detail: (data as any).detail,
-                confidence: data.confidence,
-              }
-              slmThinkingSteps = [...slmThinkingSteps, newStep]
-              updateMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === resumeProgressId
-                    ? {
-                        ...msg,
-                        content: data.message || msg.content,
-                        metadata: {
-                          ...msg.metadata,
-                          slmIsThinking: data.slmIsThinking !== false,
-                          slmThinkingSteps: [...slmThinkingSteps],
-                        },
-                      }
-                    : msg
-                )
-              )
-              continue
-            }
-          }
-
-          // Completion
-          if (event.event === 'complete') {
-            streamCompleted = true
-            const answerFromServer =
-              typeof data.answer === 'string' && data.answer.trim()
-                ? data.answer
-                : (data.final_result as any)?.summary || null
-
-            const apiSources = ((data.final_result as any)?.sources || (data as any).sources || [])
-              .map((src: any) => ({
-                name: src.title || src.name || src.document_id || src.id || 'Fuente',
-                id: src.document_id || src.id,
-                url: src.url,
-                boe_id: src.boe_id,
-                graph_link: src.graph_link,
-                source_type: src.source_type || src.type,
-                fileType: src.file_type || src.mime_type,
-                relevanceScore: src.score || src.relevance,
-              }))
-              .filter((s: any) => s.name && s.name !== 'Fuente')
-
-            updateMessages((prev) =>
-              prev.map((msg) => {
-                if (msg.id !== resumeProgressId) return msg
-                const finalContent =
-                  answerFromServer || msg.metadata?.streaming_text || msg.content || 'Análisis completado'
-                const finalSlmSteps =
-                  slmThinkingSteps.length > 0 ? [...slmThinkingSteps] : msg.metadata?.slmThinkingSteps || []
-                return {
-                  ...msg,
-                  type: 'result' as const,
-                  content: finalContent,
-                  isStreaming: false,
-                  documents: apiSources.length > 0 ? apiSources : undefined,
-                  suggestions: data.suggestions || (data.final_result as any)?.suggestions,
-                  metadata: {
-                    ...msg.metadata,
-                    progress: 100,
-                    isStreaming: false,
-                    streaming_text: undefined,
-                    slmIsThinking: false,
-                    slmThinkingSteps: finalSlmSteps,
-                  },
-                }
-              })
-            )
-            setIsLoading(false)
-            continue
-          }
-
-          // Error
-          if (event.event === 'error') {
-            streamCompleted = true
-            updateMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === resumeProgressId
-                  ? {
-                      ...msg,
-                      type: 'error' as const,
-                      content: data.message || 'Error procesando la respuesta.',
-                      isStreaming: false,
-                      metadata: { ...msg.metadata, isStreaming: false, slmIsThinking: false },
-                    }
-                  : msg
-              )
-            )
-            setIsLoading(false)
-            continue
-          }
-
-          // Progress events
-          if (!['complete', 'error', 'token', 'slm_thinking'].includes(event.event)) {
-            updateMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === resumeProgressId
-                  ? {
-                      ...msg,
-                      content: data.message || msg.content,
-                      metadata: {
-                        ...msg.metadata,
-                        progress: data.progress,
-                        agent: data.agent,
-                        ...(data.slmIsThinking !== undefined && { slmIsThinking: data.slmIsThinking }),
-                      },
-                    }
-                  : msg
-              )
-            )
-          }
+        const { streamCompleted } = await processResumeEvents(
+          resumeQueryStreamGenerator(threadId, selectedValue, tenantId, user.id),
+          resumeProgressId,
+          updateMessages,
+        )
+        if (!streamCompleted) {
+          // Stream ended without complete/error — should not happen normally
         }
       } catch (err: any) {
-        if (!streamCompleted) {
-          updateMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === resumeProgressId
-                ? {
-                    ...msg,
-                    type: 'error' as const,
-                    content: 'Error al continuar la consulta. Por favor, intenta de nuevo.',
-                    isStreaming: false,
-                    metadata: { ...msg.metadata, isStreaming: false, slmIsThinking: false },
-                  }
-                : msg
-            )
+        console.error('Clarification resume failed:', err)
+        updateMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === resumeProgressId
+              ? {
+                  ...msg,
+                  type: 'error' as const,
+                  content: 'Error al continuar la consulta. Por favor, intenta de nuevo.',
+                  isStreaming: false,
+                  metadata: { ...msg.metadata, isStreaming: false, slmIsThinking: false },
+                }
+              : msg
           )
-        }
+        )
       } finally {
         setIsLoading(false)
       }
     },
     [user, tenantId, resumeQueryStreamGenerator, updateMessages]
   )
+
+  // Handle HITL review decision — sends Approve/Edit/Reject to resume the paused graph
+  async function handleHITLDecision(messageId: string, decision: HITLDecision) {
+    const pending = pendingClarificationRef.current
+    if (!pending || !user?.id || !tenantId) return
+
+    pendingClarificationRef.current = null
+    const { threadId } = pending
+
+    // Show decision in chat
+    const decisionLabel =
+      decision.type === 'approve' ? 'Aprobado'
+        : decision.type === 'edit' ? 'Editado y enviado'
+        : `Rechazado${decision.message ? `: ${decision.message}` : ''}`
+
+    updateMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === messageId
+          ? { ...msg, type: 'info' as const, content: decisionLabel, metadata: { ...msg.metadata, hitl_review: undefined } }
+          : msg
+      )
+    )
+
+    // Create resume progress message
+    const resumeProgressId = (Date.now() + 1).toString()
+    updateMessages((prev) => [
+      ...prev,
+      {
+        id: resumeProgressId,
+        type: 'progress' as const,
+        content: 'Procesando tu decision...',
+        timestamp: new Date(),
+        metadata: { progress: 0, streaming_text: '' },
+      },
+    ])
+    setIsLoading(true)
+    setError(null)
+
+    // Resume graph with decision object
+    try {
+      await processResumeEvents(
+        resumeQueryStreamGenerator(threadId, decision as unknown as Record<string, unknown>, tenantId, user.id),
+        resumeProgressId,
+        updateMessages,
+      )
+    } catch (error) {
+      console.error('HITL resume failed:', error)
+      updateMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === resumeProgressId
+            ? { ...msg, type: 'error' as const, content: 'Error procesando la decision', isStreaming: false }
+            : msg
+        )
+      )
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Handle suggestion click — dispatches to resume flow if clarification is pending
   const handleSuggestionClick = useCallback(
@@ -1807,6 +1920,13 @@ export function EmmaChat({
             onRetry={handleRetry}
             onDocumentClick={handleDocumentClick}
             onPreviewClick={handlePreviewClick}
+            renderHITLReview={(request, messageId) => (
+              <HITLReviewCard
+                request={request}
+                isLoading={false}
+                onSubmit={(decision) => handleHITLDecision(messageId, decision)}
+              />
+            )}
           />
         </div>
       )}

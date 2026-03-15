@@ -133,7 +133,7 @@ export interface ClarificationOption {
 import { ReasoningStepType, SLMThinkingStep, SLMThinkingStepType } from '@/lib/types/emma'
 
 export interface EmmaStreamEvent {
-  event: 'start' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'complete' | 'error' | 'token' | 'first_token' | 'clarification' | 'progress' | 'slm_thinking' | 'slm_plan' | 'structural_step'
+  event: 'start' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'complete' | 'error' | 'token' | 'first_token' | 'clarification' | 'hitl_review' | 'progress' | 'slm_thinking' | 'slm_plan' | 'structural_step'
   data: {
     message?: string
     text?: string // Token text for streaming events
@@ -476,7 +476,7 @@ export function useEmmaService() {
    */
   async function* resumeQueryStreamGenerator(
     threadId: string,
-    resumeValue: string,
+    resumeValue: string | Record<string, unknown>,
     tenantId: string,
     userId?: string,
   ): AsyncGenerator<EmmaStreamEvent, void, unknown> {

@@ -28,6 +28,8 @@ interface EmmaRenderChatProps {
   className?: string
   /** Show terminal-style header with traffic lights */
   showTerminalHeader?: boolean
+  /** Render callback for HITL review cards (Approve/Edit/Reject) */
+  renderHITLReview?: (request: any, messageId: string) => React.ReactNode
 }
 
 export function EmmaRenderChat({
@@ -41,6 +43,7 @@ export function EmmaRenderChat({
   onPreviewClick,
   className,
   showTerminalHeader = false,
+  renderHITLReview,
 }: EmmaRenderChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -118,6 +121,7 @@ export function EmmaRenderChat({
                 onRetry={onRetry}
                 onDocumentClick={onDocumentClick}
                 onPreviewClick={onPreviewClick}
+                renderHITLReview={renderHITLReview}
               />
             )
           })}
@@ -147,6 +151,7 @@ interface MessageBubbleProps {
   onRetry?: (failedQuery: string) => void
   onDocumentClick?: (doc: DocumentInfo) => void
   onPreviewClick?: (doc: DocumentInfo) => void
+  renderHITLReview?: (request: any, messageId: string) => React.ReactNode
 }
 
 function MessageBubble({
@@ -158,6 +163,7 @@ function MessageBubble({
   onRetry,
   onDocumentClick,
   onPreviewClick,
+  renderHITLReview,
 }: MessageBubbleProps) {
   const isUser = message.type === 'user'
   const isProgress = message.type === 'progress'
@@ -293,6 +299,26 @@ function MessageBubble({
           )}
           <ForgeResult metadata={message.forge} />
         </div>
+      </div>
+    )
+  }
+
+  // HITL Review card — Approve/Edit/Reject for tool calls
+  if (message.type === 'clarification' && message.metadata?.hitl_review && renderHITLReview) {
+    const answered = clarificationAnswered
+    return (
+      <div className="w-full">
+        {answered ? (
+          <Card className="space-y-3 p-3 rounded-lg border bg-primary/5 border-primary/20">
+            <div className="flex items-center gap-2">
+              <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+              <span className="text-xs font-mono text-primary uppercase tracking-wide">EMMA:</span>
+            </div>
+            <p className="text-sm text-muted-foreground italic">{message.content}</p>
+          </Card>
+        ) : (
+          renderHITLReview(message.metadata.hitl_review, message.id)
+        )}
       </div>
     )
   }
