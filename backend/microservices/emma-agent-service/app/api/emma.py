@@ -736,11 +736,14 @@ async def _generate_langgraph_sse(
                     await asyncio.sleep(0)
                     continue  # Skip the general sleep below (already yielded)
 
-            elif event_type == "clarification":
-                # HITL interrupt — graph paused for user input
-                clar_data = data
-                yield f"event: clarification\ndata: {_dumps({'question': clar_data.get('question', ''), 'options': clar_data.get('options', []), 'thread_id': clar_data.get('thread_id', thread_id)})}\n\n"
-                # SSE closes after clarification — frontend will resume via /query/resume/stream
+            elif event_type in ("clarification", "confirmation", "hitl_review"):
+                # HITL interrupt — graph paused for user input.
+                # Dispatch the actual interrupt type so frontend renders the right UI.
+                actual_type = event_type
+                if isinstance(data, dict):
+                    actual_type = data.get("type", event_type)
+                yield f"event: {actual_type}\ndata: {_dumps({**data, 'thread_id': data.get('thread_id', thread_id)})}\n\n"
+                # SSE closes after interrupt — frontend will resume via /query/resume/stream
                 return
 
             elif event_type == "complete":
@@ -1111,9 +1114,14 @@ async def emma_query_stream(
 
 
 class ResumeRequest(BaseModel):
-    """Request to resume a paused graph (HITL interrupt)."""
+    """Request to resume a paused graph (HITL interrupt).
+
+    resume_value accepts:
+    - str: legacy confirm/cancel strings (backwards compat)
+    - dict: HITLDecision object (approve/edit/reject with optional args)
+    """
     thread_id: str = Field(..., description="Thread ID of the paused graph")
-    resume_value: str = Field(..., description="User's selected option / response")
+    resume_value: Any = Field(..., description="User's decision — string (legacy) or dict (HITLDecision)")
     tenant_id: str = Field(..., description="Tenant identifier")
     user_id: Optional[str] = Field(None, description="User identifier")
 
@@ -1164,8 +1172,12 @@ async def emma_query_resume_stream(
                 yield f"event: token\ndata: {_dumps({'text': data.get('text', ''), 'token': data.get('token', '')})}\n\n"
             elif event_type == "complete":
                 yield f"event: complete\ndata: {_dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'sources': data.get('sources', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id')})}\n\n"
-            elif event_type == "clarification":
-                yield f"event: clarification\ndata: {_dumps({'question': data.get('question', ''), 'options': data.get('options', []), 'thread_id': data.get('thread_id')})}\n\n"
+            elif event_type in ("clarification", "confirmation", "hitl_review"):
+                # Dispatch the actual interrupt type from the data payload
+                actual_type = event_type
+                if isinstance(data, dict):
+                    actual_type = data.get("type", event_type)
+                yield f"event: {actual_type}\ndata: {_dumps({**data, 'thread_id': data.get('thread_id', thread_id)})}\n\n"
                 return
             elif event_type == "error":
                 yield f"event: error\ndata: {_dumps({'error': 'Lo siento, hubo un problema temporal. Por favor, inténtalo de nuevo.'})}\n\n"

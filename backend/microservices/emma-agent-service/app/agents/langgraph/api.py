@@ -486,8 +486,12 @@ async def stream_react_query(
                 interrupt_value = e.args[0] if e.args else None
 
             logger.info(f"ReAct graph interrupted (HITL/exception) for thread_id={thread_id}")
+            # Dispatch SSE event type based on the interrupt value's type field
+            interrupt_type = "clarification"  # default for legacy interrupts
+            if isinstance(interrupt_value, dict):
+                interrupt_type = interrupt_value.get("type", "clarification")
             yield {
-                "type": "clarification",
+                "type": interrupt_type,
                 "data": {
                     "thread_id": thread_id,
                     **(interrupt_value if isinstance(interrupt_value, dict) else {"message": str(interrupt_value)}),
@@ -512,8 +516,12 @@ async def stream_react_query(
                     if hasattr(task, "interrupts") and task.interrupts:
                         interrupt_value = task.interrupts[0].value if hasattr(task.interrupts[0], "value") else None
                         logger.info(f"ReAct graph interrupted (HITL/post-stream) for thread_id={thread_id}")
+                        # Dispatch SSE event type based on the interrupt value's type field
+                        interrupt_type = "clarification"  # default for legacy interrupts
+                        if isinstance(interrupt_value, dict):
+                            interrupt_type = interrupt_value.get("type", "clarification")
                         yield {
-                            "type": "clarification",
+                            "type": interrupt_type,
                             "data": {
                                 "thread_id": thread_id,
                                 **(interrupt_value if isinstance(interrupt_value, dict) else {"message": str(interrupt_value)}),
@@ -638,8 +646,12 @@ async def resume_react_query(
             interrupt_value = None
             if hasattr(e, "interrupts") and e.interrupts:
                 interrupt_value = e.interrupts[0].value if hasattr(e.interrupts[0], "value") else None
+            # Dispatch SSE event type based on the interrupt value's type field
+            interrupt_type = "clarification"  # default for legacy interrupts
+            if isinstance(interrupt_value, dict):
+                interrupt_type = interrupt_value.get("type", "clarification")
             yield {
-                "type": "clarification",
+                "type": interrupt_type,
                 "data": {
                     "thread_id": thread_id,
                     **(interrupt_value if isinstance(interrupt_value, dict) else {"message": str(interrupt_value)}),
