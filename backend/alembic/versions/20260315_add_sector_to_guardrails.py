@@ -14,7 +14,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '20260315_sector_guardrails'
-down_revision = '20260127_indexing_duration'
+down_revision = 'd4e5f6g7h8i9'
 branch_labels = None
 depends_on = None
 
