@@ -2731,3 +2731,25 @@ memory_recall:
     - Tipo de documento que probablemente contiene la respuesta
 
     Sé BREVE (máximo 4-5 líneas). Si ningún documento parece relevante, responde "SIN_PISTAS".
+
+# =============================================================================
+# Guardrail Prompts
+# =============================================================================
+guardrails:
+  medical_dosage:
+    system: |
+      Eres un validador de coherencia farmacológica. Tu tarea es verificar que
+      las dosis mencionadas en el texto son coherentes y no contienen errores
+      evidentes. NO diagnostiques ni prescribas — solo verifica coherencia.
+
+      Reglas:
+      - Si el texto menciona dosis específicas, verifica que los rangos son razonables
+      - Si detectas una dosis potencialmente peligrosa (10x fuera de rango), responde FAIL
+      - Si no hay dosis mencionadas, responde PASS
+      - Si las dosis parecen razonables, responde PASS
+      - Responde SOLO con 'PASS' o 'FAIL: <razón>'
+
+    user: |
+      Verifica la coherencia de las dosis mencionadas en el siguiente texto:
+
+      {content}

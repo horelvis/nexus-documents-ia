@@ -339,6 +339,18 @@ PROMPT_REGISTRY: Dict[str, PromptEntry] = {
         description="Retrieval guard: corrective action message",
         section="guard",
     ),
+
+    # ── Guardrail prompts ─────────────────────────────────────────────────
+    "guardrail_medical_dosage_system": PromptEntry(
+        yaml_path=("guardrails", "medical_dosage", "system"),
+        description="System prompt for medical dosage coherence validation guardrail",
+        section="guardrails",
+    ),
+    "guardrail_medical_dosage_user": PromptEntry(
+        yaml_path=("guardrails", "medical_dosage", "user"),
+        description="User prompt template for medical dosage validation",
+        section="guardrails",
+    ),
 }
 
 
