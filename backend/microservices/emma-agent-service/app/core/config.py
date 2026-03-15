@@ -71,6 +71,15 @@ class Settings(BaseSettings):
     vllm_planner_max_tokens: int = int(os.getenv("VLLM_PLANNER_MAX_TOKENS", "4096"))
     vllm_planner_temperature: float = float(os.getenv("VLLM_PLANNER_TEMPERATURE", "0.3"))
 
+    # LLM Layer (ChatOpenAI) — aliases for backwards compatibility with VLLM_* vars
+    llm_base_url: str = os.getenv("LLM_BASE_URL", os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1"))
+    llm_model: str = os.getenv("LLM_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B"))
+    llm_api_key: str = os.getenv("LLM_API_KEY", "not-needed")
+    planner_temperature: float = float(os.getenv("PLANNER_TEMPERATURE", "0.3"))
+    planner_max_tokens: int = int(os.getenv("PLANNER_MAX_TOKENS", "4096"))
+    chat_temperature: float = float(os.getenv("CHAT_TEMPERATURE", "0.6"))
+    chat_max_tokens: int = int(os.getenv("CHAT_MAX_TOKENS", "16384"))
+
     # Ollama configuration (LEGACY)
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "llama3.2:latest"))
