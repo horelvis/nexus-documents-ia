@@ -239,17 +239,19 @@ class PdfReplacer:
     ) -> None:
         """Fill AcroForm widgets directly by widget_name mapping.
 
-        Fields with a 'widget_name' key (set by analyze) are filled directly
-        via the widget API. This is the most reliable method for form PDFs.
+        Handles:
+        - Text widgets: direct field_value assignment
+        - CheckBox widgets: set to on_state() for truthy values, clear for falsy
+        - Cifra widgets (max_len=1): single-digit fields, no special handling
         """
-        # Build widget_name → field_name mapping
-        widget_targets: dict[str, str] = {}  # widget_name → new_value
+        # Build widget_name → (new_value, field_name) mapping
+        widget_targets: dict[str, tuple[str, str]] = {}
         for f in fields:
             name = f.get("field_name", "")
             wn = f.get("widget_name", "")
             if name in field_values and wn:
-                widget_targets[wn] = field_values[name]
-                filled.add(name)  # Mark as handled (even if widget not found)
+                widget_targets[wn] = (field_values[name], name)
+                filled.add(name)
 
         if not widget_targets:
             return
@@ -257,9 +259,33 @@ class PdfReplacer:
         for page_num in range(len(doc)):
             page = doc[page_num]
             for w in page.widgets():
-                if w.field_name in widget_targets:
-                    old_val = w.field_value or ""
-                    new_val = widget_targets[w.field_name]
+                if w.field_name not in widget_targets:
+                    continue
+
+                new_val, field_name = widget_targets[w.field_name]
+                old_val = w.field_value or ""
+
+                if w.field_type_string == "CheckBox":
+                    # Truthy values: "true", "1", "yes", "sí", "si", "x", on_state
+                    truthy = new_val.strip().lower() in (
+                        "true", "1", "yes", "sí", "si", "x", "on", "checked",
+                    )
+                    if truthy:
+                        try:
+                            w.field_value = w.on_state()
+                        except Exception:
+                            w.field_value = "Yes"
+                    else:
+                        w.field_value = ""  # unchecked
+                    w.update()
+                    logger.info(
+                        "CheckBox %s: %s (was '%s')",
+                        w.field_name,
+                        "checked" if truthy else "unchecked",
+                        old_val[:10],
+                    )
+                else:
+                    # Text, ComboBox, ListBox
                     w.field_value = new_val
                     w.update()
                     logger.info(

@@ -85,37 +85,45 @@ def _detect_format(filename: str, content: bytes) -> str:
 
 
 def _match_field_to_widget(field: dict, widgets: list[dict]) -> str | None:
-    """Match a detected field to a PDF widget by value or label.
+    """Match a detected field to a PDF widget by value, name, or label.
 
     Returns widget_name if matched, None otherwise.
     """
     cv = (field.get("current_value") or "").strip()
     hint = (field.get("context_hint") or "").lower()
+    field_name = field.get("field_name", "")
 
-    # 1. Exact value match (for filled fields like dates, NIF)
-    if cv and not cv.startswith("."):
+    # 1. Exact field_name match (LLM used widget_name directly as field_name)
+    for w in widgets:
+        if w["widget_name"] == field_name:
+            logger.info("Widget match by name: %s → %s", field_name, w["widget_name"])
+            return w["widget_name"]
+
+    # 2. Exact value match (for filled fields like dates, NIF)
+    if cv and not cv.startswith(".") and len(cv) > 1:
         for w in widgets:
             wv = (w.get("widget_value") or "").strip()
             if wv and wv == cv:
                 logger.info("Widget match by value: %s → %s (cv='%s')",
-                            field.get("field_name"), w["widget_name"], cv[:20])
+                            field_name, w["widget_name"], cv[:20])
                 return w["widget_name"]
 
-    # 2. Widget name mentioned in field data (LLM may have picked it up)
-    field_name = field.get("field_name", "")
+    # 3. Case-insensitive name match
+    fn_lower = field_name.lower()
     for w in widgets:
-        wn = w["widget_name"].lower()
-        if wn in field_name.lower() or field_name.lower() in wn:
+        wn_lower = w["widget_name"].lower()
+        if wn_lower == fn_lower or wn_lower in fn_lower or fn_lower in wn_lower:
+            logger.info("Widget match by name (fuzzy): %s → %s", field_name, w["widget_name"])
             return w["widget_name"]
 
-    # 3. Label overlap (fuzzy: check if widget label words appear in field hint)
+    # 4. Label overlap (check if widget label words appear in context_hint)
     if hint:
         for w in widgets:
             wlabel = (w.get("label") or "").lower()
             if wlabel and len(wlabel) > 3:
-                # Check if significant words from widget label appear in context_hint
                 words = [word for word in wlabel.split() if len(word) > 3]
                 if words and all(word in hint for word in words[:3]):
+                    logger.info("Widget match by label: %s → %s", field_name, w["widget_name"])
                     return w["widget_name"]
 
     return None
@@ -195,12 +203,20 @@ async def analyze_document(
             logger.info("PDF has %d form widgets", len(widgets))
             # Append widget info to document text for LLM context
             widget_section = "\n\n--- EDITABLE FORM FIELDS ---\n"
+            widget_section += "These are the fillable fields in the PDF form. Use widget_name as field_name.\n"
+            widget_section += "For CheckBox fields, value should be 'true' or 'false'.\n"
+            widget_section += "For Cifra fields (max_len=1), value is a single digit.\n\n"
             for w in widgets:
+                extra = ""
+                if w.get("max_len"):
+                    extra = f" | max_len: {w['max_len']}"
+                if w["widget_type"] == "CheckBox":
+                    extra = " | values: true/false"
                 widget_section += (
                     f"Widget: {w['widget_name']} | "
                     f"Label: {w['label']} | "
                     f"Value: \"{w['widget_value']}\" | "
-                    f"Type: {w['widget_type']}\n"
+                    f"Type: {w['widget_type']}{extra}\n"
                 )
             document_text += widget_section
     else:

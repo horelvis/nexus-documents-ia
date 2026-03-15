@@ -50,8 +50,8 @@ def extract_text_from_pdf(pdf_bytes: bytes, max_chars: int = 20000) -> tuple[str
 def extract_widgets_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
     """Extract AcroForm widget info from PDF.
 
-    Returns list of widget descriptors with name, value, type, and context.
-    Empty list if no widgets found.
+    Returns list of widget descriptors with name, value, type, context,
+    and metadata (max_len for text, on_state for checkboxes).
     """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     widgets = []
@@ -59,22 +59,33 @@ def extract_widgets_from_pdf(pdf_bytes: bytes) -> list[dict[str, Any]]:
     for page_num in range(len(doc)):
         page = doc[page_num]
         for w in page.widgets():
-            if w.field_type_string not in ("Text", "ComboBox", "ListBox"):
+            wtype = w.field_type_string
+            if wtype not in ("Text", "CheckBox", "ComboBox", "ListBox"):
                 continue
 
             # Get contextual label: text to the left of the widget
             left_rect = fitz.Rect(0, w.rect.y0 - 2, w.rect.x0, w.rect.y1 + 2)
             left_text = page.get_text("text", clip=left_rect).strip().replace("\n", " ")
 
-            widgets.append({
+            widget_info: dict[str, Any] = {
                 "widget_name": w.field_name,
                 "widget_value": w.field_value or "",
-                "widget_type": w.field_type_string,
+                "widget_type": wtype,
                 "label": left_text[:80] if left_text else w.field_name,
                 "page": page_num,
                 "rect": [round(w.rect.x0), round(w.rect.y0),
                          round(w.rect.x1), round(w.rect.y1)],
-            })
+            }
+
+            if wtype == "Text":
+                widget_info["max_len"] = getattr(w, "text_maxlen", 0) or 0
+            elif wtype == "CheckBox":
+                try:
+                    widget_info["on_state"] = w.on_state()
+                except Exception:
+                    widget_info["on_state"] = "Yes"
+
+            widgets.append(widget_info)
 
     doc.close()
     return widgets
