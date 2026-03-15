@@ -1,7 +1,7 @@
 # Sector-Aware Guardrails & Medical Safety — Design Spec
 
 **Date**: 2026-03-15
-**Status**: Reviewed (spec-reviewer pass 1 — 4 critical + 5 important issues resolved)
+**Status**: Approved (spec-reviewer pass 2 — 0 critical, 0 important, 2 suggestions incorporated)
 **Scope**: Phase 1 — Minimum Viable Safe for Medical Sector + Guardrail improvements across all sectors
 
 ## Problem Statement
@@ -317,7 +317,7 @@ Paths relative to `backend/`:
 | File | Type | Description |
 |------|------|-------------|
 | `alembic/versions/XXXX_add_sector_to_guardrails.py` | NEW | Migration: add `sector VARCHAR(50)` column to `emma_guardrails` table + index |
-| `app/api/v1/prompts.py` | MOD | Add `sector` query parameter to `GET /guardrails` endpoint |
+| `app/api/v1/prompts.py` | MOD | Add `sector` query parameter to `GET /guardrails` endpoint; add `sector: Optional[str]` to `GuardrailCreate` schema and INSERT statement |
 
 ## Testing Strategy
 
