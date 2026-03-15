@@ -423,7 +423,7 @@ export const EmmaChat = forwardRef<EmmaChatRef, EmmaChatProps>(function EmmaChat
 
       // Find exact match by filename
       const exactMatch = searchResponse.data.results.find(
-        result => result.filename === doc.name || result.title === doc.name
+        (result: any) => result.filename === doc.name || result.title === doc.name
       )
 
       if (!exactMatch) {

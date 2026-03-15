@@ -188,7 +188,7 @@ export function EmmaMarkdownFormat({
     <div className={cn("prose prose-sm max-w-none", textColor, className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        components={components}
+        components={components as any}
       >
         {processedContent}
       </ReactMarkdown>
