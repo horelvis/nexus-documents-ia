@@ -250,36 +250,35 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
     streamed_tokens = False
 
     try:
-        from app.agents.llm_router import get_llm_router
-        from app.agents.llm_client import ModelRole
-        router = await get_llm_router()
-        llm_kwargs = {
-            "messages": llm_messages,
-            "max_tokens": settings.react_max_completion_tokens,
-            "role": ModelRole.CHAT,
-        }
+        from langchain_core.messages import SystemMessage, HumanMessage
+        from app.agents.llm_models import get_chat_model, chat_with_thinking
+
+        lc_messages = [
+            SystemMessage(content=llm_messages[0]["content"]),
+            HumanMessage(content=llm_messages[1]["content"]),
+        ]
         per_request_thinking = state.get("enable_thinking")
-        if per_request_thinking is not None:
-            llm_kwargs["enable_thinking"] = per_request_thinking
 
         # Stream tokens in real-time if writer is available
         if writer:
             chunks = []
-            async for event in router.chat_stream(**llm_kwargs):
-                if event.event_type == "content" and event.content:
-                    chunks.append(event.content)
-                    writer({"type": "token", "data": {"text": event.content}})
-                elif event.event_type == "thinking" and event.thinking:
-                    pass  # Skip thinking tokens from output
-                elif event.event_type == "error" and event.error:
-                    logger.warning(f"Synthesize swarm stream error: {event.error}")
+            model = get_chat_model().bind(max_tokens=settings.react_max_completion_tokens)
+            async for chunk in model.astream(lc_messages):
+                text = chunk.content
+                if text:
+                    chunks.append(text)
+                    writer({"type": "token", "data": {"text": text}})
 
             synthesized_answer = "".join(chunks)
             streamed_tokens = True
         else:
             # Fallback: non-streaming call (e.g., graph.invoke() without stream_mode)
-            response = await router.chat(**llm_kwargs)
-            synthesized_answer = response.content or ""
+            if per_request_thinking:
+                synthesized_answer = await chat_with_thinking(lc_messages)
+            else:
+                model = get_chat_model().bind(max_tokens=settings.react_max_completion_tokens)
+                response = await model.ainvoke(lc_messages)
+                synthesized_answer = response.content or ""
 
         # Clean thinking tags from synthesis
         import re
