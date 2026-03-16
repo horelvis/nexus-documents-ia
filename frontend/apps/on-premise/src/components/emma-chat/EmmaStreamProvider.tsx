@@ -1,6 +1,6 @@
 'use client'
 
-import React, { createContext, useContext, ReactNode } from 'react'
+import React, { createContext, useContext, useMemo, ReactNode } from 'react'
 import { useStream } from '@langchain/langgraph-sdk/react'
 import type { Message } from '@langchain/langgraph-sdk'
 
@@ -45,32 +45,50 @@ function getSSOToken(): string | undefined {
 
 interface EmmaStreamProviderProps {
   children: ReactNode
-  apiUrl: string
   assistantId?: string
   threadId: string | null
   onThreadId: (id: string) => void
   tenantId: string
 }
 
+/**
+ * Constructs the API URL for the emma-agent-service LangGraph endpoint.
+ * On the client, connects directly to port 8009 (bypasses Next.js proxy).
+ */
+function getApiUrl(): string {
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:8009/api`
+  }
+  return '/api'
+}
+
 export function EmmaStreamProvider({
   children,
-  apiUrl,
   assistantId = 'emma-react',
   threadId,
   onThreadId,
   tenantId,
 }: EmmaStreamProviderProps) {
-  const token = getSSOToken()
+  // Memoize token read so it doesn't re-evaluate on every render
+  const token = useMemo(() => getSSOToken(), [])
+
+  // Memoize headers to prevent useStream from recreating the client
+  const defaultHeaders = useMemo(
+    () => ({
+      'X-Tenant-ID': tenantId,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    }),
+    [tenantId, token],
+  )
+
+  const apiUrl = useMemo(() => getApiUrl(), [])
 
   const stream = useStream<EmmaStateType>({
     apiUrl,
     assistantId,
     threadId,
     messagesKey: 'messages',
-    defaultHeaders: {
-      'X-Tenant-ID': tenantId,
-      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-    },
+    defaultHeaders,
     onThreadId,
     fetchStateHistory: true,
   })

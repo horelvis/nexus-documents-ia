@@ -546,9 +546,20 @@ async def resume_react_query(
 
     set_execution_context(tenant_id=tenant_id, user_id=user_id)
 
+    # Format a human-friendly label for the resume value (HITL decision)
+    resume_label = str(resume_value)
+    if isinstance(resume_value, dict):
+        dtype = resume_value.get("type", "")
+        if dtype == "approve":
+            resume_label = "Aprobado"
+        elif dtype == "edit":
+            resume_label = "Editado y enviado"
+        elif dtype == "reject":
+            resume_label = f"Rechazado{': ' + resume_value.get('message', '') if resume_value.get('message') else ''}"
+
     yield {
         "type": "started",
-        "data": {"thread_id": thread_id, "query": str(resume_value), "graph_type": "react_resume"},
+        "data": {"thread_id": thread_id, "query": resume_label, "graph_type": "react_resume"},
     }
 
     try:

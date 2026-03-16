@@ -33,6 +33,58 @@ router = APIRouter(prefix="/api", tags=["langgraph-protocol"])
 
 
 # =============================================================================
+# HITL Decision Formatting
+# =============================================================================
+
+def _format_hitl_decision(resume_value: Any) -> Optional[str]:
+    """Convert a raw HITL decision dict into a human-friendly label.
+
+    When a user approves/edits/rejects via the HITLReviewCard, the SDK sends
+    the decision as Command(resume={type: 'approve'|'edit'|'reject', ...}).
+    LangGraph persists this as a HumanMessage with the raw dict as content.
+    This helper generates a clean label to show in chat instead.
+
+    Returns None if the value is not a recognized HITL decision.
+    """
+    if not isinstance(resume_value, dict):
+        return None
+
+    decision_type = resume_value.get("type")
+    if decision_type == "approve":
+        return "Aprobado"
+    elif decision_type == "edit":
+        return "Editado y enviado"
+    elif decision_type == "reject":
+        message = resume_value.get("message", "")
+        return f"Rechazado: {message}" if message else "Rechazado"
+
+    return None
+
+
+def _sanitize_checkpoint_message(content: str) -> Optional[str]:
+    """Detect a raw HITL decision dict in a HumanMessage content string
+    and return a friendly label. Returns None if not a decision.
+
+    LangGraph persists Command(resume=value) as HumanMessage(content=str(value)).
+    This produces Python dict repr like "{'type': 'edit', 'edited_args': {...}}".
+    """
+    import re
+    trimmed = content.strip()
+    if not re.match(r"""^[{'"]\s*['"]?type['"]?\s*:\s*['"]?(approve|edit|reject)""", trimmed):
+        return None
+
+    if "'approve'" in trimmed or '"approve"' in trimmed:
+        return "Aprobado"
+    elif "'edit'" in trimmed or '"edit"' in trimmed:
+        return "Editado y enviado"
+    elif "'reject'" in trimmed or '"reject"' in trimmed:
+        msg_match = re.search(r"""['"]message['"]:\s*['"]([^'"]+)['"]""", trimmed)
+        return f"Rechazado: {msg_match.group(1)}" if msg_match else "Rechazado"
+
+    return None
+
+
+# =============================================================================
 # Request / Response Models
 # =============================================================================
 
@@ -189,14 +241,22 @@ async def get_thread_state(
         # Convert LangChain messages to serializable dicts
         messages = []
         for msg in values.get("messages", []):
-            if hasattr(msg, "dict"):
-                messages.append(msg.dict())
-            elif hasattr(msg, "model_dump"):
-                messages.append(msg.model_dump())
+            if hasattr(msg, "model_dump"):
+                msg_dict = msg.model_dump()
+            elif hasattr(msg, "dict"):
+                msg_dict = msg.dict()
             elif isinstance(msg, dict):
-                messages.append(msg)
+                msg_dict = msg
             else:
-                messages.append({"type": "unknown", "content": str(msg)})
+                msg_dict = {"type": "unknown", "content": str(msg)}
+
+            # Sanitize HITL resume values persisted as HumanMessages
+            if msg_dict.get("type") == "human" and isinstance(msg_dict.get("content"), str):
+                friendly = _sanitize_checkpoint_message(msg_dict["content"])
+                if friendly:
+                    msg_dict = {**msg_dict, "content": friendly}
+
+            messages.append(msg_dict)
 
         # Check for pending interrupts
         interrupts = []
@@ -320,11 +380,21 @@ async def run_stream(
         if state_snapshot and state_snapshot.values:
             for msg in state_snapshot.values.get("messages", []):
                 if hasattr(msg, "model_dump"):
-                    prior_messages.append(msg.model_dump())
+                    msg_dict = msg.model_dump()
                 elif hasattr(msg, "dict"):
-                    prior_messages.append(msg.dict())
+                    msg_dict = msg.dict()
                 elif isinstance(msg, dict):
-                    prior_messages.append(msg)
+                    msg_dict = msg
+                else:
+                    continue
+
+                # Sanitize HITL resume values from checkpoint history
+                if msg_dict.get("type") == "human" and isinstance(msg_dict.get("content"), str):
+                    friendly = _sanitize_checkpoint_message(msg_dict["content"])
+                    if friendly:
+                        msg_dict = {**msg_dict, "content": friendly}
+
+                prior_messages.append(msg_dict)
     except Exception as e:
         logger.debug(f"Could not load prior messages for thread {thread_id[:8]}: {e}")
 
@@ -332,6 +402,17 @@ async def run_stream(
     if body.command and body.command.get("resume") is not None:
         resume_value = body.command["resume"]
         logger.info(f"LangGraph protocol: resuming thread {thread_id[:8]}...")
+
+        # Inject a human-friendly message into prior_messages so the adapter
+        # emits it in values snapshots instead of the raw Command(resume=...)
+        # dict that LangGraph persists as a HumanMessage in the checkpoint.
+        friendly_label = _format_hitl_decision(resume_value)
+        if friendly_label:
+            prior_messages.append({
+                "type": "human",
+                "content": friendly_label,
+                "id": str(uuid.uuid4()),
+            })
 
         from app.agents.langgraph.api import resume_react_query
 
