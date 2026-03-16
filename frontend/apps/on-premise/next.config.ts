@@ -30,11 +30,6 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
 
-  // Expose server env vars to the client bundle
-  env: {
-    NEXT_PUBLIC_LANGGRAPH_PROTOCOL: process.env.LANGGRAPH_PROTOCOL || 'false',
-  },
-
   // Rewrite API calls to backend
   async rewrites() {
     // BACKEND_URL is a server-side runtime env var (set in Docker compose).

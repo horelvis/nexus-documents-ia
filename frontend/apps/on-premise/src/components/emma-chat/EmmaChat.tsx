@@ -33,7 +33,7 @@ import { CommandBar } from './messages/CommandBar'
 import { ThreadHistory } from './ThreadHistory'
 import type { Message as SDKMessage } from '@langchain/langgraph-sdk'
 
-const USE_LANGGRAPH_PROTOCOL = process.env.NEXT_PUBLIC_LANGGRAPH_PROTOCOL === 'true'
+const USE_LANGGRAPH_PROTOCOL = true  // Always use LangGraph protocol (useStream SDK)
 
 const SSO_TOKEN_KEY = 'nexus_sso_tokens'
 
