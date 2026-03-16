@@ -134,6 +134,18 @@ PROMPT_REGISTRY: Dict[str, PromptEntry] = {
         section="heartbeat",
     ),
 
+    # ── Fast-path (classify node — no tools) ─────────────────────────────────
+    "emma_fast_conversational_system": PromptEntry(
+        yaml_path=("fast_path", "conversational_system"),
+        description="Fast-path system prompt for greetings, identity, farewells",
+        section="fast_path",
+    ),
+    "emma_fast_general_knowledge_system": PromptEntry(
+        yaml_path=("fast_path", "general_knowledge_system"),
+        description="Fast-path system prompt for general knowledge (code, math, translations)",
+        section="fast_path",
+    ),
+
     # ── ReAct Agent (main reasoning loop) ────────────────────────────────────
     "emma_react_system": PromptEntry(
         yaml_path=("react_agent", "system"),

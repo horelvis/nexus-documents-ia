@@ -23,8 +23,8 @@ from .guardrail_helper import apply_guardrails
 
 logger = logging.getLogger(__name__)
 
-# System prompt for conversational fast-path (lightweight LLM call, no tools)
-_CONVERSATIONAL_SYSTEM_PROMPT = """\
+# Hardcoded fallbacks — used only when Langfuse AND YAML are both unavailable.
+_CONVERSATIONAL_SYSTEM_FALLBACK = """\
 Eres Emma, la asistente de inteligencia artificial de NouxCubeIA.
 Ayudas a gestionar documentos empresariales, consultar legislación española (BOE), \
 analizar contratos, generar borradores y mucho más.
@@ -41,8 +41,7 @@ NO repitas toda la memoria, solo úsala de forma natural y breve.
 - NO uses emojis excesivos (máximo 1 si es natural).
 - Responde SOLO en texto plano, sin markdown."""
 
-# System prompt for general knowledge fast-path (code, math, translations, etc.)
-_GENERAL_KNOWLEDGE_SYSTEM_PROMPT = """\
+_GENERAL_KNOWLEDGE_SYSTEM_FALLBACK = """\
 Eres Emma, la asistente de inteligencia artificial de NouxCubeIA.
 Además de ayudarte con documentos y legislación, también puedo echarte una mano \
 con preguntas generales.
@@ -61,6 +60,50 @@ sugiérelo de forma natural ("Para eso necesitaría revisar tus documentos, \
 ¿quieres que lo busque?")."""
 
 
+async def _load_fast_path_prompt(prompt_name: str, yaml_path: tuple, fallback: str) -> str:
+    """Load a fast-path prompt: Langfuse → YAML → hardcoded fallback.
+
+    Follows the same 3-tier pattern as _load_react_system_prompt in react_loop.py.
+    """
+    from pathlib import Path
+
+    # Tier 1: Langfuse (TTL-cached, ~0ms on hit)
+    try:
+        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+        client = get_langfuse_prompt_client()
+        cached = await client.get_prompt(prompt_name)
+        if cached and cached.content:
+            logger.debug(f"Fast-path prompt '{prompt_name}' loaded from Langfuse (v{cached.version})")
+            return cached.content
+    except Exception as e:
+        logger.debug(f"Langfuse prompt '{prompt_name}' fetch skipped: {e}")
+
+    # Tier 2: YAML fallback
+    candidates = [
+        Path("/app/config/prompts/emma_prompts.yaml"),
+        Path(__file__).parent.parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
+    ]
+    for p in candidates:
+        if p.exists():
+            try:
+                import yaml
+                with open(p, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                # Navigate nested YAML path (e.g., ("fast_path", "conversational_system"))
+                node = data
+                for key in yaml_path:
+                    node = node.get(key, {}) if isinstance(node, dict) else {}
+                if isinstance(node, str) and node.strip():
+                    logger.debug(f"Fast-path prompt '{prompt_name}' loaded from YAML")
+                    return node.strip()
+            except Exception as e:
+                logger.warning(f"Failed to load fast-path prompt from YAML: {e}")
+
+    # Tier 3: Hardcoded fallback
+    logger.debug(f"Fast-path prompt '{prompt_name}' using hardcoded fallback")
+    return fallback
+
+
 async def _generate_conversational_response(
     query: str,
     user_name: str = "",
@@ -75,6 +118,7 @@ async def _generate_conversational_response(
     Includes conversation history and user memory for contextual replies.
     Falls back to a simple greeting if the LLM call fails.
 
+    Prompts loaded from: Langfuse → YAML → hardcoded fallback.
     For general_knowledge: uses CHAT model with higher token limit and markdown.
     For conversational/identity: uses PLANNER model with low token limit.
     """
@@ -84,11 +128,19 @@ async def _generate_conversational_response(
 
     if is_general_knowledge:
         from app.agents.llm_models import get_chat_model
-        system_msg = _GENERAL_KNOWLEDGE_SYSTEM_PROMPT
+        system_msg = await _load_fast_path_prompt(
+            "emma_fast_general_knowledge_system",
+            ("fast_path", "general_knowledge_system"),
+            _GENERAL_KNOWLEDGE_SYSTEM_FALLBACK,
+        )
         model = get_chat_model().bind(temperature=0.5, max_tokens=2048)
     else:
         from app.agents.llm_models import get_planner_model
-        system_msg = _CONVERSATIONAL_SYSTEM_PROMPT
+        system_msg = await _load_fast_path_prompt(
+            "emma_fast_conversational_system",
+            ("fast_path", "conversational_system"),
+            _CONVERSATIONAL_SYSTEM_FALLBACK,
+        )
         model = get_planner_model().bind(temperature=0.7, max_tokens=150)
 
     if user_name:
