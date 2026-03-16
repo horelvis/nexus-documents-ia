@@ -23,10 +23,17 @@ import { Label } from '@/components/ui/label'
 import { IconBrain, IconBolt } from '@tabler/icons-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ArtifactsPanel, ArtifactTab } from './ArtifactsPanel'
-import { FileCheck, TrendingUp, Hammer } from 'lucide-react'
+import { FileCheck, TrendingUp, Hammer, History } from 'lucide-react'
 import { VerifiedGenTab } from './artifacts/VerifiedGenTab'
 import { PredictiveTab } from './artifacts/PredictiveTab'
 import { ForgeTab } from './artifacts/ForgeTab'
+import { EmmaStreamProvider, useEmmaStream } from './EmmaStreamProvider'
+import { BranchSwitcher } from './messages/BranchSwitcher'
+import { CommandBar } from './messages/CommandBar'
+import { ThreadHistory } from './ThreadHistory'
+import type { Message as SDKMessage } from '@langchain/langgraph-sdk'
+
+const USE_LANGGRAPH_PROTOCOL = process.env.NEXT_PUBLIC_USE_LANGGRAPH_PROTOCOL === 'true'
 
 const SSO_TOKEN_KEY = 'nexus_sso_tokens'
 
@@ -208,16 +215,52 @@ async function processResumeEvents(
   return { streamCompleted }
 }
 
-export function EmmaChat({
+// ---- useStream helpers (only used when USE_LANGGRAPH_PROTOCOL === true) ----
+
+/** Convert SDK Message[] to EmmaMessage[] for rendering */
+function convertStreamMessages(sdkMessages: SDKMessage[]): EmmaMessage[] {
+  return sdkMessages
+    .filter((m): m is SDKMessage & { type: 'human' | 'ai' } =>
+      m.type === 'human' || m.type === 'ai'
+    )
+    .map((m, i) => {
+      const contentStr =
+        typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content)
+            ? m.content
+                .filter((c): c is { type: 'text'; text: string } => (c as any).type === 'text')
+                .map((c) => c.text)
+                .join('')
+            : ''
+      return {
+        id: m.id || `msg-${i}`,
+        type: m.type === 'human' ? ('user' as const) : ('result' as const),
+        content: contentStr,
+        timestamp: new Date(),
+      }
+    })
+}
+
+function EmmaChatInner({
   className,
   initialQuery,
   messages: externalMessages,
   onMessagesChange,
   conversationId,
-}: EmmaChatProps) {
+  useStreamMode,
+}: EmmaChatProps & { useStreamMode?: boolean }) {
   const { user, tenantId, isAuthenticated, login } = useAuth()
   const { queryEmmaStream, resumeQueryStreamGenerator, uploadTempDocument } = useEmmaService()
   const apiClient = useApiClient()
+
+  // --- useStream SDK integration (feature-flagged) ---
+  // When useStreamMode is true, this component is wrapped in EmmaStreamProvider
+  // so calling useEmmaStream() is safe. When false, we pass a dummy object.
+  const stream = useStreamMode ? useEmmaStream() : null
+
+  // Thread history sidebar (only in useStream mode)
+  const [showThreadHistory, setShowThreadHistory] = useState(false)
 
   // Proactive welcome message from Emma (LLM-generated with user context)
   const [welcomeMessage, setWelcomeMessage] = useState<string>('')
@@ -1181,6 +1224,24 @@ export function EmmaChat({
     [user, tenantId, queryEmmaStream, uploadTempDocument, sessionId, login, updateMessages, deepReasoning]
   )
 
+  // useStream-based submit handler (feature-flagged path)
+  function handleSendQueryViaStream(query: string) {
+    if (!stream || !user?.id || !tenantId) return
+    stream.submit(
+      { messages: [{ type: 'human' as const, content: query }] },
+      {
+        streamMode: ['values'],
+        config: {
+          configurable: {
+            user_id: user.id,
+            tenant_id: tenantId,
+            deep_reasoning: deepReasoning,
+          },
+        },
+      }
+    )
+  }
+
   // Handle verified document generation (non-blocking dialog)
   const handleVerifiedGeneration = useCallback(
     async (topic: string, attachments?: Attachment[]) => {
@@ -1924,7 +1985,22 @@ export function EmmaChat({
     }
   }, [initialQuery, user?.id, tenantId, messages.length, handleSendQuery])
 
-  const hasMessages = messages.length > 0
+  // When useStream mode is active, messages come from the SDK stream
+  const displayMessages = useStreamMode && stream
+    ? convertStreamMessages(stream.messages)
+    : messages
+
+  // Derive loading state from stream when in useStream mode
+  const displayIsLoading = useStreamMode && stream
+    ? stream.isLoading
+    : isLoading
+
+  // Derive error from stream when in useStream mode
+  const displayError = useStreamMode && stream && stream.error
+    ? (stream.error instanceof Error ? stream.error.message : String(stream.error))
+    : error
+
+  const hasMessages = displayMessages.length > 0
 
   // Build artifact tabs from active jobs
   const artifactTabs: ArtifactTab[] = []
@@ -1967,29 +2043,101 @@ export function EmmaChat({
     })
   }
 
+  // Effective send handler: routes to stream or SSE based on mode
+  async function effectiveSendQuery(query: string, attachments?: Attachment[]) {
+    if (useStreamMode && stream) {
+      handleSendQueryViaStream(query)
+      return
+    }
+    await handleSendQuery(query, attachments)
+  }
+
+  // Effective suggestion handler: routes to stream resume or existing logic
+  function effectiveSuggestionClick(suggestion: string) {
+    if (useStreamMode && stream) {
+      handleSendQueryViaStream(suggestion)
+      return
+    }
+    handleSuggestionClick(suggestion)
+  }
+
   return (
     <div className={cn('flex h-full', className)}>
+      {/* Thread History sidebar (useStream mode only) */}
+      {useStreamMode && showThreadHistory && stream && (
+        <ThreadHistory
+          currentThreadId={null}
+          onSelectThread={() => {
+            // Thread switching is handled by the provider's onThreadId callback
+          }}
+          apiUrl="/api"
+          tenantId={tenantId || ''}
+        />
+      )}
+
       {/* Chat area */}
       <div className="flex flex-1 flex-col min-w-0">
       {/* Chat messages */}
       {hasMessages && (
         <div className="flex-1 overflow-hidden min-h-0">
           <EmmaRenderChat
-            messages={messages}
-            isLoading={isLoading}
-            error={error}
+            messages={displayMessages}
+            isLoading={displayIsLoading}
+            error={displayError}
             onFeedback={handleFeedback}
-            onSuggestionClick={handleSuggestionClick}
+            onSuggestionClick={effectiveSuggestionClick}
             onRetry={handleRetry}
             onDocumentClick={handleDocumentClick}
             onPreviewClick={handlePreviewClick}
-            renderHITLReview={(request, messageId) => (
-              <HITLReviewCard
-                request={request}
-                isLoading={false}
-                onSubmit={(decision) => handleHITLDecision(messageId, decision)}
+            renderHITLReview={useStreamMode && stream?.interrupt
+              ? (request, messageId) => {
+                  // In useStream mode, render interrupt-based review
+                  return (
+                    <HITLReviewCard
+                      request={request}
+                      isLoading={stream.isLoading}
+                      onSubmit={(decision) => {
+                        stream.submit(undefined, { command: { resume: decision } })
+                      }}
+                    />
+                  )
+                }
+              : (request, messageId) => (
+                  <HITLReviewCard
+                    request={request}
+                    isLoading={false}
+                    onSubmit={(decision) => handleHITLDecision(messageId, decision)}
+                  />
+                )
+            }
+            renderBranchSwitcher={useStreamMode && stream ? (msgId) => {
+              const sdkMsg = stream.messages.find((m) => m.id === msgId)
+              if (!sdkMsg) return null
+              const meta = stream.getMessagesMetadata(sdkMsg)
+              if (!meta) return null
+              return (
+                <BranchSwitcher
+                  branch={meta.branch}
+                  branchOptions={meta.branchOptions}
+                  onSelect={(b) => stream.setBranch(b)}
+                  isLoading={stream.isLoading}
+                />
+              )
+            } : undefined}
+            renderCommandBar={useStreamMode && stream ? (msgId, content) => (
+              <CommandBar
+                content={content}
+                isLoading={stream.isLoading}
+                onRegenerate={() => {
+                  const sdkMsg = stream.messages.find((m) => m.id === msgId)
+                  if (!sdkMsg) return
+                  const meta = stream.getMessagesMetadata(sdkMsg)
+                  if (meta?.firstSeenState?.parent_checkpoint) {
+                    stream.submit(undefined, { checkpoint: meta.firstSeenState.parent_checkpoint })
+                  }
+                }}
               />
-            )}
+            ) : undefined}
           />
         </div>
       )}
@@ -2028,7 +2176,7 @@ export function EmmaChat({
                 {EXAMPLE_PROMPTS.map((prompt, idx) => (
                   <button
                     key={idx}
-                    onClick={() => handleSendQuery(prompt)}
+                    onClick={() => effectiveSendQuery(prompt)}
                     className="px-3 py-1.5 text-sm bg-muted hover:bg-muted/80 rounded-lg transition-colors"
                   >
                     {prompt}
@@ -2040,11 +2188,57 @@ export function EmmaChat({
         </div>
       )}
 
+      {/* Stream interrupt rendering (useStream mode only) */}
+      {useStreamMode && stream?.interrupt && (
+        <div className="border-t bg-amber-500/5 p-4">
+          {stream.interrupt.value && typeof stream.interrupt.value === 'object' && (stream.interrupt.value as any).type === 'clarification' ? (
+            <div className="space-y-2">
+              <p className="text-sm text-foreground/90">{(stream.interrupt.value as any).question}</p>
+              <div className="flex flex-wrap gap-2">
+                {((stream.interrupt.value as any).options || []).map((opt: { label: string; value: string }, idx: number) => (
+                  <button
+                    key={idx}
+                    onClick={() => stream.submit(undefined, { command: { resume: opt.value } })}
+                    className="px-3 py-1.5 text-xs font-mono border border-amber-500/30 rounded hover:bg-amber-500/10"
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <HITLReviewCard
+              request={stream.interrupt.value as any}
+              isLoading={stream.isLoading}
+              onSubmit={(decision) => {
+                stream.submit(undefined, { command: { resume: decision } })
+              }}
+            />
+          )}
+        </div>
+      )}
+
       {/* Input */}
       <div className="border-t bg-background p-4">
-        {/* Deep Reasoning Toggle */}
+        {/* Deep Reasoning Toggle + Thread History Toggle */}
         <TooltipProvider>
           <div className="flex items-center justify-end gap-2 mb-3">
+            {/* Thread history toggle (useStream mode only) */}
+            {useStreamMode && (
+              <button
+                onClick={() => setShowThreadHistory(!showThreadHistory)}
+                className={cn(
+                  'mr-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors',
+                  showThreadHistory
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                <History className="h-3.5 w-3.5" />
+                Historial
+              </button>
+            )}
+
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex items-center gap-2">
@@ -2065,7 +2259,7 @@ export function EmmaChat({
                     id="deep-reasoning"
                     checked={deepReasoning}
                     onCheckedChange={setDeepReasoning}
-                    disabled={isLoading}
+                    disabled={displayIsLoading}
                     className="data-[state=checked]:bg-purple-600"
                   />
                   <Label
@@ -2099,10 +2293,10 @@ export function EmmaChat({
         </TooltipProvider>
 
         <EmmaQueryInput
-          onSendQuery={handleSendQuery}
+          onSendQuery={effectiveSendQuery}
           onVerifiedGeneration={handleVerifiedGeneration}
           onPredictiveAnalysis={handlePredictiveAnalysis}
-          isLoading={isLoading}
+          isLoading={displayIsLoading}
           disabled={!user?.id}
           placeholder="Pregúntame sobre tus documentos..."
           maxAttachments={10}
@@ -2212,4 +2406,26 @@ function getContextualSuggestions(query?: string, response?: string, toolsUsed?:
     'Muestra documentos relacionados',
     '¿Qué más puedo preguntarte?',
   ]
+}
+
+// ---- Exported wrapper: conditionally wraps Inner in EmmaStreamProvider ----
+
+export function EmmaChat(props: EmmaChatProps) {
+  const { tenantId } = useAuth()
+  const [streamThreadId, setStreamThreadId] = useState<string | null>(null)
+
+  if (USE_LANGGRAPH_PROTOCOL) {
+    return (
+      <EmmaStreamProvider
+        apiUrl="/api"
+        threadId={streamThreadId}
+        onThreadId={setStreamThreadId}
+        tenantId={tenantId || ''}
+      >
+        <EmmaChatInner {...props} useStreamMode />
+      </EmmaStreamProvider>
+    )
+  }
+
+  return <EmmaChatInner {...props} />
 }

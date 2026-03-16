@@ -30,6 +30,10 @@ interface EmmaRenderChatProps {
   showTerminalHeader?: boolean
   /** Render callback for HITL review cards (Approve/Edit/Reject) */
   renderHITLReview?: (request: any, messageId: string) => React.ReactNode
+  /** Render callback for branch switcher (useStream mode) */
+  renderBranchSwitcher?: (messageId: string) => React.ReactNode
+  /** Render callback for command bar with copy/regenerate (useStream mode) */
+  renderCommandBar?: (messageId: string, content: string) => React.ReactNode
 }
 
 export function EmmaRenderChat({
@@ -44,6 +48,8 @@ export function EmmaRenderChat({
   className,
   showTerminalHeader = false,
   renderHITLReview,
+  renderBranchSwitcher,
+  renderCommandBar,
 }: EmmaRenderChatProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -122,6 +128,8 @@ export function EmmaRenderChat({
                 onDocumentClick={onDocumentClick}
                 onPreviewClick={onPreviewClick}
                 renderHITLReview={renderHITLReview}
+                renderBranchSwitcher={renderBranchSwitcher}
+                renderCommandBar={renderCommandBar}
               />
             )
           })}
@@ -152,6 +160,8 @@ interface MessageBubbleProps {
   onDocumentClick?: (doc: DocumentInfo) => void
   onPreviewClick?: (doc: DocumentInfo) => void
   renderHITLReview?: (request: any, messageId: string) => React.ReactNode
+  renderBranchSwitcher?: (messageId: string) => React.ReactNode
+  renderCommandBar?: (messageId: string, content: string) => React.ReactNode
 }
 
 function MessageBubble({
@@ -164,6 +174,8 @@ function MessageBubble({
   onDocumentClick,
   onPreviewClick,
   renderHITLReview,
+  renderBranchSwitcher,
+  renderCommandBar,
 }: MessageBubbleProps) {
   const isUser = message.type === 'user'
   const isProgress = message.type === 'progress'
@@ -386,8 +398,8 @@ function MessageBubble({
   const getCardStyles = () => {
     if (isUser) return 'p-4 border border-border/50 bg-card/80 rounded-lg'
     if (isError) return 'p-4 border border-destructive/30 bg-destructive/5 rounded-lg'
-    // Emma responses - special terminal style
-    return 'space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20'
+    // Emma responses - special terminal style (group enables hover for branch/command bar)
+    return 'group space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20'
   }
 
   return (
@@ -564,6 +576,14 @@ function MessageBubble({
                     <IconThumbDown className="h-3 w-3" />
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {/* Branch switcher + Command bar (useStream mode) */}
+            {(renderBranchSwitcher || renderCommandBar) && (
+              <div className="flex items-center gap-2 pt-1 opacity-0 transition-opacity group-hover:opacity-100">
+                {renderBranchSwitcher?.(message.id)}
+                {renderCommandBar?.(message.id, message.content)}
               </div>
             )}
           </>
