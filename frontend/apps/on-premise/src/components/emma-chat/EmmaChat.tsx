@@ -13,7 +13,6 @@ import { EmmaQueryInput } from './EmmaQueryInput'
 import { EmmaRenderChat } from './EmmaRenderChat'
 import { HITLReviewCard } from './HITLReviewCard'
 import { PDFPreviewModal } from './PDFPreviewModal'
-import { PredictiveAnalysisDialog } from './PredictiveAnalysisDialog'
 import { useVerifiedGeneration } from '@/contexts/verified-generation-context'
 import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata, PredictiveFactorInfo, PredictiveAnalysisMetadata, HITLReviewRequest, HITLDecision } from '@/lib/types/emma'
 import { isDocGenResult, extractDocGenMetadata } from '@/lib/utils/docgen-detector'
@@ -23,6 +22,8 @@ import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
 import { IconBrain, IconBolt } from '@tabler/icons-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { ArtifactsPanel, ArtifactTab } from './ArtifactsPanel'
+import { FileCheck, TrendingUp } from 'lucide-react'
 
 const SSO_TOKEN_KEY = 'nexus_sso_tokens'
 
@@ -319,8 +320,6 @@ export function EmmaChat({
 
   // Verified generation queue state (from layout-level context — persists across navigation)
   const {
-    dialogOpen: verifiedDialogOpen,
-    setDialogOpen: setVerifiedDialogOpen,
     jobs: verifiedJobs,
     jobsRef: verifiedJobsRef,
     updateJob: contextUpdateJob,
@@ -330,9 +329,12 @@ export function EmmaChat({
   } = useVerifiedGeneration()
 
   // Predictive analysis queue state
-  const [predictiveDialogOpen, setPredictiveDialogOpen] = useState(false)
   const [predictiveJobs, setPredictiveJobs] = useState<Record<string, PredictiveAnalysisMetadata>>({})
   const predictiveJobsRef = useRef<Record<string, PredictiveAnalysisMetadata>>({})
+
+  // Artifacts panel state
+  const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false)
+  const [activeArtifactTab, setActiveArtifactTab] = useState<string | null>(null)
 
   // Retain uploaded file IDs across follow-up queries in the same session
   const sessionUploadIdsRef = useRef<string[]>([])
@@ -1216,9 +1218,10 @@ export function EmmaChat({
         contextRemoveJob(jobId)
       }
 
-      // Add job to queue and open widget
+      // Add job to queue and open artifacts panel
       contextSetJob(jobId, initialVerified)
-      setVerifiedDialogOpen(true)
+      setArtifactsPanelOpen(true)
+      setActiveArtifactTab('verified')
 
       // Mark active session for recovery if user navigates away
       sessionStorage.setItem('verified_active_session', JSON.stringify({
@@ -1556,7 +1559,8 @@ export function EmmaChat({
           predictiveJobsRef.current = updated
           return updated
         })
-        setPredictiveDialogOpen(true)
+        setArtifactsPanelOpen(true)
+        setActiveArtifactTab('predictive')
 
         // Upload files
         const uploadedDocs = attachments?.filter((a) => a.type === 'upload') || []
@@ -1906,8 +1910,34 @@ export function EmmaChat({
 
   const hasMessages = messages.length > 0
 
+  // Build artifact tabs from active jobs
+  const artifactTabs: ArtifactTab[] = []
+
+  if (Object.keys(verifiedJobs).length > 0) {
+    const totalClaims = Object.values(verifiedJobs).reduce((sum, j) => sum + (j.total_claims || 0), 0)
+    const verifiedCount = Object.values(verifiedJobs).reduce((sum, j) => sum + (j.verified_count || 0), 0)
+    artifactTabs.push({
+      id: 'verified',
+      label: 'Verified Gen',
+      icon: <FileCheck className="h-3.5 w-3.5" />,
+      badge: totalClaims > 0 ? `${verifiedCount}/${totalClaims}` : undefined,
+      content: <div className="text-sm text-muted-foreground">Verified Generation tab — content pending Task 4</div>,
+    })
+  }
+
+  if (Object.keys(predictiveJobs).length > 0) {
+    artifactTabs.push({
+      id: 'predictive',
+      label: 'Predictive',
+      icon: <TrendingUp className="h-3.5 w-3.5" />,
+      content: <div className="text-sm text-muted-foreground">Predictive Analysis tab — content pending Task 5</div>,
+    })
+  }
+
   return (
-    <div className={cn('flex flex-col h-full', className)}>
+    <div className={cn('flex h-full', className)}>
+      {/* Chat area */}
+      <div className="flex flex-1 flex-col min-w-0">
       {/* Chat messages */}
       {hasMessages && (
         <div className="flex-1 overflow-hidden min-h-0">
@@ -2052,15 +2082,18 @@ export function EmmaChat({
         open={showPreviewModal}
         onOpenChange={setShowPreviewModal}
       />
+      </div>
 
-      {/* Verified Generation Dialog — rendered in layout via VerifiedGenerationFloating */}
-
-      {/* Predictive Analysis Dialog */}
-      <PredictiveAnalysisDialog
-        open={predictiveDialogOpen}
-        onOpenChange={setPredictiveDialogOpen}
-        jobs={predictiveJobs}
-      />
+      {/* Artifacts Panel */}
+      {artifactTabs.length > 0 && (
+        <ArtifactsPanel
+          tabs={artifactTabs}
+          activeTabId={activeArtifactTab}
+          onTabChange={setActiveArtifactTab}
+          open={artifactsPanelOpen}
+          onOpenChange={setArtifactsPanelOpen}
+        />
+      )}
     </div>
   )
 }
