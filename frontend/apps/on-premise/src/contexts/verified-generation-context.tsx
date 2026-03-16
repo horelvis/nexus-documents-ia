@@ -3,9 +3,9 @@
 /**
  * Verified Generation Context
  *
- * Holds verified generation job state at layout level so the floating
- * progress dialog persists across page navigation. EmmaChat writes to
- * this context; the dialog reads from it and renders in the layout.
+ * Holds verified generation job state at layout level so it persists
+ * across page navigation. EmmaChat writes to this context; the
+ * ArtifactsPanel VerifiedGenTab reads from it.
  */
 
 import { createContext, useContext, useState, useRef, useCallback } from 'react'
@@ -16,10 +16,6 @@ import type { ReviewDecision } from '@/lib/services/verified-generation.service'
 export type ReviewSubmitHandler = (jobId: string, decisions: ReviewDecision[]) => void
 
 interface VerifiedGenerationContextValue {
-  /** Whether the floating dialog is open */
-  dialogOpen: boolean
-  setDialogOpen: (open: boolean) => void
-
   /** Active verification jobs keyed by job ID */
   jobs: Record<string, VerifiedGenerationMetadata>
   jobsRef: React.MutableRefObject<Record<string, VerifiedGenerationMetadata>>
@@ -38,7 +34,6 @@ interface VerifiedGenerationContextValue {
 const VerifiedGenerationContext = createContext<VerifiedGenerationContextValue | null>(null)
 
 export function VerifiedGenerationProvider({ children }: { children: React.ReactNode }) {
-  const [dialogOpen, setDialogOpen] = useState(false)
   const [jobs, setJobs] = useState<Record<string, VerifiedGenerationMetadata>>({})
   const jobsRef = useRef<Record<string, VerifiedGenerationMetadata>>({})
   const reviewHandler = useRef<ReviewSubmitHandler | null>(null)
@@ -72,7 +67,7 @@ export function VerifiedGenerationProvider({ children }: { children: React.React
 
   return (
     <VerifiedGenerationContext.Provider
-      value={{ dialogOpen, setDialogOpen, jobs, jobsRef, updateJob, setJob, removeJob, reviewHandler }}
+      value={{ jobs, jobsRef, updateJob, setJob, removeJob, reviewHandler }}
     >
       {children}
     </VerifiedGenerationContext.Provider>
