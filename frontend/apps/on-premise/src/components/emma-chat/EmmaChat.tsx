@@ -33,7 +33,6 @@ import { CommandBar } from './messages/CommandBar'
 import { ThreadHistory } from './ThreadHistory'
 import type { Message as SDKMessage } from '@langchain/langgraph-sdk'
 
-const USE_LANGGRAPH_PROTOCOL = true  // Always use LangGraph protocol (useStream SDK)
 
 const SSO_TOKEN_KEY = 'nexus_sso_tokens'
 
@@ -215,7 +214,7 @@ async function processResumeEvents(
   return { streamCompleted }
 }
 
-// ---- useStream helpers (only used when USE_LANGGRAPH_PROTOCOL === true) ----
+// ---- useStream helpers ----
 
 /** Convert SDK Message[] to EmmaMessage[] for rendering */
 function convertStreamMessages(sdkMessages: SDKMessage[]): EmmaMessage[] {
@@ -2408,24 +2407,20 @@ function getContextualSuggestions(query?: string, response?: string, toolsUsed?:
   ]
 }
 
-// ---- Exported wrapper: conditionally wraps Inner in EmmaStreamProvider ----
+// ---- Exported wrapper: wraps Inner in EmmaStreamProvider ----
 
 export function EmmaChat(props: EmmaChatProps) {
   const { tenantId } = useAuth()
   const [streamThreadId, setStreamThreadId] = useState<string | null>(null)
 
-  if (USE_LANGGRAPH_PROTOCOL) {
-    return (
-      <EmmaStreamProvider
-        apiUrl="/api"
-        threadId={streamThreadId}
-        onThreadId={setStreamThreadId}
-        tenantId={tenantId || ''}
-      >
-        <EmmaChatInner {...props} useStreamMode />
-      </EmmaStreamProvider>
-    )
-  }
-
-  return <EmmaChatInner {...props} />
+  return (
+    <EmmaStreamProvider
+      apiUrl="/api"
+      threadId={streamThreadId}
+      onThreadId={setStreamThreadId}
+      tenantId={tenantId || ''}
+    >
+      <EmmaChatInner {...props} useStreamMode />
+    </EmmaStreamProvider>
+  )
 }
