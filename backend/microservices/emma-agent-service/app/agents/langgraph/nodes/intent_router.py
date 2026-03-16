@@ -26,6 +26,7 @@ class IntentSemanticRouter:
     Routes:
       - conversational: greetings, farewells, smalltalk
       - identity: who-are-you, capabilities, name memory
+      - general_knowledge: general questions not requiring tenant documents
       - (None → falls through to LLM or default document_query)
     """
 
@@ -97,15 +98,50 @@ class IntentSemanticRouter:
                 ],
             )
 
+            general_knowledge = Route(
+                name="general_knowledge",
+                score_threshold=0.70,
+                utterances=[
+                    # Programming / code generation
+                    "Genera un código en Python", "Escribe un código en Python",
+                    "Crea un script en Python que sume dos números",
+                    "Genera un código en JavaScript", "Escribe código Java",
+                    "Haz un programa que ordene una lista",
+                    "Write a Python function", "Generate code in Python",
+                    "Write a script that sorts an array",
+                    "Cómo hago un for loop en Python",
+                    "Dame un ejemplo de recursividad",
+                    # Math / calculations
+                    "Cuánto es 2 más 2", "Calcula la raíz cuadrada de 144",
+                    "Resuelve esta ecuación", "What is 15 percent of 200",
+                    "Cuál es la fórmula del área de un círculo",
+                    # General knowledge (not document-specific)
+                    "Cuál es la capital de Francia", "What is the capital of Japan",
+                    "Quién fue Albert Einstein", "En qué año se fundó la ONU",
+                    "Cómo funciona la fotosíntesis", "Qué es machine learning",
+                    "Explica qué es una red neuronal", "How does gravity work",
+                    # Translations / language
+                    "Traduce esto al inglés", "Translate this to Spanish",
+                    "Cómo se dice 'contrato' en inglés",
+                    # Writing assistance (not document-related)
+                    "Escribe un poema sobre la primavera",
+                    "Redacta un email de agradecimiento genérico",
+                    "Ayúdame a escribir una carta de presentación",
+                    # Conversions / utilities
+                    "Convierte 100 dólares a euros", "Cuántas millas son 10 kilómetros",
+                    "Qué hora es en Tokio",
+                ],
+            )
+
             # No document_query route needed — anything below threshold
             # returns None → LLM fallback or default document_query
             self._router = RouterLayer(
                 encoder=encoder,
-                routes=[conversational, identity],
+                routes=[conversational, identity, general_knowledge],
                 auto_sync="local",
             )
             self._initialized = True
-            logger.info("IntentSemanticRouter initialized with 2 routes (threshold=0.75)")
+            logger.info("IntentSemanticRouter initialized with 3 routes (threshold=0.70-0.75)")
 
         except Exception as e:
             logger.error(f"IntentSemanticRouter init failed: {e}")
@@ -149,7 +185,11 @@ async def _llm_classify_intent(query: str) -> Optional[str]:
         system_prompt = (
             "Eres Emma, coordinadora de un sistema multi-agente. "
             "Clasifica la intención del usuario en una de estas etiquetas: "
-            "CONVERSATIONAL, IDENTITY, DOCUMENT_QUERY. "
+            "CONVERSATIONAL, IDENTITY, GENERAL_KNOWLEDGE, DOCUMENT_QUERY. "
+            "Usa GENERAL_KNOWLEDGE para preguntas generales que NO requieren buscar "
+            "documentos del usuario (código, matemáticas, traducciones, cultura general). "
+            "Usa DOCUMENT_QUERY cuando el usuario pregunta sobre SUS documentos, contratos, "
+            "facturas, legislación aplicable a su empresa, etc. "
             "Responde SOLO con la etiqueta."
         )
 
@@ -167,6 +207,8 @@ async def _llm_classify_intent(query: str) -> Optional[str]:
             return "conversational"
         if "IDENTITY" in label:
             return "identity"
+        if "GENERAL_KNOWLEDGE" in label:
+            return "general_knowledge"
         if "DOCUMENT_QUERY" in label:
             return "document_query"
         return None

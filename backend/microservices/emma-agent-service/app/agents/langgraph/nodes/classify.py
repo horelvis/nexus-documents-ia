@@ -41,25 +41,52 @@ NO repitas toda la memoria, solo úsala de forma natural y breve.
 - NO uses emojis excesivos (máximo 1 si es natural).
 - Responde SOLO en texto plano, sin markdown."""
 
+# System prompt for general knowledge fast-path (code, math, translations, etc.)
+_GENERAL_KNOWLEDGE_SYSTEM_PROMPT = """\
+Eres Emma, la asistente de inteligencia artificial de NouxCubeIA.
+Además de gestión documental, puedes ayudar con preguntas generales de conocimiento.
+
+Instrucciones:
+- Responde de forma clara, completa y bien estructurada.
+- Usa markdown para formatear: bloques de código con ```, listas, negritas, etc.
+- Para código: incluye comentarios explicativos y el lenguaje en el bloque (```python, ```javascript, etc.).
+- Para matemáticas: muestra el razonamiento paso a paso.
+- Para traducciones: incluye el texto original y la traducción.
+- Responde en el mismo idioma que el usuario.
+- Sé preciso y directo, no añadas disclaimers innecesarios.
+- Si el usuario pide algo que SÍ requiere buscar en sus documentos, indícalo amablemente."""
+
 
 async def _generate_conversational_response(
     query: str,
     user_name: str = "",
     conversation_history: Optional[List[Dict[str, str]]] = None,
     user_memory: str = "",
+    intent: str = "conversational",
 ) -> str:
-    """Generate a conversational response via LLM (no tools).
+    """Generate a fast-path response via LLM (no tools).
 
-    Makes a single lightweight chat completion call to produce natural,
-    personalized responses for greetings, identity, and farewell intents.
+    Makes a single chat completion call to produce natural responses for
+    greetings, identity, and general knowledge intents.
     Includes conversation history and user memory for contextual replies.
     Falls back to a simple greeting if the LLM call fails.
+
+    For general_knowledge: uses CHAT model with higher token limit and markdown.
+    For conversational/identity: uses PLANNER model with low token limit.
     """
     from langchain_core.messages import SystemMessage as SM, HumanMessage as HM, AIMessage as AIM
 
-    from app.agents.llm_models import get_planner_model
+    is_general_knowledge = intent == "general_knowledge"
 
-    system_msg = _CONVERSATIONAL_SYSTEM_PROMPT
+    if is_general_knowledge:
+        from app.agents.llm_models import get_chat_model
+        system_msg = _GENERAL_KNOWLEDGE_SYSTEM_PROMPT
+        model = get_chat_model().bind(temperature=0.5, max_tokens=2048)
+    else:
+        from app.agents.llm_models import get_planner_model
+        system_msg = _CONVERSATIONAL_SYSTEM_PROMPT
+        model = get_planner_model().bind(temperature=0.7, max_tokens=150)
+
     if user_name:
         system_msg += f"\n\nEl usuario se llama: {user_name}"
     if user_memory:
@@ -79,15 +106,16 @@ async def _generate_conversational_response(
     lc_messages.append(HM(content=query))
 
     try:
-        model = get_planner_model().bind(temperature=0.7, max_tokens=150)
         response = await model.ainvoke(lc_messages)
         answer = (response.content or "").strip()
         if answer:
             return answer
     except Exception as e:
-        logger.warning(f"Conversational LLM call failed, using fallback: {e}")
+        logger.warning(f"Fast-path LLM call failed (intent={intent}), using fallback: {e}")
 
     # Minimal fallback if LLM fails
+    if is_general_knowledge:
+        return "Lo siento, no pude procesar tu consulta en este momento. ¿Podrías reformularla?"
     first_name = user_name.split()[0] if user_name else ""
     greeting = f"¡Hola, {first_name}!" if first_name else "¡Hola!"
     return f"{greeting} Soy Emma, tu asistente documental. ¿En qué te ayudo?"
@@ -193,8 +221,8 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
 
     latency_ms = (time.time() - start) * 1000
 
-    # Fast-path: conversational and identity intents — LLM-generated (no tools)
-    if intent in ("conversational", "identity") and confidence >= 0.7:
+    # Fast-path: conversational, identity, and general_knowledge intents — LLM-generated (no tools)
+    if intent in ("conversational", "identity", "general_knowledge") and confidence >= 0.7:
         user_name = state.get("metadata", {}).get("user_name", "") or ""
         user_memory = state.get("user_memory") or ""
 
@@ -208,7 +236,7 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
 
         answer = await _generate_conversational_response(
             query, user_name=user_name, conversation_history=conv_history,
-            user_memory=user_memory,
+            user_memory=user_memory, intent=intent,
         )
 
         # Guardrail validation (fast-path)
