@@ -2415,7 +2415,7 @@ export function EmmaChat(props: EmmaChatProps) {
 
   return (
     <EmmaStreamProvider
-      apiUrl="/api"
+      apiUrl={typeof window !== 'undefined' ? `${window.location.protocol}//${window.location.hostname}:8009/api` : '/api'}
       threadId={streamThreadId}
       onThreadId={setStreamThreadId}
       tenantId={tenantId || ''}
