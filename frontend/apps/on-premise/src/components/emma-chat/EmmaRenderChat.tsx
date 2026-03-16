@@ -134,9 +134,12 @@ export function EmmaRenderChat({
             )
           })}
 
-          {/* Loading indicator when no progress message */}
-          {isLoading && !messages.some((m) => m.type === 'progress') && (
-            <LoadingBubble />
+          {/* Loading indicator: hide when a streamed AI message is already visible.
+              Old SSE path used 'progress' type; useStream path uses 'result' directly. */}
+          {isLoading
+            && !messages.some((m) => m.type === 'progress')
+            && !(messages.length > 0 && messages[messages.length - 1].type === 'result')
+            && (<LoadingBubble />
           )}
 
           {/* Global error */}

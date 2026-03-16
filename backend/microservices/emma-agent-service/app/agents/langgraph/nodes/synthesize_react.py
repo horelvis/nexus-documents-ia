@@ -8,8 +8,12 @@ produced (either via the terminate tool or direct LLM response).
 
 If no final_answer is available (edge case), it extracts the last
 assistant message from the conversation as the answer.
+
+Token streaming: emits tokens via get_stream_writer() so the adapter
+can translate them to event: messages for progressive rendering.
 """
 
+import asyncio
 import logging
 import time
 from typing import Any, Dict, List
@@ -29,8 +33,9 @@ async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
     tool. This node:
     1. Validates the answer exists
     2. Deduplicates sources
-    3. Sets success=True
-    4. Adds the answer as an AIMessage for conversation persistence
+    3. Streams tokens via get_stream_writer() for progressive rendering
+    4. Applies guardrails
+    5. Sets success=True
 
     Returns:
         State updates: final_answer, sources, success, messages, metadata
@@ -68,6 +73,22 @@ async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
 
     # Guardrail validation
     final_answer, guardrail_metadata = await apply_guardrails(final_answer, state)
+
+    # Stream tokens via get_stream_writer() for progressive rendering.
+    # The adapter translates these custom events to event: messages SSE
+    # events that the SDK accumulates via BaseMessageChunk.concat().
+    try:
+        from langgraph.config import get_stream_writer
+        writer = get_stream_writer()
+        words = final_answer.split(' ')
+        batch_size = 3
+        for i in range(0, len(words), batch_size):
+            batch = words[i:i + batch_size]
+            token = (" " if i > 0 else "") + " ".join(batch)
+            writer({"type": "token", "data": {"text": token}})
+            await asyncio.sleep(0.03)
+    except Exception:
+        pass  # No stream writer (e.g., graph.invoke() without stream_mode)
 
     latency_ms = (time.time() - start) * 1000
 

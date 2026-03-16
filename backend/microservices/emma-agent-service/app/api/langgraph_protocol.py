@@ -304,6 +304,30 @@ async def run_stream(
     """
     from app.services.langgraph_adapter import translate_to_langgraph_sse
 
+    # Resolve user_id: SDK sends it in config.configurable, header is fallback
+    configurable = (body.config or {}).get("configurable", {})
+    user_id = configurable.get("user_id") or x_user_id
+
+    # Load prior conversation messages from checkpointer for multi-turn continuity.
+    # The adapter needs these so every `values` event includes the full history
+    # (useStream SDK replaces state on each values event).
+    prior_messages = []
+    try:
+        from app.agents.langgraph.graph import get_react_graph
+        graph = await get_react_graph()
+        config = {"configurable": {"thread_id": thread_id}}
+        state_snapshot = await graph.aget_state(config)
+        if state_snapshot and state_snapshot.values:
+            for msg in state_snapshot.values.get("messages", []):
+                if hasattr(msg, "model_dump"):
+                    prior_messages.append(msg.model_dump())
+                elif hasattr(msg, "dict"):
+                    prior_messages.append(msg.dict())
+                elif isinstance(msg, dict):
+                    prior_messages.append(msg)
+    except Exception as e:
+        logger.debug(f"Could not load prior messages for thread {thread_id[:8]}: {e}")
+
     # Determine if this is a resume (HITL interrupt response)
     if body.command and body.command.get("resume") is not None:
         resume_value = body.command["resume"]
@@ -315,7 +339,7 @@ async def run_stream(
             thread_id=thread_id,
             resume_value=resume_value,
             tenant_id=x_tenant_id,
-            user_id=x_user_id,
+            user_id=user_id,
         )
 
     else:
@@ -345,23 +369,23 @@ async def run_stream(
             f"query='{query[:50]}...'"
         )
 
-        # Extract optional context from input
+        # Extract config from SDK body (user_id, deep_reasoning, etc.)
+        enable_thinking = configurable.get("deep_reasoning") or input_data.get("enable_thinking")
         context = input_data.get("context", {})
-        enable_thinking = input_data.get("enable_thinking")
 
         from app.agents.langgraph.api import stream_react_query
 
         emma_generator = stream_react_query(
             query=query,
             tenant_id=x_tenant_id,
-            user_id=x_user_id,
+            user_id=user_id,
             thread_id=thread_id,
             context=context,
             enable_thinking=enable_thinking,
         )
 
-    # Wrap with the LangGraph protocol translator
-    sse_generator = translate_to_langgraph_sse(emma_generator, thread_id)
+    # Wrap with the LangGraph protocol translator (prior_messages for multi-turn)
+    sse_generator = translate_to_langgraph_sse(emma_generator, thread_id, prior_messages)
 
     return StreamingResponse(
         sse_generator,

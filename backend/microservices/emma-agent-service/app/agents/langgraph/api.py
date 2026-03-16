@@ -323,9 +323,6 @@ async def stream_react_query(
         "data": {"thread_id": thread_id, "query": query, "graph_type": "react"},
     }
 
-    # Track whether real tokens were streamed (via stream writer in nodes)
-    received_real_tokens = False
-
     try:
         try:
             from app.services.upload_context_service import upload_context_service
@@ -394,8 +391,6 @@ async def stream_react_query(
                 evt_data = event.get("data", {})
 
                 if evt_type == "token":
-                    # Real LLM token from synthesis streaming
-                    received_real_tokens = True
                     yield {"type": "token", "data": evt_data}
                 else:
                     # Swarm events: worker_started, worker_complete, swarm_synthesizing
@@ -446,16 +441,6 @@ async def stream_react_query(
                 latency_ms = (time.time() - start_time) * 1000
                 final_answer = event["final_answer"]
                 event_metadata = event.get("metadata", {})
-
-                # Fake-stream tokens only if no real tokens were streamed
-                # (real tokens come from synthesize_swarm via stream writer).
-                # Skip for clarification responses (rendered as structured cards).
-                if not received_real_tokens and not event_metadata.get("query_clarification"):
-                    words = final_answer.split(' ')
-                    for i, word in enumerate(words):
-                        token = f" {word}" if i > 0 else word
-                        yield {"type": "token", "data": {"text": token, "token": token}}
-                        await asyncio.sleep(0)
 
                 # Emit complete
                 yield {

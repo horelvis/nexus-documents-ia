@@ -30,12 +30,24 @@ def _sse_line(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
 
-def _make_ai_message(content: str, tool_calls: List[Dict] | None = None) -> Dict:
-    """Create a serialized AIMessage dict compatible with useStream."""
+def _make_ai_message(
+    content: str,
+    msg_id: str | None = None,
+    tool_calls: List[Dict] | None = None,
+) -> Dict:
+    """Create a serialized AIMessage dict compatible with useStream.
+
+    Args:
+        content: Message text (may be partial during token streaming).
+        msg_id: Stable message ID — MUST be consistent across all values
+            events within a single run so the SDK's message reducer can
+            identify it as the same message being updated (streaming).
+        tool_calls: Optional tool call metadata.
+    """
     msg = {
         "type": "ai",
         "content": content,
-        "id": str(uuid.uuid4()),
+        "id": msg_id or str(uuid.uuid4()),
     }
     if tool_calls:
         msg["tool_calls"] = tool_calls
@@ -54,6 +66,7 @@ def _make_human_message(content: str) -> Dict:
 async def translate_to_langgraph_sse(
     emma_event_generator: AsyncGenerator[Dict[str, Any], None],
     thread_id: str,
+    prior_messages: List[Dict] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Translate Emma SSE events into LangGraph Server protocol SSE format.
 
@@ -68,14 +81,20 @@ async def translate_to_langgraph_sse(
         emma_event_generator: Async generator from stream_react_query() or
             resume_react_query() yielding {"type": str, "data": dict}.
         thread_id: The conversation thread ID.
+        prior_messages: Conversation history from checkpointer to include
+            in every values snapshot (multi-turn continuity).
 
     Yields:
         SSE-formatted strings in LangGraph Server protocol.
     """
     run_id = str(uuid.uuid4())
+    # Stable AI message ID for this run — the SDK's message reducer uses
+    # the id to identify "the same message being updated" across values
+    # events, enabling progressive token streaming in the UI.
+    ai_msg_id = str(uuid.uuid4())
 
-    # Accumulated state for values snapshots
-    messages: List[Dict] = []
+    # Accumulated state for values snapshots — seed with prior conversation
+    messages: List[Dict] = list(prior_messages) if prior_messages else []
     accumulated_text = ""
     sources: List[Dict] = []
     reasoning_steps: List[Dict] = []
@@ -95,6 +114,7 @@ async def translate_to_langgraph_sse(
                     messages.append(_make_human_message(query))
                 yield _sse_line("values", {
                     "messages": list(messages),
+                    "reasoning_steps": list(reasoning_steps),
                     "thread_id": data.get("thread_id", thread_id),
                 })
 
@@ -102,11 +122,15 @@ async def translate_to_langgraph_sse(
                 content = data.get("content", "")
                 if content:
                     reasoning_steps.append({"type": "thinking", "content": content})
+                    # Emit both updates (for SDK internals) and values (for UI)
                     yield _sse_line("updates", {
-                        "classify": {
-                            "type": "thinking",
-                            "content": content,
-                        },
+                        "classify": {"type": "thinking", "content": content},
+                    })
+                    yield _sse_line("values", {
+                        "messages": list(messages) + (
+                            [_make_ai_message(accumulated_text, msg_id=ai_msg_id)] if accumulated_text else []
+                        ),
+                        "reasoning_steps": list(reasoning_steps),
                     })
 
             elif event_type == "tool_call":
@@ -114,10 +138,13 @@ async def translate_to_langgraph_sse(
                 if content:
                     reasoning_steps.append({"type": "tool_call", "content": content})
                     yield _sse_line("updates", {
-                        "react_loop": {
-                            "type": "tool_call",
-                            "content": content,
-                        },
+                        "react_loop": {"type": "tool_call", "content": content},
+                    })
+                    yield _sse_line("values", {
+                        "messages": list(messages) + (
+                            [_make_ai_message(accumulated_text, msg_id=ai_msg_id)] if accumulated_text else []
+                        ),
+                        "reasoning_steps": list(reasoning_steps),
                     })
 
             elif event_type == "tool_result":
@@ -136,6 +163,12 @@ async def translate_to_langgraph_sse(
                             "source": source,
                         },
                     })
+                    yield _sse_line("values", {
+                        "messages": list(messages) + (
+                            [_make_ai_message(accumulated_text, msg_id=ai_msg_id)] if accumulated_text else []
+                        ),
+                        "reasoning_steps": list(reasoning_steps),
+                    })
 
             elif event_type == "reasoning_step":
                 step_type = data.get("step_type", "reasoning")
@@ -146,24 +179,27 @@ async def translate_to_langgraph_sse(
                         "content": content,
                     })
                     yield _sse_line("updates", {
-                        "react_loop": {
-                            "type": step_type,
-                            "content": content,
-                        },
+                        "react_loop": {"type": step_type, "content": content},
+                    })
+                    yield _sse_line("values", {
+                        "messages": list(messages) + (
+                            [_make_ai_message(accumulated_text, msg_id=ai_msg_id)] if accumulated_text else []
+                        ),
+                        "reasoning_steps": list(reasoning_steps),
                     })
 
             elif event_type == "token":
-                # Accumulate tokens into the AI message content
+                # Emit individual token chunks via event: messages.
+                # The SDK's MessageTupleManager uses BaseMessageChunk.concat()
+                # to accumulate chunks by ID — enabling progressive streaming
+                # without full state replacement on each token.
                 token_text = data.get("text", data.get("token", ""))
                 if token_text:
                     accumulated_text += token_text
-                    # Emit partial values with the accumulated AI message
-                    current_messages = list(messages) + [
-                        _make_ai_message(accumulated_text)
-                    ]
-                    yield _sse_line("values", {
-                        "messages": current_messages,
-                    })
+                    yield _sse_line("messages", [
+                        {"type": "ai", "content": token_text, "id": ai_msg_id},
+                        {},  # metadata (empty — no subgraph namespace)
+                    ])
 
             # Swarm events
             elif event_type == "swarm_started":
@@ -227,7 +263,7 @@ async def translate_to_langgraph_sse(
                 metadata = data.get("metadata", {})
 
                 # Build final AI message
-                ai_msg = _make_ai_message(final_answer or accumulated_text)
+                ai_msg = _make_ai_message(final_answer or accumulated_text, msg_id=ai_msg_id)
 
                 # Final messages list
                 final_messages = list(messages) + [ai_msg]

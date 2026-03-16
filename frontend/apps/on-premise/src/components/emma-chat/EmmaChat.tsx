@@ -27,7 +27,7 @@ import { FileCheck, TrendingUp, Hammer, History } from 'lucide-react'
 import { VerifiedGenTab } from './artifacts/VerifiedGenTab'
 import { PredictiveTab } from './artifacts/PredictiveTab'
 import { ForgeTab } from './artifacts/ForgeTab'
-import { EmmaStreamProvider, useEmmaStream } from './EmmaStreamProvider'
+import { EmmaStreamProvider, useEmmaStream, type EmmaStateType } from './EmmaStreamProvider'
 import { BranchSwitcher } from './messages/BranchSwitcher'
 import { CommandBar } from './messages/CommandBar'
 import { ThreadHistory } from './ThreadHistory'
@@ -227,29 +227,109 @@ async function processResumeEvents(
 
 // ---- useStream helpers ----
 
-/** Convert SDK Message[] to EmmaMessage[] for rendering */
-function convertStreamMessages(sdkMessages: SDKMessage[]): EmmaMessage[] {
-  return sdkMessages
+/** Extract text content from an SDK message (handles string and array formats). */
+function _getTextContent(m: SDKMessage): string {
+  if (typeof m.content === 'string') return m.content
+  if (Array.isArray(m.content)) {
+    return m.content
+      .filter((c): c is { type: 'text'; text: string } => (c as any).type === 'text')
+      .map((c) => c.text)
+      .join('')
+  }
+  return ''
+}
+
+/**
+ * Convert SDK state to EmmaMessage[] for rendering.
+ *
+ * Uses stream.messages for the conversation and stream.values for
+ * reasoning_steps / sources — following the canonical useStream pattern
+ * where values contains the full graph state snapshot.
+ */
+function convertStreamState(
+  sdkMessages: SDKMessage[],
+  values?: EmmaStateType,
+): EmmaMessage[] {
+  const reasoningSteps = values?.reasoning_steps ?? []
+  const sources = values?.sources ?? []
+
+  const converted = sdkMessages
     .filter((m): m is SDKMessage & { type: 'human' | 'ai' } =>
-      m.type === 'human' || m.type === 'ai'
+      (m.type === 'human' || m.type === 'ai')
+      // Filter out empty AI messages from tool-calling turns — the LLM
+      // generates AIMessage(content="", tool_calls=[...]) which the
+      // checkpointer persists.  These render as empty panels.
+      && !(m.type === 'ai' && !_getTextContent(m))
     )
-    .map((m, i) => {
-      const contentStr =
-        typeof m.content === 'string'
-          ? m.content
-          : Array.isArray(m.content)
-            ? m.content
-                .filter((c): c is { type: 'text'; text: string } => (c as any).type === 'text')
-                .map((c) => c.text)
-                .join('')
-            : ''
-      return {
-        id: m.id || `msg-${i}`,
-        type: m.type === 'human' ? ('user' as const) : ('result' as const),
-        content: contentStr,
-        timestamp: new Date(),
+    .map((m, i) => ({
+      id: m.id || `msg-${i}`,
+      type: m.type === 'human' ? ('user' as const) : ('result' as const),
+      content: _getTextContent(m),
+      timestamp: new Date(),
+    } as EmmaMessage))
+
+  // Attach reasoning steps + sources to the CURRENT turn's AI message.
+  // The last human message marks the start of the current turn — any
+  // AI message after it is the current response.  If no such AI message
+  // exists yet (still in reasoning phase), append a 'progress' placeholder
+  // so the steps render in a NEW panel, not on the previous turn's response.
+  if (reasoningSteps.length > 0 || sources.length > 0) {
+    const stepsMetadata = {
+      slmIsThinking: !values?.success && reasoningSteps.length > 0,
+      slmThinkingSteps: reasoningSteps.map((s, idx) => ({
+        step: idx + 1,
+        type: mapReasoningType(s.type),
+        content: s.content,
+      })),
+      ...(sources.length > 0 ? { sources } : {}),
+    }
+
+    // Find last human message index (= current turn start)
+    let lastHumanIdx = -1
+    for (let i = converted.length - 1; i >= 0; i--) {
+      if (converted[i].type === 'user') { lastHumanIdx = i; break }
+    }
+
+    // Find a 'result' message AFTER the last human (= current turn AI)
+    let currentAiIdx = -1
+    for (let i = lastHumanIdx + 1; i < converted.length; i++) {
+      if (converted[i].type === 'result' || converted[i].type === 'progress') {
+        currentAiIdx = i; break
       }
-    })
+    }
+
+    if (currentAiIdx >= 0) {
+      // Attach to existing current-turn AI message
+      converted[currentAiIdx] = {
+        ...converted[currentAiIdx],
+        metadata: { ...converted[currentAiIdx].metadata, ...stepsMetadata },
+      }
+    } else {
+      // No AI message yet — create a progress placeholder
+      converted.push({
+        id: `progress-${Date.now()}`,
+        type: 'progress' as EmmaMessage['type'],
+        content: '',
+        timestamp: new Date(),
+        metadata: stepsMetadata,
+      })
+    }
+  }
+
+  return converted
+}
+
+/** Map adapter reasoning_step.type to SLMThinkingStepType */
+function mapReasoningType(type: string): SLMThinkingStep['type'] {
+  const mapping: Record<string, SLMThinkingStep['type']> = {
+    thinking: 'thinking',
+    tool_call: 'searching',
+    tool_result: 'search_result',
+    reasoning: 'thinking',
+    search: 'searching',
+    analysis: 'analyzing',
+  }
+  return mapping[type] ?? 'thinking'
 }
 
 function EmmaChatInner({
@@ -1234,13 +1314,15 @@ function EmmaChatInner({
     [user, tenantId, queryEmmaStream, uploadTempDocument, sessionId, login, updateMessages, deepReasoning]
   )
 
-  // useStream-based submit handler (feature-flagged path)
+  // useStream-based submit handler — follows canonical SDK pattern
+  // (see github.com/langchain-ai/agent-chat-ui)
   function handleSendQueryViaStream(query: string) {
     if (!stream || !user?.id || !tenantId) return
+    const newMessage = { type: 'human' as const, content: query }
     stream.submit(
-      { messages: [{ type: 'human' as const, content: query }] },
+      { messages: [newMessage] },
       {
-        streamMode: ['values'],
+        streamMode: ['values', 'messages'],
         config: {
           configurable: {
             user_id: user.id,
@@ -1248,6 +1330,13 @@ function EmmaChatInner({
             deep_reasoning: deepReasoning,
           },
         },
+        // SDK built-in optimistic update: appends the human message to the
+        // UI immediately, before the server responds with the first values
+        // snapshot.  Prevents flash-disappear of sent messages.
+        optimisticValues: (prev) => ({
+          ...prev,
+          messages: [...(prev.messages ?? []), newMessage],
+        }),
       }
     )
   }
@@ -1995,19 +2084,21 @@ function EmmaChatInner({
     }
   }, [initialQuery, user?.id, tenantId, messages.length, handleSendQuery])
 
-  // When useStream mode is active, persist stream messages in local state
-  // to prevent flash-disappear when the SDK resets between runs.
-  const [streamMessages, setStreamMessages] = useState<EmmaMessage[]>([])
-
-  useEffect(() => {
-    if (useStreamMode && stream && stream.messages.length > 0) {
-      setStreamMessages(convertStreamMessages(stream.messages))
+  // In useStream mode, derive display messages from SDK state.
+  // A ref caches the last non-empty conversion to prevent flash-disappear
+  // when the SDK briefly resets stream.messages between runs or during
+  // state re-fetch (fetchStateHistory).
+  const streamCacheRef = useRef<EmmaMessage[]>([])
+  let displayMessages: EmmaMessage[]
+  if (useStreamMode && stream) {
+    const converted = convertStreamState(stream.messages, stream.values)
+    if (converted.length > 0) {
+      streamCacheRef.current = converted
     }
-  }, [useStreamMode, stream?.messages])
-
-  const displayMessages = useStreamMode
-    ? streamMessages
-    : messages
+    displayMessages = streamCacheRef.current
+  } else {
+    displayMessages = messages
+  }
 
   // Derive loading state from stream when in useStream mode
   const displayIsLoading = useStreamMode && stream
