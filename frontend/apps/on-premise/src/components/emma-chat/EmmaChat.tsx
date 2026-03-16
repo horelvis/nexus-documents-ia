@@ -1995,9 +1995,18 @@ function EmmaChatInner({
     }
   }, [initialQuery, user?.id, tenantId, messages.length, handleSendQuery])
 
-  // When useStream mode is active, messages come from the SDK stream
-  const displayMessages = useStreamMode && stream
-    ? convertStreamMessages(stream.messages)
+  // When useStream mode is active, persist stream messages in local state
+  // to prevent flash-disappear when the SDK resets between runs.
+  const [streamMessages, setStreamMessages] = useState<EmmaMessage[]>([])
+
+  useEffect(() => {
+    if (useStreamMode && stream && stream.messages.length > 0) {
+      setStreamMessages(convertStreamMessages(stream.messages))
+    }
+  }, [useStreamMode, stream?.messages])
+
+  const displayMessages = useStreamMode
+    ? streamMessages
     : messages
 
   // Derive loading state from stream when in useStream mode
