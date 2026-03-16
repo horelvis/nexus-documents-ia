@@ -1960,8 +1960,8 @@ export function EmmaChat({
       id: 'forge',
       label: 'Document Forge',
       icon: <Hammer className="h-3.5 w-3.5" />,
-      badge: forgeMetadata.fields_detected
-        ? `${forgeMetadata.fields_filled || 0}/${forgeMetadata.fields_detected}`
+      badge: forgeMetadata.fields?.length
+        ? `${forgeMetadata.fields_filled || 0}/${forgeMetadata.fields.length}`
         : undefined,
       content: <ForgeTab metadata={forgeMetadata} />,
     })
