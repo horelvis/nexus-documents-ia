@@ -16,6 +16,10 @@ export type EmmaStateType = {
     source?: string
   }>
   sources?: Array<Record<string, unknown>>
+  __interrupt__?: Array<{
+    value: Record<string, unknown>
+    resumable?: boolean
+  }>
   thread_id?: string
   success?: boolean
   fast_path?: boolean

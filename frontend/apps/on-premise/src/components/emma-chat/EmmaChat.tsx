@@ -316,6 +316,41 @@ function convertStreamState(
     }
   }
 
+  // Detect HITL interrupt from values.__interrupt__ and create an inline
+  // 'clarification' message so the review card renders inside the message
+  // list (same as the old SSE path which created clarification messages).
+  const interrupt = values?.__interrupt__
+  if (Array.isArray(interrupt) && interrupt.length > 0) {
+    const interruptValue = interrupt[0]?.value
+    if (interruptValue && typeof interruptValue === 'object') {
+      const interruptType = (interruptValue as any).type
+      if (interruptType === 'hitl_review') {
+        converted.push({
+          id: `hitl-${Date.now()}`,
+          type: 'clarification' as EmmaMessage['type'],
+          content: (interruptValue as any).action_request?.description || 'Revisión requerida',
+          timestamp: new Date(),
+          metadata: {
+            hitl_review: interruptValue as any,
+          },
+        })
+      } else if (interruptType === 'clarification') {
+        converted.push({
+          id: `clarification-${Date.now()}`,
+          type: 'clarification' as EmmaMessage['type'],
+          content: (interruptValue as any).question || '',
+          timestamp: new Date(),
+          metadata: {
+            clarification: {
+              question: (interruptValue as any).question || '',
+              options: (interruptValue as any).options || [],
+            } as any,
+          },
+        })
+      }
+    }
+  }
+
   return converted
 }
 
