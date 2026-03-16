@@ -42,14 +42,25 @@ function hasValidToken(): boolean {
   if (!stored) return false
   try {
     const tokens = JSON.parse(stored)
-    // Check if token exists and is not expired
     if (!tokens.access_token) return false
     if (tokens.expires_at && Date.now() >= tokens.expires_at - 60000) {
-      return false // Expired or about to expire
+      return false
     }
     return true
   } catch {
     return false
+  }
+}
+
+function getAccessToken(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const stored = sessionStorage.getItem(SSO_TOKEN_KEY)
+    if (!stored) return undefined
+    const tokens = JSON.parse(stored)
+    return tokens.access_token || undefined
+  } catch {
+    return undefined
   }
 }
 

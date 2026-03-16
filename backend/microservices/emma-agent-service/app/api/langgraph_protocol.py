@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.core.security import verify_api_key
+from app.core.security import verify_api_key_or_bearer as verify_api_key
 
 logger = logging.getLogger(__name__)
 

@@ -9,13 +9,25 @@ type StateType = { messages: Message[] }
 type StreamContextType = ReturnType<typeof useStream<StateType>>
 const StreamContext = createContext<StreamContextType | undefined>(undefined)
 
+const SSO_TOKEN_KEY = 'nexus_sso_tokens'
+
+function getSSOToken(): string | undefined {
+  if (typeof window === 'undefined') return undefined
+  try {
+    const stored = sessionStorage.getItem(SSO_TOKEN_KEY)
+    if (!stored) return undefined
+    return JSON.parse(stored).access_token || undefined
+  } catch {
+    return undefined
+  }
+}
+
 interface EmmaStreamProviderProps {
   children: ReactNode
   apiUrl: string
   assistantId?: string
   threadId: string | null
   onThreadId: (id: string) => void
-  apiKey?: string
   tenantId: string
 }
 
@@ -25,17 +37,17 @@ export function EmmaStreamProvider({
   assistantId = 'emma-react',
   threadId,
   onThreadId,
-  apiKey,
   tenantId,
 }: EmmaStreamProviderProps) {
+  const token = getSSOToken()
+
   const stream = useStream<StateType>({
     apiUrl,
     assistantId,
     threadId,
-    apiKey: apiKey || undefined,
     defaultHeaders: {
       'X-Tenant-ID': tenantId,
-      ...(apiKey ? { 'X-API-Key': apiKey } : {}),
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
     },
     onThreadId,
     fetchStateHistory: true,
