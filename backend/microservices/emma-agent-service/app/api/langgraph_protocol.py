@@ -1,0 +1,374 @@
+"""
+LangGraph Server Protocol Endpoints
+
+Implements a subset of the LangGraph Server API that the @langchain/langgraph-sdk
+useStream hook expects. This allows the frontend to migrate from custom SSE
+handling to the standard LangGraph SDK without changing the backend agent logic.
+
+Endpoints:
+    GET  /api/info                              Server metadata
+    POST /api/threads                           Create a new thread
+    GET  /api/threads                           List threads (placeholder)
+    GET  /api/threads/{thread_id}               Thread details
+    GET  /api/threads/{thread_id}/state         Current state from checkpointer
+    POST /api/threads/{thread_id}/history       Checkpoint history
+    POST /api/threads/{thread_id}/runs/stream   Execute run with SSE streaming
+
+Auth: X-API-Key header (verify_api_key dependency) + X-Tenant-ID header.
+"""
+
+import logging
+import uuid
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from app.core.security import verify_api_key
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api", tags=["langgraph-protocol"])
+
+
+# =============================================================================
+# Request / Response Models
+# =============================================================================
+
+class RunInput(BaseModel):
+    """Input for POST /threads/{thread_id}/runs/stream.
+
+    Follows the LangGraph Server schema:
+    - input: initial state (must contain messages list)
+    - command: resume payload for HITL interrupts
+    - config: LangGraph config overrides
+    - checkpoint: checkpoint_id for branch/regenerate
+    """
+    input: Optional[Dict[str, Any]] = Field(None, description="Initial state with messages")
+    command: Optional[Dict[str, Any]] = Field(None, description="Resume command (e.g., {resume: value})")
+    config: Optional[Dict[str, Any]] = Field(None, description="LangGraph config overrides")
+    checkpoint: Optional[Dict[str, Any]] = Field(None, description="Checkpoint for regeneration")
+    assistant_id: Optional[str] = Field(None, description="Assistant ID (unused, for SDK compat)")
+    stream_mode: Optional[List[str]] = Field(
+        default=None,
+        description="Stream modes (values, updates, etc.)",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "input": {
+                    "messages": [{"type": "human", "content": "Hola"}],
+                },
+            },
+        }
+
+
+class ThreadCreateRequest(BaseModel):
+    """Request to create a new thread."""
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
+class ThreadResponse(BaseModel):
+    """Thread metadata response."""
+    thread_id: str
+    created_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ServerInfo(BaseModel):
+    """Server metadata for useStream SDK."""
+    version: str = "1.0.0"
+    name: str = "emma-agent-service"
+    description: str = "Emma LangGraph Agent — LangGraph protocol adapter"
+
+
+# =============================================================================
+# Endpoints
+# =============================================================================
+
+@router.get("/info", response_model=ServerInfo)
+async def get_info():
+    """Server metadata — used by LangGraph SDK for capability detection."""
+    return ServerInfo()
+
+
+@router.post("/threads", response_model=ThreadResponse)
+async def create_thread(
+    body: Optional[ThreadCreateRequest] = None,
+    _: bool = Depends(verify_api_key),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Create a new conversation thread.
+
+    Returns a thread_id that can be used with /runs/stream.
+    The actual thread state is created lazily when the first run executes
+    (the checkpointer creates it on first graph.astream call).
+    """
+    thread_id = str(uuid.uuid4())
+    metadata = (body.metadata if body else {}) or {}
+    metadata["tenant_id"] = x_tenant_id
+
+    return ThreadResponse(
+        thread_id=thread_id,
+        metadata=metadata,
+    )
+
+
+@router.get("/threads", response_model=List[ThreadResponse])
+async def list_threads(
+    _: bool = Depends(verify_api_key),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    limit: int = 20,
+    offset: int = 0,
+):
+    """List threads for a tenant.
+
+    Placeholder — returns empty list. Full implementation will query
+    emma_sessions table filtered by tenant_id.
+    """
+    # TODO: Query emma_sessions for this tenant
+    return []
+
+
+@router.get("/threads/{thread_id}", response_model=ThreadResponse)
+async def get_thread(
+    thread_id: str,
+    _: bool = Depends(verify_api_key),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Get thread details.
+
+    Returns thread metadata. The thread exists if the checkpointer has
+    state for this thread_id.
+    """
+    # Try to get state from checkpointer
+    try:
+        from app.agents.langgraph.graph import get_react_graph
+        graph = await get_react_graph()
+        config = {"configurable": {"thread_id": thread_id}}
+        state = await graph.aget_state(config)
+        if state and state.values:
+            return ThreadResponse(
+                thread_id=thread_id,
+                metadata=state.values.get("metadata", {}),
+            )
+    except Exception as e:
+        logger.debug(f"Could not load thread state for {thread_id}: {e}")
+
+    # Thread may not have state yet (created but no runs)
+    return ThreadResponse(
+        thread_id=thread_id,
+        metadata={"tenant_id": x_tenant_id},
+    )
+
+
+@router.get("/threads/{thread_id}/state")
+async def get_thread_state(
+    thread_id: str,
+    _: bool = Depends(verify_api_key),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+):
+    """Get current state from the checkpointer.
+
+    Returns the latest checkpoint state for this thread. Used by useStream
+    for initial state hydration and interrupt detection on reconnect.
+    """
+    try:
+        from app.agents.langgraph.graph import get_react_graph
+        graph = await get_react_graph()
+        config = {"configurable": {"thread_id": thread_id}}
+        state_snapshot = await graph.aget_state(config)
+
+        if not state_snapshot or not state_snapshot.values:
+            raise HTTPException(status_code=404, detail="No state found for thread")
+
+        values = state_snapshot.values
+
+        # Convert LangChain messages to serializable dicts
+        messages = []
+        for msg in values.get("messages", []):
+            if hasattr(msg, "dict"):
+                messages.append(msg.dict())
+            elif hasattr(msg, "model_dump"):
+                messages.append(msg.model_dump())
+            elif isinstance(msg, dict):
+                messages.append(msg)
+            else:
+                messages.append({"type": "unknown", "content": str(msg)})
+
+        # Check for pending interrupts
+        interrupts = []
+        if hasattr(state_snapshot, "tasks") and state_snapshot.tasks:
+            for task in state_snapshot.tasks:
+                if hasattr(task, "interrupts") and task.interrupts:
+                    for interrupt in task.interrupts:
+                        value = interrupt.value if hasattr(interrupt, "value") else None
+                        interrupts.append({
+                            "value": value,
+                            "resumable": True,
+                        })
+
+        result = {
+            "values": {
+                "messages": messages,
+                "sources": values.get("sources", []),
+                "thread_id": values.get("thread_id", thread_id),
+                "success": values.get("success"),
+                "is_complete": values.get("is_complete", False),
+            },
+            "next": [],  # Next nodes to execute (empty if complete)
+        }
+
+        if interrupts:
+            result["values"]["__interrupt__"] = interrupts
+
+        # Include checkpoint config for branch switching
+        if hasattr(state_snapshot, "config"):
+            result["checkpoint"] = state_snapshot.config
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get thread state: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get state: {str(e)}")
+
+
+@router.post("/threads/{thread_id}/history")
+async def get_thread_history(
+    thread_id: str,
+    _: bool = Depends(verify_api_key),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    limit: int = 10,
+):
+    """Get checkpoint history for branch switching.
+
+    Returns a list of checkpoint snapshots for this thread, ordered by
+    most recent first. Used by useStream for time-travel / branching.
+    """
+    try:
+        from app.agents.langgraph.graph import get_react_graph
+        graph = await get_react_graph()
+        config = {"configurable": {"thread_id": thread_id}}
+
+        history = []
+        count = 0
+        async for state_snapshot in graph.aget_state_history(config):
+            if count >= limit:
+                break
+            checkpoint_config = None
+            if hasattr(state_snapshot, "config"):
+                checkpoint_config = state_snapshot.config
+            history.append({
+                "checkpoint": checkpoint_config,
+                "values": {
+                    "thread_id": thread_id,
+                    "is_complete": (state_snapshot.values or {}).get("is_complete", False),
+                },
+                "next": list(state_snapshot.next) if hasattr(state_snapshot, "next") else [],
+            })
+            count += 1
+
+        return history
+
+    except Exception as e:
+        logger.error(f"Failed to get thread history: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get history: {str(e)}")
+
+
+@router.post("/threads/{thread_id}/runs/stream")
+async def run_stream(
+    thread_id: str,
+    body: RunInput,
+    _: bool = Depends(verify_api_key),
+    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+):
+    """Execute a run with SSE streaming in LangGraph protocol format.
+
+    This is the main endpoint consumed by useStream. It:
+    1. Parses the RunInput body
+    2. Routes to stream_react_query() or resume_react_query()
+    3. Wraps the generator with translate_to_langgraph_sse()
+    4. Returns a StreamingResponse
+
+    The response is a standard SSE stream with events:
+    - event: metadata  (run_id, thread_id)
+    - event: values    (state snapshots with messages)
+    - event: updates   (node-level outputs)
+    - event: error     (on failure)
+    - event: end       (stream complete)
+    """
+    from app.services.langgraph_adapter import translate_to_langgraph_sse
+
+    # Determine if this is a resume (HITL interrupt response)
+    if body.command and body.command.get("resume") is not None:
+        resume_value = body.command["resume"]
+        logger.info(f"LangGraph protocol: resuming thread {thread_id[:8]}...")
+
+        from app.agents.langgraph.api import resume_react_query
+
+        emma_generator = resume_react_query(
+            thread_id=thread_id,
+            resume_value=resume_value,
+            tenant_id=x_tenant_id,
+            user_id=x_user_id,
+        )
+
+    else:
+        # New query — extract from input.messages
+        input_data = body.input or {}
+        messages = input_data.get("messages", [])
+        if not messages:
+            raise HTTPException(
+                status_code=400,
+                detail="input.messages is required and must contain at least one message",
+            )
+
+        # Get the last human message as the query
+        last_message = messages[-1]
+        if isinstance(last_message, dict):
+            query = last_message.get("content", "")
+        elif isinstance(last_message, str):
+            query = last_message
+        else:
+            query = str(last_message)
+
+        if not query.strip():
+            raise HTTPException(status_code=400, detail="Empty query")
+
+        logger.info(
+            f"LangGraph protocol: new run thread={thread_id[:8]}... "
+            f"query='{query[:50]}...'"
+        )
+
+        # Extract optional context from input
+        context = input_data.get("context", {})
+        enable_thinking = input_data.get("enable_thinking")
+
+        from app.agents.langgraph.api import stream_react_query
+
+        emma_generator = stream_react_query(
+            query=query,
+            tenant_id=x_tenant_id,
+            user_id=x_user_id,
+            thread_id=thread_id,
+            context=context,
+            enable_thinking=enable_thinking,
+        )
+
+    # Wrap with the LangGraph protocol translator
+    sse_generator = translate_to_langgraph_sse(emma_generator, thread_id)
+
+    return StreamingResponse(
+        sse_generator,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

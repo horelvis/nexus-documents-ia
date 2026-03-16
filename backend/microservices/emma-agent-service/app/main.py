@@ -44,6 +44,7 @@ import time
 
 from app.core.config import settings
 from app.api import emma_router, learning_router, uploads_router, verified_router, predictive_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router, diagnostics_router, generated_documents_router
+from app.api.langgraph_protocol import router as langgraph_protocol_router
 from app.clients import get_weaviate_client
 
 # Configure logging
@@ -186,6 +187,7 @@ app.include_router(heartbeat_router, prefix="/emma", tags=["heartbeat"])
 app.include_router(prompts_router, tags=["prompts"])
 app.include_router(diagnostics_router, prefix="/diagnostics", tags=["diagnostics"])
 app.include_router(generated_documents_router, tags=["generated-documents"])
+app.include_router(langgraph_protocol_router, tags=["langgraph-protocol"])
 
 
 # Health check
