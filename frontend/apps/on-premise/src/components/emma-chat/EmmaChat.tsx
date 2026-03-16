@@ -14,7 +14,7 @@ import { EmmaRenderChat } from './EmmaRenderChat'
 import { HITLReviewCard } from './HITLReviewCard'
 import { PDFPreviewModal } from './PDFPreviewModal'
 import { useVerifiedGeneration } from '@/contexts/verified-generation-context'
-import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata, PredictiveFactorInfo, PredictiveAnalysisMetadata, HITLReviewRequest, HITLDecision } from '@/lib/types/emma'
+import { EmmaMessage, WorkflowStep, EmmaChatProps, DocumentInfo, Attachment, SLMThinkingStep, VerifiedClaimInfo, VerifiedGenerationMetadata, PredictiveFactorInfo, PredictiveAnalysisMetadata, HITLReviewRequest, HITLDecision, ForgeMetadata } from '@/lib/types/emma'
 import { isDocGenResult, extractDocGenMetadata } from '@/lib/utils/docgen-detector'
 import { isForgeResult, extractForgeMetadata } from '@/lib/utils/forge-detector'
 import { getSessionInfo } from '@/lib/services/forge.service'
@@ -23,7 +23,10 @@ import { Label } from '@/components/ui/label'
 import { IconBrain, IconBolt } from '@tabler/icons-react'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ArtifactsPanel, ArtifactTab } from './ArtifactsPanel'
-import { FileCheck, TrendingUp } from 'lucide-react'
+import { FileCheck, TrendingUp, Hammer } from 'lucide-react'
+import { VerifiedGenTab } from './artifacts/VerifiedGenTab'
+import { PredictiveTab } from './artifacts/PredictiveTab'
+import { ForgeTab } from './artifacts/ForgeTab'
 
 const SSO_TOKEN_KEY = 'nexus_sso_tokens'
 
@@ -335,6 +338,9 @@ export function EmmaChat({
   // Artifacts panel state
   const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false)
   const [activeArtifactTab, setActiveArtifactTab] = useState<string | null>(null)
+
+  // Forge metadata (latest forge result from messages)
+  const [forgeMetadata, setForgeMetadata] = useState<ForgeMetadata | null>(null)
 
   // Retain uploaded file IDs across follow-up queries in the same session
   const sessionUploadIdsRef = useRef<string[]>([])
@@ -988,22 +994,32 @@ export function EmmaChat({
                   })) {
                     const forgeMeta = extractForgeMetadata(finalContent, data.execution_time_ms)
                     if (forgeMeta) {
+                      // Capture forge metadata for artifacts panel
+                      setForgeMetadata(forgeMeta)
+                      if (!artifactsPanelOpen) {
+                        setArtifactsPanelOpen(true)
+                        setActiveArtifactTab('forge')
+                      }
+
                       // Enrich with full session data via API (fire-and-forget)
                       getSessionInfo(forgeMeta.session_id).then(resp => {
                         if (resp.data) {
+                          const enriched: ForgeMetadata = {
+                            ...forgeMeta,
+                            fields: resp.data!.fields,
+                            source_title: resp.data!.source_title || forgeMeta.source_title,
+                            document_type: resp.data!.document_type || forgeMeta.document_type,
+                            confidence: resp.data!.confidence || forgeMeta.confidence,
+                            outputs: resp.data!.outputs,
+                            status: resp.data!.status as any,
+                          }
+                          // Update artifacts panel with enriched data
+                          setForgeMetadata(enriched)
                           // Update message in place with enriched data
                           updateMessages(prev => prev.map(m =>
                             m.id === msg.id ? {
                               ...m,
-                              forge: {
-                                ...forgeMeta,
-                                fields: resp.data!.fields,
-                                source_title: resp.data!.source_title || forgeMeta.source_title,
-                                document_type: resp.data!.document_type || forgeMeta.document_type,
-                                confidence: resp.data!.confidence || forgeMeta.confidence,
-                                outputs: resp.data!.outputs,
-                                status: resp.data!.status as any,
-                              },
+                              forge: enriched,
                             } : m
                           ))
                         }
@@ -1921,7 +1937,12 @@ export function EmmaChat({
       label: 'Verified Gen',
       icon: <FileCheck className="h-3.5 w-3.5" />,
       badge: totalClaims > 0 ? `${verifiedCount}/${totalClaims}` : undefined,
-      content: <div className="text-sm text-muted-foreground">Verified Generation tab — content pending Task 4</div>,
+      content: (
+        <VerifiedGenTab
+          jobs={verifiedJobs}
+          onSubmitReview={handleReviewSubmit}
+        />
+      ),
     })
   }
 
@@ -1930,7 +1951,19 @@ export function EmmaChat({
       id: 'predictive',
       label: 'Predictive',
       icon: <TrendingUp className="h-3.5 w-3.5" />,
-      content: <div className="text-sm text-muted-foreground">Predictive Analysis tab — content pending Task 5</div>,
+      content: <PredictiveTab jobs={predictiveJobs} />,
+    })
+  }
+
+  if (forgeMetadata) {
+    artifactTabs.push({
+      id: 'forge',
+      label: 'Document Forge',
+      icon: <Hammer className="h-3.5 w-3.5" />,
+      badge: forgeMetadata.fields_detected
+        ? `${forgeMetadata.fields_filled || 0}/${forgeMetadata.fields_detected}`
+        : undefined,
+      content: <ForgeTab metadata={forgeMetadata} />,
     })
   }
 
