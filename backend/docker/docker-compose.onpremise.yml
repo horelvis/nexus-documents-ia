@@ -16,10 +16,13 @@
 
 services:
   # =============================================================================
-  # PostgreSQL with Apache AGE - Graph Database Extension
+  # PostgreSQL with Apache AGE + pgvector
   # =============================================================================
   db:
-    image: apache/age:release_PG15_1.6.0
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    image: nouxcube/postgres-age-pgvector:pg15
     ports:
       - "5432:5432"
     environment:

@@ -1,0 +1,37 @@
+# =============================================================================
+# Custom PostgreSQL image with Apache AGE + pgvector
+# =============================================================================
+# Base: apache/age (PG15 + Apache AGE for knowledge graph)
+# Added: pgvector (compiled from source — no apt package for PG15)
+#
+# Why custom image:
+#   - apache/age:release_PG15_1.6.0 ships AGE but NOT pgvector
+#   - Debian repos only have pgvector for PG16+ (no PG15 package)
+#   - MemoRAG requires VECTOR column type for embedding similarity search
+#   - Few-shot retriever also uses pgvector for semantic example matching
+#
+# Build: docker compose build db
+# =============================================================================
+
+FROM apache/age:release_PG15_1.6.0
+
+# Install build tools, compile pgvector, then clean up
+ARG PGVECTOR_VERSION=0.8.0
+
+RUN apt-get update -qq && \
+    apt-get install -y -qq --no-install-recommends \
+        build-essential \
+        postgresql-server-dev-15 \
+        git \
+        ca-certificates && \
+    cd /tmp && \
+    git clone --branch v${PGVECTOR_VERSION} --depth 1 https://github.com/pgvector/pgvector.git && \
+    cd pgvector && \
+    make -j$(nproc) OPTFLAGS="-march=native -ftree-vectorize" && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/pgvector && \
+    apt-get purge -y build-essential postgresql-server-dev-15 git && \
+    apt-get autoremove -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*

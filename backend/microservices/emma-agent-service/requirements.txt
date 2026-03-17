@@ -17,6 +17,8 @@ python-multipart>=0.0.9
 # Database and storage (for sessions)
 asyncpg>=0.29.0
 redis>=5.0.0
+sqlalchemy[asyncio]>=2.0.0  # MemoRAG memory store (pgvector queries)
+psycopg2-binary>=2.9.0  # MemoRAG PostgreSQL driver (sync, for sqlalchemy)
 
 # LLM clients
 openai>=1.0.0  # For vLLM OpenAI-compatible API

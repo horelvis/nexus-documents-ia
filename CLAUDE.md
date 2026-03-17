@@ -49,9 +49,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Backend**: FastAPI (Python 3.9+), async/await throughout
 - **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
-- **Database**: PostgreSQL + Weaviate (vectors) + Elasticsearch (full-text)
+- **Database**: PostgreSQL 15 (Apache AGE + pgvector) + Weaviate (vectors) + Elasticsearch (full-text)
 - **Storage**: Google Cloud Storage
 - **AI/ML**: vLLM (dual-model: Qwen3.5-4B planner + Qwen3.5-9B chat) + LangGraph multi-agent orchestration
+
+### PostgreSQL Extensions
+
+The `db` service uses a custom Docker image (`Dockerfile.postgres`) based on `apache/age:release_PG15_1.6.0` with two extensions:
+
+| Extension | Version | Purpose | Init Script |
+|-----------|---------|---------|-------------|
+| **Apache AGE** | 1.6.0 | Cypher graph queries for knowledge graph (entity expansion, structural queries) | `init-scripts/01-init-age.sql` |
+| **pgvector** | 0.8.0 | Vector similarity search for MemoRAG embeddings and few-shot retrieval | `init-scripts/00-init-pgvector.sql` |
+
+**Key files**:
+- `backend/docker/Dockerfile.postgres` — Custom image build (AGE base + pgvector compiled from source)
+- `backend/docker/init-scripts/00-init-pgvector.sql` — Creates pgvector extension on first startup
+- `backend/docker/init-scripts/01-init-age.sql` — Apache AGE + knowledge graph schema
+- `backend/docker/init-scripts/02-init-langfuse.sql` — Langfuse observability database
+
+**Rebuild after changes**: `cd backend/docker && docker compose build db`
 
 ### Microservices
 

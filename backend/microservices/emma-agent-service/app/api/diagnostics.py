@@ -321,15 +321,17 @@ async def _check_langfuse_prompt() -> Dict[str, Any]:
         from app.services.langfuse_prompt_client import get_langfuse_prompt_client
         client = get_langfuse_prompt_client()
 
-        # emma_react_system is critical (must be in Langfuse)
-        # emma_classify_system may use YAML fallback — not critical
-        required = ["emma_react_system"]
-        optional = ["emma_classify_system", "emma_swarm_decompose"]
+        # Critical prompts that must exist in Langfuse
+        required = ["emma_react_system", "emma_swarm_decompose"]
+        optional = ["emma_fast_conversational_system", "emma_rewrite_system"]
         loaded = []
         for name in required + optional:
-            prompt = await client.get_prompt(name)
-            if prompt is not None:
-                loaded.append(name)
+            try:
+                prompt = await client.get_prompt(name)
+                if prompt is not None:
+                    loaded.append(name)
+            except Exception:
+                pass  # Optional prompts can fail
 
         ms = (time.time() - t0) * 1000
         missing_required = set(required) - set(loaded)
@@ -362,10 +364,32 @@ async def _check_memorag(tenant_id: str) -> Dict[str, Any]:
     try:
         from app.services.memorag import get_memorag_service
         service = get_memorag_service()
+
+        # Pre-check: verify pgvector + table exist before attempting memorize
+        try:
+            await service.initialize()
+            store = service._store
+            session_factory = await store._get_session_factory()
+            from sqlalchemy import text as sa_text
+            async with session_factory() as session:
+                await session.execute(sa_text(
+                    f"SELECT 1 FROM {settings.memorag_table_name} LIMIT 0"
+                ))
+        except Exception as e:
+            err_str = str(e)
+            if "UndefinedTable" in err_str or "does not exist" in err_str:
+                return _skip("MemoRAG table missing (pgvector extension not installed on PostgreSQL)")
+            return _fail((time.time() - t0) * 1000, f"MemoRAG init: {err_str[:80]}")
+
         document_id = "__diagnostics_memorag__"
         content = (
-            "Diagnostico MemoRAG. Este documento existe solo para pruebas de salud. "
-            "Contiene la frase clave: sentinel memorag."
+            "Diagnostico MemoRAG. Este documento existe solo para pruebas de salud del sistema. "
+            "Contiene la frase clave: sentinel memorag. "
+            "El objetivo de esta prueba es verificar que el pipeline de memorización y recuperación "
+            "funciona correctamente de extremo a extremo. Este texto debe tener suficiente longitud "
+            "para pasar la validación mínima del servicio de memoria. La prueba de diagnóstico "
+            "almacena este documento y luego intenta recuperarlo buscando la frase sentinel. "
+            "Si la recuperación tiene éxito, el check se considera aprobado."
         )
         result = await service.memorize(
             tenant_id=tenant_id,
