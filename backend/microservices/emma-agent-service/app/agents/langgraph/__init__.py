@@ -1,32 +1,21 @@
 """
-LangGraph ReAct Agent Architecture
-
-This module implements a LangGraph-based ReAct agent system with:
-- ReActState (TypedDict) for explicit state management
-- Conditional routing (fast-path, react loop, swarm decomposition)
-- Swarm parallel execution for complex queries
-- Built-in memory/checkpointing
+LangGraph ReAct Agent — Core Orchestration Engine
 
 Architecture:
     START -> classify -> [fast_path -> END]
-                       -> react_loop <-> synthesize -> END       (simple)
-                       -> decompose -> [swarm_worker x N] ->     (complex)
+                       -> rewrite -> memory_recall -> react_loop <-> synthesize -> END      (simple)
+                       -> rewrite -> memory_recall -> decompose -> [swarm_worker x N] ->    (complex)
                          synthesize_swarm -> END
 
 Usage:
-    from app.agents.langgraph import execute_langgraph_query, is_langgraph_enabled
+    from app.agents.langgraph import execute_langgraph_query
 
-    if is_langgraph_enabled():
-        result = await execute_langgraph_query(
-            query="What GDPR documents do I have?",
-            tenant_id="tenant-123",
-            user_id="user-456",
-        )
-        print(result.answer)
-
-Feature Flags:
-    - LANGGRAPH_RAG_ENABLED: Enable LangGraph for all tenants (uses ReAct agent)
-    - LANGGRAPH_TENANTS: Comma-separated list of tenant IDs to enable
+    result = await execute_langgraph_query(
+        query="What GDPR documents do I have?",
+        tenant_id="tenant-123",
+        user_id="user-456",
+    )
+    print(result.answer)
 """
 
 from .state import RAGState, ReActState, ExecutionConfig, create_initial_state, create_initial_react_state

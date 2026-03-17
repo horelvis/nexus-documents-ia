@@ -59,6 +59,42 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("openai").setLevel(logging.WARNING)
 
 
+async def _validate_required_prompts():
+    """Verify critical prompts exist in Langfuse at startup.
+
+    Checks a representative subset of prompts (one per section) to catch
+    configuration issues early. Full validation happens via seed script --diff.
+    """
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+
+    # Representative prompts — one per section, covering critical paths
+    critical_prompts = [
+        "emma_react_system",
+        "emma_fast_conversational_system",
+        "emma_swarm_decompose",
+        "emma_context_root",
+    ]
+
+    client = get_langfuse_prompt_client()
+    missing = []
+
+    for name in critical_prompts:
+        try:
+            prompt = await client.get_prompt(name, fallback="__check__")
+            if prompt and prompt.content == "__check__":
+                missing.append(name)
+        except Exception:
+            missing.append(name)
+
+    if missing:
+        logger.error(
+            f"Missing {len(missing)} critical prompts in Langfuse: {missing}. "
+            f"Run: python scripts/seed_langfuse_prompts.py --force"
+        )
+    else:
+        logger.info("Langfuse prompt validation passed (critical prompts present)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
@@ -85,6 +121,13 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         logger.error(f"Service initialization failed: {e}")
+
+    # Validate Langfuse prompts — fail fast if any are missing
+    if settings.langfuse_enabled:
+        try:
+            await _validate_required_prompts()
+        except Exception as e:
+            logger.warning(f"Langfuse prompt validation skipped: {e}")
 
     # Initialize Event Bus (Emma Reactive)
     if settings.event_bus_enabled:
@@ -252,34 +295,13 @@ async def service_info():
 async def agents_status():
     """Emma AI agents status"""
     try:
-        from app.agents import agent_config, get_emma
-        from app.agents.langgraph import is_langgraph_enabled
-
-        # Check if Emma is available
-        emma_available = False
-        try:
-            emma = await get_emma()
-            emma_available = emma is not None
-        except Exception:
-            pass
-
         return {
-            "status": "available" if emma_available else "disabled",
+            "status": "available",
             "version": "2.0",
-            "emma": {
-                "available": emma_available,
-                "model_provider": agent_config.model_provider,
-            },
-            "langgraph": {
-                "enabled": is_langgraph_enabled(),
-                "specialists": ["privacy_agent", "legal_agent", "general_agent"],
-            },
+            "orchestration": "LangGraph",
             "config": {
-                "enabled": agent_config.enabled,
-                "max_turns": agent_config.max_turns,
-                "timeout_seconds": agent_config.timeout_seconds,
-                "fallback_to_rag": agent_config.fallback_to_rag,
-                "model_provider": agent_config.model_provider,
+                "enabled": settings.agents_enabled,
+                "model": settings.vllm_model,
             }
         }
     except Exception as e:

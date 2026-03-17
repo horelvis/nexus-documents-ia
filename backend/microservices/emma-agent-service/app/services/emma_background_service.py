@@ -229,7 +229,7 @@ class EmmaBackgroundService:
         # For longer responses, use LLM to summarize and make conversational
         try:
             import httpx
-            from app.agents.config import agent_config
+            from app.core.config import settings as agent_config
 
             system_prompt = f"""Reescribe la siguiente respuesta para un chat de {channel_type}.
 
@@ -449,31 +449,24 @@ Respuesta a reescribir:
         logger.info(f"🧠 Executing Emma with session_id: {session_id}")
 
         try:
-            from app.services.emma_service import emma_service
-            from app.schemas.emma import EmmaQuery
+            from app.agents.langgraph import execute_langgraph_query
 
-            emma_query = EmmaQuery(
+            langgraph_result = await execute_langgraph_query(
                 query=query,
                 tenant_id=tenant_id,
-                session_id=session_id,
+                user_id=context.get("user_id") if context else None,
+                thread_id=session_id,
                 context=context or {},
-                enable_learning=False,
-                enable_debug=False,
             )
 
-            response = await emma_service.execute_query(emma_query)
-
-            # Extract sources from data.sources or data.references if available
-            sources = []
-            if response and response.data:
-                sources = response.data.get("sources", response.data.get("references", []))
+            response = langgraph_result
+            sources = langgraph_result.sources or []
 
             return {
-                "success": True,
+                "success": langgraph_result.success,
                 "session_id": session_id,
-                "answer": response.answer if response else "Sin respuesta",
-                "confidence_score": response.confidence_score if response else None,
-                "sources_count": len(sources) if sources else 0,
+                "answer": langgraph_result.answer or "Sin respuesta",
+                "sources_count": len(sources),
                 "executed_at": datetime.now(timezone.utc).isoformat(),
             }
 

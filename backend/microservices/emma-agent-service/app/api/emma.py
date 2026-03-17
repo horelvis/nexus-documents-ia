@@ -1,12 +1,12 @@
 """
 Emma API Endpoints
 
-Main API endpoints for Emma AI assistant.
+Main API endpoints for Emma AI assistant, powered by LangGraph ReAct agent.
 
 Endpoints:
 - POST /emma/query - Execute query (non-streaming)
 - POST /emma/query/stream - Execute query with SSE streaming
-- GET /emma/tools - List available tools
+- POST /emma/query/resume/stream - Resume interrupted query (HITL)
 - GET /emma/health - Health check
 - GET /emma/sessions - List conversation sessions
 - POST /emma/sessions/{id}/continue - Continue a session
@@ -17,9 +17,8 @@ Endpoints:
 - DELETE /emma/memory/facts/{id} - Delete a single fact
 
 Architecture:
-- Uses Emma agent with SIL fast path and domain routing
-- LangGraph integration available via LANGGRAPH_RAG_ENABLED flag
-- Session persistence in PostgreSQL + Redis cache
+- LangGraph is the single orchestration engine (ReAct agent with tools)
+- Session persistence via LangGraph checkpointer (PostgreSQL)
 """
 
 import asyncio
@@ -33,23 +32,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
-from app.core.langfuse_config import (
-    flush_langfuse,
-    langfuse_context,
-    score_emma_result,
-    trace_context,
-    trace_emma_query,
-)
 from app.core.security import verify_api_key
-from app.agents.emma import (
-    Emma,
-    EmmaConfig,
-    EmmaResult,
-    ExecutionContext,
-    get_emma,
-    MAX_AGENTIC_ITERATIONS,
-)
-from app.agents.emma_tools import EMMA_TOOLS, get_emma_tools
 from app.services.emma_persistence_service import get_emma_persistence_service
 from app.schemas.emma import (
     EmmaSessionListResponse,
@@ -61,9 +44,6 @@ from app.schemas.emma import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Emma"])
-
-FAST_MAX_ITERATIONS = 3
-
 
 class _SafeEncoder(json.JSONEncoder):
     """JSON encoder that handles numpy scalar types (float32, int64, etc.)."""
@@ -229,19 +209,6 @@ class EmmaQueryResponse(BaseModel):
         }
 
 
-class ToolInfo(BaseModel):
-    """Information about a tool."""
-    name: str
-    description: str
-    parameters: Dict[str, Any]
-
-
-class ToolsResponse(BaseModel):
-    """Response listing available tools."""
-    tools: List[ToolInfo]
-    count: int
-
-
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str
@@ -316,16 +283,9 @@ async def emma_query(
     _: bool = Depends(verify_api_key),
 ):
     """
-    Execute a query with Emma or LangGraph (if enabled).
+    Execute a query with Emma (LangGraph ReAct agent).
 
-    This endpoint routes to:
-    - LangGraph multi-agent RAG (if LANGGRAPH_RAG_ENABLED=true)
-    - Emma architecture (default):
-      1. SIL fast path for structural queries (70-90% token savings)
-      2. Domain-specific dynamic prompts
-      3. Native async LLM client
-      4. Consolidated tool set (6 tools)
-
+    Uses LangGraph multi-agent RAG with ReAct loop and tool calling.
     Use thread_id to maintain conversation context across requests.
     """
     if not is_emma_enabled():
@@ -357,122 +317,62 @@ async def emma_query(
     except Exception as e:
         logger.warning(f"Failed to restore session context for {thread_id}: {e}")
 
-    # Check if LangGraph is enabled for this tenant
+    # LangGraph is the only orchestration engine
     from app.agents.langgraph import is_langgraph_enabled_for_tenant, execute_langgraph_query
 
-    if is_langgraph_enabled_for_tenant(query.tenant_id):
-        logger.info(f"🔀 LangGraph enabled for tenant {query.tenant_id}, routing to LangGraph")
-        try:
-            langgraph_result = await execute_langgraph_query(
-                query=query.query,
-                tenant_id=query.tenant_id,
-                user_id=query.user_id,
-                user_role_ids=query.user_role_ids,
-                is_admin=query.is_admin,
-                thread_id=thread_id,
-                context=query.context,
-            )
+    if not is_langgraph_enabled_for_tenant(query.tenant_id):
+        raise HTTPException(
+            status_code=500,
+            detail="Legacy Emma engine has been removed. LangGraph is the only orchestration engine.",
+        )
 
-            # Fire-and-forget: extract user facts from conversation
-            if query.user_id and settings.user_memory_enabled:
-                try:
-                    from app.services.memory.fact_extractor import extract_and_save_facts
-                    asyncio.create_task(extract_and_save_facts(
-                        tenant_id=query.tenant_id,
-                        user_id=query.user_id,
-                        user_message=query.query,
-                        assistant_response=langgraph_result.answer or "",
-                    ))
-                except Exception as e:
-                    logger.debug(f"Fact extraction dispatch failed: {e}")
+    logger.info(f"LangGraph query for tenant {query.tenant_id}")
+    try:
+        langgraph_result = await execute_langgraph_query(
+            query=query.query,
+            tenant_id=query.tenant_id,
+            user_id=query.user_id,
+            user_role_ids=query.user_role_ids,
+            is_admin=query.is_admin,
+            thread_id=thread_id,
+            context=query.context,
+        )
 
-            return EmmaQueryResponse(
-                success=langgraph_result.success,
-                answer=langgraph_result.answer,
-                domain="general",  # LangGraph handles domains internally
-                tools_called=langgraph_result.agents_used,
-                iterations=len(langgraph_result.agents_used),
-                sil_answered=langgraph_result.fast_path,
-                tokens_saved=0,
-                latency_ms=langgraph_result.latency_ms,
-                thread_id=langgraph_result.thread_id,
-                metadata={
-                    "langgraph": True,
-                    "domains": langgraph_result.domains,
-                    **langgraph_result.metadata,
-                },
-                sources=langgraph_result.sources,
-            )
-        except Exception as e:
-            logger.error(f"LangGraph query failed, falling back to Emma: {e}")
-            # Fall through to Emma
+        # Fire-and-forget: extract user facts from conversation
+        if query.user_id and settings.user_memory_enabled:
+            try:
+                from app.services.memory.fact_extractor import extract_and_save_facts
+                asyncio.create_task(extract_and_save_facts(
+                    tenant_id=query.tenant_id,
+                    user_id=query.user_id,
+                    user_message=query.query,
+                    assistant_response=langgraph_result.answer or "",
+                ))
+            except Exception as e:
+                logger.debug(f"Fact extraction dispatch failed: {e}")
 
-    # Create Langfuse trace for this query
-    with trace_context(
-        name="emma.query",
-        session_id=thread_id,
-        user_id=query.user_id,
-        metadata={
-            "tenant_id": query.tenant_id,
-            "sil_enabled": query.enable_sil,
-            "domain_routing_enabled": query.enable_domain_routing,
-        },
-        input={"query": query.query},
-        tags=["emma", "api"],
-    ) as trace:
-        try:
-            emma = await get_emma()
-
-            context = ExecutionContext(
-                tenant_id=query.tenant_id,
-                user_id=query.user_id,
-                role_ids=query.user_role_ids or [],
-                is_admin=query.is_admin,
-                thread_id=thread_id,
-            )
-
-            # Configure Emma based on request
-            emma.config.enable_domain_routing = query.enable_domain_routing
-            emma.config.enable_thinking = query.deep_reasoning
-            emma.config.max_iterations = (
-                MAX_AGENTIC_ITERATIONS if query.deep_reasoning else FAST_MAX_ITERATIONS
-            )
-            emma.config.enable_thinking = query.deep_reasoning
-            emma.config.max_iterations = (
-                MAX_AGENTIC_ITERATIONS if query.deep_reasoning else FAST_MAX_ITERATIONS
-            )
-
-            # Execute query
-            result = await emma.execute(query.query, context)
-
-            # Update trace with output
-            if trace:
-                trace.update(
-                    output={
-                        "answer": result.answer[:500] + "..." if len(result.answer) > 500 else result.answer,
-                        "domain": result.domain.value,
-                        "sil_answered": result.sil_answered,
-                    }
-                )
-
-            return EmmaQueryResponse(
-                success=result.success,
-                answer=result.answer,
-                domain=result.domain.value,
-                tools_called=result.tools_called,
-                iterations=result.iterations,
-                sil_answered=result.sil_answered,
-                tokens_saved=result.tokens_saved,
-                latency_ms=result.latency_ms,
-                thread_id=result.thread_id,
-                metadata=result.metadata,
-            )
-
-        except Exception as e:
-            logger.error(f"Emma query error: {e}", exc_info=True)
-            if trace:
-                trace.update(level="ERROR", status_message=str(e))
-            raise HTTPException(status_code=500, detail=str(e))
+        return EmmaQueryResponse(
+            success=langgraph_result.success,
+            answer=langgraph_result.answer,
+            domain="general",  # LangGraph handles domains internally
+            tools_called=langgraph_result.agents_used,
+            iterations=len(langgraph_result.agents_used),
+            sil_answered=langgraph_result.fast_path,
+            tokens_saved=0,
+            latency_ms=langgraph_result.latency_ms,
+            thread_id=langgraph_result.thread_id,
+            metadata={
+                "langgraph": True,
+                "domains": langgraph_result.domains,
+                **langgraph_result.metadata,
+            },
+            sources=langgraph_result.sources,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"LangGraph query failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 import re as _re
@@ -864,246 +764,15 @@ async def emma_query_stream(
         is_langgraph_enabled_for_tenant, stream_react_query,
     )
 
-    if is_langgraph_enabled_for_tenant(query.tenant_id):
-        logger.info(f"LangGraph ReAct streaming for tenant {query.tenant_id}")
-        return StreamingResponse(
-            _generate_langgraph_sse(query, stream_react_query),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "Connection": "keep-alive",
-                "X-Accel-Buffering": "no",
-            },
+    if not is_langgraph_enabled_for_tenant(query.tenant_id):
+        raise HTTPException(
+            status_code=500,
+            detail="Legacy Emma engine has been removed. LangGraph is the only orchestration engine.",
         )
 
-    async def generate_sse() -> AsyncGenerator[str, None]:
-        """
-        Generate SSE events, transforming Emma internal events to frontend format.
-
-        Emma internal → Frontend expected:
-        - content → token (with text field)
-        - thinking → progress (with stage='thinking')
-        - tool_call → delegation (with tool field)
-        - tool_result → step_complete
-        - done → complete (with answer, success, tools_used)
-        - error → error
-        """
-        thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
-
-        # Extend TTL and restore document context from previous session
-        try:
-            persistence = get_emma_persistence_service()
-            await persistence.touch_session(thread_id, query.tenant_id)
-            session = await persistence.get_session(thread_id)
-            if session:
-                saved_ctx = (session.get("metadata") or {}).get("document_context")
-                if saved_ctx:
-                    ctx = query.context or {}
-                    for key in ("document_id", "uploaded_file_ids", "indexed_document_ids"):
-                        if not ctx.get(key) and saved_ctx.get(key):
-                            ctx[key] = saved_ctx[key]
-                    query.context = ctx
-        except Exception as e:
-            logger.warning(f"Failed to restore session context for {thread_id}: {e}")
-
-        # Create Langfuse trace for this streaming query
-        trace = trace_emma_query(
-            query=query.query,
-            tenant_id=query.tenant_id,
-            user_id=query.user_id,
-            thread_id=thread_id,
-        )
-        if trace:
-            trace.update(metadata={"streaming": True})
-            langfuse_context.push_observation(trace)
-
-        try:
-            logger.info(f"[Emma Stream] Starting for tenant={query.tenant_id}, query={query.query[:50]}...")
-
-            # Send start event
-            yield f"event: start\ndata: {_dumps({'message': 'Iniciando análisis...', 'progress': 0})}\n\n"
-            await asyncio.sleep(0)
-
-            try:
-                emma = await get_emma()
-                logger.info("[Emma Stream] Emma instance created")
-            except Exception as init_err:
-                logger.error(f"[Emma Stream] Failed to create Emma instance: {init_err}")
-                yield f"event: error\ndata: {_dumps({'error': f'Error inicializando Emma: {str(init_err)}'})}\n\n"
-                return
-
-            yield f"event: progress\ndata: {_dumps({'message': 'Emma inicializada...', 'stage': 'init', 'progress': 5})}\n\n"
-            await asyncio.sleep(0)
-
-            context = ExecutionContext(
-                tenant_id=query.tenant_id,
-                user_id=query.user_id,
-                role_ids=query.user_role_ids or [],
-                is_admin=query.is_admin,
-                thread_id=thread_id,
-            )
-
-            emma.config.enable_domain_routing = query.enable_domain_routing
-
-            # Send progress event
-            yield f"event: progress\ndata: {_dumps({'message': 'Procesando consulta...', 'stage': 'context_preparation', 'progress': 10})}\n\n"
-            await asyncio.sleep(0)
-
-            logger.info(f"[Emma Stream] Starting execute_stream loop (SIL={query.enable_sil})")
-            event_count = 0
-            has_complete = False
-
-            try:
-                async for event in emma.execute_stream(query.query, context):
-                    event_count += 1
-                    event_type = event.get("type", "message")
-                    logger.debug(f"[Emma Stream] Event {event_count}: {event_type}")
-
-                    # Transform events to frontend expected format
-                    if event_type == "content":
-                        # content → token (text streaming)
-                        frontend_data = {
-                            "text": event.get("content", ""),
-                            "token": event.get("content", ""),
-                        }
-                        yield f"event: token\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
-
-                    elif event_type == "thinking":
-                        # thinking → progress with stage
-                        frontend_data = {
-                            "message": "Razonando...",
-                            "stage": "thinking",
-                            "text": event.get("content", ""),
-                        }
-                        yield f"event: progress\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
-
-                    # SLM Router chain-of-thought events
-                    elif event_type == "slm_thinking_start":
-                        # SLM started reasoning
-                        frontend_data = {
-                            "message": event.get("content", "Analizando consulta..."),
-                            "stage": "slm_reasoning",
-                            "slmIsThinking": True,
-                            "slmThinkingSteps": [],
-                        }
-                        yield f"event: progress\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
-
-                    elif event_type == "slm_thinking_step":
-                        # SLM reasoning step (entity, intent, route)
-                        frontend_data = {
-                            "message": event.get("content", ""),
-                            "stage": "slm_reasoning",
-                            "slmIsThinking": True,
-                            "slmThinkingStep": {
-                                "step": event.get("step"),
-                                "type": event.get("step_type"),
-                                "content": event.get("content"),
-                                "entities": event.get("entities", []),
-                                "confidence": event.get("confidence", 1.0),
-                            },
-                        }
-                        yield f"event: slm_thinking\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
-
-                    elif event_type == "slm_plan_ready":
-                        # SLM plan generated
-                        frontend_data = {
-                            "message": f"Plan: {event.get('route', 'N/A')} ({event.get('confidence', 0)*100:.0f}% confianza)",
-                            "stage": "slm_plan_ready",
-                            "slmIsThinking": False,
-                            "slmPlan": {
-                                "route": event.get("route"),
-                                "confidence": event.get("confidence", 0),
-                                "entities_count": event.get("entities_count", 0),
-                                "reasoning": event.get("reasoning"),
-                            },
-                        }
-                        yield f"event: slm_plan\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
-
-                    elif event_type == "slm_execution_start":
-                        # SLM starting execution
-                        frontend_data = {
-                            "message": event.get("message", "Ejecutando plan..."),
-                            "stage": "slm_executing",
-                            "slmIsExecuting": True,
-                            "route": event.get("route"),
-                        }
-                        yield f"event: progress\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
-
-                    elif event_type == "done":
-                        # done → complete
-                        has_complete = True
-                        result = event.get("result", {})
-                        # Generate contextual suggestions based on query and result
-                        suggestions = _generate_contextual_suggestions(
-                            query.query,
-                            result.get("answer", ""),
-                            result.get("tools_called", [])
-                        )
-                        frontend_data = {
-                            "success": result.get("success", True),
-                            "answer": result.get("answer", ""),
-                            "tools_used": result.get("tools_called", []),
-                            "execution_time_ms": result.get("latency_ms", 0),
-                            "session_id": result.get("thread_id", thread_id),
-                            "process_info": result.get("process_info", {}),
-                            "final_result": result,
-                            "suggestions": suggestions,
-                        }
-                        yield f"event: complete\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
-
-                    elif event_type == "error":
-                        # error stays as error
-                        frontend_data = {"error": event.get("error", "Unknown error")}
-                        yield f"event: error\ndata: {_dumps(frontend_data, ensure_ascii=False)}\n\n"
-
-                    else:
-                        # Unknown event types → progress
-                        event_data = {k: v for k, v in event.items() if k != "type"}
-                        event_data["message"] = event_data.get("message", f"Procesando ({event_type})...")
-                        yield f"event: progress\ndata: {_dumps(event_data, ensure_ascii=False)}\n\n"
-
-                    # Force immediate flush after each event
-                    await asyncio.sleep(0)
-
-                # After loop: Check if we got events
-                logger.info(f"[Emma Stream] Loop finished with {event_count} events, has_complete={has_complete}")
-                if event_count == 0:
-                    logger.warning("[Emma Stream] No events received from execute_stream!")
-                    if trace:
-                        trace.update(level="WARNING", status_message="No events received")
-                    yield f"event: error\ndata: {_dumps({'error': 'No se recibieron eventos del procesamiento'})}\n\n"
-                elif not has_complete:
-                    logger.warning("[Emma Stream] Stream ended without 'done' event")
-
-                # Finalize trace on success
-                if trace and has_complete:
-                    trace.update(
-                        output={"event_count": event_count, "completed": has_complete}
-                    )
-
-            except Exception as stream_err:
-                import traceback
-                error_details = traceback.format_exc()
-                logger.error(f"[Emma Stream] Error in execute_stream: {stream_err}\n{error_details}")
-                if trace:
-                    trace.update(level="ERROR", status_message=str(stream_err))
-                yield f"event: error\ndata: {_dumps({'error': f'Error en procesamiento: {str(stream_err)}'})}\n\n"
-
-        except Exception as e:
-            import traceback
-            error_details = traceback.format_exc()
-            logger.error(f"Emma stream error: {e}\n{error_details}")
-            if trace:
-                trace.update(level="ERROR", status_message=str(e))
-            yield f"event: error\ndata: {_dumps({'error': 'Lo siento, hubo un problema temporal. Por favor, inténtalo de nuevo.'})}\n\n"
-        finally:
-            # Cleanup: pop trace from context and flush
-            if trace:
-                langfuse_context.pop_observation()
-                flush_langfuse()
-
+    logger.info(f"LangGraph ReAct streaming for tenant {query.tenant_id}")
     return StreamingResponse(
-        generate_sse(),
+        _generate_langgraph_sse(query, stream_react_query),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -1195,65 +864,38 @@ async def emma_query_resume_stream(
     )
 
 
-@router.get("/tools", response_model=ToolsResponse)
-async def list_tools(_: bool = Depends(verify_api_key)):
-    """
-    List all available Emma tools.
-
-    Emma uses a consolidated set of 5 tools:
-    - search: Semantic/keyword/hybrid document search
-    - read_document: Get full document content
-    - analyze: Deep RAG-based document analysis
-    - ask_user: Human-in-the-loop clarification
-    - legal_search: Public legal knowledge search
-    """
-    tools = get_emma_tools()
-
-    return ToolsResponse(
-        tools=[
-            ToolInfo(
-                name=t["name"],
-                description=t["description"],
-                parameters=t["parameters"],
-            )
-            for t in tools
-        ],
-        count=len(tools),
-    )
-
-
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
     """
-    Check Emma health status.
+    Check Emma health status (LangGraph orchestration).
 
     Returns:
     - LLM connection status
-    - SIL availability
     - Enabled features
     """
     try:
-        emma = await get_emma()
+        from app.agents.llm_models import get_chat_model
 
-        # Check LLM connection
-        llm_connected, llm_msg = await emma._llm_client.validate_connection()
-
-        # Check LangGraph status
-        from app.agents.langgraph import is_langgraph_enabled
-        langgraph_enabled = is_langgraph_enabled()
+        # Check LLM connection by verifying model is available
+        llm_connected = False
+        try:
+            model = get_chat_model()
+            llm_connected = model is not None
+        except Exception:
+            pass
 
         return HealthResponse(
             status="healthy" if llm_connected else "degraded",
             version="2.0",
             llm_connected=llm_connected,
             sil_enabled=False,
-            orchestration="LangGraph" if langgraph_enabled else "Emma",
+            orchestration="LangGraph",
             features={
                 "sil_fast_path": False,
-                "domain_routing": emma.config.enable_domain_routing,
-                "streaming": emma.config.enable_streaming,
                 "emma_enabled": is_emma_enabled(),
-                "langgraph_enabled": langgraph_enabled,
+                "langgraph_enabled": True,
+                "user_memory_enabled": settings.user_memory_enabled,
+                "swarm_enabled": settings.swarm_enabled,
             },
         )
 
@@ -1302,73 +944,6 @@ async def update_cendoj_status(
         sector=settings.active_sector or "none",
         docker_image="nouxcube-cendoj-agent",
     )
-
-
-@router.get("/compare")
-async def compare_service_vs_direct(
-    query: str = Query(..., description="Query to compare"),
-    tenant_id: str = Query(..., description="Tenant ID"),
-    _: bool = Depends(verify_api_key),
-):
-    """
-    Compare Emma service vs direct Emma responses for the same query.
-
-    Useful for testing. Returns both responses with timing information.
-    """
-    import time
-    from app.services.emma_service import emma_service
-    from app.schemas.emma import EmmaQuery as ServiceEmmaQuery
-
-    results = {}
-
-    # Execute via service
-    try:
-        service_start = time.time()
-        service_query = ServiceEmmaQuery(
-            query=query,
-            tenant_id=tenant_id,
-        )
-        service_response = await emma_service.execute_query(service_query)
-        service_latency = (time.time() - service_start) * 1000
-
-        results["service"] = {
-            "success": service_response.success,
-            "answer": service_response.answer[:500] + "..." if len(service_response.answer) > 500 else service_response.answer,
-            "latency_ms": service_latency,
-        }
-    except Exception as e:
-        results["service"] = {"error": str(e)}
-
-    # Execute direct
-    try:
-        emma = await get_emma()
-        direct_start = time.time()
-        context = ExecutionContext(tenant_id=tenant_id)
-        direct_result = await emma.execute(query, context)
-        direct_latency = (time.time() - direct_start) * 1000
-
-        results["direct"] = {
-            "success": direct_result.success,
-            "answer": direct_result.answer[:500] + "..." if len(direct_result.answer) > 500 else direct_result.answer,
-            "latency_ms": direct_latency,
-            "sil_answered": direct_result.sil_answered,
-            "tokens_saved": direct_result.tokens_saved,
-            "domain": direct_result.domain.value,
-        }
-    except Exception as e:
-        results["direct"] = {"error": str(e)}
-
-    # Calculate comparison
-    if "latency_ms" in results.get("service", {}) and "latency_ms" in results.get("direct", {}):
-        service_lat = results["service"]["latency_ms"]
-        direct_lat = results["direct"]["latency_ms"]
-        results["comparison"] = {
-            "latency_improvement_pct": round((service_lat - direct_lat) / service_lat * 100, 1) if service_lat > 0 else 0,
-            "sil_fast_path": results["direct"].get("sil_answered", False),
-            "tokens_saved": results["direct"].get("tokens_saved", 0),
-        }
-
-    return results
 
 
 # =============================================================================

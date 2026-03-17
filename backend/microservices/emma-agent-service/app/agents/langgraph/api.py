@@ -2,22 +2,16 @@
 LangGraph ReAct Agent API Integration
 
 API layer for executing LangGraph-based ReAct agent queries.
-Integrated into Emma endpoints via feature flag.
+LangGraph is the single orchestration engine — no feature flags needed.
 
 Usage:
-    from app.agents.langgraph.api import execute_langgraph_query, is_langgraph_enabled
+    from app.agents.langgraph.api import execute_langgraph_query
 
-    if is_langgraph_enabled():
-        result = await execute_langgraph_query(query, tenant_id, user_id)
-    else:
-        result = await emma.execute(query, context)
-
-Feature Flag: LANGGRAPH_RAG_ENABLED (default: false)
+    result = await execute_langgraph_query(query, tenant_id, user_id)
 """
 
 import asyncio
 import logging
-import os
 import time
 import uuid
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -32,50 +26,15 @@ from .state import ReActState, ExecutionConfig, create_initial_react_state
 logger = logging.getLogger(__name__)
 
 
-# =============================================================================
-# Feature Flags
-# =============================================================================
-
+# Backwards-compatible stubs — always returns True.
+# These will be removed in a future cleanup pass.
 def is_langgraph_enabled() -> bool:
-    """
-    Check if LangGraph RAG is enabled.
-
-    Controlled via environment variable LANGGRAPH_RAG_ENABLED.
-    Defaults to true — LangGraph is the primary orchestration engine.
-    """
-    return os.getenv("LANGGRAPH_RAG_ENABLED", "true").lower() == "true"
-
-
-def get_langgraph_tenants() -> List[str]:
-    """
-    Get list of tenant IDs with LangGraph enabled.
-
-    For gradual rollout, specific tenants can be whitelisted.
-    Set LANGGRAPH_TENANTS="tenant-1,tenant-2" to enable for specific tenants.
-    Set LANGGRAPH_TENANTS="*" to enable for all tenants (same as LANGGRAPH_RAG_ENABLED=true).
-    """
-    tenants = os.getenv("LANGGRAPH_TENANTS", "")
-    if not tenants or tenants == "*":
-        return []  # Empty means check global flag
-    return [t.strip() for t in tenants.split(",") if t.strip()]
-
+    """LangGraph is always enabled — it's the core orchestration engine."""
+    return True
 
 def is_langgraph_enabled_for_tenant(tenant_id: str) -> bool:
-    """
-    Check if LangGraph is enabled for a specific tenant.
-
-    Allows gradual rollout by tenant.
-    """
-    # Check global flag first
-    if is_langgraph_enabled():
-        return True
-
-    # Check tenant-specific whitelist
-    whitelisted = get_langgraph_tenants()
-    if whitelisted and tenant_id in whitelisted:
-        return True
-
-    return False
+    """LangGraph is always enabled for all tenants."""
+    return True
 
 
 # =============================================================================
@@ -672,28 +631,10 @@ async def maybe_use_langgraph(
     thread_id: Optional[str] = None,
     **kwargs,
 ) -> Optional[LangGraphQueryResponse]:
+    """Execute a LangGraph query. Always returns a result (LangGraph is always enabled).
+
+    Kept for backwards compatibility with callers that check for None.
     """
-    Try to use LangGraph if enabled, otherwise return None.
-
-    This helper allows gradual migration from Emma to LangGraph.
-    If LangGraph is not enabled for this tenant, returns None
-    so the caller can fall back to Emma.
-
-    When enabled, routes through the ReAct agent graph.
-
-    Args:
-        query: User's query
-        tenant_id: Tenant ID
-        user_id: Optional user ID
-        thread_id: Optional thread ID
-        **kwargs: Additional arguments passed to execute_langgraph_query
-
-    Returns:
-        LangGraphQueryResponse if LangGraph is enabled, None otherwise
-    """
-    if not is_langgraph_enabled_for_tenant(tenant_id):
-        return None
-
     return await execute_langgraph_query(
         query=query,
         tenant_id=tenant_id,
