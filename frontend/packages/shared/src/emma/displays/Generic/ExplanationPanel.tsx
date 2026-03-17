@@ -7,10 +7,11 @@ import { ChevronRight } from "lucide-react"
 interface ExplanationPanelProps {
   explanation: string | null
   isLoading?: boolean
+  title?: string
   className?: string
 }
 
-export function ExplanationPanel({ explanation, isLoading, className }: ExplanationPanelProps) {
+export function ExplanationPanel({ explanation, isLoading, title = "Así lo resolví", className }: ExplanationPanelProps) {
   const [isOpen, setIsOpen] = useState(false)
 
   if (!explanation && !isLoading) return null
@@ -28,7 +29,7 @@ export function ExplanationPanel({ explanation, isLoading, className }: Explanat
             isOpen && "rotate-90",
           )}
         />
-        <span className="font-medium">Así lo resolví</span>
+        <span className="font-medium">{title}</span>
       </button>
 
       {isOpen && (

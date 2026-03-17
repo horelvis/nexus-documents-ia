@@ -133,9 +133,9 @@ async def _call_llm(
     user_prompt = await client.get_prompt(
         "emma_explain_user",
         variables={
-            "facts": facts_formatted,
-            "tools_used": tools_human_names,
-            "sources": source_names,
+            "facts_formatted": facts_formatted,
+            "tools_human_names": tools_human_names,
+            "source_names": source_names,
         },
     )
 
