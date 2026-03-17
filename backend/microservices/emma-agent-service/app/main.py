@@ -89,7 +89,7 @@ async def _validate_required_prompts():
     if missing:
         logger.error(
             f"Missing {len(missing)} critical prompts in Langfuse: {missing}. "
-            f"Run: python scripts/seed_langfuse_prompts.py --force"
+            f"Create them via Langfuse UI or a migration script."
         )
     else:
         logger.info("Langfuse prompt validation passed (critical prompts present)")

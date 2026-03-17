@@ -1,15 +1,13 @@
 """
 Unified Prompt Registry — Single source of truth for all Langfuse prompt names.
 
-Langfuse is the ONLY prompt source at runtime. YAML is only used by the
-seed script (scripts/seed_langfuse_prompts.py) to populate Langfuse initially.
+Langfuse DB is the ONLY prompt source. No YAML, no seed script.
 
 Adding a new prompt:
     1. Add an entry to PROMPT_REGISTRY below
-    2. Add the corresponding YAML content in config/prompts/emma_prompts.yaml
-    3. Run: python scripts/seed_langfuse_prompts.py --dry-run  (verify)
-    4. Run: python scripts/seed_langfuse_prompts.py             (seed missing only)
-    5. To force-overwrite existing: python scripts/seed_langfuse_prompts.py --force
+    2. Create a migration script in scripts/ (like migrate_*_prompts.py)
+       with content inline in Python → langfuse.create_prompt()
+    3. Run the migration script inside the container
 """
 
 from dataclasses import dataclass, field
@@ -21,13 +19,13 @@ class PromptEntry:
     """A prompt registered in the system."""
 
     yaml_path: Tuple[str, ...]
-    """Path into emma_prompts.yaml (e.g., ("react_agent", "system"))."""
+    """Legacy YAML path. Kept for backwards compat with any tooling that reads it."""
 
     description: str
     """Human-readable description of what this prompt does."""
 
     section: str = ""
-    """Logical section for filtering in the seed script (e.g., "react", "predictive")."""
+    """Logical section for grouping prompts (e.g., "react", "predictive")."""
 
     prompt_type: str = "text"
     """Langfuse prompt type. Almost always "text"."""
@@ -36,9 +34,6 @@ class PromptEntry:
 # =============================================================================
 # PROMPT_REGISTRY — all known Langfuse prompt names
 # =============================================================================
-# Merge of langfuse_prompt_client.name_mapping (runtime) and
-# seed_langfuse_prompts.PROMPT_REGISTRY (seeding).
-#
 # Convention: emma_{feature}_{system|user|evaluator}
 
 PROMPT_REGISTRY: Dict[str, PromptEntry] = {

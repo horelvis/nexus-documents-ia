@@ -52,7 +52,7 @@ class SectorConfig:
         entity_patterns: Regex patterns for entity extraction by type
         graph_name: Apache AGE graph name
         graph_schema: Path to Cypher schema file
-        system_prompt_key: Key in emma_prompts.yaml for sector system prompt
+        system_prompt_key: Langfuse prompt name for sector system prompt
         collection_suffix: Optional suffix for Weaviate collection names
         men_domain: MEN service domain mapping
         graph_search_properties: Node properties to search in Cypher queries

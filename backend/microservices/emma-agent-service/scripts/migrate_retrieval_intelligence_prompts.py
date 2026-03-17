@@ -2,8 +2,8 @@
 """
 Migration: Retrieval Intelligence prompts (Phase 1 + Phase 3).
 
-Pushes prompt changes directly to Langfuse WITHOUT touching emma_prompts.yaml.
-Langfuse is the single source of truth — no YAML intermediary.
+Pushes prompt changes directly to Langfuse.
+Langfuse DB is the single source of truth for all prompts.
 
 Changes:
   1. emma_react_system — appends filter guidance section + {current_date} placeholder

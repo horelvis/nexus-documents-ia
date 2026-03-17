@@ -380,45 +380,40 @@ Respuesta a reescribir:
                 "timezone": "Europe/Madrid",
             }
 
-    def _get_social_prompt(self, channel_type: str, location: Optional[Dict[str, str]] = None) -> str:
-        """Load social channel prompt from emma_prompts.yaml with location context."""
+    async def _get_social_prompt(self, channel_type: str, location: Optional[Dict[str, str]] = None) -> str:
+        """Load social channel prompt from Langfuse with location context."""
         try:
-            import yaml
-            from pathlib import Path
             from datetime import datetime
             import pytz
+            from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
-            prompts_path = Path(__file__).parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml"
-            if prompts_path.exists():
-                with open(prompts_path, "r", encoding="utf-8") as f:
-                    prompts = yaml.safe_load(f)
+            client = get_langfuse_prompt_client()
+            cached = await client.get_prompt("emma_social_system")
+            system_prompt = cached.content
 
-                social_config = prompts.get("social_channels", {})
-                system_prompt = social_config.get("system_prompt", "")
+            # Get location (from param or defaults)
+            loc = location or self._get_channel_location()
 
-                # Get location (from param or defaults)
-                loc = location or self._get_channel_location()
+            # Get current datetime in the channel's timezone
+            try:
+                tz = pytz.timezone(loc.get("timezone", "Europe/Madrid"))
+                current_dt = datetime.now(tz).strftime("%A %d de %B de %Y, %H:%M")
+            except Exception:
+                current_dt = datetime.now().strftime("%A %d de %B de %Y, %H:%M")
 
-                # Get current datetime in the channel's timezone
-                try:
-                    tz = pytz.timezone(loc.get("timezone", "Europe/Madrid"))
-                    current_dt = datetime.now(tz).strftime("%A %d de %B de %Y, %H:%M")
-                except Exception:
-                    current_dt = datetime.now().strftime("%A %d de %B de %Y, %H:%M")
-
-                # Replace all placeholders
-                return (
-                    system_prompt
-                    .replace("{channel_type}", channel_type)
-                    .replace("{location_city}", loc.get("city", "Madrid"))
-                    .replace("{location_region}", loc.get("region", "España"))
-                    .replace("{location_country}", loc.get("country", "España"))
-                    .replace("{timezone}", loc.get("timezone", "Europe/Madrid"))
-                    .replace("{current_datetime}", current_dt)
-                )
+            # Replace all placeholders
+            return (
+                system_prompt
+                .replace("{channel_type}", channel_type)
+                .replace("{location_city}", loc.get("city", "Madrid"))
+                .replace("{location_region}", loc.get("region", "España"))
+                .replace("{location_country}", loc.get("country", "España"))
+                .replace("{timezone}", loc.get("timezone", "Europe/Madrid"))
+                .replace("{current_datetime}", current_dt)
+            )
 
         except Exception as e:
-            logger.warning(f"Could not load social prompt: {e}")
+            logger.warning(f"Could not load social prompt from Langfuse: {e}")
 
         # Fallback prompt
         return (

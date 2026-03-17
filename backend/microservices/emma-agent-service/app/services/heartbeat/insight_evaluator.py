@@ -32,16 +32,13 @@ URGENCY_MAP = {
 class InsightEvaluator:
     """Evaluates tenant context using LLM to generate proactive insights.
 
-    The system prompt is fetched from Langfuse (prompt name:
-    'emma_heartbeat_evaluator') with a YAML fallback from
-    emma_prompts.yaml → heartbeat.evaluation_system.
-
+    The system prompt is fetched from Langfuse (prompt: 'emma_heartbeat_evaluator').
     New insight types can be added by editing the prompt in Langfuse UI
     without modifying Python code or redeploying.
     """
 
     async def _get_system_prompt(self) -> str:
-        """Fetch the evaluation system prompt from Langfuse (or YAML fallback)."""
+        """Fetch the evaluation system prompt from Langfuse."""
         try:
             from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
@@ -52,7 +49,7 @@ class InsightEvaluator:
         except Exception as e:
             logger.warning(f"Failed to fetch Langfuse prompt: {e}")
 
-        # Hardcoded fallback (matches emma_prompts.yaml heartbeat.evaluation_system)
+        # Hardcoded fallback
         return self._fallback_system_prompt()
 
     def _fallback_system_prompt(self) -> str:

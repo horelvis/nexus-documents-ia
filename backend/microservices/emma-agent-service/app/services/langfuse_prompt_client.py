@@ -28,7 +28,7 @@ class PromptNotFoundError(Exception):
         self.name = name
         super().__init__(
             f"Prompt '{name}' not found in Langfuse. "
-            f"Run: python scripts/seed_langfuse_prompts.py --force"
+            f"Create it via Langfuse UI or a migration script."
         )
 
 
@@ -190,7 +190,7 @@ class LangfusePromptClient:
             is_fallback = True
             logger.warning(
                 f"Using inline fallback for prompt '{name}' — "
-                f"this should be in Langfuse. Run: seed_langfuse_prompts.py --force"
+                f"this should be in Langfuse. Create it via UI or migration script."
             )
 
         # No prompt found anywhere → fail fast
