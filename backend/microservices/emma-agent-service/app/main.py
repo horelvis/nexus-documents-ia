@@ -43,7 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 
 from app.core.config import settings
-from app.api import emma_router, learning_router, uploads_router, verified_router, predictive_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router, diagnostics_router, generated_documents_router
+from app.api import emma_router, learning_router, uploads_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router, diagnostics_router, generated_documents_router
 from app.api.langgraph_protocol import router as langgraph_protocol_router
 from app.clients import get_weaviate_client
 
@@ -219,8 +219,7 @@ async def log_requests(request: Request, call_next):
 app.include_router(emma_router, prefix="/emma", tags=["emma"])
 app.include_router(learning_router, prefix="/learning", tags=["learning"])
 app.include_router(uploads_router, prefix="/emma", tags=["uploads"])
-app.include_router(verified_router, tags=["verified-generation"])
-app.include_router(predictive_router, tags=["predictive-analysis"])
+# verified_router and predictive_router removed — absorbed by /emma/query (sub-graph tools)
 app.include_router(training_router, tags=["training"])
 app.include_router(background_router, prefix="/emma", tags=["background"])
 app.include_router(triggers_router, tags=["triggers"])
