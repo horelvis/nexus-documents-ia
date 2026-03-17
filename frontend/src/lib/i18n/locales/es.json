@@ -319,6 +319,16 @@
       "phrase4": "Preparando el análisis...",
       "phrase5": "Consultando información relevante...",
       "phrase6": "Un momento, estoy procesando..."
+    },
+    "phases": {
+      "understanding": "Entendiendo tu consulta",
+      "searching": "Buscando información",
+      "analyzing": "Analizando resultados",
+      "responding": "Redactando respuesta"
+    },
+    "explanation": {
+      "title": "Así lo resolví",
+      "loading": "Generando explicación..."
     }
   },
   "billingPage": {

@@ -185,6 +185,16 @@
       "phrase4": "Préparation de l'analyse...",
       "phrase5": "Consultation des informations pertinentes...",
       "phrase6": "Un instant, traitement en cours..."
+    },
+    "phases": {
+      "understanding": "Compréhension de votre requête",
+      "searching": "Recherche d'informations",
+      "analyzing": "Analyse des résultats",
+      "responding": "Rédaction de la réponse"
+    },
+    "explanation": {
+      "title": "Comment j'ai résolu",
+      "loading": "Génération de l'explication..."
     }
   },
   "chatPage": {

@@ -6,6 +6,7 @@ import { InfoDisplay } from "./SystemMessages/InfoDisplay"
 import { WorkflowProgress } from "./Generic/WorkflowProgress"
 import { SLMThinkingDisplay } from "./Generic/SLMThinkingDisplay"
 import { ReasoningDisplay } from "./Generic/ReasoningDisplay"
+import { ExplanationPanel } from "./Generic/ExplanationPanel"
 import { DisplayRendererProps, DocumentInfo, SLMThinkingStep, SLMPlanReady, Citation } from "../types"
 
 export function DisplayRenderer({
@@ -144,6 +145,10 @@ export function DisplayRenderer({
             confidence={message.metadata?.confidence_score}
             defaultExpanded={false}
           />
+
+          {message.metadata?.explanation && (
+            <ExplanationPanel explanation={message.metadata.explanation} />
+          )}
         </div>
       )
 

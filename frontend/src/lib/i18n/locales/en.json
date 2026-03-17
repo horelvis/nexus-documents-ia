@@ -274,6 +274,16 @@
       "phrase4": "Preparing the analysis...",
       "phrase5": "Looking up relevant information...",
       "phrase6": "Just a moment, processing..."
+    },
+    "phases": {
+      "understanding": "Understanding your query",
+      "searching": "Searching for information",
+      "analyzing": "Analyzing results",
+      "responding": "Writing response"
+    },
+    "explanation": {
+      "title": "How I solved it",
+      "loading": "Generating explanation..."
     }
   },
   "billingPage": {
