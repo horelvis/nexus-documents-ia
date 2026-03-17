@@ -89,6 +89,9 @@ class SectorConfig:
     max_evidence: int = 5
     hitl_default: bool = False
 
+    # Explanation sector guidance (injected into explain prompt)
+    explain_guidance: str = "Usa lenguaje accesible. Describe los documentos consultados."
+
     def __post_init__(self) -> None:
         """Validate rerank_weights keys on construction."""
         if self.rerank_weights:

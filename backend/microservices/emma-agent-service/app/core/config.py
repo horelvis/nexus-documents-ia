@@ -358,6 +358,11 @@ class Settings(BaseSettings):
     user_memory_cache_ttl: int = int(os.getenv("USER_MEMORY_CACHE_TTL", "3600"))
 
     # ==========================================================================
+    # Explanation Generation (humanized reasoning trace)
+    # ==========================================================================
+    explain_enabled: bool = os.getenv("EXPLAIN_ENABLED", "true").lower() == "true"
+
+    # ==========================================================================
     # Document Generation & Email Tools (ReAct)
     # ==========================================================================
     document_generation_enabled: bool = os.getenv("DOCUMENT_GENERATION_ENABLED", "true").lower() == "true"

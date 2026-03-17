@@ -502,6 +502,18 @@ PROMPT_REGISTRY: Dict[str, PromptEntry] = {
         description="Quality gate: corrective message for fabricated/ungrounded data",
         section="quality_corrective",
     ),
+
+    # ── Explanation (humanized reasoning trace) ───────────────────────────
+    "emma_explain_system": PromptEntry(
+        yaml_path=("explain", "system"),
+        description="System prompt for humanized explanation generation",
+        section="explain",
+    ),
+    "emma_explain_user": PromptEntry(
+        yaml_path=("explain", "user"),
+        description="User template with verified facts and sector guidance",
+        section="explain",
+    ),
 }
 
 

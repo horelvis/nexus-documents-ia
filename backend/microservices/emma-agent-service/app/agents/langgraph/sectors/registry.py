@@ -77,6 +77,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         fidelity_confidence_cap=0.80,
         max_evidence=5,
         hitl_default=False,
+        explain_guidance="Usa terminología jurídica. Cita artículos y leyes por nombre completo.",
     ),
 
     # -----------------------------------------------------------------
@@ -125,6 +126,7 @@ SECTOR_CONFIGS: Dict[str, SectorConfig] = {
         fidelity_confidence_cap=0.60,
         max_evidence=15,
         hitl_default=True,
+        explain_guidance="Usa terminología clínica. Referencia protocolos y normativa sanitaria.",
     ),
 
     # -----------------------------------------------------------------

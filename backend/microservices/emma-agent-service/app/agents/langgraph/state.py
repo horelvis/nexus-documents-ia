@@ -518,6 +518,11 @@ class ReActState(TypedDict, total=False):
     success: bool
 
     # =========================================================================
+    # Explanation (humanized reasoning trace, feature-gated)
+    # =========================================================================
+    explanation: Optional[str]
+
+    # =========================================================================
     # Observability
     # =========================================================================
     # Structured reasoning steps (THINKING, TOOL_CALL, OBSERVATION, etc.)
@@ -709,6 +714,7 @@ async def create_initial_react_state(
         final_answer=None,
         sources=[],
         success=False,
+        explanation=None,
 
         # Observability
         reasoning_steps=[],
