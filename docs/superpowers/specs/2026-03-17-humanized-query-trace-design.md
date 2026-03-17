@@ -37,24 +37,9 @@ Rationale:
 | **react_loop** | `understanding` → `searching` → `analyzing` → `responding` |
 | **swarm** | `understanding` → `searching` → `analyzing (N tasks)` → `responding` |
 
-### 1.2 Phase derivation from reasoning_steps
+### 1.2 Backend: `phase_update` event
 
-The breadcrumb is **frontend-only** — no new SSE event required. Phases are derived from `reasoning_steps` already flowing in LangGraph `values` events:
-
-```typescript
-const PHASE_MAP: Record<string, string> = {
-  "routing": "understanding",
-  "memory": "understanding",
-  "tool_call": "searching",
-  "tool_result": "searching",
-  "validation": "analyzing",
-  "synthesis": "responding",
-}
-```
-
-### 1.3 Backend: `phase_update` event
-
-Additionally, `langgraph_adapter.py` emits `phase_update` events for explicit phase transitions:
+The breadcrumb is driven by `phase_update` events emitted by `langgraph_adapter.py`. Deriving phases purely from `reasoning_steps` types on the frontend is fragile because `ReasoningTracker.StepType` does not cleanly map to the four user-facing phases. Instead, the backend adapter emits explicit phase transitions:
 
 ```python
 PHASE_MAP = {
@@ -111,9 +96,9 @@ decompose → swarm → synthesize_swarm → explain → END
 fast_path (no explain) → END
 ```
 
-Skipped when `fast_path_used=True` or `EXPLAIN_ENABLED=false`.
+Skipped when `fast_path_used=True` or `EXPLAIN_ENABLED=false`. The skip is handled via **early return inside the node** (not a conditional edge), consistent with how other nodes handle feature flags in this codebase (e.g., memory_recall checks `USER_MEMORY_ENABLED`).
 
-### 2.2 Input (from EmmaState)
+### 2.2 Input (from ReActState)
 
 | Field | Type | Purpose |
 |-------|------|---------|
@@ -121,9 +106,10 @@ Skipped when `fast_path_used=True` or `EXPLAIN_ENABLED=false`.
 | `final_answer` | `str` | Response already generated |
 | `sources` | `List[Dict]` | Documents and legislation used |
 | `query` | `str` | Original or rewritten query |
-| `intent` | `str` | Classified intent |
-| `tools_used` | `List[str]` | Tools invoked |
-| `active_sector` | `str` | legal, medical, or documental |
+| `tool_calls_history` | `List[Dict[str, Any]]` | Tool invocations with name, args, timestamps. Extract unique tool names via `{entry["name"] for entry in tool_calls_history}`. |
+| `sector` | `Optional[str]` | legal, medical, or documental (from `ReActState.sector`) |
+| `messages` | `List[BaseMessage]` | Full message sequence (accessed for anti-hallucination validation only — NOT passed to LLM prompt) |
+| `metadata` | `Dict[str, Any]` | Contains `intent` from classify node (access via `metadata.get("intent")`) |
 
 ### 2.3 Output
 
@@ -158,8 +144,8 @@ Iterates `reasoning_steps` and `sources` to produce `facts: List[str]`:
 | Layer | Mechanism | How |
 |-------|-----------|-----|
 | **1. Restricted input** | Deterministic fact extractor | Only verified `facts[]` from `reasoning_steps` reach the LLM. Query is NOT passed. |
-| **2. Post-LLM validation** | `_detect_fabricated_data()` from `quality_gate.py` | Compares explanation against ToolMessage corpus. Fabricated data → fallback template. |
-| **3. Existing guardrails** | `guardrail_service.py` with `applies_to: ["explain"]` | Sector guardrails (medical, legal) validate the output. |
+| **2. Post-LLM validation** | `_detect_fabricated_data()` from `quality_gate.py` | Compares explanation against ToolMessage corpus extracted from `state["messages"]`. Fabricated data → fallback template. Note: `messages` are accessed here for validation but are NOT passed to the LLM prompt. |
+| **3. Existing guardrails** | `guardrail_service.py` with agent_name `"explain"` | Sector guardrails (medical, legal) validate the output. Requires adding `"explain"` to `applies_to` arrays of relevant existing guardrails in `guardrail_registry.py`, or creating new explain-specific guardrails via the migration script. |
 
 ### 2.6 Fallback template
 
@@ -169,7 +155,23 @@ Used when: LLM fails, validation rejects, facts empty, or `EXPLAIN_ENABLED=false
 "Consulté {n} fuentes ({source_names}) utilizando {tools_human_names}."
 ```
 
+Where `tools_human_names` is derived from `tool_calls_history`:
+```python
+TOOL_HUMAN_NAMES = {
+    "smart_search": "búsqueda inteligente",
+    "get_document_content": "lectura de documento",
+    "structural_query": "consulta estructural",
+    "search_jurisprudence": "búsqueda de jurisprudencia",
+    "web_search": "búsqueda web",
+    "analyze_domain": "análisis de dominio",
+    # ...
+}
+tools_human_names = ", ".join(TOOL_HUMAN_NAMES.get(t, t) for t in unique_tool_names)
+```
+
 ### 2.7 Sector guidance (in `sectors/config.py`)
+
+New `explain_guidance: str` field on `SectorConfig` (which is `@dataclass(frozen=True)` — adding a field with a default is safe). Each sector registry instantiation (`LEGAL_SECTOR`, `MEDICAL_SECTOR`, `DOCUMENTAL_SECTOR`) must be updated with the new field value:
 
 | Sector | `explain_guidance` |
 |--------|-------------------|
@@ -244,7 +246,13 @@ interface ExplanationPanelProps {
 
 ### 3.4 Transport
 
-`explanation` flows as part of `EmmaState` → `values` event snapshot → `useStream()` state → `EmmaMessage.metadata.explanation`. No new SSE event type needed for the explanation itself.
+The `explanation` field requires **explicit wiring** through the streaming pipeline (the adapter is explicit, not passthrough):
+
+1. **`api.py`** (`stream_react_query()`): Include `explanation` in the `complete` event data, alongside `answer`, `sources`, and `metadata`. Read from the graph's final state.
+2. **`langgraph_adapter.py`** (`translate_to_langgraph_sse()`): Forward `explanation` in the final `values` snapshot within the `complete` handler, same as `sources` and `metadata`.
+3. **Frontend**: Read `explanation` from the `values` event state in `useStream()` → map to `EmmaMessage.metadata.explanation`.
+
+No new SSE event type needed — `explanation` rides the existing `complete` → `values` pipeline, but both `api.py` and `langgraph_adapter.py` must be updated to include the new field.
 
 ### 3.5 File changes summary
 
@@ -266,11 +274,13 @@ interface ExplanationPanelProps {
 | File | Change | Type |
 |------|--------|------|
 | `nodes/explain.py` | Explain node with fact extraction + LLM + validation | New |
-| `graph.py` | Connect explain after synthesize/synthesize_swarm | Modify |
+| `graph.py` | Connect explain after synthesize/synthesize_swarm (simple edges, skip via early return) | Modify |
 | `state.py` | Add `explanation: Optional[str]` | Modify |
-| `langgraph_adapter.py` | Emit `phase_update` events | Modify |
-| `sectors/config.py` | Add `explain_guidance` per sector | Modify |
+| `api.py` | Include `explanation` in `complete` event data from graph final state | Modify |
+| `langgraph_adapter.py` | Emit `phase_update` events + forward `explanation` in final `values` snapshot | Modify |
+| `sectors/config.py` | Add `explain_guidance` field to `SectorConfig` + update LEGAL/MEDICAL/DOCUMENTAL instances | Modify |
 | `prompt_registry.py` | 2 new entries (emma_explain_system, emma_explain_user) | Modify |
+| `guardrail_registry.py` | Add `"explain"` to `applies_to` of relevant sector guardrails | Modify |
 | `scripts/migrate_explain_prompts.py` | Langfuse migration script | New |
 | `core/config.py` | Add `EXPLAIN_ENABLED: bool = True` | Modify |
 
@@ -349,9 +359,12 @@ No additional flags. Breadcrumb is frontend-only. Explanation is naturally skipp
 1. Create `explain_node.py` with unit tests
 2. Register prompts in `prompt_registry.py`
 3. Run `migrate_explain_prompts.py` in Langfuse
-4. Connect node in `graph.py`
-5. Add `phase_update` to adapter
-6. Validate with integration tests
+4. Add `explain_guidance` to `SectorConfig` and sector instances
+5. Add `"explain"` to relevant guardrails in `guardrail_registry.py`
+6. Connect node in `graph.py`
+7. Wire `explanation` through `api.py` + `langgraph_adapter.py`
+8. Add `phase_update` to adapter
+9. Validate with integration tests
 
 ### Phase 2 — Frontend
 1. Create `PhaseBreadcrumb.tsx`
