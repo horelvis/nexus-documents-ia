@@ -65,6 +65,8 @@ class ToolRegistry:
         from .document_generator import GenerateDocumentTool
         from .email import SendEmailTool
         from .forge_document import ForgeDocumentTool
+        from .verified_generation import VerifiedGenerationTool
+        from .predictive_analysis import PredictiveAnalysisTool
 
         tools: List[EmmaTool] = [
             SmartSearchTool(),         # Replaces SearchDocuments + SearchLegislation
@@ -78,6 +80,8 @@ class ToolRegistry:
             GenerateDocumentTool(),
             ForgeDocumentTool(),
             SendEmailTool(),
+            VerifiedGenerationTool(),  # Sub-graph: claim-by-claim verified document
+            PredictiveAnalysisTool(),  # Sub-graph: factor extraction + prediction
             TerminateTool(),  # Always last — the agent's "I'm done" signal
         ]
 

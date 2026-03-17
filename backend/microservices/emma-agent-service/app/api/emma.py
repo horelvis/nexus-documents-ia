@@ -503,7 +503,7 @@ async def _generate_langgraph_sse(
             elif event_type == "retrieve_complete":
                 doc_count = data.get("doc_count", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'search_result', 'content': f'{doc_count} documentos recuperados', 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'search_result', 'content': f'{doc_count} documentos recuperados', 'isThinking': True})}\n\n"
                 yield f"event: progress\ndata: {_dumps({'message': f'Recuperados {doc_count} documentos', 'stage': 'retrieval', 'progress': 20})}\n\n"
 
             elif event_type == "plan_complete":
@@ -513,13 +513,13 @@ async def _generate_langgraph_sse(
 
                 # Emit reasoning steps for traceability
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Dominios detectados: {", ".join(domains)}', 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Dominios detectados: {", ".join(domains)}', 'isThinking': True})}\n\n"
 
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'preparing', 'content': f'Agentes seleccionados: {", ".join(agents)}', 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'preparing', 'content': f'Agentes seleccionados: {", ".join(agents)}', 'isThinking': True})}\n\n"
 
                 # Emit plan ready
-                yield f"event: slm_plan\ndata: {_dumps({'stage': 'slm_plan_ready', 'slmIsThinking': False, 'slmPlan': {'route': 'MULTI_AGENT' if len(agents) > 1 else agents[0] if agents else 'general_agent', 'confidence': 0.9, 'agents': agents, 'domains': domains, 'reasoning': reasoning}})}\n\n"
+                yield f"event: slm_plan\ndata: {_dumps({'stage': 'slm_plan_ready', 'isThinking': False, 'slmPlan': {'route': 'MULTI_AGENT' if len(agents) > 1 else agents[0] if agents else 'general_agent', 'confidence': 0.9, 'agents': agents, 'domains': domains, 'reasoning': reasoning}})}\n\n"
                 yield f"event: progress\ndata: {_dumps({'message': f'Plan: {reasoning}', 'stage': 'planning', 'progress': 30})}\n\n"
 
             elif event_type == "agent_started":
@@ -538,12 +538,12 @@ async def _generate_langgraph_sse(
                 }.get(agent_name, agent_name)
 
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Ejecutando {agent_display}...', 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Ejecutando {agent_display}...', 'isThinking': True})}\n\n"
 
             elif event_type == "structural_step":
                 # Reasoning step from structural query tool
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'querying', 'content': data.get('content', ''), 'detail': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'querying', 'content': data.get('content', ''), 'detail': data.get('content', ''), 'isThinking': True})}\n\n"
 
             elif event_type == "agent_complete":
                 agent_name = data.get("agent", "unknown")
@@ -558,14 +558,14 @@ async def _generate_langgraph_sse(
                     # Truncate to first sentence, max 100 chars
                     first_sentence = _re.split(r'[.\n]', content.strip())[0][:100]
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'thinking', 'content': first_sentence, 'detail': content, 'slmIsThinking': True})}\n\n"
+                    yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'thinking', 'content': first_sentence, 'detail': content, 'isThinking': True})}\n\n"
 
             elif event_type == "tool_call":
                 content = data.get("content", "")
                 if content:
                     action_type, human_text, detail = _humanize_tool_call(content)
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'slmIsThinking': True})}\n\n"
+                    yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'isThinking': True})}\n\n"
 
             elif event_type == "tool_result":
                 content = data.get("content", "")
@@ -573,7 +573,7 @@ async def _generate_langgraph_sse(
                     source = data.get("source", "")
                     action_type, human_text, detail = _humanize_observation(content, source)
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'slmIsThinking': True})}\n\n"
+                    yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'isThinking': True})}\n\n"
 
             elif event_type == "reasoning_step":
                 step_type = data.get("step_type", "thinking")
@@ -596,31 +596,31 @@ async def _generate_langgraph_sse(
                         "connector": "connecting", "transformation": "analyzing",
                     }.get(step_type, step_type)
                     step_counter += 1
-                    yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': semantic_type, 'content': content, 'slmIsThinking': True})}\n\n"
+                    yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': semantic_type, 'content': content, 'isThinking': True})}\n\n"
 
             # Swarm events (parallel sub-agent execution)
             elif event_type == "swarm_started":
                 num_workers = data.get("num_workers", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'swarm_decompose', 'content': f'Descomponiendo en {num_workers} tareas paralelas...', 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'swarm_decompose', 'content': f'Descomponiendo en {num_workers} tareas paralelas...', 'isThinking': True})}\n\n"
                 yield f"event: swarm_started\ndata: {_dumps(data)}\n\n"
 
             elif event_type == "worker_started":
                 worker_id = data.get("worker_id", 0)
                 sub_task = data.get("sub_task", "")[:80]
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'swarm_worker', 'content': f'Agente {worker_id}: {sub_task}', 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'swarm_worker', 'content': f'Agente {worker_id}: {sub_task}', 'isThinking': True})}\n\n"
 
             elif event_type == "worker_complete":
                 worker_id = data.get("worker_id", 0)
                 latency = data.get("latency_ms", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'swarm_worker_done', 'content': f'Agente {worker_id} completado ({latency:.0f}ms)', 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'swarm_worker_done', 'content': f'Agente {worker_id} completado ({latency:.0f}ms)', 'isThinking': True})}\n\n"
 
             elif event_type == "swarm_synthesizing":
                 successful_count = data.get("successful_workers", 0)
                 step_counter += 1
-                yield f"event: slm_thinking\ndata: {_dumps({'step': step_counter, 'type': 'swarm_synthesize', 'content': f'Sintetizando resultados de {successful_count} agentes...', 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'swarm_synthesize', 'content': f'Sintetizando resultados de {successful_count} agentes...', 'isThinking': True})}\n\n"
                 yield f"event: progress\ndata: {_dumps({'message': 'Sintetizando resultados...', 'stage': 'synthesizing', 'progress': 80})}\n\n"
 
             elif event_type == "token":
@@ -654,7 +654,7 @@ async def _generate_langgraph_sse(
                     data.get("answer", ""),
                     data.get("agents_used", [])
                 )
-                yield f"event: progress\ndata: {_dumps({'message': 'Generando respuesta...', 'stage': 'synthesizing', 'progress': 90, 'slmIsThinking': False})}\n\n"
+                yield f"event: progress\ndata: {_dumps({'message': 'Generando respuesta...', 'stage': 'synthesizing', 'progress': 90, 'isThinking': False})}\n\n"
                 yield f"event: complete\ndata: {_dumps({'success': data.get('success', True), 'answer': data.get('answer', ''), 'tools_used': data.get('agents_used', []), 'execution_time_ms': data.get('latency_ms', 0), 'session_id': data.get('thread_id', thread_id), 'domains': data.get('domains', []), 'final_result': data, 'suggestions': suggestions})}\n\n"
 
                 # Guardrail SSE events
@@ -733,7 +733,7 @@ async def emma_query_stream(
     event: content
     data: {"content": "Analizando tu consulta..."}
 
-    event: slm_thinking
+    event: agent_reasoning
     data: {"step": 1, "type": "query_analysis", "content": "Detectando consulta estructural..."}
 
     event: tool_call
@@ -830,13 +830,13 @@ async def emma_query_resume_stream(
             if event_type == "started":
                 yield f"event: start\ndata: {_dumps({'message': 'Procesando selección...', 'progress': 0, 'thread_id': data.get('thread_id')})}\n\n"
             elif event_type == "thinking":
-                yield f"event: slm_thinking\ndata: {_dumps({'type': 'thinking', 'content': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'type': 'thinking', 'content': data.get('content', ''), 'isThinking': True})}\n\n"
             elif event_type == "tool_call":
-                yield f"event: slm_thinking\ndata: {_dumps({'type': 'searching', 'content': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'type': 'searching', 'content': data.get('content', ''), 'isThinking': True})}\n\n"
             elif event_type == "tool_result":
-                yield f"event: slm_thinking\ndata: {_dumps({'type': 'search_result', 'content': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'type': 'search_result', 'content': data.get('content', ''), 'isThinking': True})}\n\n"
             elif event_type == "reasoning_step":
-                yield f"event: slm_thinking\ndata: {_dumps({'type': data.get('step_type', 'analyzing'), 'content': data.get('content', ''), 'slmIsThinking': True})}\n\n"
+                yield f"event: agent_reasoning\ndata: {_dumps({'type': data.get('step_type', 'analyzing'), 'content': data.get('content', ''), 'isThinking': True})}\n\n"
             elif event_type == "token":
                 yield f"event: token\ndata: {_dumps({'text': data.get('text', ''), 'token': data.get('token', '')})}\n\n"
             elif event_type == "complete":
