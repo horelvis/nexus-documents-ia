@@ -1,8 +1,8 @@
 """
 Unified Prompt Registry — Single source of truth for all Langfuse prompt names.
 
-Both `langfuse_prompt_client.py` (runtime YAML fallback) and
-`seed_langfuse_prompts.py` (initial Langfuse population) import from here.
+Langfuse is the ONLY prompt source at runtime. YAML is only used by the
+seed script (scripts/seed_langfuse_prompts.py) to populate Langfuse initially.
 
 Adding a new prompt:
     1. Add an entry to PROMPT_REGISTRY below
@@ -362,6 +362,143 @@ PROMPT_REGISTRY: Dict[str, PromptEntry] = {
         yaml_path=("guardrails", "medical_dosage", "user"),
         description="User prompt template for medical dosage validation",
         section="guardrails",
+    ),
+
+    # ── Rewrite node (query contextualization) ─────────────────────────────
+    "emma_rewrite_system": PromptEntry(
+        yaml_path=("rewrite", "system"),
+        description="Rewrite node: contextualize follow-up queries using conversation history",
+        section="rewrite",
+    ),
+
+    # ── Domain specialist prompts (analyze_domain tool) ────────────────────
+    "emma_domain_legal": PromptEntry(
+        yaml_path=("domain_specialists", "legal"),
+        description="Domain specialist: Spanish law and legislation",
+        section="domain_specialists",
+    ),
+    "emma_domain_labor": PromptEntry(
+        yaml_path=("domain_specialists", "labor"),
+        description="Domain specialist: Spanish labor law",
+        section="domain_specialists",
+    ),
+    "emma_domain_fiscal": PromptEntry(
+        yaml_path=("domain_specialists", "fiscal"),
+        description="Domain specialist: Spanish tax and fiscal law",
+        section="domain_specialists",
+    ),
+    "emma_domain_contract": PromptEntry(
+        yaml_path=("domain_specialists", "contract"),
+        description="Domain specialist: contract analysis",
+        section="domain_specialists",
+    ),
+    "emma_domain_compliance": PromptEntry(
+        yaml_path=("domain_specialists", "compliance"),
+        description="Domain specialist: regulatory compliance",
+        section="domain_specialists",
+    ),
+    "emma_domain_privacy": PromptEntry(
+        yaml_path=("domain_specialists", "privacy"),
+        description="Domain specialist: data protection and privacy (GDPR/LOPDGDD)",
+        section="domain_specialists",
+    ),
+    "emma_domain_general": PromptEntry(
+        yaml_path=("domain_specialists", "general"),
+        description="Domain specialist: general document management",
+        section="domain_specialists",
+    ),
+    "emma_domain_docgen": PromptEntry(
+        yaml_path=("domain_specialists", "docgen"),
+        description="Domain specialist: business document generation",
+        section="domain_specialists",
+    ),
+    "emma_domain_realestate": PromptEntry(
+        yaml_path=("domain_specialists", "realestate"),
+        description="Domain specialist: real estate law (LAU, LPH)",
+        section="domain_specialists",
+    ),
+    "emma_domain_education": PromptEntry(
+        yaml_path=("domain_specialists", "education"),
+        description="Domain specialist: education law (LOMLOE, LOE, LOU)",
+        section="domain_specialists",
+    ),
+
+    # ── RLM Processor (recursive large document pipeline) ──────────────────
+    "emma_rlm_chunk_system": PromptEntry(
+        yaml_path=("rlm", "chunk_system"),
+        description="RLM: system prompt for processing individual document chunks",
+        section="rlm",
+    ),
+    "emma_rlm_chunk_user": PromptEntry(
+        yaml_path=("rlm", "chunk_user"),
+        description="RLM: user prompt template for document chunk processing",
+        section="rlm",
+    ),
+    "emma_rlm_aggregate_system": PromptEntry(
+        yaml_path=("rlm", "aggregate_system"),
+        description="RLM: system prompt for aggregating chunk results",
+        section="rlm",
+    ),
+    "emma_rlm_aggregate_user": PromptEntry(
+        yaml_path=("rlm", "aggregate_user"),
+        description="RLM: user prompt template for aggregating chunk results",
+        section="rlm",
+    ),
+
+    # ── Guardrail fallback messages (sector-specific blocked content) ──────
+    "emma_guardrail_sector_medical": PromptEntry(
+        yaml_path=("guardrail_fallback", "medical"),
+        description="Guardrail: blocked content message for medical sector",
+        section="guardrail_fallback",
+    ),
+    "emma_guardrail_sector_legal": PromptEntry(
+        yaml_path=("guardrail_fallback", "legal"),
+        description="Guardrail: blocked content message for legal sector",
+        section="guardrail_fallback",
+    ),
+    "emma_guardrail_sector_documental": PromptEntry(
+        yaml_path=("guardrail_fallback", "documental"),
+        description="Guardrail: blocked content message for documental sector",
+        section="guardrail_fallback",
+    ),
+    "emma_guardrail_default": PromptEntry(
+        yaml_path=("guardrail_fallback", "default"),
+        description="Guardrail: default blocked content message (all sectors)",
+        section="guardrail_fallback",
+    ),
+
+    # ── Memory Generator (document indexing memory) ────────────────────────
+    "emma_memory_generator_system": PromptEntry(
+        yaml_path=("memory_generator", "system"),
+        description="Memory generator: system prompt for document memory extraction",
+        section="memory_generator",
+    ),
+    "emma_memory_generator_user": PromptEntry(
+        yaml_path=("memory_generator", "user"),
+        description="Memory generator: user prompt template for document memory extraction",
+        section="memory_generator",
+    ),
+
+    # ── Quality Gate (CRAG corrective messages) ────────────────────────────
+    "emma_quality_corrective_no_tools": PromptEntry(
+        yaml_path=("quality_corrective", "no_tools"),
+        description="Quality gate: corrective message when LLM skips tool usage on step 0",
+        section="quality_corrective",
+    ),
+    "emma_quality_corrective_low_quality": PromptEntry(
+        yaml_path=("quality_corrective", "low_quality"),
+        description="Quality gate: corrective message for incomplete/unsourced answers",
+        section="quality_corrective",
+    ),
+    "emma_quality_corrective_low_retrieval": PromptEntry(
+        yaml_path=("quality_corrective", "low_retrieval"),
+        description="Quality gate: corrective message for low-quality search results",
+        section="quality_corrective",
+    ),
+    "emma_quality_corrective_faithfulness": PromptEntry(
+        yaml_path=("quality_corrective", "faithfulness"),
+        description="Quality gate: corrective message for fabricated/ungrounded data",
+        section="quality_corrective",
     ),
 }
 

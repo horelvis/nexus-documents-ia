@@ -1,30 +1,35 @@
 """
-Langfuse Prompt Client — Wrapper for Langfuse Prompt Management API.
+Langfuse Prompt Client — Single source of truth for all prompts.
 
-Provides:
-- Prompt fetching with local TTL cache (default 5 minutes)
-- YAML fallback when Langfuse is unavailable or prompt doesn't exist
-- Jinja2 template compilation
-- Version tracking for observability
+Langfuse is the ONLY prompt source. No YAML fallback. Missing prompts
+raise PromptNotFoundError to fail fast.
 
 Usage:
     client = get_langfuse_prompt_client()
-    prompt = await client.get_prompt("emma_agent_labor", variables={"action": "analyze"})
+    prompt = await client.get_prompt("emma_react_system", variables={"tools": "..."})
 """
 
 import logging
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import yaml
 from jinja2 import Environment, BaseLoader, TemplateSyntaxError, Undefined
 
 from app.core.config import settings
-from app.services.prompt_registry import PROMPT_REGISTRY, get_yaml_path_map
 
 logger = logging.getLogger(__name__)
+
+
+class PromptNotFoundError(Exception):
+    """Raised when a prompt is not found in Langfuse and no fallback is provided."""
+
+    def __init__(self, name: str):
+        self.name = name
+        super().__init__(
+            f"Prompt '{name}' not found in Langfuse. "
+            f"Run: python scripts/seed_langfuse_prompts.py --force"
+        )
 
 
 @dataclass
@@ -59,18 +64,14 @@ class SilentUndefined(Undefined):
 
 class LangfusePromptClient:
     """
-    Client for Langfuse Prompt Management with local caching and YAML fallback.
+    Client for Langfuse Prompt Management with local caching.
 
-    Features:
-    - Fetches prompts from Langfuse with TTL-based caching
-    - Falls back to YAML when Langfuse is unavailable
-    - Supports Jinja2 template rendering
-    - Tracks prompt versions for observability
+    Langfuse is the single source of truth. No YAML fallback.
+    Missing prompts raise PromptNotFoundError.
     """
 
     def __init__(self):
         self._cache: Dict[str, CachedPrompt] = {}
-        self._yaml_cache: Optional[Dict[str, Any]] = None
         self._langfuse = None
         self._langfuse_checked = False
         self._jinja_env = Environment(
@@ -87,11 +88,11 @@ class LangfusePromptClient:
         self._langfuse_checked = True
 
         if not settings.langfuse_enabled:
-            logger.info("Langfuse disabled (LANGFUSE_ENABLED=false)")
+            logger.warning("Langfuse disabled — prompts will only work from cache or fallback args")
             return None
 
         if not settings.langfuse_public_key or not settings.langfuse_secret_key:
-            logger.warning("Langfuse keys not configured, prompts will use YAML fallback")
+            logger.warning("Langfuse keys not configured — prompts will only work from cache or fallback args")
             return None
 
         try:
@@ -101,83 +102,14 @@ class LangfusePromptClient:
                 secret_key=settings.langfuse_secret_key,
                 host=settings.langfuse_host,
             )
-            logger.info(f"✅ Langfuse Prompt Client initialized (host={settings.langfuse_host})")
+            logger.info(f"Langfuse Prompt Client initialized (host={settings.langfuse_host})")
             return self._langfuse
         except ImportError:
-            logger.warning("Langfuse SDK not installed, using YAML fallback")
+            logger.error("Langfuse SDK not installed — prompt system unavailable")
             return None
         except Exception as e:
             logger.error(f"Failed to initialize Langfuse: {e}")
             return None
-
-    def _load_yaml(self) -> Dict[str, Any]:
-        """Load and cache emma_prompts.yaml."""
-        if self._yaml_cache is not None:
-            return self._yaml_cache
-
-        candidates = [
-            Path("/app/config/prompts/emma_prompts.yaml"),
-            Path(__file__).parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
-        ]
-
-        for path in candidates:
-            if path.exists():
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        self._yaml_cache = yaml.safe_load(f) or {}
-                    logger.info(f"📄 Loaded YAML prompts from {path}")
-                    return self._yaml_cache
-                except Exception as e:
-                    logger.warning(f"Failed to load {path}: {e}")
-
-        self._yaml_cache = {}
-        return self._yaml_cache
-
-    def _get_yaml_prompt(self, name: str) -> Optional[str]:
-        """
-        Get prompt from YAML using dotted path notation.
-
-        Examples:
-            "emma_context_root" -> context_root section
-            "emma_agent_labor" -> autogen_agents.LaborAgent.system_message
-            "emma_sector_legal" -> sectors.legal.system_prompt
-            "emma_synthesis" -> system_prompts.synthesis
-        """
-        yaml_data = self._load_yaml()
-
-        # Use unified prompt registry for YAML path lookup
-        name_mapping = get_yaml_path_map()
-
-        # Check explicit mapping first
-        if name in name_mapping:
-            path = name_mapping[name]
-            value = yaml_data
-            for key in path:
-                if isinstance(value, dict) and key in value:
-                    value = value[key]
-                else:
-                    return None
-            return value if isinstance(value, str) else None
-
-        # Try agent prompts (emma_agent_<name>)
-        if name.startswith("emma_agent_"):
-            agent_suffix = name[11:]  # Remove "emma_agent_"
-            # Try multiple agent name formats
-            agent_names = [
-                agent_suffix,
-                f"{agent_suffix.title()}Agent",
-                f"{agent_suffix.replace('_', ' ').title().replace(' ', '')}Agent",
-            ]
-            for agent_name in agent_names:
-                for section in ("autogen_agents", "planning_agents"):
-                    if section in yaml_data:
-                        agent_data = yaml_data[section].get(agent_name, {})
-                        if "system_message" in agent_data:
-                            return agent_data["system_message"]
-                        if "system_template" in agent_data:
-                            return agent_data["system_template"]
-
-        return None
 
     async def get_prompt(
         self,
@@ -189,21 +121,25 @@ class LangfusePromptClient:
         fallback: Optional[str] = None,
     ) -> Optional[CachedPrompt]:
         """
-        Get a prompt by name with caching and YAML fallback.
+        Get a prompt by name from Langfuse with caching.
 
         Args:
-            name: Prompt name in Langfuse (e.g., "emma_agent_labor")
+            name: Prompt name in Langfuse (e.g., "emma_react_system")
             version: Specific version to fetch (default: latest)
             label: Label to fetch (e.g., "production", "staging").
                    Defaults to settings.langfuse_prompt_label (typically "production").
             variables: Template variables for Jinja2 rendering
-            fallback: Fallback content if prompt not found anywhere
+            fallback: Fallback content if prompt not found in Langfuse.
+                      WARNING: Using fallback is deprecated and will be removed.
+                      All prompts should exist in Langfuse.
 
         Returns:
-            CachedPrompt with content and metadata, or None if not found
+            CachedPrompt with content and metadata
+
+        Raises:
+            PromptNotFoundError: If prompt not found and no fallback provided
         """
-        # Pin to production label by default — prevents draft/test prompts
-        # from accidentally becoming active.
+        # Pin to production label by default
         if label is None and settings.langfuse_prompt_label:
             label = settings.langfuse_prompt_label
 
@@ -213,9 +149,7 @@ class LangfusePromptClient:
         if cache_key in self._cache:
             cached = self._cache[cache_key]
             if not cached.is_expired(settings.langfuse_prompt_cache_ttl):
-                logger.debug(f"🎯 Cache hit for prompt '{name}'")
                 if variables:
-                    # Return copy with rendered content — don't mutate cached template
                     rendered = self._render_template(cached.content, variables)
                     return CachedPrompt(
                         name=cached.name,
@@ -227,46 +161,41 @@ class LangfusePromptClient:
                     )
                 return cached
 
-        # Try Langfuse if enabled
+        # Try Langfuse
         prompt_content = None
         prompt_version = None
         prompt_labels = None
         is_fallback = False
 
-        if settings.use_langfuse_prompts:
-            langfuse = self._get_langfuse()
-            if langfuse:
-                try:
-                    prompt = langfuse.get_prompt(
-                        name=name,
-                        version=version,
-                        label=label,
-                        fallback=fallback,
-                    )
-                    if prompt:
-                        prompt_content = prompt.prompt if hasattr(prompt, 'prompt') else str(prompt)
-                        prompt_version = getattr(prompt, 'version', None)
-                        prompt_labels = getattr(prompt, 'labels', None)
-                        logger.info(f"📥 Fetched prompt '{name}' v{prompt_version} from Langfuse")
-                except Exception as e:
-                    logger.warning(f"⚠️ Langfuse fetch failed for '{name}': {e}")
+        langfuse = self._get_langfuse()
+        if langfuse:
+            try:
+                prompt = langfuse.get_prompt(
+                    name=name,
+                    version=version,
+                    label=label,
+                    fallback=fallback,
+                )
+                if prompt:
+                    prompt_content = prompt.prompt if hasattr(prompt, 'prompt') else str(prompt)
+                    prompt_version = getattr(prompt, 'version', None)
+                    prompt_labels = getattr(prompt, 'labels', None)
+                    logger.info(f"Fetched prompt '{name}' v{prompt_version} from Langfuse")
+            except Exception as e:
+                logger.warning(f"Langfuse fetch failed for '{name}': {e}")
 
-        # Fall back to YAML if Langfuse failed or disabled
-        if prompt_content is None:
-            prompt_content = self._get_yaml_prompt(name)
-            is_fallback = True
-            if prompt_content:
-                logger.debug(f"📄 Using YAML fallback for prompt '{name}'")
-
-        # Use provided fallback if nothing found
+        # Use provided fallback if Langfuse failed (transitional — will be removed)
         if prompt_content is None and fallback:
             prompt_content = fallback
             is_fallback = True
-            logger.debug(f"📄 Using provided fallback for prompt '{name}'")
+            logger.warning(
+                f"Using inline fallback for prompt '{name}' — "
+                f"this should be in Langfuse. Run: seed_langfuse_prompts.py --force"
+            )
 
+        # No prompt found anywhere → fail fast
         if prompt_content is None:
-            logger.warning(f"❌ Prompt '{name}' not found in Langfuse or YAML")
-            return None
+            raise PromptNotFoundError(name)
 
         # Cache the result
         cached_prompt = CachedPrompt(
@@ -281,7 +210,6 @@ class LangfusePromptClient:
 
         # Render template if variables provided
         if variables:
-            # Return copy with rendered content — keep raw template in cache
             rendered = self._render_template(cached_prompt.content, variables)
             return CachedPrompt(
                 name=cached_prompt.name,
@@ -313,10 +241,10 @@ class LangfusePromptClient:
         try:
             return self._jinja_env.from_string(template_str).render(**variables).strip()
         except TemplateSyntaxError as e:
-            logger.warning(f"⚠️ Template syntax error: {e}")
+            logger.warning(f"Template syntax error: {e}")
             return template_str
         except Exception as e:
-            logger.warning(f"⚠️ Template render error: {e}")
+            logger.warning(f"Template render error: {e}")
             return template_str
 
     def invalidate_cache(self, prompt_names: Optional[List[str]] = None) -> int:
@@ -332,7 +260,7 @@ class LangfusePromptClient:
         if prompt_names is None:
             count = len(self._cache)
             self._cache.clear()
-            logger.info(f"🗑️ Invalidated all {count} cached prompts")
+            logger.info(f"Invalidated all {count} cached prompts")
             return count
 
         count = 0
@@ -341,17 +269,11 @@ class LangfusePromptClient:
                 del self._cache[key]
                 count += 1
 
-        logger.info(f"🗑️ Invalidated {count} cached prompts")
+        logger.info(f"Invalidated {count} cached prompts")
         return count
-
-    def reload_yaml(self) -> None:
-        """Force reload of YAML cache."""
-        self._yaml_cache = None
-        logger.info("🔄 YAML cache cleared, will reload on next access")
 
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
-        now = time.time()
         ttl = settings.langfuse_prompt_cache_ttl
 
         valid_count = sum(
@@ -363,7 +285,6 @@ class LangfusePromptClient:
             if p.is_fallback
         )
 
-        # Trigger lazy initialization to check connection status
         langfuse_client = self._get_langfuse()
 
         return {
@@ -373,7 +294,6 @@ class LangfusePromptClient:
             "fallback_count": fallback_count,
             "ttl_seconds": ttl,
             "langfuse_connected": langfuse_client is not None,
-            "use_langfuse_prompts": settings.use_langfuse_prompts,
         }
 
     async def sync_from_langfuse(self, prompt_names: Optional[List[str]] = None) -> List[str]:
@@ -381,52 +301,20 @@ class LangfusePromptClient:
         Force sync prompts from Langfuse, bypassing cache.
 
         Args:
-            prompt_names: Specific prompts to sync. None = sync known prompts.
+            prompt_names: Specific prompts to sync. None = sync all registered prompts.
 
         Returns:
             List of successfully synced prompt names.
         """
-        if not settings.use_langfuse_prompts:
-            logger.warning("Langfuse prompts disabled, sync skipped")
-            return []
+        from app.services.prompt_registry import PROMPT_REGISTRY
 
         langfuse = self._get_langfuse()
         if not langfuse:
             logger.warning("Langfuse not available, sync skipped")
             return []
 
-        # Default prompts to sync
         if prompt_names is None:
-            prompt_names = [
-                "emma_context_root",
-                "emma_synthesis",
-                "emma_planning",
-                "emma_action_generate",
-                "emma_action_retrieve",
-                "emma_action_analyze",
-                "emma_sector_legal",
-                "emma_sector_medical",
-                "emma_sector_documental",
-                "emma_agent_labor",
-                "emma_agent_fiscal",
-                "emma_agent_contract",
-                "emma_agent_compliance",
-                "emma_agent_privacy",
-                "emma_agent_docgen",
-                "emma_social_system",
-                "emma_heartbeat_evaluator",
-                # Swarm Agent
-                "emma_swarm_decompose",
-                "emma_swarm_synthesize",
-                # Predictive Analysis (system prompts)
-                "emma_predictive_factor_system",
-                "emma_predictive_outcome_system",
-                "emma_predictive_weight_system",
-                "emma_predictive_recommendation_system",
-                # Verified Generation (system prompts)
-                "emma_verified_claim_system",
-                "emma_verified_factcheck_system",
-            ]
+            prompt_names = list(PROMPT_REGISTRY.keys())
 
         synced = []
         for name in prompt_names:
@@ -435,57 +323,16 @@ class LangfusePromptClient:
                 if key.startswith(name):
                     del self._cache[key]
 
-            # Fetch fresh from Langfuse
-            prompt = await self.get_prompt(name)
-            if prompt and not prompt.is_fallback:
-                synced.append(name)
+            # Fetch fresh from Langfuse (use empty fallback to avoid PromptNotFoundError during sync)
+            try:
+                prompt = await self.get_prompt(name, fallback="")
+                if prompt and not prompt.is_fallback:
+                    synced.append(name)
+            except PromptNotFoundError:
+                logger.warning(f"Prompt '{name}' not found in Langfuse during sync")
 
-        logger.info(f"🔄 Synced {len(synced)}/{len(prompt_names)} prompts from Langfuse")
+        logger.info(f"Synced {len(synced)}/{len(prompt_names)} prompts from Langfuse")
         return synced
-
-    async def list_available_prompts(self) -> Dict[str, List[str]]:
-        """List all available prompts from both Langfuse and YAML."""
-        result = {
-            "langfuse": [],
-            "yaml": [],
-        }
-
-        # List YAML prompts
-        yaml_data = self._load_yaml()
-        yaml_prompts = set()
-
-        # Scan known sections
-        if "context_root" in yaml_data:
-            yaml_prompts.add("emma_context_root")
-
-        for key in yaml_data.get("action_instructions", {}).keys():
-            yaml_prompts.add(f"emma_action_{key}")
-
-        for key in yaml_data.get("sectors", {}).keys():
-            yaml_prompts.add(f"emma_sector_{key}")
-
-        for key in yaml_data.get("system_prompts", {}).keys():
-            yaml_prompts.add(f"emma_{key}")
-
-        for section in ("autogen_agents", "planning_agents"):
-            for agent_name in yaml_data.get(section, {}).keys():
-                # Convert AgentName to emma_agent_name format
-                snake_name = "".join(
-                    f"_{c.lower()}" if c.isupper() else c
-                    for c in agent_name
-                ).lstrip("_").replace("_agent", "")
-                yaml_prompts.add(f"emma_agent_{snake_name}")
-
-        result["yaml"] = sorted(yaml_prompts)
-
-        # List Langfuse prompts (if available)
-        # Note: Langfuse SDK doesn't have a list_prompts method,
-        # so we report cached ones
-        result["langfuse"] = sorted(
-            set(p.name for p in self._cache.values() if not p.is_fallback)
-        )
-
-        return result
 
 
 # Singleton instance

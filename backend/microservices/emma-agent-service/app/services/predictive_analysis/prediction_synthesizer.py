@@ -28,23 +28,6 @@ from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
 logger = logging.getLogger(__name__)
 
-# ─── Fallback prompts (Spanish) ───
-
-FALLBACK_REC_SYSTEM = (
-    "Eres un analista experto redactando recomendaciones basadas en factores predictivos.\n"
-    "Escribe una recomendación concisa (3-5 frases) SIEMPRE en ESPAÑOL.\n"
-    "Sé equilibrado, mencionando factores a favor y en contra.\n"
-    "NO uses etiquetas <think>. Responde directamente con la recomendación."
-)
-
-FALLBACK_REC_USER = (
-    "DESCRIPCIÓN DEL CASO:\n{case_description}\n\n"
-    "FACTORES ANALIZADOS:\n{factors_summary}\n\n"
-    "RESULTADOS PREDICHOS:\n{outcome_summary}\n\n"
-    "PREDICCIÓN PRINCIPAL: {primary_label} ({primary_probability})\n\n"
-    "Escribe una recomendación concisa (3-5 frases) en español. Sé específico sobre los factores clave."
-)
-
 
 @observe(name="predictive.synthesize")
 async def synthesize_prediction(
@@ -232,9 +215,8 @@ async def _generate_recommendation(
     # System prompt
     sys_cached = await client.get_prompt(
         "emma_predictive_recommendation_system",
-        fallback=FALLBACK_REC_SYSTEM,
     )
-    system_prompt = sys_cached.content if sys_cached else FALLBACK_REC_SYSTEM
+    system_prompt = sys_cached.content
 
     # User prompt
     user_variables = {
@@ -247,11 +229,8 @@ async def _generate_recommendation(
     user_cached = await client.get_prompt(
         "emma_predictive_recommendation_user",
         variables=user_variables,
-        fallback=FALLBACK_REC_USER.format(**user_variables),
     )
-    user_prompt = user_cached.content if user_cached else FALLBACK_REC_USER.format(
-        **user_variables
-    )
+    user_prompt = user_cached.content
 
     try:
         from langchain_core.messages import SystemMessage, HumanMessage

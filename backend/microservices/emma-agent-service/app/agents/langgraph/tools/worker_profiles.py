@@ -57,40 +57,28 @@ class WorkerProfile:
     langfuse_prompt_key: Optional[str] = None
 
     async def resolve_prompt(self, task_description: str = "", tools_desc: str = "") -> str:
-        """Resolve system prompt: Langfuse override → default.
+        """Resolve system prompt from Langfuse, with task context injection."""
+        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+        client = get_langfuse_prompt_client()
 
-        Args:
-            task_description: The specific sub-task description
-            tools_desc: Comma-separated tool names available
-
-        Returns:
-            Complete system prompt for the worker
-        """
-        # Try Langfuse prompt first
         if self.langfuse_prompt_key:
-            try:
-                from app.services.langfuse_prompt_client import get_langfuse_prompt_client
-                client = get_langfuse_prompt_client()
-                prompt = await client.get_prompt(
-                    self.langfuse_prompt_key,
-                    variables={
-                        "task_description": task_description,
-                        "tools_description": tools_desc,
-                    },
-                )
-                if prompt and prompt.content:
-                    return prompt.content
-            except Exception as e:
-                logger.debug(f"Langfuse prompt fetch failed for {self.langfuse_prompt_key}: {e}")
+            prompt = await client.get_prompt(
+                self.langfuse_prompt_key,
+                variables={
+                    "task_description": task_description,
+                    "tools_description": tools_desc,
+                },
+            )
+            base = prompt.content
+        else:
+            base = self.system_prompt
 
-        # Default prompt with task injection
-        prompt = self.system_prompt
-        if task_description:
-            prompt += f"\n\nTu tarea específica: {task_description}"
-        if tools_desc:
-            prompt += f"\n\nHerramientas disponibles: {tools_desc}"
+        if task_description and "Tu tarea específica" not in base:
+            base += f"\n\nTu tarea específica: {task_description}"
+        if tools_desc and "Herramientas disponibles" not in base:
+            base += f"\n\nHerramientas disponibles: {tools_desc}"
 
-        return prompt
+        return base
 
 
 # ─── Worker Profile Definitions ──────────────────────────────────────────

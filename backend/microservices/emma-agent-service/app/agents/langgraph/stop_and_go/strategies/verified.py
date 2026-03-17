@@ -19,120 +19,6 @@ from app.agents.langgraph.stop_and_go.strategy import register_strategy
 
 logger = logging.getLogger(__name__)
 
-# =========================================================================
-# Fallback prompts — Two-tier verification
-# =========================================================================
-
-# Tier 1: Faithfulness check — does the claim accurately represent the source?
-FALLBACK_FAITHFULNESS_SYSTEM = (
-    "Eres un evaluador de fidelidad textual. Tu tarea es determinar si una AFIRMACIÓN "
-    "es una representación fiel del TEXTO FUENTE del que fue generada.\n\n"
-    "Responde SOLO con un objeto JSON (sin markdown, sin explicación):\n"
-    '{"faithful": true/false, "confidence": 0.0-1.0, "reason": "razón breve", '
-    '"correction": "texto corregido o null"}\n\n'
-    "Evalúa:\n"
-    "1. ¿La afirmación está CONTENIDA (entailed) en el texto fuente?\n"
-    "2. ¿La afirmación añade información NO presente en la fuente? (= alucinación)\n"
-    "3. ¿La afirmación distorsiona el significado del texto fuente?\n\n"
-    "Escala de confidence (USA TODA LA ESCALA, no siempre 0.9+):\n"
-    "- 0.95: Cita textual o paráfrasis exacta con datos verificables\n"
-    "- 0.85: Paráfrasis correcta pero simplificada\n"
-    "- 0.75: Resumen fiel pero con posible pérdida de matiz\n"
-    "- 0.65: Mayormente fiel pero con alguna imprecisión menor\n"
-    "- 0.50: Parcialmente fiel, mezcla información correcta e incorrecta\n"
-    "- 0.30: Distorsiona significativamente el contenido fuente\n\n"
-    "Reglas:\n"
-    "- faithful=true si la afirmación parafrasea o resume correctamente el texto fuente\n"
-    "- faithful=false si añade datos, cifras o conclusiones que no están en la fuente\n"
-    "- Si la afirmación es mayormente correcta pero necesita ajustes, establece correction\n"
-    "- 'correction' debe ser el TEXTO REESCRITO en el MISMO IDIOMA, NO un meta-comentario\n"
-    "- NUNCA uses etiquetas <think>. Genera el JSON directamente.\n"
-    "- Escribe 'reason' SIEMPRE en español."
-)
-
-FALLBACK_FAITHFULNESS_USER = (
-    "AFIRMACIÓN GENERADA:\n{claim_text}\n\n"
-    "TEXTO FUENTE (del cual se generó la afirmación):\n{source_text}\n\n"
-    "¿La afirmación representa fielmente el texto fuente? Responde solo con JSON."
-)
-
-# Tier 2: External verification — is the claim independently supported?
-FALLBACK_EXTERNAL_VERIFY_SYSTEM = (
-    "Eres un verificador de hechos. Evalúa si una AFIRMACIÓN está respaldada por "
-    "EVIDENCIA INDEPENDIENTE (fuentes distintas al documento original).\n\n"
-    "Responde SOLO con un objeto JSON (sin markdown, sin explicación):\n"
-    '{"supported": true/false, "confidence": 0.0-1.0, "reason": "razón breve"}\n\n'
-    "Reglas de DOI (prioridad máxima):\n"
-    "- Si la evidencia incluye una fuente con source='doi_invalid', la afirmación contiene un DOI incorrecto.\n"
-    "  Marca supported=false.\n"
-    "- Si la evidencia incluye una fuente con source='doi_mismatch', el DOI apunta a un artículo diferente.\n"
-    "  Marca supported=false y explica la discrepancia en reason.\n"
-    "- Si la evidencia incluye una fuente con source='citation_unverified', la cita no pudo verificarse.\n"
-    "  Reduce confidence. No es motivo para supported=false si hay otra evidencia.\n"
-    "- Si la evidencia incluye una fuente con source='doi' (DOI validado), verifica que el título y autores\n"
-    "  del DOI coincidan con lo citado en la afirmación. Si no coinciden, marca supported=false.\n\n"
-    "Escala de confidence (USA TODA LA ESCALA, no siempre 0.9+):\n"
-    "- 0.95: La evidencia confirma directamente la afirmación con datos específicos\n"
-    "- 0.85: La evidencia respalda la idea general con alta certeza\n"
-    "- 0.75: La evidencia es consistente pero no confirma directamente\n"
-    "- 0.65: La evidencia es parcialmente relevante o tangencial\n"
-    "- 0.50: La evidencia tiene relación temática pero no confirma la afirmación\n"
-    "- 0.30: La evidencia contradice parcialmente la afirmación\n\n"
-    "Reglas generales:\n"
-    "- supported=true si la evidencia independiente respalda la afirmación\n"
-    "- La evidencia proviene de fuentes DISTINTAS al documento que generó la afirmación\n"
-    "- Prioriza evidencia de documentos internos sobre evidencia web\n"
-    "- NUNCA uses etiquetas <think>. Genera el JSON directamente.\n"
-    "- Escribe 'reason' SIEMPRE en español."
-)
-
-FALLBACK_EXTERNAL_VERIFY_USER = (
-    "AFIRMACIÓN A VERIFICAR:\n{claim_text}\n\n"
-    "EVIDENCIA INDEPENDIENTE:\n{evidence_text}\n\n"
-    "¿La evidencia independiente respalda la afirmación? Responde solo con JSON."
-)
-
-# Legacy combined prompt — kept for Langfuse fallback compatibility
-FALLBACK_FACTCHECK_SYSTEM = (
-    "Eres un asistente de verificación de hechos. Evalúa si una afirmación está respaldada por la evidencia.\n\n"
-    "Responde SOLO con un objeto JSON (sin markdown, sin explicación):\n"
-    '{"supported": true/false, "confidence": 0.0-1.0, "reason": "razón breve", '
-    '"correction": "texto corregido o null"}\n\n'
-    "Reglas de DOI (prioridad máxima):\n"
-    "- Si la evidencia incluye una fuente con source='doi_invalid', la afirmación contiene un DOI incorrecto.\n"
-    "  Marca supported=false y en correction reescribe la afirmación eliminando o marcando el DOI erróneo.\n"
-    "- Si la evidencia incluye una fuente con source='doi' (DOI validado), verifica que el título y autores\n"
-    "  del DOI coincidan con lo citado en la afirmación. Si no coinciden, marca supported=false.\n"
-    "- Para documentos académicos: verifica que las referencias bibliográficas estén correctamente citadas\n"
-    "  (autores, año, título, revista). Un DOI válido pero con metadatos que no coinciden es un error.\n\n"
-    "Reglas generales:\n"
-    "- supported=true si la evidencia respalda razonablemente o es consistente con la afirmación\n"
-    "- Para documentos subidos: la afirmación fue generada A PARTIR de este documento, verifica que refleja el contenido con precisión\n"
-    "- Prioriza evidencia de documentos internos/subidos. La evidencia web es complementaria.\n"
-    "- Si la afirmación parafrasea o resume la evidencia correctamente, marca como respaldada con alta confianza\n"
-    "- Cuando la evidencia web apoya la idea general de la afirmación, marca como respaldada\n"
-    "- IMPORTANTE: 'correction' debe ser el TEXTO DE LA AFIRMACIÓN REESCRITO en el MISMO IDIOMA que la afirmación original, NO un meta-comentario sobre qué cambiar\n"
-    "- Si la afirmación es mayormente correcta pero necesita ajustes menores, establece correction con el texto mejorado\n"
-    "- Si la afirmación no se puede corregir, establece correction como null\n"
-    "- NUNCA uses etiquetas <think>. Genera el JSON directamente.\n"
-    "- Escribe 'reason' SIEMPRE en español."
-)
-
-FALLBACK_FACTCHECK_USER = (
-    "AFIRMACIÓN A VERIFICAR:\n{claim_text}\n\n"
-    "EVIDENCIA:\n{evidence_text}\n\n"
-    "Evalúa si la afirmación está respaldada por la evidencia. Responde solo con JSON."
-)
-
-# Source document summary — used in the verified report header
-FALLBACK_SUMMARY_SYSTEM = (
-    "Genera un resumen conciso (2-3 frases) del siguiente documento. "
-    "Incluye: tema principal, metodología si aplica, y alcance. "
-    "Responde SOLO con el resumen, sin preámbulos."
-)
-
-FALLBACK_SUMMARY_USER = "{document_text}"
-
 # Confidence cap for faithfulness-only verdicts (no external corroboration)
 FIDELITY_CONFIDENCE_CAP = 0.80
 
@@ -533,9 +419,9 @@ class VerifiedStrategy:
     async def _generate_source_summary(self, state: dict) -> str:
         """Generate a brief summary of the source document via LLM.
 
-        Uses Langfuse prompts (emma_verified_summary_system/user) with
-        hardcoded fallbacks, following the same _resolve_prompts pattern
-        as faithfulness and external verification.
+        Uses Langfuse prompts (emma_verified_summary_system/user),
+        following the same _resolve_prompts pattern as faithfulness
+        and external verification.
         """
         source_context = state.get("source_context", "")
         if not source_context:
@@ -544,13 +430,11 @@ class VerifiedStrategy:
         # Use first ~4000 chars for summary (enough to capture intro/abstract)
         preview = source_context[:4000]
         try:
-            system_prompt, user_prompt = await self._resolve_prompts(
-                system_key="emma_verified_summary_system",
-                user_key="emma_verified_summary_user",
-                system_fallback=FALLBACK_SUMMARY_SYSTEM,
-                user_fallback=FALLBACK_SUMMARY_USER,
-                variables={"document_text": preview},
+            system_prompt, user_template = await self._resolve_prompts(
+                "emma_verified_summary_system",
+                "emma_verified_summary_user",
             )
+            user_prompt = user_template.replace("{document_text}", preview)
 
             from langchain_core.messages import SystemMessage, HumanMessage
             from app.agents.llm_models import get_chat_model
@@ -647,13 +531,11 @@ class VerifiedStrategy:
         """
         source_text = self._build_evidence_text(source_evidence, max_chars=6000)
 
-        system_prompt, user_prompt = await self._resolve_prompts(
-            system_key="emma_verified_faithfulness_system",
-            user_key="emma_verified_faithfulness_user",
-            system_fallback=FALLBACK_FAITHFULNESS_SYSTEM,
-            user_fallback=FALLBACK_FAITHFULNESS_USER,
-            variables={"claim_text": claim_text, "source_text": source_text},
+        system_prompt, user_template = await self._resolve_prompts(
+            "emma_verified_faithfulness_system",
+            "emma_verified_faithfulness_user",
         )
+        user_prompt = user_template.replace("{claim_text}", claim_text).replace("{source_text}", source_text)
 
         result = await self._call_llm_json(system_prompt, user_prompt, tier_label="faithfulness")
 
@@ -681,13 +563,11 @@ class VerifiedStrategy:
         """
         evidence_text = self._build_evidence_text(external_evidence, max_chars=8000)
 
-        system_prompt, user_prompt = await self._resolve_prompts(
-            system_key="emma_verified_external_system",
-            user_key="emma_verified_external_user",
-            system_fallback=FALLBACK_EXTERNAL_VERIFY_SYSTEM,
-            user_fallback=FALLBACK_EXTERNAL_VERIFY_USER,
-            variables={"claim_text": claim_text, "evidence_text": evidence_text},
+        system_prompt, user_template = await self._resolve_prompts(
+            "emma_verified_external_system",
+            "emma_verified_external_user",
         )
+        user_prompt = user_template.replace("{claim_text}", claim_text).replace("{evidence_text}", evidence_text)
 
         result = await self._call_llm_json(system_prompt, user_prompt, tier_label="external")
 
@@ -736,29 +616,13 @@ class VerifiedStrategy:
             total += len(part)
         return "\n\n".join(parts)
 
-    async def _resolve_prompts(
-        self,
-        system_key: str,
-        user_key: str,
-        system_fallback: str,
-        user_fallback: str,
-        variables: Dict[str, str],
-    ) -> tuple:
-        """Resolve system + user prompts via Langfuse with YAML fallbacks."""
+    async def _resolve_prompts(self, system_name: str, user_name: str) -> tuple:
+        """Resolve a system+user prompt pair from Langfuse."""
         from app.services.langfuse_prompt_client import get_langfuse_prompt_client
-
-        prompt_client = get_langfuse_prompt_client()
-
-        sys_cached = await prompt_client.get_prompt(system_key, fallback=system_fallback)
-        system_prompt = sys_cached.content if sys_cached else system_fallback
-
-        formatted_fallback = user_fallback.format(**variables)
-        user_cached = await prompt_client.get_prompt(
-            user_key, variables=variables, fallback=formatted_fallback
-        )
-        user_prompt = user_cached.content if user_cached else formatted_fallback
-
-        return system_prompt, user_prompt
+        client = get_langfuse_prompt_client()
+        sys_prompt = await client.get_prompt(system_name)
+        usr_prompt = await client.get_prompt(user_name)
+        return sys_prompt.content, usr_prompt.content
 
     async def _call_llm_json(
         self,

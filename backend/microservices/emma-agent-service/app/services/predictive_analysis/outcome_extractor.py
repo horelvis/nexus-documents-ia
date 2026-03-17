@@ -26,34 +26,6 @@ from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
 logger = logging.getLogger(__name__)
 
-# ─── Fallback prompts (Spanish) ───
-
-FALLBACK_OUTCOME_SYSTEM = (
-    "Eres un evaluador de evidencias para análisis predictivo.\n\n"
-    "Para cada pieza de evidencia, determina:\n"
-    "1. Si apoya o contradice el factor analítico\n"
-    "2. Qué resultado sugiere\n"
-    "3. Tu nivel de confianza\n\n"
-    "Responde SOLO con un objeto JSON (sin markdown, sin explicación):\n"
-    '{{"supports_factor": true/false, "outcome": "una de las claves de resultado", '
-    '"confidence": 0.0-1.0, "reason": "razón breve en español"}}\n\n'
-    "Resultados disponibles: {outcome_display}\n\n"
-    "Reglas:\n"
-    "- Basa tu evaluación estrictamente en el texto de la evidencia\n"
-    "- Considera cómo la evidencia se relaciona con el factor específico\n"
-    "- Escribe la razón SIEMPRE en español\n"
-    "- NUNCA uses etiquetas <think>. Responde directamente con JSON."
-)
-
-FALLBACK_OUTCOME_USER = (
-    "FACTOR A EVALUAR:\n"
-    "Tipo: {factor_type}\n"
-    "Descripción: {factor_description}\n"
-    "Base legal: {legal_basis}\n\n"
-    "EVIDENCIA:\n{doc_excerpt}\n\n"
-    "Evalúa esta evidencia respecto al factor. Responde solo con JSON."
-)
-
 
 @observe(name="predictive.evaluate_evidence")
 async def evaluate_evidence_outcomes(
@@ -83,11 +55,8 @@ async def evaluate_evidence_outcomes(
     sys_cached = await client.get_prompt(
         "emma_predictive_outcome_system",
         variables={"outcome_display": outcome_display},
-        fallback=FALLBACK_OUTCOME_SYSTEM.format(outcome_display=outcome_display),
     )
-    system_prompt = sys_cached.content if sys_cached else FALLBACK_OUTCOME_SYSTEM.format(
-        outcome_display=outcome_display
-    )
+    system_prompt = sys_cached.content
 
     matches: List[VerificationMatch] = []
 
@@ -106,11 +75,8 @@ async def evaluate_evidence_outcomes(
         user_cached = await client.get_prompt(
             "emma_predictive_outcome_user",
             variables=user_variables,
-            fallback=FALLBACK_OUTCOME_USER.format(**user_variables),
         )
-        user_prompt = user_cached.content if user_cached else FALLBACK_OUTCOME_USER.format(
-            **user_variables
-        )
+        user_prompt = user_cached.content
 
         # Evaluate with LLM
         evaluation = await _call_llm_evaluation(system_prompt, user_prompt, outcome_keys)

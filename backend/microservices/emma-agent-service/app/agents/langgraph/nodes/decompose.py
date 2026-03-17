@@ -35,32 +35,6 @@ from ..tools.worker_profiles import get_worker_profile, get_valid_focus_types
 
 logger = logging.getLogger(__name__)
 
-# Fallback decomposition prompt (used when Langfuse is unavailable)
-_DECOMPOSE_SYSTEM_FALLBACK = """\
-Eres un coordinador de agentes especializados. Descompón la consulta del usuario en \
-sub-tareas INDEPENDIENTES que puedan ejecutarse en paralelo por agentes tipados.
-
-Herramientas disponibles:
-{tools_description}
-
-Tipos de agente disponibles (campo "focus"):
-{focus_types}
-
-Reglas:
-- Máximo {max_workers} sub-tareas
-- Cada sub-tarea debe ser INDEPENDIENTE (no depender del resultado de otra)
-- Asigna 1-3 herramientas relevantes a cada sub-tarea (excluyendo "terminate")
-- Si la consulta es simple (una sola fuente necesaria), devuelve una lista vacía []
-- El campo "focus" DEBE ser uno de los tipos listados arriba
-
-Responde SOLO con un array JSON (sin markdown, sin explicaciones):
-[
-  {{"description": "...", "tool_names": ["tool1", "tool2"], "focus": "category"}},
-  ...
-]
-O [] si la consulta no necesita descomposición.\
-"""
-
 
 def _extract_json_array(text: str) -> Optional[List[Dict[str, Any]]]:
     """Extract a JSON array from LLM response, handling common formatting issues."""
@@ -181,35 +155,25 @@ async def decompose_node(state: ReActState) -> Dict[str, Any]:
 
     max_workers = settings.swarm_max_workers
 
-    # Try Langfuse prompt first, fall back to hardcoded
-    prompt_content = None
-    try:
-        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
-        client = get_langfuse_prompt_client()
-        prompt = await client.get_prompt(
-            "emma_swarm_decompose",
-            variables={
-                "tools_description": tools_desc,
-                "max_workers": str(max_workers),
-            },
-        )
-        if prompt:
-            prompt_content = prompt.content
-    except Exception as e:
-        logger.debug(f"Langfuse prompt fetch failed for decompose: {e}")
+    # Build focus types description from worker profiles
+    from ..tools.worker_profiles import WORKER_PROFILES
+    focus_types_str = "\n".join(
+        f"- {focus}: {p.name} (herramientas: {', '.join(p.tool_names)})"
+        for focus, p in WORKER_PROFILES.items()
+    )
 
-    if not prompt_content:
-        # Build focus types description from worker profiles
-        from ..tools.worker_profiles import WORKER_PROFILES
-        focus_types_desc = "\n".join(
-            f"- {focus}: {p.name} (herramientas: {', '.join(p.tool_names)})"
-            for focus, p in WORKER_PROFILES.items()
-        )
-        prompt_content = _DECOMPOSE_SYSTEM_FALLBACK.format(
-            tools_description=tools_desc,
-            focus_types=focus_types_desc,
-            max_workers=max_workers,
-        )
+    # Load prompt from Langfuse
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    prompt = await client.get_prompt(
+        "emma_swarm_decompose",
+        variables={
+            "tools_description": tools_desc,
+            "focus_types": focus_types_str,
+            "max_workers": str(max_workers),
+        },
+    )
+    prompt_content = prompt.content
 
     # LLM call for decomposition
     # /no_think tells Qwen3 to skip thinking mode and output directly

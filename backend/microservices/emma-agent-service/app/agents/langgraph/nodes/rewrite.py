@@ -36,21 +36,7 @@ from ..reasoning_tracker import StepType
 
 logger = logging.getLogger(__name__)
 
-# ── Rewrite system prompt ────────────────────────────────────────────
-
-_REWRITE_SYSTEM_PROMPT = """\
-Eres un módulo de reformulación de consultas. Tu ÚNICA tarea es reescribir \
-la última pregunta del usuario para que sea autocontenida, incorporando el \
-contexto necesario de la conversación previa.
-
-Reglas:
-- Si la pregunta YA es autocontenida y se entiende sin contexto previo, \
-devuélvela TAL CUAL sin cambios.
-- Si la pregunta depende del contexto previo (pronombres, referencias, \
-confirmaciones), reescríbela incorporando el tema/objeto del contexto.
-- Mantén el mismo idioma, tono e intención del usuario.
-- NO respondas la pregunta. NO añadas información nueva.
-- Responde SOLO con la consulta reformulada, sin explicaciones ni comillas."""
+# ── Rewrite system prompt (loaded from Langfuse) ─────────────────────
 
 
 async def rewrite_node(state: ReActState) -> Dict[str, Any]:
@@ -100,8 +86,14 @@ async def rewrite_node(state: ReActState) -> Dict[str, Any]:
         context_lines.append(f"{label}: {content}")
     context_text = "\n".join(context_lines)
 
+    # Load prompt from Langfuse
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    prompt = await client.get_prompt("emma_rewrite_system")
+    rewrite_system = prompt.content
+
     llm_messages = [
-        {"role": "system", "content": _REWRITE_SYSTEM_PROMPT},
+        {"role": "system", "content": rewrite_system},
         {
             "role": "user",
             "content": (

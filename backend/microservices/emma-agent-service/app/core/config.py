@@ -228,13 +228,11 @@ class Settings(BaseSettings):
     langfuse_debug: bool = os.getenv("LANGFUSE_DEBUG", "false").lower() == "true"
 
     # ==========================================================================
-    # Prompt Management (Langfuse Prompts + Custom)
+    # Prompt Management (Langfuse — Single Source of Truth)
     # ==========================================================================
-    # Langfuse is the PRIMARY prompt source; YAML is the fallback.
-    # Set to false only for offline/air-gapped deployments without Langfuse.
-    use_langfuse_prompts: bool = os.getenv("USE_LANGFUSE_PROMPTS", "true").lower() == "true"
-    # Label used when fetching prompts from Langfuse (pins to promoted versions).
-    # Empty string = fetch latest (no label filter).
+    # Langfuse is the ONLY prompt source. All prompts must exist in Langfuse.
+    # Missing prompts cause PromptNotFoundError (fail-fast).
+    # Label pins to promoted versions — prevents draft prompts from going live.
     langfuse_prompt_label: str = os.getenv("LANGFUSE_PROMPT_LABEL", "production")
     # Local cache TTL for Langfuse prompts (seconds)
     langfuse_prompt_cache_ttl: int = int(os.getenv("LANGFUSE_PROMPT_CACHE_TTL", "300"))

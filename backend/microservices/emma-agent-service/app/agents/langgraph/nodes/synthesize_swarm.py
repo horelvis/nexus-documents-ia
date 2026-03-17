@@ -29,26 +29,6 @@ from .guardrail_helper import apply_guardrails
 
 logger = logging.getLogger(__name__)
 
-# Fallback synthesis prompt
-_SYNTHESIZE_SYSTEM_FALLBACK = """\
-Varios agentes han investigado diferentes aspectos de la consulta del usuario.
-Combina sus hallazgos en UNA respuesta coherente y completa.
-
-Consulta original: {query}
-
-Resultados de los agentes:
-{worker_results_formatted}
-
-Reglas:
-- Integra la información de todos los agentes de forma natural
-- Cita las fuentes de cada agente
-- Si hay contradicciones, señálalas
-- Estructura la respuesta con secciones si es apropiado
-- No repitas información
-- Sé directo y conciso
-- Responde en el mismo idioma que la consulta original\
-"""
-
 
 def _format_worker_results(results: List[Dict[str, Any]]) -> str:
     """Format worker results for the synthesis prompt.
@@ -218,27 +198,16 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
     # Build synthesis prompt
     results_formatted = _format_worker_results(successful)
 
-    prompt_content = None
-    try:
-        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
-        client = get_langfuse_prompt_client()
-        prompt = await client.get_prompt(
-            "emma_swarm_synthesize",
-            variables={
-                "query": query,
-                "worker_results_formatted": results_formatted,
-            },
-        )
-        if prompt:
-            prompt_content = prompt.content
-    except Exception as e:
-        logger.debug(f"Langfuse prompt fetch failed for synthesis: {e}")
-
-    if not prompt_content:
-        prompt_content = _SYNTHESIZE_SYSTEM_FALLBACK.format(
-            query=query,
-            worker_results_formatted=results_formatted,
-        )
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    prompt = await client.get_prompt(
+        "emma_swarm_synthesize",
+        variables={
+            "query": query,
+            "worker_results_formatted": results_formatted,
+        },
+    )
+    prompt_content = prompt.content
 
     # LLM synthesis — stream tokens in real-time via stream writer
     llm_messages = [

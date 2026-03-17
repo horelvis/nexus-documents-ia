@@ -12,16 +12,18 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-SECTOR_FALLBACK_MESSAGES = {
-    "medical": (
-        "⚕️ No puedo proporcionar esta información en el contexto sanitario. "
-        "Consulte con un profesional sanitario cualificado."
-    ),
-    "legal": "⚖️ No puedo generar esta respuesta. Consulte con un profesional jurídico.",
-    "documental": "No puedo generar esta respuesta. Reformule su consulta.",
-}
-
-DEFAULT_FALLBACK = "No puedo generar esta respuesta."
+async def _get_guardrail_fallback(sector: str) -> str:
+    """Get guardrail blocked-content message from Langfuse."""
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    # Try sector-specific first, then default
+    name = f"emma_guardrail_sector_{sector}" if sector else "emma_guardrail_default"
+    try:
+        prompt = await client.get_prompt(name)
+        return prompt.content
+    except Exception:
+        prompt = await client.get_prompt("emma_guardrail_default")
+        return prompt.content
 
 
 async def apply_guardrails(
@@ -73,7 +75,7 @@ async def apply_guardrails(
         }
 
         if result.should_block:
-            fallback = SECTOR_FALLBACK_MESSAGES.get(sector, DEFAULT_FALLBACK)
+            fallback = await _get_guardrail_fallback(sector)
             return fallback, metadata
 
         if result.redacted_content:

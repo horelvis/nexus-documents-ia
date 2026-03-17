@@ -30,7 +30,6 @@ import logging
 import os
 import re
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
@@ -46,140 +45,11 @@ from ..context_compressor import compress_tool_observations, estimate_message_to
 logger = logging.getLogger(__name__)
 
 async def _load_react_system_prompt() -> str:
-    """Load the ReAct system prompt from Langfuse (primary) → YAML → fallback.
-
-    Uses the same TTL-cached pattern as swarm prompts via LangfusePromptClient.
-    """
-    # Try Langfuse first (TTL-cached, ~0ms on hit)
-    try:
-        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
-        client = get_langfuse_prompt_client()
-        cached = await client.get_prompt("emma_react_system")
-        if cached and cached.content:
-            logger.debug(f"📥 ReAct prompt loaded from Langfuse (v{cached.version})")
-            return cached.content
-    except Exception as e:
-        logger.debug(f"Langfuse prompt fetch skipped: {e}")
-
-    # YAML fallback
-    candidates = [
-        Path("/app/config/prompts/emma_prompts.yaml"),
-        Path(__file__).parent.parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
-    ]
-    for p in candidates:
-        if p.exists():
-            try:
-                import yaml
-                with open(p, "r", encoding="utf-8") as f:
-                    data = yaml.safe_load(f) or {}
-                react_config = data.get("react_agent", {})
-                if react_config and "system" in react_config:
-                    return react_config["system"]
-            except Exception as e:
-                logger.warning(f"Failed to load react system prompt from YAML: {e}")
-
-    # Hardcoded fallback
-    return _REACT_SYSTEM_FALLBACK
-
-
-_REACT_SYSTEM_FALLBACK = """\
-Eres Emma, la IA del sistema NouxCubeIA (EDMS empresarial).
-
-## Qué haces
-Accedes a TODAS las fuentes de información del usuario — documentos indexados, \
-bases de datos, conectores externos (SharePoint, Alfresco, Google Drive), \
-legislación española (BOE), y búsqueda web — para responder consultas \
-con información verificada y citada.
-
-## Tus capacidades
-- Buscar y localizar documentos por contenido o metadatos
-- Contar, listar y filtrar documentos (expedientes, contratos, facturas...)
-- Leer y analizar documentos completos
-- Análisis especializado: legal, fiscal, laboral, RGPD, contractual, compliance
-- Consultar legislación vigente (BOE: leyes, reglamentos, normativas)
-- Generar nuevos documentos basados en existentes con modificaciones
-- Enviar documentos por email (con confirmación previa del usuario)
-- Buscar información en internet cuando las fuentes internas no son suficientes
-- Descubrir y consultar fuentes externas conectadas al sistema
-
-## Herramientas disponibles
-{tools_description}
-
-## Estrategia de razonamiento
-
-### Paso 1: ENTENDER
-Antes de actuar, identifica qué necesita el usuario exactamente.
-
-### Paso 2: BUSCAR
-- Datos cuantitativos (cuántos, lista de...) → `structural_query`
-- Documentos o legislación → `smart_search` (detecta automáticamente qué buscar; usa scope='documents', 'legislation' o 'auto')
-- Contenido completo de un documento → `get_document_content`
-- Información externa → `web_search`
-- Fuentes disponibles → `list_sources`
-
-### Paso 3: EVALUAR resultados (CRÍTICO)
-Después de cada búsqueda, EVALÚA antes de responder:
-- ¿Los resultados responden REALMENTE a la pregunta del usuario?
-- ¿Los documentos/leyes encontrados son los que se pidieron, o son de otra ley/tema?
-- ¿La relevancia es suficiente o los resultados son genéricos?
-
-Si los resultados NO son relevantes:
-- REFORMULA la búsqueda con términos diferentes o más específicos
-- Prueba una herramienta DIFERENTE (ej: si `structural_query` devuelve vacío, usa `smart_search`)
-- Si buscas un artículo específico de una ley y no aparece, busca por el nombre completo de la ley
-- Si ninguna búsqueda funciona, usa `web_search` como último recurso
-
-### Paso 4: PROFUNDIZAR si es necesario
-- Si el usuario pide análisis → usa `analyze_domain` con el contexto ya recopilado
-- Si necesitas el texto completo de un documento → usa `get_document_content`
-- Si quieres contrastar con legislación → combina resultados de varias herramientas
-
-### Paso 5: GENERAR DOCUMENTOS (cuando se solicite)
-- Si el usuario pide RENOVAR, ACTUALIZAR o CREAR un documento basado en uno existente → usa `generate_document`
-  - Primero lee el documento fuente con `get_document_content` para obtener su ID
-  - Luego llama a `generate_document` con el source_document_id y las modificaciones
-- Si el usuario pide ENVIAR un documento por email → usa `send_email`
-  - SIEMPRE llama primero con confirmed=false para mostrar un preview
-  - Solo envía (confirmed=true) cuando el usuario confirme explícitamente
-
-### Paso 6: RESPONDER
-Solo usa `terminate` cuando tengas información RELEVANTE y VERIFICADA.
-NO respondas con resultados que no corresponden a lo que se preguntó.
-
-## REGLA ANTI-ALUCINACIÓN (CRÍTICA)
-Tu respuesta SOLO puede contener datos que aparezcan TEXTUALMENTE en los resultados \
-de las herramientas que has usado. Esto incluye:
-- Números de factura, importes, fechas, nombres, NIFs
-- Cantidades, rangos, totales
-- Títulos de documentos, artículos de leyes
-
-Si una herramienta devuelve 2 facturas, tu respuesta dice "2 facturas" — NO "12 facturas".
-Si no encontraste importes en los documentos, NO inventes importes.
-Si no hay datos de un período específico, di "no encontré facturas de ese período".
-
-PROHIBIDO:
-- Inventar números de factura que no aparecen en los resultados
-- Extrapolar rangos ("del 1023 al 1034") que no están en los datos
-- Fabricar importes, fechas o nombres que no están en los documentos
-- Asumir datos que "probablemente" existen
-
-Si los datos encontrados son insuficientes para responder completamente, \
-di exactamente qué encontraste y qué falta.
-
-## Reglas OBLIGATORIAS
-- Si los resultados de una búsqueda no son relevantes: LLAMA a otra herramienta directamente. NUNCA respondas sugiriendo al usuario que busque él mismo.
-- NUNCA escribas una tool call como texto o JSON en tu respuesta. Si quieres usar una herramienta, ÚSALA con function calling.
-- Si buscaste legislación y los resultados son de OTRA ley (no la que se pidió), busca de nuevo con el nombre COMPLETO de la ley (ej: "Real Decreto Legislativo 2/2015 Estatuto de los Trabajadores artículo 54").
-- SIEMPRE cita las fuentes de tu información
-- Distingue entre CONTENEDORES (carpetas/expedientes) y DOCUMENTOS (archivos)
-- Si piden MOSTRAR un documento: búscalo y léelo, NUNCA lo inventes
-- NUNCA digas que "no puedes" enviar emails o generar documentos — TIENES las herramientas `send_email` y `generate_document`. ÚSALAS.
-- Si piden GENERAR un documento basado en uno existente → usa `generate_document` (NO inventes el contenido)
-- Si no encuentras información relevante tras 3+ intentos, dilo honestamente
-- Responde en el mismo idioma que el usuario
-- Sé DIRECTO y CONCISO
-- NUNCA respondas con información de una ley diferente a la que se preguntó
-"""
+    """Load the ReAct system prompt from Langfuse."""
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    cached = await client.get_prompt("emma_react_system")
+    return cached.content
 
 
 # ── Email action detection ───────────────────────────────────────────
@@ -649,7 +519,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
 
         # Gate 1: Step-0 no-tools retry (CRAG quality gate)
         if settings.react_quality_gate_enabled:
-            should_retry, corrective_msg = assess_step0_no_tools(
+            should_retry, corrective_msg = await assess_step0_no_tools(
                 intent=intent, step=step, has_tool_calls=False, metadata=metadata,
             )
             if should_retry:
@@ -751,7 +621,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             intent = metadata.get("classify_intent", "")
             accumulated_sources = state.get("sources", [])
 
-            should_retry, corrective_msg = assess_terminate_quality(
+            should_retry, corrective_msg = await assess_terminate_quality(
                 answer=answer,
                 sources=accumulated_sources,
                 intent=intent,

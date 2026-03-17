@@ -29,71 +29,6 @@ from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 
 logger = logging.getLogger(__name__)
 
-# ─── Fallback prompts (Spanish) — used when Langfuse + YAML both fail ───
-
-FALLBACK_FACTOR_SYSTEM = """Eres un agente analítico experto que extrae factores críticos para análisis predictivo.
-
-REGLAS CRÍTICAS:
-1. Extrae EXACTAMENTE UN factor por llamada
-2. Cada factor debe ser de estos tipos: {factor_types}
-3. Los factores deben basarse en los documentos fuente
-4. Incluye referencias específicas (artículos, cláusulas, normativas) cuando estén disponibles
-5. Mantén los factores concisos y enfocados (2-3 frases máximo)
-6. Responde SIEMPRE en español
-7. NO uses etiquetas <think> ni bloques de razonamiento
-
-FORMATO DE SALIDA (JSON):
-{{"factor_type": "uno de los tipos anteriores", "description": "descripción clara del factor", "legal_basis": "referencia específica o null"}}
-
-Responde SOLO con el objeto JSON, nada más."""
-
-FALLBACK_FACTOR_USER_FIRST = """Extrae el PRIMER factor analítico.
-
-DESCRIPCIÓN DEL CASO:
-{case_description}
-
-CONTEXTO FUENTE:
-{source_context}
-
-TIPOS DE FACTORES DISPONIBLES: {factor_types}
-
-Extrae UN factor como JSON. Responde solo con el JSON."""
-
-FALLBACK_FACTOR_USER_NEXT = """Extrae el SIGUIENTE factor analítico.
-
-DESCRIPCIÓN DEL CASO:
-{case_description}
-
-CONTEXTO FUENTE:
-{source_context}
-
-FACTORES YA EXTRAÍDOS (no repetir):
-{previous_factors}
-
-TIPOS DE FACTORES DISPONIBLES: {factor_types}
-NÚMERO DE FACTOR: {factor_number}
-
-Extrae UN nuevo factor como JSON. Responde solo con el JSON."""
-
-FALLBACK_COMPLETION_SYSTEM = "Eres un verificador de completitud. Responde SOLO con SÍ o NO."
-
-FALLBACK_COMPLETION_USER = """Determina si el análisis de factores está COMPLETO.
-
-DESCRIPCIÓN DEL CASO:
-{case_description}
-
-CONTEXTO FUENTE:
-{source_context}
-
-FACTORES EXTRAÍDOS HASTA AHORA:
-{factors_text}
-
-TIPOS DE FACTORES DISPONIBLES: {factor_types}
-
-¿Está completo el análisis? Responde SOLO "SÍ" o "NO".
-- SÍ: Todos los factores relevantes de los documentos han sido identificados
-- NO: Hay más factores significativos por extraer"""
-
 
 class FactorAgent:
     """
@@ -170,17 +105,15 @@ class FactorAgent:
         # System prompt
         sys_cached = await client.get_prompt(
             "emma_predictive_completion_system",
-            fallback=FALLBACK_COMPLETION_SYSTEM,
         )
-        system_prompt = sys_cached.content if sys_cached else FALLBACK_COMPLETION_SYSTEM
+        system_prompt = sys_cached.content
 
         # User prompt
         user_cached = await client.get_prompt(
             "emma_predictive_completion_user",
             variables=variables,
-            fallback=FALLBACK_COMPLETION_USER.format(**variables),
         )
-        user_prompt = user_cached.content if user_cached else FALLBACK_COMPLETION_USER.format(**variables)
+        user_prompt = user_cached.content
 
         response = await self._call_llm(system_prompt, user_prompt)
 
@@ -202,12 +135,8 @@ class FactorAgent:
         cached = await client.get_prompt(
             "emma_predictive_factor_system",
             variables={"factor_types": factor_types_str},
-            fallback=FALLBACK_FACTOR_SYSTEM.format(factor_types=factor_types_str),
         )
-        if cached and cached.content:
-            return cached.content
-
-        return FALLBACK_FACTOR_SYSTEM.format(factor_types=factor_types_str)
+        return cached.content
 
     async def _build_user_prompt(
         self,
@@ -244,11 +173,8 @@ class FactorAgent:
             cached = await client.get_prompt(
                 "emma_predictive_factor_user_next",
                 variables=variables,
-                fallback=FALLBACK_FACTOR_USER_NEXT.format(**variables),
             )
-            if cached and cached.content:
-                return cached.content
-            return FALLBACK_FACTOR_USER_NEXT.format(**variables)
+            return cached.content
         else:
             variables = {
                 "case_description": case_description,
@@ -258,11 +184,8 @@ class FactorAgent:
             cached = await client.get_prompt(
                 "emma_predictive_factor_user_first",
                 variables=variables,
-                fallback=FALLBACK_FACTOR_USER_FIRST.format(**variables),
             )
-            if cached and cached.content:
-                return cached.content
-            return FALLBACK_FACTOR_USER_FIRST.format(**variables)
+            return cached.content
 
     def _format_existing_factors(self, factors: List[WeightedFactor]) -> str:
         if not factors:

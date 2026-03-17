@@ -29,24 +29,6 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ─── Hardcoded fallback warnings ───
-_FALLBACK_LOW_QUALITY = (
-    "⚠️ CALIDAD BAJA: Los resultados tienen baja relevancia respecto a la consulta. "
-    "Considera reformular la búsqueda o indicar al usuario que la información es limitada."
-)
-_FALLBACK_SINGLE_SOURCE = (
-    "⚠️ FUENTE ÚNICA: Todos los resultados provienen del mismo documento. "
-    "Indica esta limitación al usuario."
-)
-_FALLBACK_CORRECTIVE = (
-    "La calidad de los resultados de búsqueda es baja. "
-    "Antes de responder, intenta: "
-    "1) Reformular la búsqueda con términos más específicos, "
-    "2) Probar smart_search con otros filtros o web_search, "
-    "3) Si no hay información relevante, indícalo claramente al usuario "
-    "sin inventar datos."
-)
-
 
 @dataclass
 class RetrievalQuality:
@@ -72,16 +54,12 @@ class RetrievalQuality:
         }
 
 
-async def _resolve_warning(prompt_key: str, fallback: str) -> str:
-    """Resolve a warning message via Langfuse → YAML → hardcoded fallback."""
-    try:
-        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
-        prompt_client = get_langfuse_prompt_client()
-        cached = await prompt_client.get_prompt(prompt_key, fallback=fallback)
-        return cached.content.strip() if cached else fallback
-    except Exception as e:
-        logger.debug(f"Warning resolution failed for '{prompt_key}': {e}")
-        return fallback
+async def _resolve_warning(prompt_name: str) -> str:
+    """Resolve a warning message from Langfuse."""
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    cached = await client.get_prompt(prompt_name)
+    return cached.content
 
 
 async def assess_retrieval_quality(
@@ -105,8 +83,8 @@ async def assess_retrieval_quality(
     # ── No results: always LOW ──
     if not results:
         rq.confidence = "low"
-        rq.warnings = [await _resolve_warning("emma_guard_low_quality", _FALLBACK_LOW_QUALITY)]
-        rq.corrective_message = await _resolve_warning("emma_guard_corrective", _FALLBACK_CORRECTIVE)
+        rq.warnings = [await _resolve_warning("emma_guard_low_quality")]
+        rq.corrective_message = await _resolve_warning("emma_guard_corrective")
         logger.info("🛡️ Retrieval guard: confidence=low (0 results)")
         return rq
 
@@ -126,23 +104,17 @@ async def assess_retrieval_quality(
     warnings: List[str] = []
 
     if low_score:
-        warnings.append(await _resolve_warning(
-            "emma_guard_low_quality", _FALLBACK_LOW_QUALITY,
-        ))
+        warnings.append(await _resolve_warning("emma_guard_low_quality"))
 
     if single_source:
-        warnings.append(await _resolve_warning(
-            "emma_guard_single_source", _FALLBACK_SINGLE_SOURCE,
-        ))
+        warnings.append(await _resolve_warning("emma_guard_single_source"))
 
     rq.warnings = warnings
 
     # ── Confidence verdict ──
     if low_score:
         rq.confidence = "low"
-        rq.corrective_message = await _resolve_warning(
-            "emma_guard_corrective", _FALLBACK_CORRECTIVE,
-        )
+        rq.corrective_message = await _resolve_warning("emma_guard_corrective")
     elif single_source:
         rq.confidence = "medium"
     else:

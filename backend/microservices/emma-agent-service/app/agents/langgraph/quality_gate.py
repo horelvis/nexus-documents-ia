@@ -130,42 +130,18 @@ _GAVE_UP_PHRASES = [
     "lo siento, no",
 ]
 
-# Corrective messages injected as HumanMessage
-CORRECTIVE_MSG_NO_TOOLS = (
-    "IMPORTANTE: Debes usar herramientas para responder esta consulta. "
-    "Usa `smart_search` para buscar en documentos y legislación, "
-    "o `structural_query` para contar/listar documentos. "
-    "NO respondas sin buscar primero."
-)
+# Corrective messages loaded from Langfuse (quality_corrective section)
+# Loaded lazily on first use via _get_corrective_msg()
 
-CORRECTIVE_MSG_LOW_QUALITY = (
-    "Tu respuesta parece incompleta o sin fuentes verificadas. "
-    "Antes de terminar, asegúrate de: "
-    "1) Haber buscado con `smart_search` o la herramienta apropiada, "
-    "2) Tener al menos una fuente que respalde tu respuesta, "
-    "3) Dar una respuesta sustancial (no genérica). "
-    "Intenta de nuevo con una búsqueda más específica."
-)
-
-FALLBACK_CORRECTIVE_LOW_RETRIEVAL = (
-    "La calidad de los resultados de búsqueda es baja. "
-    "Antes de responder, intenta: "
-    "1) Reformular la búsqueda con términos más específicos, "
-    "2) Probar smart_search con otros filtros o web_search, "
-    "3) Si no hay información relevante, indícalo claramente al usuario "
-    "sin inventar datos."
-)
-
-CORRECTIVE_MSG_FAITHFULNESS = (
-    "ALERTA: Tu respuesta contiene datos concretos (números, importes, fechas, "
-    "rangos) que NO aparecen en los resultados de las herramientas que usaste. "
-    "PROHIBIDO inventar datos. Revisa los resultados de búsqueda y responde "
-    "SOLO con la información que REALMENTE encontraste. "
-    "Si los datos son insuficientes, di exactamente qué encontraste y qué falta."
-)
+async def _get_corrective_msg(key: str) -> str:
+    """Load a corrective message from Langfuse."""
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    prompt = await client.get_prompt(f"emma_quality_corrective_{key}")
+    return prompt.content
 
 
-def assess_step0_no_tools(
+async def assess_step0_no_tools(
     intent: str,
     step: int,
     has_tool_calls: bool,
@@ -195,10 +171,10 @@ def assess_step0_no_tools(
     logger.warning(
         f"⚠️ Quality Gate 1: Step 0 no-tools for intent '{intent}' — injecting retry"
     )
-    return True, CORRECTIVE_MSG_NO_TOOLS
+    return True, await _get_corrective_msg("no_tools")
 
 
-def assess_terminate_quality(
+async def assess_terminate_quality(
     answer: str,
     sources: List[Dict[str, Any]],
     intent: str,
@@ -246,11 +222,10 @@ def assess_terminate_quality(
             f"⚠️ Quality Gate 2: Answer too short ({len(answer)} chars) "
             f"for intent '{intent}'"
         )
-        return True, CORRECTIVE_MSG_LOW_QUALITY
+        return True, await _get_corrective_msg("low_quality")
 
     # Heuristic 2: No sources for document/legal query
     if not sources and intent in ("document_query", "legal_query"):
-        # Check if any search tool was called
         search_tools = {"smart_search", "search_jurisprudence", "web_search"}
         has_searched = False
         if tool_calls_history:
@@ -263,7 +238,7 @@ def assess_terminate_quality(
                 f"⚠️ Quality Gate 2: No sources and no search performed "
                 f"for intent '{intent}'"
             )
-            return True, CORRECTIVE_MSG_LOW_QUALITY
+            return True, await _get_corrective_msg("low_quality")
 
     # Heuristic 3: "No encontré" without prior search
     answer_lower = answer.lower()
@@ -279,28 +254,20 @@ def assess_terminate_quality(
             logger.warning(
                 f"⚠️ Quality Gate 2: Gave-up phrase detected without searching"
             )
-            return True, CORRECTIVE_MSG_LOW_QUALITY
+            return True, await _get_corrective_msg("low_quality")
 
     # Heuristic 4: Low retrieval confidence (from retrieval_guard)
     retrieval_quality = metadata.get("last_retrieval_quality")
     if retrieval_quality and retrieval_quality.get("confidence") == "low":
         if not metadata.get("quality_gate_retrieval_retried"):
-            # Use pre-resolved corrective message if available, else fallback
-            corrective = FALLBACK_CORRECTIVE_LOW_RETRIEVAL
-            # The retrieval_guard pre-resolves this via Langfuse,
-            # but it's stored on the RetrievalQuality object, not in metadata dict.
-            # Metadata only has the serialized dict, so we use the fallback here.
             logger.warning(
                 f"⚠️ Quality Gate 4: Low retrieval confidence — "
                 f"top_score={retrieval_quality.get('top_score', 0):.3f}, "
                 f"entity_coverage={retrieval_quality.get('entity_coverage', 0):.2f}"
             )
-            return True, corrective
+            return True, await _get_corrective_msg("low_retrieval")
 
     # Heuristic 5: Faithfulness — detect fabricated specifics
-    # Extract specific numbers/data from the answer and check if they
-    # appear in tool result observations. If the answer contains concrete
-    # data not grounded in any tool output, it's likely hallucinated.
     if messages and intent in _TOOL_REQUIRED_INTENTS:
         if not metadata.get("quality_gate_faithfulness_retried"):
             fabricated = _detect_fabricated_data(answer, messages)
@@ -309,6 +276,6 @@ def assess_terminate_quality(
                     f"⚠️ Quality Gate 5: Fabricated data detected — "
                     f"{fabricated[:3]}"
                 )
-                return True, CORRECTIVE_MSG_FAITHFULNESS
+                return True, await _get_corrective_msg("faithfulness")
 
     return False, ""

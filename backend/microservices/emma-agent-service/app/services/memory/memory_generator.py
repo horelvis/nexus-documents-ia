@@ -24,24 +24,24 @@ logger = logging.getLogger(__name__)
 # Maximum document text to send to planner (4B model has limited context)
 _MAX_TEXT_CHARS = 8000
 
-_MEMORY_SYSTEM_PROMPT = """Eres un sistema de indexacion documental. Tu tarea es generar una "memoria" compacta de un documento.
-
-Genera un JSON con exactamente estos campos:
-- "summary": Resumen del documento en 2-3 frases (maximo 150 palabras). Incluye: tipo de documento, partes involucradas, tema principal, fechas clave.
-- "key_entities": Lista de nombres propios importantes (personas, empresas, organismos). Maximo 10.
-- "key_topics": Lista de temas/conceptos clave del documento. Maximo 8.
-
-Responde SOLO con el JSON, sin explicaciones."""
-
-_MEMORY_USER_TEMPLATE = """/no_think
-Documento: {filename}
-Tipo: {semantic_type}
-Dominio: {domain}
-
-Texto (primeros {text_len} caracteres):
-{text}
-
-Genera la memoria JSON:"""
+async def _get_memory_prompts(
+    filename: str, semantic_type: str, domain: str, text: str, text_len: int
+) -> tuple:
+    """Load memory generator prompts from Langfuse."""
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    system = await client.get_prompt("emma_memory_generator_system")
+    user = await client.get_prompt(
+        "emma_memory_generator_user",
+        variables={
+            "filename": filename,
+            "semantic_type": semantic_type,
+            "domain": domain,
+            "text_len": str(text_len),
+            "text": text,
+        },
+    )
+    return system.content, user.content
 
 
 async def generate_document_memory(
@@ -69,21 +69,21 @@ async def generate_document_memory(
     # Truncate to planner context limit
     text = document_text[:_MAX_TEXT_CHARS]
 
-    user_prompt = _MEMORY_USER_TEMPLATE.format(
-        filename=filename or "desconocido",
-        semantic_type=semantic_type or "desconocido",
-        domain=domain or "general",
-        text_len=len(text),
-        text=text,
-    )
-
     try:
+        system_prompt, user_prompt = await _get_memory_prompts(
+            filename=filename or "desconocido",
+            semantic_type=semantic_type or "desconocido",
+            domain=domain or "general",
+            text=text,
+            text_len=len(text),
+        )
+
         from langchain_core.messages import SystemMessage, HumanMessage
         from app.agents.llm_models import get_planner_model
 
         model = get_planner_model().bind(temperature=0.1, max_tokens=500)
         response = await model.ainvoke([
-            SystemMessage(content=_MEMORY_SYSTEM_PROMPT),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ])
 

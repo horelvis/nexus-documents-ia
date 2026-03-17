@@ -27,59 +27,30 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-import yaml
-from pathlib import Path
-
 from ..state import RAGState
 from ..reasoning_tracker import ReasoningTracker, StepType
 
 logger = logging.getLogger(__name__)
 
 
-# ─── RLM Prompt Loader (from emma_prompts.yaml) ──────────────────────────────
+# ─── RLM Prompt Loader (from Langfuse) ────────────────────────────────────────
 
-_rlm_prompts_cache: Optional[Dict[str, str]] = None
+async def _get_rlm_prompt(key: str, **kwargs: Any) -> str:
+    """Get an RLM prompt by key from Langfuse, formatted with kwargs.
 
-
-def _load_rlm_prompts() -> Dict[str, str]:
-    """Load RLM prompts from emma_prompts.yaml with caching."""
-    global _rlm_prompts_cache
-    if _rlm_prompts_cache is not None:
-        return _rlm_prompts_cache
-
-    search_paths = [
-        Path("/app/config/prompts/emma_prompts.yaml"),
-        Path("./config/prompts/emma_prompts.yaml"),
-        Path(__file__).parent.parent.parent.parent / "config" / "prompts" / "emma_prompts.yaml",
-    ]
-
-    for path in search_paths:
-        if path.exists():
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    config = yaml.safe_load(f) or {}
-                rlm = config.get("rlm", {})
-                if rlm:
-                    _rlm_prompts_cache = rlm
-                    logger.info(f"RLM prompts loaded from {path}")
-                    return rlm
-            except Exception as e:
-                logger.warning(f"Failed to load RLM prompts from {path}: {e}")
-
-    logger.warning("RLM prompts not found in YAML, using fallback defaults")
-    _rlm_prompts_cache = {}
-    return {}
-
-
-def _get_rlm_prompt(key: str, **kwargs: Any) -> str:
-    """Get an RLM prompt by key, formatted with kwargs."""
-    prompts = _load_rlm_prompts()
-    template = prompts.get(key, "")
+    Maps short keys (chunk_system, aggregate_user) to Langfuse prompt names
+    (emma_rlm_chunk_system, emma_rlm_aggregate_user).
+    """
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    prompt_name = f"emma_rlm_{key}"
+    prompt = await client.get_prompt(prompt_name)
+    template = prompt.content
     if template and kwargs:
         try:
             return template.format(**kwargs)
         except KeyError as e:
-            logger.warning(f"RLM prompt '{key}' missing placeholder: {e}")
+            logger.warning(f"RLM prompt '{prompt_name}' missing placeholder: {e}")
             return template
     return template
 
@@ -209,26 +180,12 @@ async def _process_chunk(
     Returns:
         LLM response text for this chunk
     """
-    system_prompt = _get_rlm_prompt(
+    system_prompt = await _get_rlm_prompt(
         "chunk_system", chunk_idx=idx + 1, chunk_total=total
     )
-    if not system_prompt:
-        system_prompt = (
-            "Eres Emma, asistente de IA para gestión documental. "
-            f"Sección {idx + 1} de {total}. "
-            "Extrae ÚNICAMENTE información de esta sección. "
-            "Si no hay info relevante, responde '[NO_RELEVANTE]'."
-        )
-
-    user_message = _get_rlm_prompt(
+    user_message = await _get_rlm_prompt(
         "chunk_user", query=query, chunk_idx=idx + 1, chunk_total=total, chunk=chunk
     )
-    if not user_message:
-        user_message = (
-            f"**Pregunta**: {query}\n\n"
-            f"**Sección {idx + 1}/{total}**:\n{chunk}\n\n"
-            "Extrae SOLO la información presente en esta sección."
-        )
 
     try:
         from langchain_core.messages import SystemMessage, HumanMessage
@@ -283,23 +240,10 @@ async def _aggregate_results(
 
     # If fits in context or max depth reached, do final synthesis
     if combined_tokens <= chunk_size or depth >= max_depth:
-        system_prompt = _get_rlm_prompt("aggregate_system")
-        if not system_prompt:
-            system_prompt = (
-                "Eres Emma, asistente de IA para gestión documental. "
-                "Sintetiza resultados parciales. Responde ÚNICAMENTE con información "
-                "presente en los resultados. NO añadas conocimiento general."
-            )
-
-        user_message = _get_rlm_prompt(
+        system_prompt = await _get_rlm_prompt("aggregate_system")
+        user_message = await _get_rlm_prompt(
             "aggregate_user", query=query, combined=combined
         )
-        if not user_message:
-            user_message = (
-                f"**Pregunta**: {query}\n\n"
-                f"**Resultados parciales**:\n\n{combined}\n\n"
-                "Genera una respuesta basada exclusivamente en los resultados anteriores."
-            )
 
         try:
             from langchain_core.messages import SystemMessage, HumanMessage

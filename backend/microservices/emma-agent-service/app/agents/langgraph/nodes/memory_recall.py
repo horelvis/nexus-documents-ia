@@ -96,31 +96,12 @@ def _format_memorag_for_planner(memories: List[Dict[str, Any]], max_items: int =
     return "\n\n".join(lines)
 
 
-_CLUE_SYSTEM_FALLBACK = """\
-Eres un asistente de búsqueda. A partir de la consulta del usuario y los resúmenes de documentos \
-disponibles, genera pistas de búsqueda concisas para localizar la información más relevante.
-
-Formato de respuesta (texto plano, sin JSON):
-- IDs de documentos relevantes (si los hay)
-- Palabras clave de búsqueda específicas
-- Nombres de personas o entidades mencionadas
-- Tipo de documento que probablemente contiene la respuesta
-
-Sé BREVE (máximo 4-5 líneas). Si ningún documento parece relevante, responde "SIN_PISTAS"."""
-
-
 async def _load_clue_system_prompt() -> str:
-    """Load memory recall system prompt: Langfuse → YAML → hardcoded fallback."""
-    try:
-        from app.services.langfuse_prompt_client import get_langfuse_prompt_client
-        client = get_langfuse_prompt_client()
-        cached = await client.get_prompt("emma_memory_recall_system")
-        if cached and cached.content:
-            return cached.content
-    except Exception as e:
-        logger.debug(f"Langfuse memory_recall prompt skipped: {e}")
-
-    return _CLUE_SYSTEM_FALLBACK
+    """Load memory recall system prompt from Langfuse."""
+    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+    client = get_langfuse_prompt_client()
+    cached = await client.get_prompt("emma_memory_recall_system")
+    return cached.content
 
 
 async def _generate_clues(query: str, memories_text: str) -> Optional[str]:

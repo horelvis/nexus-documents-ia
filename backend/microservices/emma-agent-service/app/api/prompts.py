@@ -642,7 +642,7 @@ async def health_check(
             langfuse_connected=health.get("langfuse_connected", False),
             langfuse_host=settings.langfuse_host,
             database_connected=db_connected,
-            use_langfuse_prompts=settings.use_langfuse_prompts,
+            use_langfuse_prompts=True,  # Langfuse is mandatory
             cached_prompt_count=health.get("cached_prompt_count", 0),
             rules_count=counts.get("rules", 0),
             few_shot_count=counts.get("few_shot_examples", 0),

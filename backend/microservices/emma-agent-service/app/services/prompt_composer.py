@@ -449,8 +449,8 @@ class PromptComposer:
         return count
 
     def reload_yaml(self) -> None:
-        """Force reload of YAML cache."""
-        self._prompt_client.reload_yaml()
+        """Invalidate prompt cache (YAML no longer used — Langfuse is the single source)."""
+        self._prompt_client.invalidate_cache()
 
     async def get_health(self) -> Dict[str, Any]:
         """Get health status of all components."""
@@ -460,7 +460,7 @@ class PromptComposer:
             "langfuse_connected": cache_stats.get("langfuse_connected", False),
             "langfuse_host": settings.langfuse_host,
             "database_connected": True,  # Assume connected if we got here
-            "use_langfuse_prompts": settings.use_langfuse_prompts,
+            "use_langfuse_prompts": True,  # Langfuse is mandatory
             "cached_prompt_count": cache_stats.get("total_cached", 0),
             "rules_enabled": settings.rule_engine_enabled,
             "few_shot_enabled": settings.few_shot_enabled,
