@@ -1006,9 +1006,6 @@ class SmartSearchTool(EmmaTool):
 
     def _is_complex_query(self, query: str) -> bool:
         """Detect queries that would benefit from decomposition."""
-        from app.core.config import settings as _s
-        if not _s.smart_search_decompose_enabled:
-            return False
         if len(query) < 80:
             return False
 

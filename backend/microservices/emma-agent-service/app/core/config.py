@@ -153,9 +153,8 @@ class Settings(BaseSettings):
     smart_search_rerank_enabled: bool = os.getenv("SMART_SEARCH_RERANK_ENABLED", "true").lower() == "true"
     smart_search_graph_enabled: bool = os.getenv("SMART_SEARCH_GRAPH_ENABLED", "true").lower() == "true"
 
-    # SmartSearch — Retrieval Intelligence (inline feedback + query decomposition)
+    # SmartSearch — Retrieval Intelligence (inline feedback)
     smart_search_feedback_enabled: bool = os.getenv("SMART_SEARCH_FEEDBACK_ENABLED", "true").lower() == "true"
-    smart_search_decompose_enabled: bool = os.getenv("SMART_SEARCH_DECOMPOSE_ENABLED", "true").lower() == "true"
 
     # GraphRAG — Multi-hop subgraph extraction (Phase 5, replaces flat graph expansion)
     graphrag_enabled: bool = os.getenv("GRAPHRAG_ENABLED", "true").lower() == "true"
