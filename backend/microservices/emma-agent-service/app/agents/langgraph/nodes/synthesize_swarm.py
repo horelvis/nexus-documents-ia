@@ -118,7 +118,6 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
             "content": "All swarm workers failed — no results to synthesize",
         })
         return {
-            "is_complete": True,
             "final_answer": (
                 "No se pudieron obtener resultados. Los agentes encontraron errores "
                 "al procesar tu consulta. Intenta reformular la pregunta."
@@ -157,7 +156,6 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
         })
 
         return {
-            "is_complete": True,
             "final_answer": answer,
             "sources": unique_sources,
             "success": True,
@@ -284,7 +282,6 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
     )
 
     return {
-        "is_complete": True,
         "final_answer": synthesized_answer,
         "sources": unique_sources,
         "success": True,

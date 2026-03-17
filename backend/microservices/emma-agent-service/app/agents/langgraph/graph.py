@@ -91,6 +91,7 @@ def create_react_graph() -> StateGraph:
     from .nodes.decompose import decompose_node
     from .nodes.swarm_worker import swarm_worker_node
     from .nodes.synthesize_swarm import synthesize_swarm_node
+    from .nodes.explain import explain_node
 
     logger.info("Creating ReAct Agent StateGraph")
 
@@ -113,6 +114,9 @@ def create_react_graph() -> StateGraph:
     workflow.add_node("decompose", decompose_node, retry_policy=llm_retry)
     workflow.add_node("swarm_worker", swarm_worker_node)  # Has internal timeout
     workflow.add_node("synthesize_swarm", synthesize_swarm_node, retry_policy=llm_retry)
+
+    # Explain node — humanized query trace after synthesis
+    workflow.add_node("explain", explain_node)
 
     # Entry point
     workflow.set_entry_point("classify")
@@ -160,9 +164,10 @@ def create_react_graph() -> StateGraph:
     # All swarm workers converge at synthesize_swarm
     workflow.add_edge("swarm_worker", "synthesize_swarm")
 
-    # Both synthesize paths -> END
-    workflow.add_edge("synthesize", END)
-    workflow.add_edge("synthesize_swarm", END)
+    # Both synthesize paths -> explain -> END
+    workflow.add_edge("synthesize", "explain")
+    workflow.add_edge("synthesize_swarm", "explain")
+    workflow.add_edge("explain", END)
 
     # Compilation deferred to get_react_graph() which injects the checkpointer.
     # We return the uncompiled workflow here.

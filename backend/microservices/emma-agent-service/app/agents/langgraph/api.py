@@ -397,6 +397,12 @@ async def stream_react_query(
 
             # Check for final answer
             if event.get("final_answer") and event.get("is_complete"):
+                # If explain is enabled, wait for the explanation field
+                from app.core.config import settings as app_settings
+                if app_settings.explain_enabled and not event.get("fast_path_used"):
+                    if event.get("explanation") is None:
+                        continue  # Not yet — explain node hasn't run
+
                 latency_ms = (time.time() - start_time) * 1000
                 final_answer = event["final_answer"]
                 event_metadata = event.get("metadata", {})
@@ -415,6 +421,7 @@ async def stream_react_query(
                         "graph_type": "react",
                         "metadata": event_metadata,
                         "guardrail_metadata": event.get("guardrail_metadata"),
+                        "explanation": event.get("explanation"),
                     },
                 }
                 break
@@ -569,6 +576,12 @@ async def resume_react_query(
                     yield {"type": "reasoning_step", "data": {"step_type": step_type, "content": step.get("content", "")}}
 
             if event.get("final_answer") and event.get("is_complete"):
+                # If explain is enabled, wait for the explanation field
+                from app.core.config import settings as app_settings
+                if app_settings.explain_enabled and not event.get("fast_path_used"):
+                    if event.get("explanation") is None:
+                        continue  # Not yet — explain node hasn't run
+
                 latency_ms = (time.time() - start_time) * 1000
                 final_answer = event["final_answer"]
 
@@ -591,6 +604,7 @@ async def resume_react_query(
                         "graph_type": "react_resume",
                         "metadata": event.get("metadata", {}),
                         "guardrail_metadata": event.get("guardrail_metadata"),
+                        "explanation": event.get("explanation"),
                     },
                 }
                 break

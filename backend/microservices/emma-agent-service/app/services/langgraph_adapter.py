@@ -24,6 +24,30 @@ from typing import Any, AsyncGenerator, Dict, List
 
 logger = logging.getLogger(__name__)
 
+# ── Phase tracking for frontend breadcrumb ────────────────────────────────
+
+PHASE_MAP = {
+    "started": "understanding",
+    "thinking": "understanding",
+    "tool_call": "searching",
+    "tool_result": "searching",
+    "reasoning_step": "analyzing",
+    "swarm_started": "analyzing",
+    "worker_started": "analyzing",
+    "worker_complete": "analyzing",
+    "swarm_synthesizing": "responding",
+    "token": "responding",
+}
+
+PHASE_LABELS = {
+    "understanding": "Entendiendo tu consulta",
+    "searching": "Buscando información",
+    "analyzing": "Analizando resultados",
+    "responding": "Redactando respuesta",
+}
+
+PHASE_ORDER = ["understanding", "searching", "analyzing", "responding"]
+
 
 def _sse_line(event: str, data: Any) -> str:
     """Format a single SSE event line."""
@@ -99,6 +123,9 @@ async def translate_to_langgraph_sse(
     sources: List[Dict] = []
     reasoning_steps: List[Dict] = []
 
+    # Phase tracking for frontend breadcrumb
+    _current_phase: str | None = None
+
     # Emit metadata event (first event useStream expects)
     yield _sse_line("metadata", {"run_id": run_id, "thread_id": thread_id})
 
@@ -106,6 +133,22 @@ async def translate_to_langgraph_sse(
         async for event in emma_event_generator:
             event_type = event.get("type", "")
             data = event.get("data", {})
+
+            # ── Phase detection ───────────────────────────────────
+            new_phase = PHASE_MAP.get(event_type)
+            if new_phase and new_phase != _current_phase:
+                _current_phase = new_phase
+                phase_idx = PHASE_ORDER.index(new_phase)
+                completed = PHASE_ORDER[:phase_idx]
+                yield _sse_line("updates", {
+                    "phase_update": {
+                        "phase": new_phase,
+                        "label": PHASE_LABELS[new_phase],
+                        "index": phase_idx,
+                        "total": len(PHASE_ORDER),
+                        "completed_phases": completed,
+                    }
+                })
 
             if event_type == "started":
                 # Emit initial values with the user query as first message
@@ -279,6 +322,7 @@ async def translate_to_langgraph_sse(
                     "reasoning_steps": reasoning_steps,
                     "metadata": metadata,
                     "guardrail_metadata": data.get("guardrail_metadata"),
+                    "explanation": data.get("explanation"),
                 })
 
             elif event_type == "error":
