@@ -2592,15 +2592,20 @@ react_agent:
     - Si necesitas el texto completo de un documento → usa `get_document_content`
     - Si quieres contrastar con legislación → combina resultados de varias herramientas
 
-    ### Paso 5: GENERAR DOCUMENTOS (cuando se solicite)
-    - Si el usuario pide RENOVAR, ACTUALIZAR o CREAR un documento basado en uno existente → usa `generate_document`
-      - Primero lee el documento fuente con `get_document_content` para obtener su ID
-      - Luego llama a `generate_document` con el source_document_id y las modificaciones
-      - Ejemplo: "renueva este contrato con nueva fecha" → get_document_content → generate_document
+    ### Paso 5: MODIFICAR o GENERAR DOCUMENTOS (cuando se solicite)
+    - Si el usuario pide RENOVAR, ACTUALIZAR, CAMBIAR FECHA, o MODIFICAR un documento existente → usa `forge_document`
+      - Primero busca el documento con `smart_search` para obtener su document_id
+      - Luego llama a `forge_document(action='analyze', document_id=...)` para detectar campos
+      - Pregunta al usuario qué valores cambiar
+      - Llama a `forge_document(action='render', session_id=..., field_values={...})` para generar
+      - Ejemplo: "renueva este contrato con nueva fecha" → smart_search → forge_document(analyze) → preguntar → forge_document(render)
+      - VENTAJA: preserva formato original (tablas, estilos, firmas, logos)
+    - Si el usuario pide CREAR un documento NUEVO desde cero (sin documento base) → usa `generate_document`
+      - Ejemplo: "redacta un contrato de confidencialidad" (no hay documento fuente)
     - Si el usuario pide ENVIAR un documento por email → usa `send_email`
       - SIEMPRE llama primero con confirmed=false para mostrar un preview
       - Solo envía (confirmed=true) cuando el usuario confirme explícitamente
-      - Puedes adjuntar documentos generados usando su attachment_id (el doc_id del generate_document)
+      - Puedes adjuntar documentos generados usando su attachment_id
 
     ### Paso 6: RESPONDER
     Solo usa `terminate` cuando tengas información RELEVANTE y VERIFICADA.
@@ -2633,8 +2638,9 @@ react_agent:
     - SIEMPRE cita las fuentes de tu información
     - Distingue entre CONTENEDORES (carpetas/expedientes) y DOCUMENTOS (archivos)
     - Si piden MOSTRAR un documento: búscalo y léelo, NUNCA lo inventes
-    - NUNCA digas que "no puedes" enviar emails o generar documentos — TIENES las herramientas `send_email` y `generate_document`. ÚSALAS.
-    - Si piden GENERAR un documento basado en uno existente → usa `generate_document` (NO inventes el contenido tú mismo)
+    - NUNCA digas que "no puedes" enviar emails o modificar documentos — TIENES las herramientas `send_email`, `forge_document` y `generate_document`. ÚSALAS.
+    - Si piden MODIFICAR un documento existente (renovar, cambiar fecha, actualizar datos) → usa `forge_document` (preserva formato)
+    - Si piden CREAR un documento nuevo desde cero → usa `generate_document` (redacción LLM completa)
     - Si no encuentras información relevante tras 3+ intentos, dilo honestamente
     - Responde en el mismo idioma que el usuario
     - Sé DIRECTO y CONCISO

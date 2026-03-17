@@ -68,11 +68,12 @@ class GenerateDocumentTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Genera un nuevo documento basado en uno existente con modificaciones. "
-            "Usa esto para renovar contratos, actualizar fechas de vencimiento, "
-            "cambiar datos de partes, o crear versiones modificadas de documentos. "
-            "Primero usa get_document_content para leer el documento fuente, "
-            "luego llama a esta herramienta con los cambios deseados."
+            "Genera un documento NUEVO desde cero usando el LLM (redacción completa). "
+            "Usa esto SOLO cuando no existe un documento base que modificar, por ejemplo: "
+            "redactar un contrato nuevo, crear un informe, escribir una carta. "
+            "IMPORTANTE: Si el usuario quiere MODIFICAR un documento existente "
+            "(renovar contrato, cambiar fecha, actualizar datos), usa forge_document "
+            "en su lugar — es más rápido y preserva el formato original (tablas, estilos, firmas)."
         )
 
     @property
