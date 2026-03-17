@@ -133,22 +133,57 @@ class IntentSemanticRouter:
                 ],
             )
 
-            # No document_query route needed — anything below threshold
-            # returns None → LLM fallback or default document_query
+            # Document actions — queries that require ReAct tools (email, forge, search).
+            # Mapped to document_query in classify_intent() to ensure ReAct loop routing.
+            # This route prevents general_knowledge from capturing action queries like
+            # "enviar por correo..." or "renueva el contrato...".
+            document_action = Route(
+                name="document_action",
+                score_threshold=0.65,
+                utterances=[
+                    # Email sending
+                    "Envía este documento por correo", "Manda un email con el contrato",
+                    "Enviar por correo a juan@empresa.com", "Remite el informe por email",
+                    "Reenvía el documento al cliente", "Send this document by email",
+                    "Envía el contrato adjunto por correo electrónico",
+                    "Manda el PDF por email a recursos humanos",
+                    # Document modification / forge
+                    "Renueva el contrato cambiando la fecha", "Modifica la fecha de fin del contrato",
+                    "Actualiza los datos del contrato", "Cambia la fecha de vencimiento a 2027",
+                    "Renueva este contrato de duración determinada",
+                    "Modifica el importe del salario en el contrato",
+                    "Actualizar la dirección del empleado en el documento",
+                    "Cambiar el nombre del trabajador en el contrato",
+                    # Document generation from existing
+                    "Genera un nuevo contrato basado en este", "Crea una versión actualizada del contrato",
+                    "Genera un documento a partir de esta plantilla",
+                    # Save / persist
+                    "Guarda el documento en el sistema", "Indexa este archivo",
+                    "Almacena el contrato generado",
+                    # Search specific documents
+                    "Busca los contratos de duración determinada", "Encuentra las facturas del mes pasado",
+                    "Muestra las nóminas de enero", "Localiza el expediente del empleado",
+                    "Busca documentos que venzan pronto",
+                ],
+            )
+
             self._router = RouterLayer(
                 encoder=encoder,
-                routes=[conversational, identity, general_knowledge],
+                routes=[conversational, identity, general_knowledge, document_action],
                 auto_sync="local",
             )
             self._initialized = True
-            logger.info("IntentSemanticRouter initialized with 3 routes (threshold=0.70-0.75)")
+            logger.info("IntentSemanticRouter initialized with 4 routes")
 
         except Exception as e:
             logger.error(f"IntentSemanticRouter init failed: {e}")
             self._initialized = False
 
     def classify(self, query: str) -> Optional[str]:
-        """Return route name or None if no match."""
+        """Return route name or None if no match.
+
+        Maps document_action → document_query so it routes to ReAct loop.
+        """
         if not self._initialized:
             self.initialize()
         if not self._router:
@@ -157,7 +192,12 @@ class IntentSemanticRouter:
         try:
             result = self._router(query)
             if result is not None and result.name is not None:
-                return result.name.lower()
+                name = result.name.lower()
+                # document_action is a semantic route that captures action queries
+                # (email, forge, search) — map to document_query for ReAct routing
+                if name == "document_action":
+                    return "document_query"
+                return name
             return None
         except Exception as e:
             logger.warning(f"IntentRouter semantic classify error: {e}")
@@ -186,10 +226,13 @@ async def _llm_classify_intent(query: str) -> Optional[str]:
             "Eres Emma, coordinadora de un sistema multi-agente. "
             "Clasifica la intención del usuario en una de estas etiquetas: "
             "CONVERSATIONAL, IDENTITY, GENERAL_KNOWLEDGE, DOCUMENT_QUERY. "
-            "Usa GENERAL_KNOWLEDGE para preguntas generales que NO requieren buscar "
-            "documentos del usuario (código, matemáticas, traducciones, cultura general). "
-            "Usa DOCUMENT_QUERY cuando el usuario pregunta sobre SUS documentos, contratos, "
-            "facturas, legislación aplicable a su empresa, etc. "
+            "Usa GENERAL_KNOWLEDGE para preguntas generales que NO requieren buscar ni "
+            "modificar documentos del usuario (código, matemáticas, traducciones, cultura general). "
+            "Usa DOCUMENT_QUERY cuando el usuario: "
+            "1) pregunta sobre SUS documentos, contratos, facturas, legislación; "
+            "2) pide ENVIAR un email con un documento; "
+            "3) pide MODIFICAR, RENOVAR o ACTUALIZAR un documento existente; "
+            "4) pide BUSCAR documentos específicos (facturas, contratos, nóminas). "
             "Responde SOLO con la etiqueta."
         )
 
@@ -256,7 +299,7 @@ async def classify_intent(query: str) -> Tuple[str, float]:
 
     Returns:
         (intent_name, confidence) where intent is one of:
-        "conversational", "identity", "document_query"
+        "conversational", "identity", "general_knowledge", "document_query"
     """
     # Tier 0: Rule-based pre-filter for definitional queries
     # These are NEVER greetings, even if semantic router matches them
@@ -265,6 +308,7 @@ async def classify_intent(query: str) -> Tuple[str, float]:
         return "document_query", 0.95
 
     # Tier 1: Semantic Router (~1-3ms)
+    # Includes document_action route → mapped to document_query in classify()
     router = _get_intent_router()
     semantic_result = router.classify(query)
 
