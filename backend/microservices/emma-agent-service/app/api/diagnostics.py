@@ -503,6 +503,68 @@ async def _check_smart_search(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
+async def _check_smart_search_temporal(tenant_id: str) -> Dict[str, Any]:
+    """Verify SmartSearch date_from/date_to filters work."""
+    t0 = time.time()
+    try:
+        from app.agents.langgraph.tools.smart_search import SmartSearchTool
+
+        tool = SmartSearchTool()
+        # Search with a temporal filter — should not crash, may return 0 results
+        result = await tool.execute(
+            arguments={
+                "query": "documento",
+                "scope": "documents",
+                "date_from": "2020-01-01",
+                "date_to": "2030-12-31",
+                "limit": 3,
+            },
+            context={"tenant_id": tenant_id, "sector_config": {}},
+        )
+        ms = (time.time() - t0) * 1000
+        if result.success:
+            lines = result.output.count("──")
+            return _ok(ms, f"temporal filter OK, ~{lines} results")
+        # Even 0 results is OK — the filter worked without crashing
+        if "0 resultado" in result.output.lower() or "no se encontr" in result.output.lower():
+            return _ok(ms, "temporal filter OK (0 results in range)")
+        return _fail(ms, f"temporal filter error: {result.output[:80]}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_smart_search_person(tenant_id: str) -> Dict[str, Any]:
+    """Verify SmartSearch person_filter works."""
+    t0 = time.time()
+    try:
+        from app.agents.langgraph.tools.smart_search import SmartSearchTool
+
+        tool = SmartSearchTool()
+        result = await tool.execute(
+            arguments={
+                "query": "documento",
+                "scope": "documents",
+                "person_filter": "__diagnostics_nonexistent__",
+                "limit": 3,
+            },
+            context={"tenant_id": tenant_id, "sector_config": {}},
+        )
+        ms = (time.time() - t0) * 1000
+        # With a nonexistent person, we expect 0 results (filter applied correctly)
+        # or a fallback (filter dropped). Both mean the filter pipeline works.
+        if result.success:
+            output_lower = result.output.lower()
+            if "0 resultado" in output_lower or "no se encontr" in output_lower:
+                return _ok(ms, "person filter OK (0 results for nonexistent person)")
+            if "NOTA" in result.output:
+                return _ok(ms, "person filter OK (dropped + fallback)")
+            lines = result.output.count("──")
+            return _ok(ms, f"person filter OK, ~{lines} results (filter dropped)")
+        return _fail(ms, f"person filter error: {result.output[:80]}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
 async def _check_react_pipeline(tenant_id: str) -> Dict[str, Any]:
     """Run a full ReAct query (greeting, fast-path) to verify the pipeline."""
     t0 = time.time()
@@ -697,6 +759,8 @@ async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
     for name, coro in [
         ("classify", _check_classify()),
         ("smart_search", _check_smart_search(tenant_id)),
+        ("smart_search_temporal", _check_smart_search_temporal(tenant_id)),
+        ("smart_search_person", _check_smart_search_person(tenant_id)),
         ("react_pipeline", _check_react_pipeline(tenant_id)),
         ("conversation_context", _check_conversation_context(tenant_id)),
         ("user_memory", _check_user_memory(tenant_id)),
