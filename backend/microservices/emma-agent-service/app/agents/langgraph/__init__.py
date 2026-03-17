@@ -7,6 +7,10 @@ Architecture:
                        -> rewrite -> memory_recall -> decompose -> [swarm_worker x N] ->    (complex)
                          synthesize_swarm -> END
 
+Sub-graphs (invoked as tools from the ReAct agent):
+    - VerifiedGenGraph: claim-by-claim verified document generation
+    - PredictiveGraph: factor extraction + outcome evaluation + recommendation
+
 Usage:
     from app.agents.langgraph import execute_langgraph_query
 
@@ -18,7 +22,7 @@ Usage:
     print(result.answer)
 """
 
-from .state import RAGState, ReActState, ExecutionConfig, create_initial_state, create_initial_react_state
+from .state import ReActState, ExecutionConfig, create_initial_react_state
 from .graph import create_react_graph, get_react_graph, execute_react_query
 from .api import (
     execute_langgraph_query,
@@ -31,11 +35,9 @@ from .api import (
 )
 
 __all__ = [
-    # State (RAGState kept for stop_and_go/verified_generation compatibility)
-    "RAGState",
+    # State
     "ReActState",
     "ExecutionConfig",
-    "create_initial_state",
     "create_initial_react_state",
     # ReAct Graph
     "create_react_graph",

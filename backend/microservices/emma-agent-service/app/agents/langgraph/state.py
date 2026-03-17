@@ -96,10 +96,11 @@ class AgentResult(TypedDict, total=False):
 
 class RAGState(TypedDict, total=False):
     """
-    Shared state for the RAG graph.
+    DEPRECATED: Legacy RAG pipeline state.
 
-    All nodes read from and write to this state.
-    The Annotated types with reducers handle merging.
+    Only used by rlm_processor.py (will be removed when RLM migrates to ReActState).
+    New code should use ReActState or dedicated sub-graph states
+    (VerifiedGenState, PredictiveState).
 
     State Flow:
         1. RETRIEVE: Populates retrieved_docs, doc_scores

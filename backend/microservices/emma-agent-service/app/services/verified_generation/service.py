@@ -1,6 +1,14 @@
 """
-Verified Document Service - Stop-and-Go Orchestration
+DEPRECATED: Verified Document Service - Stop-and-Go Orchestration
 
+This service is no longer called by any API endpoint. Verified generation
+is now handled by the VerifiedGenerationTool sub-graph invoked from the
+ReAct agent via /emma/query. This file is kept temporarily because:
+- _rlm_filter_evidence() is imported by subgraphs/evidence.py
+- _assemble_document() is imported by stop_and_go/strategies/verified.py
+These will be extracted when stop_and_go is fully inlined into subgraphs.
+
+Original description:
 Thin service layer that delegates to the Stop-and-Go LangGraph for the
 generate → verify → decide loop. The graph handles claim generation,
 evidence search, LLM evaluation, and document assembly.

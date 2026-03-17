@@ -1,6 +1,14 @@
 """
-Predictive Analysis Service — Stop-and-Go Factor Orchestration.
+DEPRECATED: Predictive Analysis Service — Stop-and-Go Factor Orchestration.
 
+This service is no longer called by any API endpoint. Predictive analysis
+is now handled by the PredictiveAnalysisTool sub-graph invoked from the
+ReAct agent via /emma/query. This file is kept temporarily because:
+- _is_duplicate_factor() is imported by stop_and_go/strategies/predictive.py
+- _weight_factor() is imported by stop_and_go/strategies/predictive.py
+These will be extracted when stop_and_go is fully inlined into subgraphs.
+
+Original description:
 Mirrors Verified Generation's architecture but for predictive analysis:
 1. FactorAgent extracts ONE factor
 2. Weaviate + graph + web search for supporting documents

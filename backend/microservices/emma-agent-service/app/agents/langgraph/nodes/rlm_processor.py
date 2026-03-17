@@ -27,7 +27,6 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from ..state import RAGState
 from ..reasoning_tracker import ReasoningTracker, StepType
 
 logger = logging.getLogger(__name__)
@@ -293,7 +292,7 @@ async def _aggregate_results(
 # Node 1: rlm_plan_node — Detect, chunk, check cache
 # =============================================================================
 
-async def rlm_plan_node(state: RAGState) -> Dict[str, Any]:
+async def rlm_plan_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     LangGraph node: RLM planning phase.
 
@@ -449,7 +448,7 @@ async def rlm_plan_node(state: RAGState) -> Dict[str, Any]:
 # Node 2: rlm_map_node — Process chunks in parallel
 # =============================================================================
 
-async def rlm_map_node(state: RAGState) -> Dict[str, Any]:
+async def rlm_map_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     LangGraph node: RLM map phase.
 
@@ -536,7 +535,7 @@ async def rlm_map_node(state: RAGState) -> Dict[str, Any]:
 # Node 3: rlm_reduce_node — Aggregate and cache
 # =============================================================================
 
-async def rlm_reduce_node(state: RAGState) -> Dict[str, Any]:
+async def rlm_reduce_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     LangGraph node: RLM reduce phase.
 
