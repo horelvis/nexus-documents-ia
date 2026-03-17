@@ -208,10 +208,10 @@ class VerifiedDocumentService:
         request: VerifiedDocumentRequest,
     ) -> AsyncGenerator[VerificationEvent, None]:
         """
-        Generate a verified document with streaming progress events.
+        DEPRECATED: Use VerifiedGenerationTool via /emma/query instead.
 
-        This is the main entry point for SSE streaming. Delegates to the
-        StopAndGo LangGraph which handles the generate→verify→decide loop.
+        This method is no longer called by any API endpoint.
+        Kept only for the helper functions imported by strategies.
 
         Args:
             request: Generation request with parameters

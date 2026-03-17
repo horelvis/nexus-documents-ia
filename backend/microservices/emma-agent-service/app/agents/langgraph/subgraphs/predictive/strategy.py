@@ -2,6 +2,8 @@
 PredictiveStrategy — wraps FactorAgent, OutcomeExtractor, PredictiveCache,
 and PredictionSynthesizer for the stop-and-go graph.
 
+Moved from stop_and_go/strategies/
+
 This strategy does NOT own any LLM logic — it delegates to the same
 existing modules that the old while-loop used. The graph just
 orchestrates the flow.
@@ -22,7 +24,6 @@ from app.agents.langgraph.sectors.predictive_config import (
     PredictiveConfig,
     get_predictive_config,
 )
-from app.agents.langgraph.stop_and_go.strategy import register_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -304,7 +305,3 @@ class PredictiveStrategy:
             "execution_time_ms": execution_time_ms,
             "sources": list(state.get("sources_map", {}).values()),
         }
-
-
-# Register at import time
-register_strategy("predictive", PredictiveStrategy())

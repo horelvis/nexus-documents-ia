@@ -29,7 +29,7 @@ def _get_strategy():
     """Get or create the VerifiedStrategy singleton."""
     global _strategy
     if _strategy is None:
-        from app.agents.langgraph.stop_and_go.strategies.verified import VerifiedStrategy
+        from .strategy import VerifiedStrategy
         _strategy = VerifiedStrategy()
     return _strategy
 

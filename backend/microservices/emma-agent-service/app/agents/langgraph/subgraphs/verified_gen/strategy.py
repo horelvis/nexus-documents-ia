@@ -2,6 +2,8 @@
 VerifiedStrategy — wraps WriterAgent, _verify_claim logic,
 VerifiedContextCache for the stop-and-go graph.
 
+Moved from stop_and_go/strategies/
+
 Like PredictiveStrategy, this delegates to existing modules.
 The graph orchestrates the flow identically for both modes.
 """
@@ -14,8 +16,6 @@ import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List
-
-from app.agents.langgraph.stop_and_go.strategy import register_strategy
 
 logger = logging.getLogger(__name__)
 
@@ -690,7 +690,3 @@ class VerifiedStrategy:
             logger.error(f"[{tier_label}] LLM evaluation call failed: {e}")
 
         return {}
-
-
-# Register at import time
-register_strategy("verified", VerifiedStrategy())

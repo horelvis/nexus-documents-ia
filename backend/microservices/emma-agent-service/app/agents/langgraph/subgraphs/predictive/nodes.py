@@ -20,7 +20,7 @@ _strategy = None
 def _get_strategy():
     global _strategy
     if _strategy is None:
-        from app.agents.langgraph.stop_and_go.strategies.predictive import PredictiveStrategy
+        from .strategy import PredictiveStrategy
         _strategy = PredictiveStrategy()
     return _strategy
 
