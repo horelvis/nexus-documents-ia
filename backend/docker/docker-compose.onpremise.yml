@@ -548,6 +548,7 @@ services:
     volumes:
       - ../microservices/emma-agent-service/app:/app/app:ro
       - ../microservices/emma-agent-service/config:/app/config:ro
+      - ../microservices/emma-agent-service/scripts:/app/scripts:ro
       - huggingface_cache:/root/.cache/huggingface
       - fastembed_cache:/tmp/fastembed_cache
       # Docker socket for ephemeral CENDOJ agent containers
