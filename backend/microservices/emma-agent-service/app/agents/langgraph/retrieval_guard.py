@@ -1,6 +1,14 @@
 """
 Retrieval Guard — Post-retrieval quality assessment for anti-hallucination.
 
+DEPRECATED (inline warnings): The warnings list appended to tool output is
+superseded by SmartSearchTool._evaluate_results() (Phase 2 Retrieval
+Intelligence). The assess_retrieval_quality() function is still called by
+smart_search.py for metadata population — Quality Gate 4 reads
+last_retrieval_quality.confidence to decide whether to block terminate.
+The warnings are no longer the primary feedback mechanism when
+SMART_SEARCH_FEEDBACK_ENABLED=true.
+
 Evaluates search results AFTER reranking, BEFORE they reach the LLM.
 Pure score-based assessment — no entity analysis (that's SmartSearch's job).
 

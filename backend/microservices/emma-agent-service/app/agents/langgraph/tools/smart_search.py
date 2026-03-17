@@ -373,6 +373,54 @@ class SmartSearchTool(EmmaTool):
             person_doc_ids = await self._get_documents_by_person(tenant_id, enriched_person)
             graph_doc_ids.update(person_doc_ids)
 
+        # ── Step 4b: Query decomposition (Phase 3) ──
+        if self._is_complex_query(query):
+            sub_queries = await self._decompose_query(query)
+            if sub_queries:
+                decompose_client = get_weaviate_client()
+                decompose_alpha = sector_config_dict.get("hybrid_alpha", 0.5) if sector_config_dict else 0.5
+
+                async def _run_sub_query(sq: Dict[str, str]) -> List[Dict[str, Any]]:
+                    sq_scope = sq.get("scope", "auto")
+                    sq_results: List[Dict[str, Any]] = []
+                    if sq_scope in ("documents", "auto"):
+                        sq_results.extend(await self._search_documents(
+                            decompose_client, tenant_id, sq["query"], limit, decompose_alpha,
+                            person_filter=enriched_person,
+                            domain_filter=enriched_domain,
+                            semantic_type_filter=enriched_semantic_type,
+                            date_from=date_from, date_to=date_to,
+                        ))
+                    if sq_scope in ("legislation", "auto"):
+                        sq_results.extend(await self._search_legislation(
+                            decompose_client, sq["query"], min(limit, 8),
+                            enriched_domain or "", None,
+                        ))
+                    return sq_results
+
+                sub_results = await asyncio.gather(*[_run_sub_query(sq) for sq in sub_queries])
+                merged = self._merge_and_dedup(list(sub_results))
+                if merged:
+                    logger.info(
+                        f"Decomposed '{query[:60]}' into {len(sub_queries)} sub-queries "
+                        f"→ {len(merged)} merged results"
+                    )
+                    # Trim to limit, assess quality, and format
+                    merged = merged[:limit]
+                    from .base import ToolResult as _TR
+                    from ..retrieval_guard import assess_retrieval_quality as _arq
+                    retrieval_quality = await _arq(query=query, results=merged, entities=entities)
+                    return self._format_results(
+                        query, merged,
+                        dropped_filters=dropped_filters,
+                        retrieval_quality=retrieval_quality,
+                        graph_context=graph_context_text,
+                        scope_decision=scope_decision,
+                        date_from=date_from,
+                        date_to=date_to,
+                        person_filter=enriched_person,
+                    )
+
         # ── Step 5: Parallel search (asyncio.gather) ──
         client = get_weaviate_client()
         alpha = sector_config_dict.get("hybrid_alpha", 0.5) if sector_config_dict else 0.5
@@ -475,6 +523,9 @@ class SmartSearchTool(EmmaTool):
             retrieval_quality=retrieval_quality,
             graph_context=graph_context_text,
             scope_decision=scope_decision,
+            date_from=date_from,
+            date_to=date_to,
+            person_filter=enriched_person,
         )
 
     # ─── Private helpers ──────────────────────────────────────────────
@@ -953,12 +1004,147 @@ class SmartSearchTool(EmmaTool):
         """Get re-rank weights from sector config or defaults."""
         return sector_config.get("rerank_weights", _DEFAULT_RERANK_WEIGHTS)
 
+    def _is_complex_query(self, query: str) -> bool:
+        """Detect queries that would benefit from decomposition."""
+        from app.core.config import settings as _s
+        if not _s.smart_search_decompose_enabled:
+            return False
+        if len(query) < 80:
+            return False
+
+        query_lower = query.lower()
+
+        # Scope mixing: document + legislation keywords
+        has_doc = any(kw in query_lower for kw in ("contrato", "factura", "nómina", "documento"))
+        has_leg = any(kw in query_lower for kw in ("ley", "estatuto", "código", "real decreto", "artículo", "boe"))
+        if has_doc and has_leg:
+            return True
+
+        # Conjunction with distinct topics
+        conjunctions = (" y ", " además ", " también ", " por otro lado ", " comparar ", " compara ")
+        if any(c in query_lower for c in conjunctions) and len(query) > 100:
+            return True
+
+        return False
+
+    async def _decompose_query(self, query: str) -> List[Dict[str, str]]:
+        """Decompose complex query into sub-queries via PLANNER LLM (~100ms)."""
+        try:
+            from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+            from langchain_core.messages import SystemMessage, HumanMessage
+            from app.agents.llm_models import get_planner_model
+
+            client = get_langfuse_prompt_client()
+            cached = await client.get_prompt("emma_smart_search_decompose")
+            prompt_content = cached.content.replace("{query}", query)
+
+            model = get_planner_model().bind(temperature=0.1, max_tokens=300)
+            response = await model.ainvoke([
+                SystemMessage(content=prompt_content),
+                HumanMessage(content=f"/no_think\n{query}"),
+            ])
+
+            import json as _json
+            content = (response.content or "").strip()
+            # Strip thinking tags if present
+            content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+            sub_queries = _json.loads(content)
+
+            if isinstance(sub_queries, list) and len(sub_queries) >= 2:
+                return sub_queries[:3]  # Cap at 3
+        except Exception as e:
+            logger.warning(f"Query decomposition failed: {e}")
+
+        return []  # Fallback: no decomposition
+
+    def _merge_and_dedup(self, result_sets: List[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+        """Merge results from multiple sub-queries, dedup by document_id."""
+        seen: Set[str] = set()
+        merged: List[Dict[str, Any]] = []
+        for results in result_sets:
+            for r in results:
+                doc_id = r.get("document_id", "")
+                key = doc_id or r.get("title", "")
+                if key and key not in seen:
+                    seen.add(key)
+                    merged.append(r)
+        # Sort by score descending
+        merged.sort(key=lambda r: r.get("score") or 0, reverse=True)
+        return merged
+
+    def _evaluate_results(
+        self,
+        query: str,
+        results: List[Dict[str, Any]],
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        person_filter: Optional[str] = None,
+        dropped_filters: Optional[List[str]] = None,
+    ) -> str:
+        """Inline evaluation of search results for immediate agent feedback.
+
+        Heuristic checks (~0ms, no LLM):
+        1. Temporal mismatch — dates in results vs requested range
+        2. Entity coverage — query entities in result titles/content
+        3. Relevance distribution — average score, single-source bias
+        4. Filter drop notice — which filters were dropped
+        """
+        feedback = []
+
+        # 1. Temporal check
+        if date_from or date_to:
+            result_dates = [r.get("created_at", "") for r in results if r.get("created_at")]
+            if result_dates:
+                in_range = sum(1 for d in result_dates
+                               if (not date_from or d >= date_from) and (not date_to or d <= date_to))
+                if in_range == 0:
+                    feedback.append(
+                        f"- Temporal: Filtro {date_from or '?'}→{date_to or '?'} "
+                        f"pero 0 resultados en rango. Reformula con otros términos."
+                    )
+                elif in_range < len(result_dates):
+                    feedback.append(
+                        f"- Temporal: {in_range}/{len(result_dates)} resultados en el rango solicitado."
+                    )
+
+        # 2. Entity coverage
+        if person_filter and results:
+            matches = sum(1 for r in results
+                          if person_filter.lower() in (r.get("title", "") + r.get("content", "")).lower())
+            if matches == 0:
+                feedback.append(f"- Persona/Entidad: '{person_filter}' no aparece en ningún resultado.")
+
+        # 3. Relevance
+        if results:
+            scores = [r.get("score") or 0 for r in results]
+            avg_score = sum(scores) / len(scores) if scores else 0
+            if avg_score < 0.4:
+                feedback.append(
+                    f"- Relevancia: promedio {avg_score:.2f} (bajo). "
+                    f"Reformula con términos más específicos."
+                )
+            doc_ids = set(r.get("document_id", "") for r in results if r.get("document_id"))
+            if len(doc_ids) == 1 and len(results) > 1:
+                feedback.append("- Fuente única: todos los resultados del mismo documento.")
+
+        # 4. Filter drops
+        if dropped_filters:
+            feedback.append(f"- Filtros descartados (sin resultados): {', '.join(dropped_filters)}.")
+
+        if not feedback:
+            return ""
+
+        return "\n⚠️ EVALUACIÓN DE RESULTADOS:\n" + "\n".join(feedback)
+
     def _format_results(
         self, query: str, results: List[Dict[str, Any]],
         dropped_filters: Optional[List[str]] = None,
         retrieval_quality: Any = None,
         graph_context: str = "",
         scope_decision: Optional[Dict[str, Any]] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        person_filter: Optional[str] = None,
     ) -> ToolResult:
         """Format unified results for LLM consumption."""
         doc_count = sum(1 for r in results if r["type"] == "tenant_document")
@@ -1033,6 +1219,17 @@ class SmartSearchTool(EmmaTool):
             parts.append("---")
             for w in retrieval_quality.warnings:
                 parts.append(w)
+
+        # Inline retrieval feedback (Phase 2 Retrieval Intelligence)
+        from app.core.config import settings as _settings
+        if _settings.smart_search_feedback_enabled:
+            eval_text = self._evaluate_results(
+                query=query, results=results,
+                date_from=date_from, date_to=date_to,
+                person_filter=person_filter, dropped_filters=dropped_filters,
+            )
+            if eval_text:
+                parts.append(eval_text)
 
         data = {"result_count": len(results), "doc_count": doc_count, "leg_count": leg_count}
         if retrieval_quality:

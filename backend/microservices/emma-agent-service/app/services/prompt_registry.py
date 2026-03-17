@@ -352,6 +352,13 @@ PROMPT_REGISTRY: Dict[str, PromptEntry] = {
         section="guard",
     ),
 
+    # ── SmartSearch decomposition ────────────────────────────────────────
+    "emma_smart_search_decompose": PromptEntry(
+        yaml_path=("smart_search", "decompose"),
+        description="Decompose complex search query into independent sub-queries",
+        section="smart_search",
+    ),
+
     # ── Guardrail prompts ─────────────────────────────────────────────────
     "guardrail_medical_dosage_system": PromptEntry(
         yaml_path=("guardrails", "medical_dosage", "system"),

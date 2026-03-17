@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import time
+from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
@@ -83,6 +84,7 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
 
     prompt = await _load_react_system_prompt()
     prompt = prompt.replace("{tools_description}", tools_desc)
+    prompt = prompt.replace("{current_date}", date.today().isoformat())
 
     sector = state.get("sector", "")
     if sector:
