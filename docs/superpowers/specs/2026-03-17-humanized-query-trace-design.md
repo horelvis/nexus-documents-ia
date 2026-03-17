@@ -66,7 +66,7 @@ Only emitted when phase changes (deduplicated — no repeat events for same phas
 }
 ```
 
-### 1.4 Visual behavior
+### 1.3 Visual behavior
 
 - Appears below user message as horizontal breadcrumb
 - Active phase: icon + text + spinner animation (pulse)
@@ -75,7 +75,7 @@ Only emitted when phase changes (deduplicated — no repeat events for same phas
 - On `complete` event: fade-out 300ms, unmount
 - Does NOT persist after response is rendered
 
-### 1.5 i18n labels
+### 1.4 i18n labels
 
 | Phase ID | Spanish | English |
 |----------|---------|---------|
@@ -109,12 +109,12 @@ Skipped when `fast_path_used=True` or `EXPLAIN_ENABLED=false`. The skip is handl
 | `tool_calls_history` | `List[Dict[str, Any]]` | Tool invocations with name, args, timestamps. Extract unique tool names via `{entry["name"] for entry in tool_calls_history}`. |
 | `sector` | `Optional[str]` | legal, medical, or documental (from `ReActState.sector`) |
 | `messages` | `List[BaseMessage]` | Full message sequence (accessed for anti-hallucination validation only — NOT passed to LLM prompt) |
-| `metadata` | `Dict[str, Any]` | Contains `intent` from classify node (access via `metadata.get("intent")`) |
+| `metadata` | `Dict[str, Any]` | Contains `classify_intent` from classify node (access via `metadata.get("classify_intent")`) |
 
 ### 2.3 Output
 
 ```python
-explanation: Optional[str]  # New field in EmmaState
+explanation: Optional[str]  # New field in ReActState
 ```
 
 ### 2.4 Internal pipeline (2 steps)
@@ -248,11 +248,15 @@ interface ExplanationPanelProps {
 
 The `explanation` field requires **explicit wiring** through the streaming pipeline (the adapter is explicit, not passthrough):
 
-1. **`api.py`** (`stream_react_query()`): Include `explanation` in the `complete` event data, alongside `answer`, `sources`, and `metadata`. Read from the graph's final state.
-2. **`langgraph_adapter.py`** (`translate_to_langgraph_sse()`): Forward `explanation` in the final `values` snapshot within the `complete` handler, same as `sources` and `metadata`.
-3. **Frontend**: Read `explanation` from the `values` event state in `useStream()` → map to `EmmaMessage.metadata.explanation`.
+**Critical: streaming loop ordering.** The current `api.py` loop emits `complete` and `break`s when it sees `is_complete=True` (set by `synthesize`). If `explain` runs after `synthesize`, the loop would exit before the explain node's state snapshot arrives. The fix:
 
-No new SSE event type needed — `explanation` rides the existing `complete` → `values` pipeline, but both `api.py` and `langgraph_adapter.py` must be updated to include the new field.
+- **`synthesize` / `synthesize_swarm`**: Continue setting `final_answer` but **stop setting `is_complete=True`** when `EXPLAIN_ENABLED=true`.
+- **`explain` node**: Sets `is_complete=True` after writing `explanation`. On early return (fast_path, disabled), also sets `is_complete=True`.
+- **`api.py`** (`stream_react_query()`): No change needed — it already waits for `is_complete=True`, which now comes from the explain node. Include `explanation` in the `complete` event data: `"explanation": event.get("explanation")`.
+- **`langgraph_adapter.py`** (`translate_to_langgraph_sse()`): Forward `explanation` in the final `values` snapshot within the `complete` handler, alongside `sources` and `metadata`.
+- **Frontend**: Read `explanation` from the `values` event state in `useStream()` → map to `EmmaMessage.metadata.explanation`.
+
+No new SSE event type needed — `explanation` rides the existing `complete` → `values` pipeline. The key change is **who sets `is_complete`**: explain node instead of synthesize.
 
 ### 3.5 File changes summary
 
@@ -275,6 +279,8 @@ No new SSE event type needed — `explanation` rides the existing `complete` →
 |------|--------|------|
 | `nodes/explain.py` | Explain node with fact extraction + LLM + validation | New |
 | `graph.py` | Connect explain after synthesize/synthesize_swarm (simple edges, skip via early return) | Modify |
+| `nodes/synthesize.py` | Stop setting `is_complete=True` when `EXPLAIN_ENABLED=true` (explain node sets it instead) | Modify |
+| `nodes/synthesize_swarm.py` | Same as synthesize — delegate `is_complete` to explain node | Modify |
 | `state.py` | Add `explanation: Optional[str]` | Modify |
 | `api.py` | Include `explanation` in `complete` event data from graph final state | Modify |
 | `langgraph_adapter.py` | Emit `phase_update` events + forward `explanation` in final `values` snapshot | Modify |
