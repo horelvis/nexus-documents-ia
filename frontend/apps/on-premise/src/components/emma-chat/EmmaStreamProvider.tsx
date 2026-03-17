@@ -25,6 +25,7 @@ export type EmmaStateType = {
   fast_path?: boolean
   latency_ms?: number
   metadata?: Record<string, unknown>
+  explanation?: string
 }
 
 type StreamContextType = ReturnType<typeof useStream<EmmaStateType>>

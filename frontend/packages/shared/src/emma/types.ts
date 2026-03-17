@@ -200,6 +200,8 @@ export interface EmmaMessage {
     slmPlan?: SLMPlanReady
     slmIsThinking?: boolean
     slmIsExecuting?: boolean
+    // Humanized reasoning explanation
+    explanation?: string
   }
   suggestions?: string[]
   isStreaming?: boolean
