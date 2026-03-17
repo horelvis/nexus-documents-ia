@@ -321,23 +321,25 @@ async def _check_langfuse_prompt() -> Dict[str, Any]:
         from app.services.langfuse_prompt_client import get_langfuse_prompt_client
         client = get_langfuse_prompt_client()
 
-        # Critical prompts that must exist in Langfuse
-        required = ["emma_react_system", "emma_swarm_decompose"]
-        optional = ["emma_fast_conversational_system", "emma_rewrite_system"]
+        # Validate ALL registered prompts exist in Langfuse
+        from app.services.prompt_registry import PROMPT_REGISTRY
+        all_names = list(PROMPT_REGISTRY.keys())
         loaded = []
-        for name in required + optional:
+        missing = []
+        for name in all_names:
             try:
                 prompt = await client.get_prompt(name)
                 if prompt is not None:
                     loaded.append(name)
+                else:
+                    missing.append(name)
             except Exception:
-                pass  # Optional prompts can fail
+                missing.append(name)
 
         ms = (time.time() - t0) * 1000
-        missing_required = set(required) - set(loaded)
-        if missing_required:
-            return _fail(ms, f"missing required prompts: {missing_required}")
-        return _ok(ms, f"{len(loaded)}/{len(required + optional)} prompts loaded")
+        if missing:
+            return _fail(ms, f"{len(missing)} missing: {', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}")
+        return _ok(ms, f"{len(loaded)}/{len(all_names)} prompts loaded")
     except Exception as e:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
