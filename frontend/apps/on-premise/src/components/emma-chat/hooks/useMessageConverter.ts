@@ -63,6 +63,8 @@ export function useMessageConverter(
   isLoading: boolean,
 ): { messages: EmmaMessage[] } {
   const cacheRef = useRef<EmmaMessage[]>([])
+  // Persist metadata across turns so previous responses keep their reasoning_steps/sources
+  const metadataCacheRef = useRef<Map<string, EmmaMessage['metadata']>>(new Map())
 
   // Derive stable keys for memoization
   const reasoningLen = values?.reasoning_steps?.length ?? 0
@@ -74,6 +76,7 @@ export function useMessageConverter(
   const messages = useMemo(() => {
     const reasoningSteps = values?.reasoning_steps ?? []
     const sources = values?.sources ?? []
+    const metadataCache = metadataCacheRef.current
 
     // 1. Convert SDK messages — filter empty AI (tool-call turns)
     const converted = sdkMessages
@@ -86,8 +89,6 @@ export function useMessageConverter(
         const rawContent = getTextContent(m)
 
         // Detect HITL resume values persisted as human messages by LangGraph.
-        // Command(resume=decision) stores the raw decision dict as a HumanMessage.
-        // Replace with a user-friendly label so it doesn't show raw JSON/Python dict.
         if (m.type === 'human') {
           const friendlyLabel = formatResumeMessage(rawContent)
           if (friendlyLabel) {
@@ -100,12 +101,22 @@ export function useMessageConverter(
           }
         }
 
-        return {
+        const msg: EmmaMessage = {
           id: m.id || `msg-fallback-${m.type}`,
           type: m.type === 'human' ? 'user' : 'result',
           content: rawContent,
           timestamp: new Date(),
-        } as EmmaMessage
+        }
+
+        // Restore cached metadata for previous turns' AI messages
+        if (m.type === 'ai' && msg.id) {
+          const cached = metadataCache.get(msg.id)
+          if (cached) {
+            msg.metadata = cached
+          }
+        }
+
+        return msg
       })
 
     // 2. Attach reasoning steps + sources to the current turn's AI message
@@ -115,7 +126,6 @@ export function useMessageConverter(
         rawReasoningSteps: reasoningSteps,
       }
 
-      // Attach humanized explanation when available (from explain node)
       if (explanation) {
         stepsMetadata!.explanation = explanation
       }
@@ -153,9 +163,14 @@ export function useMessageConverter(
 
       if (currentAiIdx >= 0) {
         // Attach to existing current-turn AI message
+        const merged = { ...converted[currentAiIdx].metadata, ...stepsMetadata }
         converted[currentAiIdx] = {
           ...converted[currentAiIdx],
-          metadata: { ...converted[currentAiIdx].metadata, ...stepsMetadata },
+          metadata: merged,
+        }
+        // Cache completed turn metadata so it persists when next turn starts
+        if (success && converted[currentAiIdx].id) {
+          metadataCache.set(converted[currentAiIdx].id, merged)
         }
       } else {
         // No AI message yet — create a progress placeholder with stable ID
