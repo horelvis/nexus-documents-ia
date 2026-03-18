@@ -3,12 +3,11 @@
  * user-friendly ActivityStep[] for display in the ActivityTimeline.
  *
  * Rules:
- * - Known pipeline steps (routing, thinking) are shown with humanized labels
- *   based on their content patterns (classify, rewrite, memory recall)
- * - LLM internal thinking (no recognized pattern) is silently ignored
+ * - Rewrite (actual reformulation) → shown with new query text
+ * - Memory recall → shown with doc count
  * - A `tool_call` followed by a matching `tool_result` merges into one completed step
  * - A standalone `tool_call` (no result yet) renders as an active step
- * - `response` steps are ignored (the synthesize phase is shown by ActivityTimeline)
+ * - Everything else (thinking, routing, response, error) → ignored
  */
 
 export type ActivityIcon = 'search' | 'read' | 'analyze' | 'web' | 'legal' | 'write' | 'done'
@@ -27,8 +26,6 @@ export interface RawReasoningStep {
 }
 
 // ─── Pipeline step patterns ──────────────────────────────────────────────────
-// Match known content patterns from classify, rewrite, and memory_recall nodes
-// to show pipeline progression in the timeline.
 
 type PipelinePattern = {
   pattern: RegExp
@@ -36,19 +33,16 @@ type PipelinePattern = {
   icon: ActivityIcon
 }
 
-/** Routing steps — only show when the user benefits from knowing */
 const ROUTING_PATTERNS: PipelinePattern[] = [
-  // Rewrite with actual reformulation — user sees their ambiguous query was improved
   {
     pattern: /^Rewrite:\s*'.+'\s*→\s*'(.+)'/,
     text: (m) => `Reformulada: "${m[1]}"`,
     icon: 'analyze',
   },
-  // Everything else (Intent, Rewrite pass-through) — internal plumbing, skip
+  // Catch-all: skip all other routing (Intent, Rewrite pass-through, etc.)
   { pattern: /.*/, text: '', icon: 'analyze' },
 ]
 
-/** Thinking steps — only show memory recall for multi-turn conversations */
 const THINKING_PATTERNS: PipelinePattern[] = [
   {
     pattern: /^Memory recall:\s*(\d+)/,
@@ -57,10 +51,6 @@ const THINKING_PATTERNS: PipelinePattern[] = [
   },
 ]
 
-/**
- * Try to match a routing or thinking step against known pipeline patterns.
- * Returns an ActivityStep if matched, null if the step should be ignored.
- */
 function matchPipelineStep(
   step: RawReasoningStep,
   stepIdx: number,
@@ -70,77 +60,95 @@ function matchPipelineStep(
   for (const { pattern, text, icon } of patterns) {
     const match = step.content.match(pattern)
     if (match) {
-      // Empty text means "skip this step"
       if (text === '') return null
       const label = typeof text === 'function' ? text(match) : text
       return { id: `step-${stepIdx}`, text: label, status: 'completed', icon }
     }
   }
 
-  return null // No pattern matched — ignore
+  return null
 }
 
 // ─── Tool configs ────────────────────────────────────────────────────────────
 
-/** Extract the tool name from a tool_call content string like `tool_name(args...)` */
+/** Extract the tool name from `tool_name(args...)` */
 function extractToolName(content: string): string {
-  const match = content.match(/^(\w+)\(/)
-  return match ? match[1] : ''
+  const m = content.match(/^(\w+)\(/)
+  return m ? m[1] : ''
+}
+
+/** Extract query= arg from tool_call content, truncated */
+function extractQuery(content: string): string {
+  const m = content.match(/query=([^,)]+)/)
+  if (!m) return ''
+  const q = m[1].trim()
+  return q.length > 40 ? q.substring(0, 37) + '...' : q
+}
+
+/** Extract document title from get_document_content result.
+ *  Backend format: "**Documento: Contrato de Servicios**\n..." */
+function extractDocTitle(content: string): string | null {
+  const m = content.match(/\*{0,2}Documento:\s*(.+?)\*{0,2}\s*\n/)
+  return m ? m[1].trim() : null
 }
 
 type ToolConfig = {
   icon: ActivityIcon
-  activeText: string
-  resultText: (content: string) => string
+  activeText: (callContent: string) => string
+  resultText: (resultContent: string) => string
 }
 
 const TOOL_CONFIGS: Record<string, ToolConfig> = {
   smart_search: {
     icon: 'search',
-    activeText: 'Buscando información...',
+    activeText: (call) => {
+      const q = extractQuery(call)
+      return q ? `Buscando "${q}"...` : 'Buscando información...'
+    },
     resultText: (content) => {
-      const match = content.match(/Found (\d+) results/)
-      return match ? `Encontré ${match[1]} documentos relevantes` : 'Documentos encontrados'
+      // Backend: "Se encontraron N resultados para 'query':"
+      const m = content.match(/[Ss]e encontraron (\d+) resultado/)
+      if (m) return `${m[1]} resultados encontrados`
+      if (/[Nn]o se encontraron/.test(content)) return 'Sin resultados'
+      return 'Búsqueda completada'
     },
   },
   get_document_content: {
     icon: 'read',
-    activeText: 'Leyendo documento...',
+    activeText: () => 'Leyendo documento...',
     resultText: (content) => {
-      const fileMatch = content.match(/\b([\w\-.]+\.\w{2,5})\b/)
-      return fileMatch ? `Leí ${fileMatch[1]}` : 'Documento leído'
+      const title = extractDocTitle(content)
+      return title ? `Leí "${title}"` : 'Documento leído'
     },
   },
   structural_query: {
     icon: 'analyze',
-    activeText: 'Consultando el grafo de conocimiento...',
+    activeText: () => 'Consultando el grafo...',
     resultText: (content) => {
-      const match = content.match(/Total de documentos\*{0,2}:\s*(\d+)/)
-      return match ? `El grafo reportó ${match[1]} documentos` : 'Consulta al grafo completada'
+      const m = content.match(/\*{0,2}Total de documentos\*{0,2}:\s*(\d+)/)
+      return m ? `${m[1]} documentos en el grafo` : 'Consulta al grafo completada'
     },
   },
   web_search: {
     icon: 'web',
-    activeText: 'Buscando en internet...',
+    activeText: (call) => {
+      const q = extractQuery(call)
+      return q ? `Buscando en internet "${q}"...` : 'Buscando en internet...'
+    },
     resultText: () => 'Resultados de internet obtenidos',
   },
   search_jurisprudence: {
     icon: 'legal',
-    activeText: 'Buscando jurisprudencia...',
+    activeText: (call) => {
+      const q = extractQuery(call)
+      return q ? `Buscando jurisprudencia: "${q}"...` : 'Buscando jurisprudencia...'
+    },
     resultText: () => 'Jurisprudencia encontrada',
   },
 }
 
 // ─── Main export ───────────────────────────────────────────────────────────────
 
-/**
- * Converts an array of raw LangGraph reasoning steps into ActivityStep[].
- *
- * Handles three categories:
- *  1. Pipeline steps (routing/thinking with known content patterns) → completed steps
- *  2. Tool calls → merged with results when available, or shown as active
- *  3. Everything else (LLM thinking, response, error, unknown) → ignored
- */
 export function humanizeSteps(steps: RawReasoningStep[]): ActivityStep[] {
   const result: ActivityStep[] = []
   let globalIdx = 0
@@ -182,12 +190,12 @@ export function humanizeSteps(steps: RawReasoningStep[]): ActivityStep[] {
       }
 
       if (resultStep !== null) {
-        const text = config ? config.resultText(resultStep.content) : 'Procesando...'
+        const text = config ? config.resultText(resultStep.content) : 'Paso completado'
         result.push({ id: `step-${globalIdx}`, text, status: 'completed', icon })
         globalIdx++
         i = resultIndex + 1
       } else {
-        const text = config?.activeText ?? 'Procesando...'
+        const text = config?.activeText(step.content) ?? 'Procesando...'
         result.push({ id: `step-${globalIdx}`, text, status: 'active', icon })
         globalIdx++
         i++
@@ -195,8 +203,7 @@ export function humanizeSteps(steps: RawReasoningStep[]): ActivityStep[] {
       continue
     }
 
-    // 3. Everything else — skip silently
-    // (tool_result orphans, response, error, unknown types)
+    // 3. Everything else — skip
     i++
   }
 

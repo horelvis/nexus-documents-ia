@@ -3,280 +3,258 @@ import { humanizeSteps } from './humanizeStep'
 import type { RawReasoningStep } from './humanizeStep'
 
 describe('humanizeSteps()', () => {
-  // ─── Empty input ─────────────────────────────────────────────────────────
-  it('returns empty array for empty input', () => {
+  it('returns empty for empty input', () => {
     expect(humanizeSteps([])).toEqual([])
   })
 
-  // ─── Pipeline steps (routing/thinking with known content) ────────────────
+  // ─── Pipeline steps ──────────────────────────────────────────────────────
 
-  it('skips Intent routing (internal plumbing)', () => {
-    const steps: RawReasoningStep[] = [
+  it('skips Intent routing', () => {
+    expect(humanizeSteps([
       { type: 'routing', content: 'Intent: document_query (confidence: 0.85)' },
-    ]
-    expect(humanizeSteps(steps)).toHaveLength(0)
+    ])).toHaveLength(0)
   })
 
-  it('shows rewrite step when query was actually reformulated', () => {
-    const steps: RawReasoningStep[] = [
+  it('shows rewrite when query was reformulated', () => {
+    const result = humanizeSteps([
       { type: 'routing', content: "Rewrite: 'esos contratos' → 'contratos de ACME 2024'" },
-    ]
-    const result = humanizeSteps(steps)
+    ])
     expect(result).toHaveLength(1)
     expect(result[0].text).toBe('Reformulada: "contratos de ACME 2024"')
-    expect(result[0].icon).toBe('analyze')
-    expect(result[0].status).toBe('completed')
   })
 
-  it('skips rewrite pass-through (no history)', () => {
-    const steps: RawReasoningStep[] = [
+  it('skips rewrite pass-throughs', () => {
+    expect(humanizeSteps([
       { type: 'routing', content: 'Rewrite: no history, pass-through' },
-    ]
-    expect(humanizeSteps(steps)).toHaveLength(0)
-  })
-
-  it('skips rewrite pass-through (query already self-contained)', () => {
-    const steps: RawReasoningStep[] = [
+    ])).toHaveLength(0)
+    expect(humanizeSteps([
       { type: 'routing', content: 'Rewrite: query already self-contained' },
-    ]
-    expect(humanizeSteps(steps)).toHaveLength(0)
+    ])).toHaveLength(0)
   })
 
-  it('shows memory recall step with document count', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'thinking', content: 'Memory recall: 5 documentos escaneados → pistas de búsqueda generadas' },
-    ]
-    const result = humanizeSteps(steps)
+  it('shows memory recall with doc count', () => {
+    const result = humanizeSteps([
+      { type: 'thinking', content: 'Memory recall: 5 documentos escaneados → pistas generadas' },
+    ])
     expect(result).toHaveLength(1)
     expect(result[0].text).toBe('Memoria consultada (5 docs)')
-    expect(result[0].icon).toBe('search')
-    expect(result[0].status).toBe('completed')
   })
 
-  it('ignores generic thinking steps (LLM internal reasoning)', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'thinking', content: 'I should analyze the documents carefully...' },
-    ]
-    expect(humanizeSteps(steps)).toHaveLength(0)
+  it('ignores generic thinking (LLM reasoning)', () => {
+    expect(humanizeSteps([
+      { type: 'thinking', content: 'I should analyze carefully...' },
+    ])).toHaveLength(0)
   })
 
-  it('ignores generic routing steps with no recognized pattern', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'routing', content: 'Routing to some unknown handler' },
-    ]
-    expect(humanizeSteps(steps)).toHaveLength(0)
-  })
+  // ─── smart_search — real backend format ──────────────────────────────────
 
-  // ─── Tool call merging ──────────────────────────────────────────────────
-
-  it('merges smart_search tool_call and tool_result into one step', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'smart_search(query=contratos, stores=documents)' },
-      { type: 'tool_result', content: 'Found 5 results for query', source: 'smart_search' },
-    ]
-    const result = humanizeSteps(steps)
+  it('smart_search: extracts count from real backend format', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'smart_search(query=facturas de 2024, scope=documents)' },
+      { type: 'tool_result', content: "Se encontraron 5 resultados para 'facturas de 2024':\n\n1. **Factura_001.pdf**", source: 'smart_search' },
+    ])
     expect(result).toHaveLength(1)
-    expect(result[0].text).toBe('Encontré 5 documentos relevantes')
+    expect(result[0].text).toBe('5 resultados encontrados')
     expect(result[0].status).toBe('completed')
     expect(result[0].icon).toBe('search')
   })
 
-  it('merges get_document_content with filename from result', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'get_document_content(id=abc123)' },
-      { type: 'tool_result', content: 'Content of contrato_servicio.pdf retrieved', source: 'get_document_content' },
-    ]
-    const result = humanizeSteps(steps)
+  it('smart_search: handles "no results" format', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'smart_search(query=nanotecnología)' },
+      { type: 'tool_result', content: "No se encontraron resultados para: 'nanotecnología'", source: 'smart_search' },
+    ])
+    expect(result[0].text).toBe('Sin resultados')
+  })
+
+  it('smart_search: active text includes query', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'smart_search(query=contratos ACME, scope=auto)' },
+    ])
+    expect(result[0].status).toBe('active')
+    expect(result[0].text).toBe('Buscando "contratos ACME"...')
+  })
+
+  // ─── get_document_content — real backend format ─────────────────────────
+
+  it('get_document_content: extracts title from real format', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'get_document_content(document_id=abc123)' },
+      { type: 'tool_result', content: '**Documento: Contrato de Servicios ACME**\nTipo: contrato\nFecha: 2024-01-15\n\nContenido del doc...', source: 'get_document_content' },
+    ])
     expect(result).toHaveLength(1)
-    expect(result[0].text).toBe('Leí contrato_servicio.pdf')
+    expect(result[0].text).toBe('Leí "Contrato de Servicios ACME"')
     expect(result[0].icon).toBe('read')
   })
 
-  it('merges structural_query with document count', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'structural_query(type=count)' },
-      { type: 'tool_result', content: 'Total de documentos**: 42 en el sistema', source: 'structural_query' },
-    ]
-    const result = humanizeSteps(steps)
+  it('get_document_content: falls back to "Documento leído" if no title', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'get_document_content(document_id=xyz)' },
+      { type: 'tool_result', content: 'Raw content without document header...', source: 'get_document_content' },
+    ])
+    expect(result[0].text).toBe('Documento leído')
+  })
+
+  // ─── structural_query — real backend format ─────────────────────────────
+
+  it('structural_query: extracts count from real format', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'structural_query(query=total documentos, max_results=1)' },
+      { type: 'tool_result', content: '**Total de documentos**: 15\n**Desglose por tipo**:\n- contrato: 8', source: 'structural_query' },
+    ])
     expect(result).toHaveLength(1)
-    expect(result[0].text).toBe('El grafo reportó 42 documentos')
+    expect(result[0].text).toBe('15 documentos en el grafo')
     expect(result[0].icon).toBe('analyze')
   })
 
-  it('uses web icon for web_search', () => {
-    const steps: RawReasoningStep[] = [
+  // ─── web_search ─────────────────────────────────────────────────────────
+
+  it('web_search: active text with query', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'web_search(query=noticias Madrid)' },
+    ])
+    expect(result[0].text).toBe('Buscando en internet "noticias Madrid"...')
+  })
+
+  it('web_search: completed text', () => {
+    const result = humanizeSteps([
       { type: 'tool_call', content: 'web_search(query=noticias)' },
-      { type: 'tool_result', content: 'Search results from the internet', source: 'web_search' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(1)
-    expect(result[0].icon).toBe('web')
+      { type: 'tool_result', content: 'Search results...', source: 'web_search' },
+    ])
     expect(result[0].text).toBe('Resultados de internet obtenidos')
+    expect(result[0].icon).toBe('web')
   })
 
-  it('uses legal icon for search_jurisprudence', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'search_jurisprudence(query=sentencia)' },
-      { type: 'tool_result', content: 'Jurisprudencia results returned', source: 'search_jurisprudence' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(1)
+  // ─── search_jurisprudence ───────────────────────────────────────────────
+
+  it('search_jurisprudence: active with query', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'search_jurisprudence(query=despido improcedente)' },
+    ])
+    expect(result[0].text).toBe('Buscando jurisprudencia: "despido improcedente"...')
     expect(result[0].icon).toBe('legal')
-  })
-
-  // ─── Standalone tool calls (active / in-flight) ──────────────────────────
-
-  it('marks standalone tool_call without result as active', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'smart_search(query=facturas)' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(1)
-    expect(result[0].status).toBe('active')
-    expect(result[0].text).toBe('Buscando información...')
-  })
-
-  it('shows correct active text for get_document_content', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'get_document_content(id=xyz)' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result[0].status).toBe('active')
-    expect(result[0].text).toBe('Leyendo documento...')
-  })
-
-  it('shows correct active text for web_search', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'web_search(query=noticias)' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result[0].text).toBe('Buscando en internet...')
   })
 
   // ─── Unknown tool fallback ──────────────────────────────────────────────
 
-  it('shows Procesando... for unknown tools', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'some_unknown_tool(param=value)' },
-      { type: 'tool_result', content: 'Some result returned', source: 'some_unknown_tool' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(1)
-    expect(result[0].text).toBe('Procesando...')
+  it('unknown tool: shows "Paso completado" for completed', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'unknown_tool(param=value)' },
+      { type: 'tool_result', content: 'Some result', source: 'unknown_tool' },
+    ])
+    expect(result[0].text).toBe('Paso completado')
     expect(result[0].icon).toBe('analyze')
   })
 
-  // ─── Silently ignored types ──────────────────────────────────────────────
+  it('unknown tool: shows "Procesando..." when active', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'unknown_tool(param=value)' },
+    ])
+    expect(result[0].text).toBe('Procesando...')
+  })
 
-  it('ignores response steps (synthesize phase)', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'response', content: 'Final answer: ...' },
-    ]
-    expect(humanizeSteps(steps)).toHaveLength(0)
+  // ─── Ignored types ──────────────────────────────────────────────────────
+
+  it('ignores response steps', () => {
+    expect(humanizeSteps([
+      { type: 'response', content: 'Final answer' },
+    ])).toHaveLength(0)
   })
 
   it('ignores error steps', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'error', content: 'Something went wrong' },
-    ]
-    expect(humanizeSteps(steps)).toHaveLength(0)
+    expect(humanizeSteps([
+      { type: 'error', content: 'Something failed' },
+    ])).toHaveLength(0)
+  })
+
+  // ─── Multiple tool calls (distinct steps, no duplicates) ────────────────
+
+  it('multiple different tools produce distinct steps', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'smart_search(query=contratos ACME)' },
+      { type: 'tool_result', content: "Se encontraron 3 resultados para 'contratos ACME':\n...", source: 'smart_search' },
+      { type: 'tool_call', content: 'get_document_content(document_id=abc)' },
+      { type: 'tool_result', content: '**Documento: Contrato ACME 2024**\nTipo: contrato\n\n...', source: 'get_document_content' },
+      { type: 'tool_call', content: 'structural_query(query=total)' },
+      { type: 'tool_result', content: '**Total de documentos**: 10\n...', source: 'structural_query' },
+    ])
+    expect(result).toHaveLength(3)
+    expect(result[0].text).toBe('3 resultados encontrados')
+    expect(result[1].text).toBe('Leí "Contrato ACME 2024"')
+    expect(result[2].text).toBe('10 documentos en el grafo')
+  })
+
+  it('two smart_search calls produce distinguishable steps', () => {
+    const result = humanizeSteps([
+      { type: 'tool_call', content: 'smart_search(query=facturas)' },
+      { type: 'tool_result', content: "Se encontraron 5 resultados para 'facturas':\n...", source: 'smart_search' },
+      { type: 'tool_call', content: 'smart_search(query=contratos laborales)' },
+      { type: 'tool_result', content: "Se encontraron 2 resultados para 'contratos laborales':\n...", source: 'smart_search' },
+    ])
+    expect(result).toHaveLength(2)
+    expect(result[0].text).toBe('5 resultados encontrados')
+    expect(result[1].text).toBe('2 resultados encontrados')
   })
 
   // ─── Full pipeline simulation ────────────────────────────────────────────
 
-  it('shows full pipeline: rewrite → memory → search → read', () => {
-    const steps: RawReasoningStep[] = [
+  it('full pipeline: rewrite → memory → search → read', () => {
+    const result = humanizeSteps([
       { type: 'routing', content: 'Intent: document_query (confidence: 0.92)' },
-      { type: 'routing', content: "Rewrite: 'esos contratos' → 'contratos de trabajo ACME 2024'" },
-      { type: 'thinking', content: 'Memory recall: 3 documentos escaneados → pistas de búsqueda generadas' },
+      { type: 'routing', content: "Rewrite: 'esos contratos' → 'contratos de trabajo ACME'" },
+      { type: 'thinking', content: 'Memory recall: 3 documentos escaneados → pistas generadas' },
       { type: 'thinking', content: 'I need to search for the contracts...' },
-      { type: 'tool_call', content: 'smart_search(query=contratos de trabajo ACME 2024)' },
-      { type: 'tool_result', content: 'Found 4 results for query', source: 'smart_search' },
+      { type: 'tool_call', content: 'smart_search(query=contratos de trabajo ACME)' },
+      { type: 'tool_result', content: "Se encontraron 4 resultados para 'contratos':\n...", source: 'smart_search' },
       { type: 'thinking', content: 'Let me read the most relevant document...' },
-      { type: 'tool_call', content: 'get_document_content(id=doc123)' },
-      { type: 'tool_result', content: 'Content of contrato_ACME.pdf retrieved', source: 'get_document_content' },
+      { type: 'tool_call', content: 'get_document_content(document_id=doc123)' },
+      { type: 'tool_result', content: '**Documento: Contrato ACME 2024**\nTipo: contrato\n\n...', source: 'get_document_content' },
       { type: 'response', content: 'Based on the analysis...' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(4) // rewrite + memory + search + read (Intent skipped)
-    expect(result[0].text).toBe('Reformulada: "contratos de trabajo ACME 2024"')
+    ])
+    expect(result).toHaveLength(4)
+    expect(result[0].text).toBe('Reformulada: "contratos de trabajo ACME"')
     expect(result[1].text).toBe('Memoria consultada (3 docs)')
-    expect(result[2].text).toBe('Encontré 4 documentos relevantes')
-    expect(result[3].text).toBe('Leí contrato_ACME.pdf')
+    expect(result[2].text).toBe('4 resultados encontrados')
+    expect(result[3].text).toBe('Leí "Contrato ACME 2024"')
     expect(result.every(s => s.status === 'completed')).toBe(true)
   })
 
-  it('shows pipeline with active search (streaming mid-tool)', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'routing', content: 'Intent: document_query (confidence: 0.90)' },
-      { type: 'routing', content: 'Rewrite: query already self-contained' },
-      { type: 'thinking', content: 'Memory recall: 2 documentos escaneados → pistas de búsqueda generadas' },
-      { type: 'tool_call', content: 'smart_search(query=facturas 2024)' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(2) // memory + active search (intent+rewrite skipped)
-    expect(result[0].text).toBe('Memoria consultada (2 docs)')
-    expect(result[0].status).toBe('completed')
-    expect(result[1].text).toBe('Buscando información...')
-    expect(result[1].status).toBe('active')
-  })
-
-  it('simple query shows only tool step (no pipeline noise)', () => {
-    const steps: RawReasoningStep[] = [
+  it('simple query: only tool step, no noise', () => {
+    const result = humanizeSteps([
       { type: 'routing', content: 'Intent: structural_query (confidence: 0.95)' },
       { type: 'routing', content: 'Rewrite: no history, pass-through' },
-      { type: 'tool_call', content: 'structural_query(type=count)' },
-      { type: 'tool_result', content: 'Total de documentos**: 15 en el sistema', source: 'structural_query' },
+      { type: 'tool_call', content: 'structural_query(query=total de documentos)' },
+      { type: 'tool_result', content: '**Total de documentos**: 15\n**Desglose...', source: 'structural_query' },
       { type: 'response', content: 'Tienes 15 documentos.' },
-    ]
-    const result = humanizeSteps(steps)
+    ])
     expect(result).toHaveLength(1)
-    expect(result[0].text).toBe('El grafo reportó 15 documentos')
+    expect(result[0].text).toBe('15 documentos en el grafo')
   })
 
-  // ─── Multiple sequential tool calls ──────────────────────────────────────
-
-  it('handles multiple sequential tool calls correctly', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'smart_search(query=contratos)' },
-      { type: 'tool_result', content: 'Found 3 results for query', source: 'smart_search' },
-      { type: 'tool_call', content: 'get_document_content(id=abc)' },
-      { type: 'tool_result', content: 'Content of informe_anual.pdf retrieved', source: 'get_document_content' },
-      { type: 'tool_call', content: 'structural_query(type=count)' },
-      { type: 'tool_result', content: 'Total de documentos**: 10 en el sistema', source: 'structural_query' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(3)
-    expect(result[0].text).toBe('Encontré 3 documentos relevantes')
-    expect(result[1].text).toBe('Leí informe_anual.pdf')
-    expect(result[2].text).toBe('El grafo reportó 10 documentos')
+  it('streaming mid-tool: shows active search with query', () => {
+    const result = humanizeSteps([
+      { type: 'routing', content: 'Intent: document_query (confidence: 0.90)' },
+      { type: 'routing', content: 'Rewrite: query already self-contained' },
+      { type: 'thinking', content: 'Memory recall: 2 documentos escaneados → pistas generadas' },
+      { type: 'tool_call', content: 'smart_search(query=facturas 2024)' },
+    ])
+    expect(result).toHaveLength(2)
+    expect(result[0].text).toBe('Memoria consultada (2 docs)')
+    expect(result[1].text).toBe('Buscando "facturas 2024"...')
+    expect(result[1].status).toBe('active')
   })
 
   // ─── Unique IDs ──────────────────────────────────────────────────────────
 
-  it('assigns unique ids to all steps', () => {
-    const steps: RawReasoningStep[] = [
+  it('assigns unique ids', () => {
+    const result = humanizeSteps([
       { type: 'routing', content: "Rewrite: 'a' → 'b'" },
       { type: 'tool_call', content: 'smart_search(query=a)' },
-      { type: 'tool_result', content: 'Found 1 results for query', source: 'smart_search' },
+      { type: 'tool_result', content: "Se encontraron 1 resultado para 'a':\n...", source: 'smart_search' },
       { type: 'tool_call', content: 'web_search(query=b)' },
-      { type: 'tool_result', content: 'Web results', source: 'web_search' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(3) // rewrite + search + web
+      { type: 'tool_result', content: 'Results', source: 'web_search' },
+    ])
     const ids = result.map(s => s.id)
     expect(new Set(ids).size).toBe(ids.length)
-  })
-
-  // ─── Edge cases ──────────────────────────────────────────────────────────
-
-  it('falls back for smart_search result without count', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'tool_call', content: 'smart_search(query=algo)' },
-      { type: 'tool_result', content: 'No specific count in this result', source: 'smart_search' },
-    ]
-    const result = humanizeSteps(steps)
-    expect(result[0].status).toBe('completed')
-    expect(result[0].text).toBe('Documentos encontrados')
   })
 })
