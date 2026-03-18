@@ -92,12 +92,15 @@ async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
 
     latency_ms = (time.time() - start) * 1000
 
-    # Only add AIMessage if react_loop didn't already set one with the same content
+    # Update the existing AI message (from react_loop) with the guardrail-modified content.
+    # Using the same ID ensures LangGraph's add_messages reducer UPDATES in place
+    # instead of appending a duplicate.
     messages = state.get("messages", [])
-    last_is_answer = (
-        messages and isinstance(messages[-1], AIMessage)
-        and messages[-1].content == final_answer
-    )
+    last_ai_msg = None
+    for msg in reversed(messages):
+        if isinstance(msg, AIMessage) and msg.content:
+            last_ai_msg = msg
+            break
 
     result = {
         "final_answer": final_answer,
@@ -114,7 +117,12 @@ async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
         },
     }
 
-    if not last_is_answer:
+    if last_ai_msg and last_ai_msg.content != final_answer:
+        # Content changed (guardrails added disclaimer) → update existing message by ID
+        result["messages"] = [AIMessage(content=final_answer, id=last_ai_msg.id)]
+    elif not last_ai_msg:
+        # No AI message from react_loop (edge case) → create new one
         result["messages"] = [AIMessage(content=final_answer)]
+    # else: content unchanged → no message update needed
 
     return result

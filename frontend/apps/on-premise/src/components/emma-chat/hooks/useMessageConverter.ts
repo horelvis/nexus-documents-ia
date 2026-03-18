@@ -121,6 +121,23 @@ export function useMessageConverter(
         } as EmmaMessage
       })
 
+    // 1b. Remove prefix-duplicate AI messages (defensive — backend fix is primary).
+    // If synthesize creates a new message instead of updating, the pre-guardrail
+    // response (shorter, no disclaimer) is a prefix of the post-guardrail one.
+    // Keep only the longer version.
+    for (let i = converted.length - 1; i > 0; i--) {
+      const curr = converted[i]
+      const prev = converted[i - 1]
+      if (curr.type === 'result' && prev.type === 'result' && curr.content && prev.content) {
+        if (curr.content.startsWith(prev.content)) {
+          converted.splice(i - 1, 1)
+          i-- // adjust index after removal
+        } else if (prev.content.startsWith(curr.content)) {
+          converted.splice(i, 1)
+        }
+      }
+    }
+
     // 2. Restore cached metadata for previous turns' AI messages
     for (let i = 0; i < converted.length; i++) {
       const msg = converted[i]
