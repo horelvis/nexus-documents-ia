@@ -75,14 +75,6 @@ export function useMessageConverter(
     const reasoningSteps = values?.reasoning_steps ?? []
     const sources = values?.sources ?? []
 
-    if (reasoningSteps.length > 0) {
-      console.log('[useMessageConverter] reasoning_steps update:', {
-        count: reasoningSteps.length,
-        types: reasoningSteps.map(s => s.type),
-        success,
-      })
-    }
-
     // 1. Convert SDK messages — filter empty AI (tool-call turns)
     const converted = sdkMessages
       .filter(

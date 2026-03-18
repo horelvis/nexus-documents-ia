@@ -66,8 +66,8 @@ function StepRow({ step }: { step: ActivityStep }) {
 }
 
 export function ActivityTimeline({ steps, isStreaming, executionTimeMs, className }: ActivityTimelineProps) {
-  // During streaming: auto-expanded; after completion: collapsed by default
-  const [isOpen, setIsOpen] = useState(isStreaming)
+  // Always start expanded — user can collapse manually after reading
+  const [isOpen, setIsOpen] = useState(true)
 
   if (steps.length === 0) return null
 

@@ -436,27 +436,13 @@ function MessageBubble({
           // EMMA response
           <>
             {/* Activity timeline — collapsed summary after completion */}
-            {(() => {
-              const raw = message.metadata?.rawReasoningSteps ?? []
-              const hasExplanation = !!message.metadata?.explanation
-              const humanized = raw.length > 0 ? humanizeSteps(raw) : []
-              console.log('[ActivityTimeline:Result]', {
-                hasExplanation,
-                rawCount: raw.length,
-                rawTypes: raw.map(s => s.type),
-                humanizedCount: humanized.length,
-                humanizedTexts: humanized.map(s => `${s.status}:${s.text}`),
-                messageId: message.id,
-                messageType: message.type,
-              })
-              return hasExplanation && humanized.length > 0 ? (
-                <ActivityTimeline
-                  steps={humanized}
-                  isStreaming={false}
-                  executionTimeMs={message.metadata?.execution_time_ms}
-                />
-              ) : null
-            })()}
+            {(message.metadata?.rawReasoningSteps?.length ?? 0) > 0 && (
+              <ActivityTimeline
+                steps={humanizeSteps(message.metadata!.rawReasoningSteps!)}
+                isStreaming={false}
+                executionTimeMs={message.metadata?.execution_time_ms}
+              />
+            )}
 
             {/* EMMA label - always shown */}
             <div className="flex items-center gap-2">
@@ -628,25 +614,12 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
         )}
 
         {/* Activity timeline — humanized step indicator during streaming */}
-        {(() => {
-          const raw = message.metadata?.rawReasoningSteps ?? []
-          const humanized = raw.length > 0 ? humanizeSteps(raw) : []
-          if (raw.length > 0) {
-            console.log('[ActivityTimeline:Progress]', {
-              rawCount: raw.length,
-              rawTypes: raw.map(s => s.type),
-              humanizedCount: humanized.length,
-              humanizedTexts: humanized.map(s => `${s.status}:${s.text}`),
-              messageId: message.id,
-            })
-          }
-          return humanized.length > 0 ? (
-            <ActivityTimeline
-              steps={humanized}
-              isStreaming={true}
-            />
-          ) : null
-        })()}
+        {(message.metadata?.rawReasoningSteps?.length ?? 0) > 0 && (
+          <ActivityTimeline
+            steps={humanizeSteps(message.metadata!.rawReasoningSteps!)}
+            isStreaming={true}
+          />
+        )}
 
         {/* Workflow steps - shown above content like reasoning */}
         {hasSteps && (
