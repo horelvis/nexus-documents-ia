@@ -67,6 +67,7 @@ keyfile.json
 
 # SSL Certificates
 frontend/certificates/
+frontend/apps/*/certificates/
 
 # Archivos de cobertura de pruebas
 coverage/

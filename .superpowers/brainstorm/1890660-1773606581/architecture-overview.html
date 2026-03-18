@@ -1,0 +1,168 @@
+<h2>EmmaChat UX Redesign — Architecture Overview</h2>
+<p class="subtitle">3-phase roadmap: HITL Protocol → Artifacts Panel → useStream Migration</p>
+
+<div class="section">
+  <h3>Current Architecture</h3>
+  <div class="mockup">
+    <div class="mockup-header">EmmaChat (Today)</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 20px;">
+      <div style="display:flex; gap:12px; align-items:start; margin-bottom:16px;">
+        <div style="background:#e0e7ff; border-radius:8px; padding:8px 14px; max-width:70%;">
+          <div style="font-size:11px; color:#4338ca; margin-bottom:4px;">User</div>
+          Envía email a user@test.com con el contrato
+        </div>
+      </div>
+      <div style="display:flex; gap:12px; align-items:start; margin-bottom:16px; justify-content:flex-start;">
+        <div style="background:#f0fdf4; border-radius:8px; padding:8px 14px; max-width:70%;">
+          <div style="font-size:11px; color:#15803d; margin-bottom:4px;">Emma (SSE progress)</div>
+          <div style="color:#666; font-size:12px;">⏳ Buscando contrato... → 📧 Preparando email...</div>
+        </div>
+      </div>
+      <div style="display:flex; gap:12px; align-items:start; margin-bottom:16px; justify-content:flex-start;">
+        <div style="background:#fef3c7; border:2px solid #f59e0b; border-radius:8px; padding:12px 14px; max-width:75%;">
+          <div style="font-size:11px; color:#92400e; margin-bottom:6px;">⚠️ Confirmation (current HITL)</div>
+          <div style="margin-bottom:8px;">Preview del email a user@test.com</div>
+          <div style="display:flex; gap:8px;">
+            <span style="background:#16a34a; color:white; padding:4px 12px; border-radius:6px; font-size:12px;">✉️ Confirmar envío</span>
+            <span style="background:#dc2626; color:white; padding:4px 12px; border-radius:6px; font-size:12px;">Cancelar</span>
+          </div>
+          <div style="margin-top:8px; font-size:11px; color:#92400e;">❌ No edit — No reject with feedback</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Target Architecture (3 Phases)</h3>
+  <div class="mockup">
+    <div class="mockup-header">EmmaChat Redesigned</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.6; padding: 20px;">
+      <div style="display:flex; gap:0; height:400px;">
+        <!-- Chat area -->
+        <div style="flex:3; border-right:1px solid #e5e7eb; padding:12px; overflow:auto;">
+          <div style="font-size:11px; color:#6b7280; margin-bottom:12px; text-align:center;">— Chat powered by useStream SDK (Phase 3) —</div>
+
+          <div style="display:flex; gap:8px; align-items:start; margin-bottom:12px;">
+            <div style="background:#e0e7ff; border-radius:8px; padding:6px 12px; max-width:70%; font-size:12px;">
+              Envía email a user@test.com con el contrato
+            </div>
+          </div>
+
+          <div style="display:flex; gap:8px; align-items:start; margin-bottom:12px;">
+            <div style="background:#f0fdf4; border-radius:8px; padding:6px 12px; max-width:70%; font-size:12px;">
+              <span style="color:#666;">🔧 smart_search(query="contrato")</span>
+            </div>
+          </div>
+
+          <!-- HITL Interrupt Card -->
+          <div style="background:white; border:2px solid #6366f1; border-radius:12px; padding:16px; margin-bottom:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+              <span style="font-weight:bold; color:#4338ca;">📧 send_email</span>
+              <span style="font-size:11px; color:#6b7280;">Phase 1: HITL Protocol</span>
+            </div>
+
+            <div style="margin-bottom:8px;">
+              <div style="font-size:11px; color:#6b7280; margin-bottom:2px;">To</div>
+              <div style="background:#f3f4f6; padding:6px 10px; border-radius:6px; border:1px solid #d1d5db; font-size:12px;">user@test.com</div>
+            </div>
+            <div style="margin-bottom:8px;">
+              <div style="font-size:11px; color:#6b7280; margin-bottom:2px;">Subject</div>
+              <div style="background:#f3f4f6; padding:6px 10px; border-radius:6px; border:1px solid #d1d5db; font-size:12px;">Contrato de arrendamiento — editable ✏️</div>
+            </div>
+            <div style="margin-bottom:12px;">
+              <div style="font-size:11px; color:#6b7280; margin-bottom:2px;">Body</div>
+              <div style="background:#f3f4f6; padding:6px 10px; border-radius:6px; border:1px solid #d1d5db; font-size:12px; min-height:40px;">Adjunto el contrato solicitado... — editable ✏️</div>
+            </div>
+
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <span style="background:#16a34a; color:white; padding:5px 14px; border-radius:6px; font-size:12px; cursor:pointer;">✅ Approve</span>
+              <span style="background:#f59e0b; color:white; padding:5px 14px; border-radius:6px; font-size:12px; cursor:pointer;">✏️ Edit & Send</span>
+              <span style="background:#dc2626; color:white; padding:5px 14px; border-radius:6px; font-size:12px; cursor:pointer;">❌ Reject</span>
+            </div>
+            <div style="margin-top:8px;">
+              <div style="font-size:11px; color:#6b7280;">Reject reason (optional):</div>
+              <div style="background:#fef2f2; padding:4px 8px; border-radius:4px; border:1px dashed #fca5a5; font-size:11px; color:#991b1b; margin-top:2px;">Share feedback with the agent...</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Artifacts Panel -->
+        <div style="flex:2; padding:12px; background:#fafafa;">
+          <div style="font-size:11px; color:#6b7280; margin-bottom:8px; text-align:center;">— Artifacts Panel (Phase 2) —</div>
+
+          <div style="background:white; border:1px solid #e5e7eb; border-radius:8px; padding:12px; margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-weight:bold; font-size:13px;">📄 Verified Generation</span>
+              <span style="font-size:11px; background:#dcfce7; color:#166534; padding:2px 8px; border-radius:10px;">3/5 claims</span>
+            </div>
+            <div style="font-size:11px;">
+              <div style="display:flex; align-items:center; gap:4px; margin-bottom:4px;">
+                <span style="color:#16a34a;">✓</span> El contrato tiene duración de 3 años
+                <span style="background:#dcfce7; padding:1px 4px; border-radius:3px; font-size:10px;">0.92</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:4px; margin-bottom:4px;">
+                <span style="color:#16a34a;">✓</span> La renta mensual es de 1.200€
+                <span style="background:#dcfce7; padding:1px 4px; border-radius:3px; font-size:10px;">0.88</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:4px; margin-bottom:4px;">
+                <span style="color:#f59e0b;">⏳</span> Verifying claim 3...
+              </div>
+            </div>
+          </div>
+
+          <div style="background:white; border:1px solid #e5e7eb; border-radius:8px; padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-weight:bold; font-size:13px;">🔨 Document Forge</span>
+              <span style="font-size:11px; background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:10px;">Ready</span>
+            </div>
+            <div style="font-size:11px; color:#666;">
+              Template: Contrato de arrendamiento<br>
+              Fields detected: 12/15 filled<br>
+              <span style="color:#16a34a;">Confidence: 87%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Phase Roadmap</h3>
+  <div style="display:flex; gap:16px; flex-wrap:wrap;">
+    <div style="flex:1; min-width:200px; background:#eef2ff; border:2px solid #6366f1; border-radius:12px; padding:16px;">
+      <div style="font-weight:bold; color:#4338ca; margin-bottom:8px;">Phase 1: HITL Protocol</div>
+      <div style="font-size:13px; line-height:1.5;">
+        <div>• HITLRequest protocol</div>
+        <div>• Approve / Edit / Reject UI</div>
+        <div>• Backend interrupt() → SSE</div>
+        <div>• Email + Forge + future tools</div>
+        <div style="color:#6366f1; margin-top:6px; font-size:12px;">~1 week</div>
+      </div>
+    </div>
+    <div style="flex:1; min-width:200px; background:#f0fdf4; border:2px solid #16a34a; border-radius:12px; padding:16px;">
+      <div style="font-weight:bold; color:#15803d; margin-bottom:8px;">Phase 2: Artifacts Panel</div>
+      <div style="font-size:13px; line-height:1.5;">
+        <div>• Side panel component</div>
+        <div>• Verified Gen in panel</div>
+        <div>• Forge results in panel</div>
+        <div>• Resizable + collapsible</div>
+        <div style="color:#16a34a; margin-top:6px; font-size:12px;">~1 week</div>
+      </div>
+    </div>
+    <div style="flex:1; min-width:200px; background:#fef3c7; border:2px solid #f59e0b; border-radius:12px; padding:16px;">
+      <div style="font-weight:bold; color:#92400e; margin-bottom:8px;">Phase 3: useStream SDK</div>
+      <div style="font-size:13px; line-height:1.5;">
+        <div>• Adapter endpoints (backend)</div>
+        <div>• useStream hook (frontend)</div>
+        <div>• Branch switching</div>
+        <div>• Regenerate per-message</div>
+        <div>• Verified Gen as subgraph</div>
+        <div style="color:#d97706; margin-top:6px; font-size:12px;">~2-3 weeks</div>
+      </div>
+    </div>
+  </div>
+</div>
+</content>
+</invoke>

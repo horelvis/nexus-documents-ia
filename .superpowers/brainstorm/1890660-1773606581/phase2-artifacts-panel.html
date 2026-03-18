@@ -1,0 +1,253 @@
+<h2>Phase 2: Artifacts Panel — Verified Generation + Document Forge</h2>
+<p class="subtitle">Persistent side panel replacing floating dialogs. Resizable, collapsible, multi-artifact.</p>
+
+<div class="section">
+  <h3>Layout: Chat + Artifacts Side Panel</h3>
+  <div class="mockup">
+    <div class="mockup-header">EmmaChat with Artifacts Panel Open</div>
+    <div class="mockup-body" style="padding: 0; height: 480px;">
+      <div style="display: flex; height: 100%;">
+        <!-- Chat area (3fr) -->
+        <div style="flex: 3; display: flex; flex-direction: column; border-right: 1px solid #e5e7eb;">
+          <!-- Header -->
+          <div style="padding: 10px 16px; border-bottom: 1px solid #e5e7eb; display:flex; align-items:center; gap:8px;">
+            <span style="font-size: 18px;">🤖</span>
+            <span style="font-weight: bold;">Emma</span>
+            <span style="margin-left:auto; font-size:12px; background:#eef2ff; color:#4338ca; padding:2px 8px; border-radius:10px;">Legal Sector</span>
+          </div>
+
+          <!-- Messages -->
+          <div style="flex: 1; overflow: auto; padding: 16px; font-size: 13px;">
+            <div style="background:#e0e7ff; border-radius:8px; padding:8px 12px; max-width:70%; margin-bottom:12px;">
+              Genera un informe verificado sobre el contrato de arrendamiento
+            </div>
+
+            <div style="background:#f0fdf4; border-radius:8px; padding:8px 12px; max-width:75%; margin-bottom:12px;">
+              <div style="font-size:11px; color:#15803d; margin-bottom:4px;">Emma</div>
+              He iniciado la generación verificada del informe. Puedes seguir el progreso en el panel lateral →
+              <div style="margin-top:8px; display:flex; gap:6px;">
+                <span style="background:#dbeafe; color:#1e40af; padding:2px 8px; border-radius:6px; font-size:11px; cursor:pointer;">📄 Ver en panel</span>
+              </div>
+            </div>
+
+            <div style="background:#f0fdf4; border-radius:8px; padding:8px 12px; max-width:75%; margin-bottom:12px;">
+              <div style="font-size:11px; color:#15803d; margin-bottom:4px;">Emma</div>
+              Mientras se verifica, ¿necesitas algo más? Puedo buscar legislación relevante o analizar cláusulas.
+            </div>
+
+            <div style="background:#e0e7ff; border-radius:8px; padding:8px 12px; max-width:70%; margin-bottom:12px;">
+              Sí, rellena el contrato con Document Forge
+            </div>
+
+            <div style="background:#f0fdf4; border-radius:8px; padding:8px 12px; max-width:75%;">
+              <div style="font-size:11px; color:#15803d; margin-bottom:4px;">Emma</div>
+              Forge ha detectado 12 campos. Revísalos en el panel →
+              <div style="margin-top:8px; display:flex; gap:6px;">
+                <span style="background:#fef3c7; color:#92400e; padding:2px 8px; border-radius:6px; font-size:11px; cursor:pointer;">🔨 Ver Forge</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Input -->
+          <div style="padding: 12px 16px; border-top: 1px solid #e5e7eb;">
+            <div style="background:#f3f4f6; border-radius:10px; padding:10px 14px; display:flex; align-items:center; gap:8px;">
+              <span style="color:#9ca3af; font-size:13px; flex:1;">Escribe tu mensaje...</span>
+              <span style="background:#4338ca; color:white; padding:4px 12px; border-radius:6px; font-size:12px;">Enviar</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Artifacts Panel (2fr) -->
+        <div style="flex: 2; display: flex; flex-direction: column; background: #fafafa;">
+          <!-- Panel Header with tabs -->
+          <div style="padding: 10px 16px; border-bottom: 1px solid #e5e7eb; display:flex; align-items:center; gap:8px; background:white;">
+            <span style="font-weight:bold; font-size:14px;">Artifacts</span>
+            <span style="margin-left:auto; cursor:pointer; color:#6b7280; font-size:18px;">✕</span>
+          </div>
+
+          <!-- Artifact Tabs -->
+          <div style="display:flex; border-bottom:1px solid #e5e7eb; background:white;">
+            <div style="padding:8px 16px; font-size:12px; border-bottom:2px solid #4338ca; color:#4338ca; font-weight:600; cursor:pointer;">
+              📄 Verified Gen
+              <span style="background:#dcfce7; color:#166534; padding:1px 6px; border-radius:8px; font-size:10px; margin-left:4px;">3/5</span>
+            </div>
+            <div style="padding:8px 16px; font-size:12px; color:#6b7280; cursor:pointer;">
+              🔨 Forge
+              <span style="background:#fef3c7; color:#92400e; padding:1px 6px; border-radius:8px; font-size:10px; margin-left:4px;">12 fields</span>
+            </div>
+          </div>
+
+          <!-- Active Artifact Content: Verified Generation -->
+          <div style="flex:1; overflow:auto; padding:16px;">
+            <!-- Progress header -->
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
+              <div style="flex:1; height:6px; background:#e5e7eb; border-radius:3px; overflow:hidden;">
+                <div style="width:60%; height:100%; background:#16a34a; border-radius:3px;"></div>
+              </div>
+              <span style="font-size:11px; color:#6b7280;">3/5 claims</span>
+            </div>
+
+            <!-- Claims list -->
+            <div style="display:flex; flex-direction:column; gap:10px;">
+              <!-- Verified claim -->
+              <div style="background:white; border:1px solid #dcfce7; border-radius:8px; padding:12px;">
+                <div style="display:flex; align-items:start; gap:8px;">
+                  <span style="color:#16a34a; font-size:16px; line-height:1;">✓</span>
+                  <div style="flex:1;">
+                    <div style="font-size:12px; margin-bottom:4px;">El contrato tiene una duración de 3 años renovables</div>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                      <span style="background:#dcfce7; color:#166534; padding:1px 6px; border-radius:6px; font-size:10px;">confidence: 0.92</span>
+                      <span style="background:#dbeafe; color:#1e40af; padding:1px 6px; border-radius:6px; font-size:10px;">corroborated</span>
+                    </div>
+                    <div style="font-size:11px; color:#6b7280; margin-top:4px; font-style:italic;">Verificado contra cláusula 3.1 del contrato</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Verified claim 2 -->
+              <div style="background:white; border:1px solid #dcfce7; border-radius:8px; padding:12px;">
+                <div style="display:flex; align-items:start; gap:8px;">
+                  <span style="color:#16a34a; font-size:16px; line-height:1;">✓</span>
+                  <div style="flex:1;">
+                    <div style="font-size:12px; margin-bottom:4px;">La renta mensual es de 1.200€</div>
+                    <div style="display:flex; gap:6px;">
+                      <span style="background:#dcfce7; color:#166534; padding:1px 6px; border-radius:6px; font-size:10px;">confidence: 0.88</span>
+                      <span style="background:#dcfce7; color:#166534; padding:1px 6px; border-radius:6px; font-size:10px;">fidelity_only</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Verifying claim -->
+              <div style="background:white; border:1px solid #fef3c7; border-radius:8px; padding:12px;">
+                <div style="display:flex; align-items:start; gap:8px;">
+                  <span style="color:#f59e0b; font-size:14px; line-height:1.2;">
+                    <span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span>
+                  </span>
+                  <div style="flex:1;">
+                    <div style="font-size:12px; margin-bottom:4px; color:#92400e;">Verifying: El arrendatario debe depositar fianza de 2 meses...</div>
+                    <div style="font-size:11px; color:#6b7280;">Searching external evidence...</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Pending claims -->
+              <div style="background:#f9fafb; border:1px dashed #d1d5db; border-radius:8px; padding:12px; color:#9ca3af; font-size:12px; text-align:center;">
+                2 claims pending verification
+              </div>
+            </div>
+
+            <!-- HITL Review button (when claims need review) -->
+            <div style="margin-top:16px; padding:12px; background:#fef2f2; border:1px solid #fca5a5; border-radius:8px;">
+              <div style="font-size:12px; color:#991b1b; margin-bottom:8px;">
+                <strong>1 claim needs human review</strong> — low confidence (0.45)
+              </div>
+              <button style="background:#dc2626; color:white; padding:6px 16px; border-radius:6px; font-size:12px; border:none; cursor:pointer;">Review disputed claims</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Panel States</h3>
+  <div style="display:flex; gap:16px; flex-wrap:wrap;">
+    <div class="mockup" style="flex:1; min-width:180px;">
+      <div class="mockup-header">Collapsed (pill)</div>
+      <div class="mockup-body" style="padding:20px; display:flex; justify-content:flex-end;">
+        <div style="background:#4338ca; color:white; padding:6px 14px; border-radius:20px; font-size:12px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+          📄 2 artifacts
+          <span style="background:rgba(255,255,255,0.2); padding:1px 6px; border-radius:8px; font-size:10px;">⏳ 1</span>
+        </div>
+      </div>
+    </div>
+    <div class="mockup" style="flex:1; min-width:180px;">
+      <div class="mockup-header">No artifacts</div>
+      <div class="mockup-body" style="padding:20px; text-align:center;">
+        <div style="color:#9ca3af; font-size:13px;">Panel hidden — no artifacts active</div>
+        <div style="font-size:11px; color:#d1d5db; margin-top:4px;">Appears when Verified Gen or Forge starts</div>
+      </div>
+    </div>
+    <div class="mockup" style="flex:1; min-width:180px;">
+      <div class="mockup-header">Resize handle</div>
+      <div class="mockup-body" style="padding:20px; display:flex; align-items:center; justify-content:center;">
+        <div style="width:4px; height:40px; background:#d1d5db; border-radius:2px; cursor:col-resize;"></div>
+        <div style="font-size:11px; color:#6b7280; margin-left:12px;">Drag to resize<br>Min: 300px<br>Max: 60% viewport</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Forge Tab Content</h3>
+  <div class="mockup">
+    <div class="mockup-header">Document Forge — Field Review</div>
+    <div class="mockup-body" style="padding: 20px; max-width: 400px;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+        <span style="font-size:16px;">🔨</span>
+        <span style="font-weight:bold;">Contrato de arrendamiento</span>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
+        <div style="flex:1; height:6px; background:#e5e7eb; border-radius:3px; overflow:hidden;">
+          <div style="width:80%; height:100%; background:#16a34a; border-radius:3px;"></div>
+        </div>
+        <span style="font-size:11px; color:#6b7280;">12/15 fields</span>
+        <span style="font-size:11px; background:#dcfce7; color:#166534; padding:2px 6px; border-radius:6px;">87%</span>
+      </div>
+
+      <!-- Fields -->
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div style="display:flex; align-items:center; gap:8px; padding:8px; background:#f0fdf4; border-radius:6px;">
+          <span style="color:#16a34a;">✓</span>
+          <span style="font-size:12px; flex:1;">arrendador_nombre</span>
+          <span style="font-size:11px; color:#6b7280;">Juan García López</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; padding:8px; background:#f0fdf4; border-radius:6px;">
+          <span style="color:#16a34a;">✓</span>
+          <span style="font-size:12px; flex:1;">arrendatario_nif</span>
+          <span style="font-size:11px; color:#6b7280;">12345678A</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; padding:8px; background:#fef3c7; border-radius:6px;">
+          <span style="color:#f59e0b;">?</span>
+          <span style="font-size:12px; flex:1; color:#92400e;">fianza_meses</span>
+          <span style="font-size:11px; color:#92400e; font-style:italic;">Not detected</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; padding:8px; background:#fef3c7; border-radius:6px;">
+          <span style="color:#f59e0b;">?</span>
+          <span style="font-size:12px; flex:1; color:#92400e;">clausula_penalizacion</span>
+          <span style="font-size:11px; color:#92400e; font-style:italic;">Not detected</span>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-top:16px;">
+        <button style="background:#4338ca; color:white; padding:8px 16px; border-radius:8px; font-size:12px; border:none; cursor:pointer; flex:1;">✏️ Editar campos</button>
+        <button style="background:#16a34a; color:white; padding:8px 16px; border-radius:8px; font-size:12px; border:none; cursor:pointer; flex:1;">📄 Generar PDF</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Key Behaviors</h3>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; font-size: 13px;">
+    <div style="background: #eef2ff; border-radius: 10px; padding: 14px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">Auto-open</div>
+      Panel opens automatically when Verified Gen or Forge starts. No manual button needed.
+    </div>
+    <div style="background: #f0fdf4; border-radius: 10px; padding: 14px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">Non-blocking</div>
+      Chat continues while artifacts process. User can ask questions while waiting for verification.
+    </div>
+    <div style="background: #fef3c7; border-radius: 10px; padding: 14px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">Tab persistence</div>
+      Multiple artifacts coexist as tabs. Completed artifacts stay until user closes them.
+    </div>
+    <div style="background: #faf5ff; border-radius: 10px; padding: 14px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">Collapse to pill</div>
+      User can collapse panel to a floating pill showing artifact count + status. Click to reopen.
+    </div>
+  </div>
+</div>

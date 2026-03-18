@@ -14,6 +14,14 @@ const nextConfig: NextConfig = {
     return config
   },
 
+  // Exclude LangChain packages from server-side bundling (SSR).
+  // They import React hooks that conflict with Next.js DevTools' segment-explorer
+  // when bundled into the SSR layer. These packages are client-only (useStream).
+  serverExternalPackages: [
+    "@langchain/langgraph-sdk",
+    "@langchain/core",
+  ],
+
   // Enable standalone output for Docker deployments
   output: "standalone",
 

@@ -1,8 +1,8 @@
 "use client"
 
-import React, { useState } from "react"
-import { cn } from "../../../lib"
-import { ChevronRight } from "lucide-react"
+import { useState } from "react"
+import { cn } from "@/lib/utils"
+import { IconChevronRight } from "@tabler/icons-react"
 
 interface ExplanationPanelProps {
   explanation: string | null
@@ -23,7 +23,7 @@ export function ExplanationPanel({ explanation, isLoading, title = "Mi proceso d
         className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
         aria-expanded={isOpen}
       >
-        <ChevronRight
+        <IconChevronRight
           className={cn(
             "h-3 w-3 transition-transform duration-200",
             isOpen && "rotate-90",

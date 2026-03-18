@@ -7,8 +7,8 @@ export { EmmaMarkdownFormat } from "./EmmaMarkdownFormat"
 // Display Components
 export { ThinkingIndicator } from "./displays/Generic/ThinkingIndicator"
 export { WorkflowProgress } from "./displays/Generic/WorkflowProgress"
-export { SLMThinkingDisplay } from "./displays/Generic/SLMThinkingDisplay"
 export { ReasoningDisplay, type ReasoningDisplayProps } from "./displays/Generic/ReasoningDisplay"
+export { ExplanationPanel } from "./displays/Generic/ExplanationPanel"
 
 // Voice Mode Components
 export {
@@ -35,13 +35,7 @@ export type {
   ChainOfThoughtData,
   DisplayRendererProps,
   WorkflowStep,
-  // SLM Router types
-  SLMThinkingStep,
-  SLMThinkingStepType,
   SLMPlanReady,
-  SLMExecutionComplete,
-  SLMStreamEvent,
-  SLMStreamEventType,
   ProgressStage,
 } from "./types"
 
@@ -55,20 +49,3 @@ export type {
   TTSSelectorProps,
   VoiceModeProps,
 } from "./voice"
-
-// Backward compatibility aliases (Elysia -> Emma)
-export { EmmaChat as ElysiaChat } from "./EmmaChat"
-export { EmmaQueryInput as ElysiaQueryInput } from "./EmmaQueryInput"
-export { EmmaRenderChat as ElysiaRenderChat } from "./EmmaRenderChat"
-export { EmmaMarkdownFormat as ElysiaMarkdownFormat } from "./EmmaMarkdownFormat"
-
-export type {
-  ElysiaMessage,
-  ElysiaMessageType,
-  ElysiaChatProps,
-  ElysiaQueryInputProps,
-  ElysiaRenderChatProps,
-  ElysiaMarkdownFormatProps,
-  ElysiaSession,
-  ElysiaApiResponse,
-} from "./types"

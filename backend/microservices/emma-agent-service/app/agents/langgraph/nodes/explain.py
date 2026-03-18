@@ -10,6 +10,7 @@ never sees the original query.
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -46,11 +47,34 @@ FALLBACK_TEMPLATE = "Consulté {n} fuente(s) ({source_names}) utilizando {tools_
 
 # ── Fact extraction (pure Python, deterministic) ─────────────────────────────
 
+# Regex to extract tool name from reasoning_steps content.
+# Real format: "structural_query(query=..., max_results=1)"
+#              "smart_search(query=..., stores=documents)"
+_TOOL_CALL_RE = re.compile(r"^(\w+)\(")
+
+
+def _extract_tool_name(content: str) -> str:
+    """Extract the tool name from a reasoning_step content string.
+
+    The react_loop emits tool_call steps with content like:
+        "structural_query(query=total de documentos, max_results=1)"
+    This extracts "structural_query".
+    """
+    m = _TOOL_CALL_RE.match(content)
+    return m.group(1) if m else ""
+
+
 def extract_facts(
     reasoning_steps: List[Dict[str, Any]],
     sources: List[Dict[str, Any]],
 ) -> List[str]:
-    """Map reasoning_steps to human-readable fact strings.
+    """Extract human-readable facts from reasoning_steps and sources.
+
+    reasoning_steps real schema (from react_loop):
+        {"type": "tool_call", "content": "smart_search(query=contratos)"}
+        {"type": "tool_result", "content": "Found 3 results...", "source": "smart_search"}
+        {"type": "thinking", "content": "..."}
+        {"type": "routing", "content": "Intent: document_query (confidence: 0.85)"}
 
     Only processes known step types; unknown types are silently skipped.
     """
@@ -58,47 +82,51 @@ def extract_facts(
     mentioned_sources: set = set()
 
     for step in reasoning_steps:
-        step_type = step.get("type")
+        step_type = step.get("type", "")
+        content = step.get("content", "")
 
         if step_type == "tool_call":
-            tool_name = step.get("name", "")
+            tool_name = _extract_tool_name(content)
             if tool_name == "smart_search":
-                stores = step.get("stores", "documentos")
-                count = step.get("result_count", 0)
-                facts.append(
-                    f"Busqué en {stores} y encontré {count} resultados"
-                )
+                facts.append("Busqué en documentos y legislación")
             elif tool_name == "search_jurisprudence":
                 facts.append("Busqué jurisprudencia en CENDOJ")
             elif tool_name == "web_search":
                 facts.append("Busqué información en internet")
             elif tool_name == "get_document_content":
-                doc_id = step.get("doc_id", "desconocido")
-                facts.append(
-                    f"Leí el contenido del documento {doc_id}"
-                )
+                facts.append("Leí el contenido de un documento")
             elif tool_name == "structural_query":
                 facts.append(
                     "Realicé una consulta estructural al grafo de conocimiento"
                 )
             elif tool_name == "analyze_domain":
                 facts.append("Realicé un análisis de dominio especializado")
+            elif tool_name == "verified_generation":
+                facts.append("Ejecuté generación verificada claim-by-claim")
+            elif tool_name == "predictive_analysis":
+                facts.append("Ejecuté un análisis predictivo")
+            elif tool_name:
+                human = TOOL_HUMAN_NAMES.get(tool_name, tool_name)
+                facts.append(f"Utilicé {human}")
 
         elif step_type == "tool_result":
-            tool_name = step.get("name", "")
-            if tool_name == "smart_search":
-                title = step.get("title", "")
-                score = step.get("score", 0)
-                if title:
-                    mentioned_sources.add(title)
-                    facts.append(
-                        f"Consulté: {title} (relevancia {score:.0%})"
-                    )
+            source_tool = step.get("source", "")
+            # Extract key numbers from tool results for richer facts
+            if source_tool == "structural_query" and "Total de documentos" in content:
+                # e.g. "**Total de documentos**: 15\n**Desglose..."
+                total_match = re.search(r"Total de documentos\*?\*?:\s*(\d+)", content)
+                if total_match:
+                    facts.append(f"El grafo reportó {total_match.group(1)} documentos")
+            elif source_tool == "smart_search":
+                count_match = re.search(r"(\d+)\s+resultado", content)
+                if count_match:
+                    facts.append(f"La búsqueda devolvió {count_match.group(1)} resultados")
 
-    # Add sources not already mentioned via tool_result
+    # Add sources not already mentioned
     for source in sources:
         title = source.get("title", "")
         if title and title not in mentioned_sources:
+            mentioned_sources.add(title)
             pages = source.get("pages", "")
             if pages:
                 facts.append(f"Fuente utilizada: {title}, páginas {pages}")

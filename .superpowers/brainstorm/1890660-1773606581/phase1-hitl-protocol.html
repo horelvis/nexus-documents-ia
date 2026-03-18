@@ -1,0 +1,210 @@
+<h2>Phase 1: HITL Protocol — Approve / Edit / Reject</h2>
+<p class="subtitle">Generalised interrupt handling for any tool call that needs human review</p>
+
+<div class="section">
+  <h3>Backend Protocol: interrupt() → SSE event</h3>
+  <div class="mockup">
+    <div class="mockup-header">LangGraph Node (Python) — e.g. react_loop</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 12px; padding: 16px; line-height: 1.7; background: #1e1e2e; color: #cdd6f4;">
+<span style="color:#89b4fa">from</span> langgraph.types <span style="color:#89b4fa">import</span> interrupt<br><br>
+<span style="color:#6c7086"># When a tool needs human review:</span><br>
+decision = interrupt({<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"type"</span>: <span style="color:#f9e2af">"hitl_review"</span>,<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"action_request"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"name"</span>: <span style="color:#f9e2af">"send_email"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"args"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"to"</span>: <span style="color:#f9e2af">"user@test.com"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"subject"</span>: <span style="color:#f9e2af">"Contrato de arrendamiento"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"body"</span>: <span style="color:#f9e2af">"Adjunto el contrato..."</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;},<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"description"</span>: <span style="color:#f9e2af">"Enviar email con contrato adjunto"</span>,<br>
+&nbsp;&nbsp;},<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"review_config"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"allowed_decisions"</span>: [<span style="color:#f9e2af">"approve"</span>, <span style="color:#f9e2af">"edit"</span>, <span style="color:#f9e2af">"reject"</span>],<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"editable_fields"</span>: [<span style="color:#f9e2af">"to"</span>, <span style="color:#f9e2af">"subject"</span>, <span style="color:#f9e2af">"body"</span>],<br>
+&nbsp;&nbsp;},<br>
+})<br><br>
+<span style="color:#6c7086"># After resume:</span><br>
+<span style="color:#89b4fa">if</span> decision[<span style="color:#f9e2af">"type"</span>] == <span style="color:#f9e2af">"approve"</span>:<br>
+&nbsp;&nbsp;await registry.execute(<span style="color:#f9e2af">"send_email"</span>, tc_args, context)<br>
+<span style="color:#89b4fa">elif</span> decision[<span style="color:#f9e2af">"type"</span>] == <span style="color:#f9e2af">"edit"</span>:<br>
+&nbsp;&nbsp;await registry.execute(<span style="color:#f9e2af">"send_email"</span>, decision[<span style="color:#f9e2af">"edited_args"</span>], context)<br>
+<span style="color:#89b4fa">elif</span> decision[<span style="color:#f9e2af">"type"</span>] == <span style="color:#f9e2af">"reject"</span>:<br>
+&nbsp;&nbsp;feedback = decision.get(<span style="color:#f9e2af">"message"</span>, <span style="color:#f9e2af">""</span>)<br>
+&nbsp;&nbsp;<span style="color:#6c7086"># Agent receives feedback and adjusts</span>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>SSE Event Format</h3>
+  <div class="mockup">
+    <div class="mockup-header">SSE: event: hitl_review</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 12px; padding: 16px; line-height: 1.7; background: #1e1e2e; color: #cdd6f4;">
+<span style="color:#6c7086">// New SSE event emitted when interrupt() fires</span><br>
+event: <span style="color:#f9e2af">hitl_review</span><br>
+data: {<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"interrupt_id"</span>: <span style="color:#f9e2af">"int_abc123"</span>,<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"action_request"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"name"</span>: <span style="color:#f9e2af">"send_email"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"args"</span>: { <span style="color:#f9e2af">"to"</span>: <span style="color:#f9e2af">"..."</span>, <span style="color:#f9e2af">"subject"</span>: <span style="color:#f9e2af">"..."</span>, <span style="color:#f9e2af">"body"</span>: <span style="color:#f9e2af">"..."</span> },<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"description"</span>: <span style="color:#f9e2af">"Enviar email con contrato adjunto"</span><br>
+&nbsp;&nbsp;},<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"review_config"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"allowed_decisions"</span>: [<span style="color:#f9e2af">"approve"</span>, <span style="color:#f9e2af">"edit"</span>, <span style="color:#f9e2af">"reject"</span>],<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"editable_fields"</span>: [<span style="color:#f9e2af">"to"</span>, <span style="color:#f9e2af">"subject"</span>, <span style="color:#f9e2af">"body"</span>]<br>
+&nbsp;&nbsp;}<br>
+}
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Frontend: HITL Review Card (inline in chat)</h3>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">Approve Mode (default view)</div>
+      <div class="mockup-body" style="padding: 20px;">
+        <div style="border: 2px solid #6366f1; border-radius: 12px; padding: 16px; background: white;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+            <span style="font-size:20px;">📧</span>
+            <span style="font-weight:bold; font-size:15px; color:#4338ca;">send_email</span>
+            <span style="font-size:11px; background:#eef2ff; color:#4338ca; padding:2px 8px; border-radius:10px; margin-left:auto;">Requires approval</span>
+          </div>
+          <div style="font-size:12px; color:#6b7280; margin-bottom:12px; font-style:italic;">Enviar email con contrato adjunto</div>
+
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px; color:#6b7280; margin-bottom:3px; font-weight:600;">To</div>
+            <div style="background:#f9fafb; padding:8px 12px; border-radius:8px; border:1px solid #e5e7eb; font-size:13px;">user@test.com</div>
+          </div>
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px; color:#6b7280; margin-bottom:3px; font-weight:600;">Subject</div>
+            <div style="background:#f9fafb; padding:8px 12px; border-radius:8px; border:1px solid #e5e7eb; font-size:13px;">Contrato de arrendamiento</div>
+          </div>
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px; color:#6b7280; margin-bottom:3px; font-weight:600;">Body</div>
+            <div style="background:#f9fafb; padding:8px 12px; border-radius:8px; border:1px solid #e5e7eb; font-size:13px; min-height:50px;">Adjunto encontrará el contrato de arrendamiento solicitado. Quedo a su disposición para cualquier consulta.</div>
+          </div>
+
+          <div style="display:flex; gap:8px;">
+            <button style="background:#16a34a; color:white; padding:8px 20px; border-radius:8px; font-size:13px; border:none; cursor:pointer; font-weight:600;">✅ Aprobar</button>
+            <button style="background:#f59e0b; color:white; padding:8px 20px; border-radius:8px; font-size:13px; border:none; cursor:pointer; font-weight:600;">✏️ Editar</button>
+            <button style="background:white; color:#dc2626; padding:8px 20px; border-radius:8px; font-size:13px; border:2px solid #dc2626; cursor:pointer; font-weight:600;">Rechazar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mockup">
+      <div class="mockup-header">Edit Mode (after clicking ✏️ Editar)</div>
+      <div class="mockup-body" style="padding: 20px;">
+        <div style="border: 2px solid #f59e0b; border-radius: 12px; padding: 16px; background: white;">
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+            <span style="font-size:20px;">📧</span>
+            <span style="font-weight:bold; font-size:15px; color:#92400e;">send_email — Editing</span>
+            <span style="font-size:11px; background:#fff7ed; color:#92400e; padding:2px 8px; border-radius:10px; margin-left:auto;">Modified</span>
+          </div>
+
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px; color:#6b7280; margin-bottom:3px; font-weight:600;">To</div>
+            <input style="width:100%; padding:8px 12px; border-radius:8px; border:2px solid #f59e0b; font-size:13px; box-sizing:border-box; background:#fffbeb;" value="user@test.com, boss@company.com" readonly>
+          </div>
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px; color:#6b7280; margin-bottom:3px; font-weight:600;">Subject</div>
+            <input style="width:100%; padding:8px 12px; border-radius:8px; border:2px solid #f59e0b; font-size:13px; box-sizing:border-box; background:#fffbeb;" value="RE: Contrato de arrendamiento" readonly>
+          </div>
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px; color:#6b7280; margin-bottom:3px; font-weight:600;">Body</div>
+            <textarea style="width:100%; padding:8px 12px; border-radius:8px; border:2px solid #f59e0b; font-size:13px; box-sizing:border-box; min-height:60px; resize:vertical; background:#fffbeb;" readonly>Adjunto encontrará el contrato de arrendamiento actualizado con las modificaciones acordadas. CC a dirección.</textarea>
+          </div>
+
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button style="background:#f59e0b; color:white; padding:8px 20px; border-radius:8px; font-size:13px; border:none; cursor:pointer; font-weight:600;">📤 Enviar editado</button>
+            <button style="background:white; color:#6b7280; padding:8px 16px; border-radius:8px; font-size:13px; border:1px solid #d1d5db; cursor:pointer;">↩️ Reset</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Reject Mode (with feedback textarea)</h3>
+  <div class="mockup">
+    <div class="mockup-header">Reject — Agent receives feedback</div>
+    <div class="mockup-body" style="padding: 20px; max-width: 500px;">
+      <div style="border: 2px solid #dc2626; border-radius: 12px; padding: 16px; background: white;">
+        <div style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+          <span style="font-size:20px;">📧</span>
+          <span style="font-weight:bold; font-size:15px; color:#dc2626;">send_email — Rejected</span>
+        </div>
+
+        <div style="background:#fef2f2; border-radius:8px; padding:12px; margin-bottom:14px;">
+          <div style="font-size:11px; color:#991b1b; margin-bottom:6px; font-weight:600;">Reason (optional)</div>
+          <textarea style="width:100%; padding:8px 12px; border-radius:8px; border:1px solid #fca5a5; font-size:13px; box-sizing:border-box; min-height:60px; resize:vertical; background:white;" readonly>No envíes el contrato aún, falta la cláusula de penalización. Primero modifica el documento.</textarea>
+        </div>
+
+        <div style="display:flex; gap:8px;">
+          <button style="background:#dc2626; color:white; padding:8px 20px; border-radius:8px; font-size:13px; border:none; cursor:pointer; font-weight:600;">Confirmar rechazo</button>
+          <button style="background:white; color:#6b7280; padding:8px 16px; border-radius:8px; font-size:13px; border:1px solid #d1d5db; cursor:pointer;">Cancelar</button>
+        </div>
+
+        <div style="margin-top:12px; padding:10px; background:#f0fdf4; border-radius:8px; font-size:12px; color:#15803d;">
+          💡 <strong>El agente recibirá tu feedback</strong> y podrá ajustar su siguiente acción. Por ejemplo: "Primero modifica el documento, luego envía."
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Tools que usan HITL Review</h3>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px;">
+    <div style="background: #eef2ff; border-radius: 10px; padding: 14px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">📧 send_email</div>
+      <div style="font-size: 12px; color: #4338ca;">Editable: to, subject, body, attachment_id</div>
+      <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">Decisions: approve, edit, reject</div>
+    </div>
+    <div style="background: #f0fdf4; border-radius: 10px; padding: 14px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">📄 generate_document</div>
+      <div style="font-size: 12px; color: #15803d;">Editable: template, field values</div>
+      <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">Decisions: approve, edit, reject</div>
+    </div>
+    <div style="background: #fef3c7; border-radius: 10px; padding: 14px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">🗑️ delete_document</div>
+      <div style="font-size: 12px; color: #92400e;">Read-only args (no edit)</div>
+      <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">Decisions: approve, reject</div>
+    </div>
+    <div style="background: #faf5ff; border-radius: 10px; padding: 14px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">🔮 Future tools</div>
+      <div style="font-size: 12px; color: #7c3aed;">Any tool can opt-in via review_config</div>
+      <div style="font-size: 11px; color: #6b7280; margin-top: 4px;">Protocol is generic</div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Resume Flow (frontend → backend)</h3>
+  <div class="mockup">
+    <div class="mockup-header">POST /emma/stream/resume</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 12px; padding: 16px; line-height: 1.7; background: #1e1e2e; color: #cdd6f4;">
+<span style="color:#6c7086">// Frontend sends decision to resume interrupted graph</span><br>
+POST /emma/stream/resume<br>
+{<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"thread_id"</span>: <span style="color:#f9e2af">"abc-123"</span>,<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"interrupt_id"</span>: <span style="color:#f9e2af">"int_abc123"</span>,<br>
+&nbsp;&nbsp;<span style="color:#a6e3a1">"decision"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"type"</span>: <span style="color:#f9e2af">"edit"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"edited_args"</span>: {<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"to"</span>: <span style="color:#f9e2af">"user@test.com, boss@company.com"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"subject"</span>: <span style="color:#f9e2af">"RE: Contrato de arrendamiento"</span>,<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#a6e3a1">"body"</span>: <span style="color:#f9e2af">"Adjunto contrato actualizado..."</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;}<br>
+&nbsp;&nbsp;}<br>
+}<br><br>
+<span style="color:#6c7086">// Backend: graph.ainvoke(None, config={"configurable": {</span><br>
+<span style="color:#6c7086">//   "thread_id": thread_id</span><br>
+<span style="color:#6c7086">// }})  ← Command(resume=decision) resumes from interrupt</span>
+    </div>
+  </div>
+</div>

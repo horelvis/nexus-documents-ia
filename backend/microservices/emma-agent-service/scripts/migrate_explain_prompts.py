@@ -37,8 +37,8 @@ EXPLAIN_SYSTEM_PROMPT = """\
 Eres un asistente que explica su proceso de investigación a profesionales.
 Reformula los siguientes hechos verificados en 2-4 frases naturales y claras.
 
-Sector del usuario: {sector}
-Adaptación de tono: {sector_guidance}
+Sector del usuario: {{ sector }}
+Adaptación de tono: {{ sector_guidance }}
 
 Reglas estrictas:
 - NO inventes pasos, fuentes ni datos que no estén en la lista de hechos.
@@ -52,10 +52,10 @@ Reglas estrictas:
 
 EXPLAIN_USER_PROMPT = """\
 Hechos verificados:
-{facts_formatted}
+{{ facts_formatted }}
 
-Herramientas utilizadas: {tools_human_names}
-Fuentes consultadas: {source_names}"""
+Herramientas utilizadas: {{ tools_human_names }}
+Fuentes consultadas: {{ source_names }}"""
 
 
 def get_langfuse_client():
@@ -73,71 +73,50 @@ def get_langfuse_client():
     return Langfuse(public_key=public_key, secret_key=secret_key, host=host), host
 
 
-def migrate_explain_system(langfuse, dry_run: bool) -> bool:
-    """Create emma_explain_system prompt."""
-    print("── emma_explain_system: creating new prompt ──")
+def migrate_prompt(langfuse, name: str, content: str, dry_run: bool, force: bool) -> bool:
+    """Create or update a prompt in Langfuse."""
+    print(f"── {name} ──")
 
-    # Check if already exists
+    exists = False
     try:
-        langfuse.get_prompt(name="emma_explain_system")
-        print("  SKIP: Prompt already exists in Langfuse")
-        return True
+        langfuse.get_prompt(name=name)
+        exists = True
     except Exception:
-        pass  # Expected: prompt doesn't exist yet
+        pass
+
+    if exists and not force:
+        print("  SKIP: Prompt already exists (use --force to overwrite)")
+        return True
+
+    action = "UPDATE" if exists else "CREATE"
 
     if dry_run:
-        print(f"  DRY RUN: Would create prompt ({len(EXPLAIN_SYSTEM_PROMPT)} chars)")
+        print(f"  DRY RUN: Would {action} prompt ({len(content)} chars)")
         return True
 
     langfuse.create_prompt(
-        name="emma_explain_system",
-        prompt=EXPLAIN_SYSTEM_PROMPT,
+        name=name,
+        prompt=content,
         type="text",
         labels=["production"],
         config={"section": "explain", "migrated_by": "humanized_query_trace"},
     )
-    print(f"  OK: Created emma_explain_system ({len(EXPLAIN_SYSTEM_PROMPT)} chars)")
-    return True
-
-
-def migrate_explain_user(langfuse, dry_run: bool) -> bool:
-    """Create emma_explain_user prompt."""
-    print("── emma_explain_user: creating new prompt ──")
-
-    # Check if already exists
-    try:
-        langfuse.get_prompt(name="emma_explain_user")
-        print("  SKIP: Prompt already exists in Langfuse")
-        return True
-    except Exception:
-        pass  # Expected: prompt doesn't exist yet
-
-    if dry_run:
-        print(f"  DRY RUN: Would create prompt ({len(EXPLAIN_USER_PROMPT)} chars)")
-        return True
-
-    langfuse.create_prompt(
-        name="emma_explain_user",
-        prompt=EXPLAIN_USER_PROMPT,
-        type="text",
-        labels=["production"],
-        config={"section": "explain", "migrated_by": "humanized_query_trace"},
-    )
-    print(f"  OK: Created emma_explain_user ({len(EXPLAIN_USER_PROMPT)} chars)")
+    print(f"  OK: {action} {name} ({len(content)} chars)")
     return True
 
 
 def main():
     parser = argparse.ArgumentParser(description="Migrate Explain prompts to Langfuse")
     parser.add_argument("--dry-run", action="store_true", help="Show what would change without modifying Langfuse")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing prompts (creates new version)")
     args = parser.parse_args()
 
     langfuse, host = get_langfuse_client()
     print(f"Connected to Langfuse at {host}\n")
 
     results = []
-    results.append(("emma_explain_system", migrate_explain_system(langfuse, args.dry_run)))
-    results.append(("emma_explain_user", migrate_explain_user(langfuse, args.dry_run)))
+    results.append(("emma_explain_system", migrate_prompt(langfuse, "emma_explain_system", EXPLAIN_SYSTEM_PROMPT, args.dry_run, args.force)))
+    results.append(("emma_explain_user", migrate_prompt(langfuse, "emma_explain_user", EXPLAIN_USER_PROMPT, args.dry_run, args.force)))
 
     print("\n── Summary ──")
     for name, ok in results:

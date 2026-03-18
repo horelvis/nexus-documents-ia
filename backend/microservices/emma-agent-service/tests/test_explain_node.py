@@ -9,26 +9,51 @@ from app.agents.langgraph.nodes.explain import (
     FALLBACK_TEMPLATE,
     explain_node,
     extract_facts,
+    _extract_tool_name,
 )
+
+
+# ── _extract_tool_name tests ──────────────────────────────────────────────
+
+
+def test_extract_tool_name_from_call():
+    """Parses tool name from real react_loop format."""
+    assert _extract_tool_name("smart_search(query=contratos)") == "smart_search"
+    assert _extract_tool_name("structural_query(query=total, max_results=1)") == "structural_query"
+    assert _extract_tool_name("web_search(query=noticias)") == "web_search"
+
+
+def test_extract_tool_name_empty():
+    """Empty or malformed content returns empty string."""
+    assert _extract_tool_name("") == ""
+    assert _extract_tool_name("some random text") == ""
 
 
 # ── extract_facts tests ─────────────────────────────────────────────────────
 
 
 def test_extracts_tool_call_facts():
-    """smart_search tool_call produces a fact."""
+    """Real react_loop tool_call step produces a fact."""
     reasoning_steps = [
-        {
-            "type": "tool_call",
-            "name": "smart_search",
-            "stores": "documentos y legislación",
-            "result_count": 5,
-        }
+        {"type": "tool_call", "content": "smart_search(query=contratos laborales)"},
     ]
     facts = extract_facts(reasoning_steps, [])
     assert len(facts) == 1
-    assert "Busqué en documentos y legislación" in facts[0]
-    assert "5 resultados" in facts[0]
+    assert "documentos y legislación" in facts[0]
+
+
+def test_extracts_structural_query_result():
+    """tool_result from structural_query extracts document count."""
+    reasoning_steps = [
+        {"type": "tool_call", "content": "structural_query(query=total)"},
+        {
+            "type": "tool_result",
+            "content": "**Total de documentos**: 15\n**Desglose por tipo**: 6 contrato(s)",
+            "source": "structural_query",
+        },
+    ]
+    facts = extract_facts(reasoning_steps, [])
+    assert any("15 documentos" in f for f in facts)
 
 
 def test_extracts_source_facts():
@@ -53,11 +78,24 @@ def test_empty_reasoning_steps():
 def test_unknown_step_type_skipped():
     """Unknown step types produce no facts."""
     reasoning_steps = [
-        {"type": "internal_thinking", "content": "hmm..."},
-        {"type": "observation", "content": "I see something"},
+        {"type": "routing", "content": "Intent: document_query (confidence: 0.85)"},
+        {"type": "thinking", "content": "Let me analyze this..."},
     ]
     facts = extract_facts(reasoning_steps, [])
     assert facts == []
+
+
+def test_multiple_tools_produce_facts():
+    """Multiple tool calls each produce a fact."""
+    reasoning_steps = [
+        {"type": "tool_call", "content": "smart_search(query=contratos)"},
+        {"type": "tool_call", "content": "web_search(query=noticias)"},
+        {"type": "tool_call", "content": "search_jurisprudence(query=despido)"},
+    ]
+    facts = extract_facts(reasoning_steps, [])
+    assert len(facts) == 3
+    assert any("internet" in f for f in facts)
+    assert any("CENDOJ" in f for f in facts)
 
 
 # ── explain_node tests ───────────────────────────────────────────────────────
@@ -104,7 +142,7 @@ async def test_generates_explanation(
     state = {
         "fast_path_used": False,
         "reasoning_steps": [
-            {"type": "tool_call", "name": "smart_search", "stores": "documentos", "result_count": 3},
+            {"type": "tool_call", "content": "smart_search(query=contratos)"},
         ],
         "sources": [{"title": "Contrato"}],
         "tool_calls_history": [{"name": "smart_search"}],
@@ -161,7 +199,7 @@ async def test_llm_failure_uses_fallback(mock_settings, mock_llm, mock_sector):
     state = {
         "fast_path_used": False,
         "reasoning_steps": [
-            {"type": "tool_call", "name": "smart_search", "stores": "docs", "result_count": 2},
+            {"type": "tool_call", "content": "smart_search(query=docs)"},
         ],
         "sources": [{"title": "Doc A"}],
         "tool_calls_history": [{"name": "smart_search"}],
@@ -196,7 +234,7 @@ async def test_fabricated_data_uses_fallback(
     state = {
         "fast_path_used": False,
         "reasoning_steps": [
-            {"type": "tool_call", "name": "smart_search", "stores": "docs", "result_count": 1},
+            {"type": "tool_call", "content": "smart_search(query=facturas)"},
         ],
         "sources": [{"title": "Factura ejemplo"}],
         "tool_calls_history": [{"name": "smart_search"}],

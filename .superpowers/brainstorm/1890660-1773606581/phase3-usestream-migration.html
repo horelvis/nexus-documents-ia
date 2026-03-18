@@ -1,0 +1,289 @@
+<h2>Phase 3: useStream SDK Migration</h2>
+<p class="subtitle">Adapter endpoints on emma-agent-service + @langchain/langgraph-sdk on frontend</p>
+
+<div class="section">
+  <h3>Backend: Adapter Endpoints</h3>
+  <div class="mockup">
+    <div class="mockup-header">New endpoints in emma-agent-service (FastAPI)</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 12px; padding: 16px; line-height: 1.8; background: #1e1e2e; color: #cdd6f4;">
+<span style="color:#6c7086"># New file: app/api/langgraph_protocol.py</span><br>
+<span style="color:#6c7086"># Implements LangGraph Server protocol subset for useStream SDK</span><br><br>
+
+<span style="color:#89b4fa">GET</span>  <span style="color:#f9e2af">/api/info</span><br>
+&nbsp;&nbsp;→ {<span style="color:#a6e3a1">"version"</span>: <span style="color:#f9e2af">"1.0"</span>, <span style="color:#a6e3a1">"graphs"</span>: [<span style="color:#f9e2af">"emma-react"</span>]}<br><br>
+
+<span style="color:#89b4fa">GET</span>  <span style="color:#f9e2af">/api/threads</span><br>
+&nbsp;&nbsp;→ Query checkpointer for thread list (by tenant_id)<br>
+&nbsp;&nbsp;→ [{<span style="color:#a6e3a1">"thread_id"</span>: <span style="color:#f9e2af">"..."</span>, <span style="color:#a6e3a1">"created_at"</span>: <span style="color:#f9e2af">"..."</span>, <span style="color:#a6e3a1">"metadata"</span>: {...}}]<br><br>
+
+<span style="color:#89b4fa">GET</span>  <span style="color:#f9e2af">/api/threads/{thread_id}/state</span><br>
+&nbsp;&nbsp;→ Get current graph state from checkpointer<br>
+&nbsp;&nbsp;→ {<span style="color:#a6e3a1">"values"</span>: {<span style="color:#a6e3a1">"messages"</span>: [...], ...}, <span style="color:#a6e3a1">"checkpoint"</span>: {...}}<br><br>
+
+<span style="color:#89b4fa">GET</span>  <span style="color:#f9e2af">/api/threads/{thread_id}/history</span><br>
+&nbsp;&nbsp;→ Checkpoint history for branch switching<br>
+&nbsp;&nbsp;→ [{<span style="color:#a6e3a1">"checkpoint"</span>: {...}, <span style="color:#a6e3a1">"parent_checkpoint"</span>: {...}, ...}]<br><br>
+
+<span style="color:#89b4fa">POST</span> <span style="color:#f9e2af">/api/threads/{thread_id}/runs</span><br>
+&nbsp;&nbsp;← {<span style="color:#a6e3a1">"input"</span>: {<span style="color:#a6e3a1">"messages"</span>: [...]}, <span style="color:#a6e3a1">"stream_mode"</span>: [<span style="color:#f9e2af">"values"</span>]}<br>
+&nbsp;&nbsp;→ SSE stream (LangGraph protocol format)<br><br>
+
+<span style="color:#89b4fa">POST</span> <span style="color:#f9e2af">/api/threads/{thread_id}/runs</span>  <span style="color:#6c7086">(with command)</span><br>
+&nbsp;&nbsp;← {<span style="color:#a6e3a1">"command"</span>: {<span style="color:#a6e3a1">"resume"</span>: {<span style="color:#a6e3a1">"decisions"</span>: [...]}}} <br>
+&nbsp;&nbsp;→ Resume interrupted graph via Command(resume=...)<br><br>
+
+<span style="color:#6c7086"># Auth: same X-API-Key + X-Tenant-ID headers as current endpoints</span><br>
+<span style="color:#6c7086"># Tenant isolation: thread queries filtered by tenant_id</span><br>
+<span style="color:#6c7086"># Old /emma/stream endpoint: kept for backwards compat</span>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>SSE Format: Current → LangGraph Protocol</h3>
+  <div class="split">
+    <div class="mockup">
+      <div class="mockup-header">Current SSE (/emma/stream)</div>
+      <div class="mockup-body" style="font-family: monospace; font-size: 11px; padding: 14px; line-height: 1.7; background: #1e1e2e; color: #cdd6f4;">
+event: <span style="color:#f9e2af">start</span><br>
+data: {}<br><br>
+event: <span style="color:#f9e2af">plan_created</span><br>
+data: {"steps": [...]}<br><br>
+event: <span style="color:#f9e2af">step_start</span><br>
+data: {"agent": "search"}<br><br>
+event: <span style="color:#f9e2af">slm_thinking</span><br>
+data: {"text": "Buscando..."}<br><br>
+event: <span style="color:#f9e2af">step_complete</span><br>
+data: {"findings": 3}<br><br>
+event: <span style="color:#f9e2af">token</span><br>
+data: {"text": "Según"}<br><br>
+event: <span style="color:#f9e2af">confirmation_needed</span><br>
+data: {"options": [...]}<br><br>
+event: <span style="color:#f9e2af">complete</span><br>
+data: {"answer": "...", "sources": [...]}<br><br>
+<span style="color:#f38ba8">Custom events, no standard</span><br>
+<span style="color:#f38ba8">Frontend parses manually</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">New SSE (/api/threads/{id}/runs)</div>
+      <div class="mockup-body" style="font-family: monospace; font-size: 11px; padding: 14px; line-height: 1.7; background: #1e1e2e; color: #cdd6f4;">
+event: <span style="color:#a6e3a1">metadata</span><br>
+data: {"run_id": "..."}<br><br>
+event: <span style="color:#a6e3a1">values</span><br>
+data: {"messages": [<br>
+&nbsp;&nbsp;{"type":"human","content":"..."}]}<br><br>
+event: <span style="color:#a6e3a1">values</span><br>
+data: {"messages": [...,<br>
+&nbsp;&nbsp;{"type":"ai","content":"Según..."}],<br>
+&nbsp;&nbsp;"sources": [...]}<br><br>
+event: <span style="color:#a6e3a1">updates</span><br>
+data: {"classify": {"intent":"doc_query"}}<br><br>
+event: <span style="color:#a6e3a1">updates</span><br>
+data: {"react_loop": {"tool_calls":[...]}}<br><br>
+event: <span style="color:#a6e3a1">interrupts</span><br>
+data: [{"id":"int_1","value":{<br>
+&nbsp;&nbsp;"action_requests":[...],<br>
+&nbsp;&nbsp;"review_configs":[...]}}]<br><br>
+event: <span style="color:#a6e3a1">checkpoint</span><br>
+data: {"id":"cp_1","ts":"..."}<br><br>
+<span style="color:#a6e3a1">Standard LangGraph protocol</span><br>
+<span style="color:#a6e3a1">useStream SDK handles parsing</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Frontend: useStream Integration</h3>
+  <div class="mockup">
+    <div class="mockup-header">EmmaChat.tsx — Before vs After</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="display: flex;">
+        <!-- Before -->
+        <div style="flex: 1; padding: 16px; border-right: 1px solid #e5e7eb;">
+          <div style="font-weight: bold; color: #dc2626; margin-bottom: 10px; font-size: 12px;">BEFORE (~250 lines SSE handling)</div>
+          <div style="font-family: monospace; font-size: 11px; line-height: 1.6; color: #666;">
+            const reader = response.body.getReader()<br>
+            while (true) {<br>
+            &nbsp;&nbsp;const {done, value} = await reader.read()<br>
+            &nbsp;&nbsp;// Manual SSE parsing...<br>
+            &nbsp;&nbsp;if (event === 'plan_created') {...}<br>
+            &nbsp;&nbsp;if (event === 'step_start') {...}<br>
+            &nbsp;&nbsp;if (event === 'step_complete') {...}<br>
+            &nbsp;&nbsp;if (event === 'token') {...}<br>
+            &nbsp;&nbsp;if (event === 'clarification_needed') {...}<br>
+            &nbsp;&nbsp;if (event === 'confirmation_needed') {...}<br>
+            &nbsp;&nbsp;if (event === 'complete') {...}<br>
+            &nbsp;&nbsp;if (event === 'error') {...}<br>
+            }<br>
+            <br>
+            <span style="color:#dc2626;">// + handleClarificationSubmit</span><br>
+            <span style="color:#dc2626;">// + session management</span><br>
+            <span style="color:#dc2626;">// + message state updates</span><br>
+            <span style="color:#dc2626;">// + error retry logic</span>
+          </div>
+        </div>
+        <!-- After -->
+        <div style="flex: 1; padding: 16px;">
+          <div style="font-weight: bold; color: #16a34a; margin-bottom: 10px; font-size: 12px;">AFTER (~30 lines with useStream)</div>
+          <div style="font-family: monospace; font-size: 11px; line-height: 1.6; color: #666;">
+            const stream = useStream({<br>
+            &nbsp;&nbsp;apiUrl: '/api',<br>
+            &nbsp;&nbsp;assistantId: 'emma-react',<br>
+            &nbsp;&nbsp;threadId,<br>
+            &nbsp;&nbsp;onThreadId: setThreadId,<br>
+            })<br>
+            <br>
+            <span style="color:#16a34a;">// Messages: stream.messages</span><br>
+            <span style="color:#16a34a;">// Loading: stream.isLoading</span><br>
+            <span style="color:#16a34a;">// Interrupt: stream.interrupt</span><br>
+            <span style="color:#16a34a;">// Error: stream.error</span><br>
+            <span style="color:#16a34a;">// Submit: stream.submit(input)</span><br>
+            <span style="color:#16a34a;">// Resume: stream.submit({},</span><br>
+            <span style="color:#16a34a;">&nbsp;&nbsp;{command:{resume:decision}})</span><br>
+            <span style="color:#16a34a;">// Branch: stream.setBranch(id)</span><br>
+            <span style="color:#16a34a;">// Regen: stream.submit(null,</span><br>
+            <span style="color:#16a34a;">&nbsp;&nbsp;{checkpoint: parentCp})</span><br>
+            <br>
+            <span style="color:#16a34a;">// All SSE parsing handled by SDK</span><br>
+            <span style="color:#16a34a;">// Thread mgmt built-in</span><br>
+            <span style="color:#16a34a;">// Optimistic updates built-in</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>New UX Features (free from useStream)</h3>
+  <div style="display:flex; gap:16px; flex-wrap:wrap;">
+    <div class="mockup" style="flex:1; min-width:220px;">
+      <div class="mockup-header">Branch Switching</div>
+      <div class="mockup-body" style="padding: 16px;">
+        <div style="background:white; border-radius:8px; padding:10px; border:1px solid #e5e7eb; margin-bottom:8px;">
+          <div style="font-size:12px; color:#666; margin-bottom:6px;">AI response</div>
+          <div style="font-size:13px; margin-bottom:8px;">Encontré 3 facturas...</div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button style="background:#f3f4f6; border:1px solid #d1d5db; padding:2px 8px; border-radius:4px; font-size:11px; cursor:pointer;">←</button>
+            <span style="font-size:11px; color:#6b7280;">2 / 3</span>
+            <button style="background:#f3f4f6; border:1px solid #d1d5db; padding:2px 8px; border-radius:4px; font-size:11px; cursor:pointer;">→</button>
+          </div>
+        </div>
+        <div style="font-size:11px; color:#6b7280;">Navigate between alternative responses from different checkpoint branches</div>
+      </div>
+    </div>
+
+    <div class="mockup" style="flex:1; min-width:220px;">
+      <div class="mockup-header">Regenerate</div>
+      <div class="mockup-body" style="padding: 16px;">
+        <div style="background:white; border-radius:8px; padding:10px; border:1px solid #e5e7eb; margin-bottom:8px;">
+          <div style="font-size:12px; color:#666; margin-bottom:6px;">AI response</div>
+          <div style="font-size:13px; margin-bottom:8px;">No encontré resultados relevantes...</div>
+          <div style="display:flex; align-items:center; gap:6px; opacity:0.7;">
+            <button style="background:white; border:1px solid #d1d5db; padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+              🔄 Regenerar
+            </button>
+            <button style="background:white; border:1px solid #d1d5db; padding:4px 10px; border-radius:6px; font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+              📋 Copiar
+            </button>
+          </div>
+        </div>
+        <div style="font-size:11px; color:#6b7280;">Re-run from parent checkpoint — agent takes a different path</div>
+      </div>
+    </div>
+
+    <div class="mockup" style="flex:1; min-width:220px;">
+      <div class="mockup-header">Thread History</div>
+      <div class="mockup-body" style="padding: 16px;">
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <div style="background:#eef2ff; border-radius:6px; padding:8px 10px; font-size:12px; cursor:pointer; border:1px solid #6366f1;">
+            <div style="font-weight:600;">Contrato arrendamiento</div>
+            <div style="font-size:11px; color:#6b7280;">Hace 2 min</div>
+          </div>
+          <div style="background:white; border-radius:6px; padding:8px 10px; font-size:12px; cursor:pointer; border:1px solid #e5e7eb;">
+            <div>Facturas Q1 2026</div>
+            <div style="font-size:11px; color:#6b7280;">Hace 1 hora</div>
+          </div>
+          <div style="background:white; border-radius:6px; padding:8px 10px; font-size:12px; cursor:pointer; border:1px solid #e5e7eb;">
+            <div>Análisis RGPD</div>
+            <div style="font-size:11px; color:#6b7280;">Ayer</div>
+          </div>
+        </div>
+        <div style="font-size:11px; color:#6b7280; margin-top:8px;">Threads from checkpointer — persistent across sessions</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Verified Generation as Subgraph</h3>
+  <div class="mockup">
+    <div class="mockup-header">Architecture: Verified Gen → LangGraph Subgraph</div>
+    <div class="mockup-body" style="font-family: monospace; font-size: 12px; padding: 16px; line-height: 1.8; background: #1e1e2e; color: #cdd6f4;">
+<span style="color:#6c7086"># Current: Separate SSE endpoint (/emma/verified/stream)</span><br>
+<span style="color:#6c7086"># Target: Subgraph within main ReAct graph</span><br><br>
+
+<span style="color:#89b4fa">Main Graph</span> (emma-react):<br>
+&nbsp;&nbsp;classify → rewrite → memory_recall → react_loop ⟲ → synthesize<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↓ <span style="color:#f9e2af">(tool: verified_generate)</span><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#89b4fa">Verified Subgraph</span>:<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;initialize → extract → evaluate ⟲ → synthesize<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;↑ <span style="color:#f9e2af">interrupt() for HITL review</span><br><br>
+
+<span style="color:#6c7086"># Benefits:</span><br>
+<span style="color:#a6e3a1">• One SSE stream</span> — all events (chat + verified) flow through useStream<br>
+<span style="color:#a6e3a1">• Checkpointed</span> — verified state persists across reconnects<br>
+<span style="color:#a6e3a1">• HITL native</span> — review interrupt uses same protocol as email confirm<br>
+<span style="color:#a6e3a1">• streamSubgraphs: true</span> — frontend receives subgraph events for panel updates<br><br>
+
+<span style="color:#6c7086"># Frontend receives subgraph updates as:</span><br>
+event: <span style="color:#a6e3a1">updates</span><br>
+data: {"verified_subgraph:evaluate": {<br>
+&nbsp;&nbsp;"claims": [...], "current_claim_index": 3, "total_claims": 5<br>
+}}
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Migration Strategy (Incremental)</h3>
+  <div style="display: flex; flex-direction: column; gap: 12px;">
+    <div style="display:flex; gap:12px; align-items:start;">
+      <div style="background:#6366f1; color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:bold; flex-shrink:0;">1</div>
+      <div style="flex:1; background:#eef2ff; border-radius:10px; padding:12px;">
+        <div style="font-weight:bold; margin-bottom:4px;">Spike test: useStream + adapter</div>
+        <div style="font-size:12px; color:#4338ca;">Minimal /api/info + /api/threads/{id}/runs endpoint. Validate useStream connects and receives messages. ~2 days.</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:12px; align-items:start;">
+      <div style="background:#6366f1; color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:bold; flex-shrink:0;">2</div>
+      <div style="flex:1; background:#eef2ff; border-radius:10px; padding:12px;">
+        <div style="font-weight:bold; margin-bottom:4px;">Chat migration: EmmaChat → useStream</div>
+        <div style="font-size:12px; color:#4338ca;">Replace manual SSE with useStream hook. Add interrupt rendering. Old /emma/stream stays as fallback. ~1 week.</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:12px; align-items:start;">
+      <div style="background:#6366f1; color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:bold; flex-shrink:0;">3</div>
+      <div style="flex:1; background:#eef2ff; border-radius:10px; padding:12px;">
+        <div style="font-weight:bold; margin-bottom:4px;">Verified Gen subgraph</div>
+        <div style="font-size:12px; color:#4338ca;">Convert stop-and-go to LangGraph subgraph. Events flow through useStream to artifacts panel. ~1 week.</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:12px; align-items:start;">
+      <div style="background:#6366f1; color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:bold; flex-shrink:0;">4</div>
+      <div style="flex:1; background:#eef2ff; border-radius:10px; padding:12px;">
+        <div style="font-weight:bold; margin-bottom:4px;">Branch switching + regenerate + thread history</div>
+        <div style="font-size:12px; color:#4338ca;">Wire up useStream features to UI components. History endpoint + checkpoint browsing. ~3 days.</div>
+      </div>
+    </div>
+    <div style="display:flex; gap:12px; align-items:start;">
+      <div style="background:#dc2626; color:white; width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:13px; font-weight:bold; flex-shrink:0;">5</div>
+      <div style="flex:1; background:#fef2f2; border-radius:10px; padding:12px;">
+        <div style="font-weight:bold; margin-bottom:4px;">Cleanup: remove old SSE</div>
+        <div style="font-size:12px; color:#dc2626;">Delete /emma/stream, /emma/query, legacy emma.py SSE. Single protocol. ~2 days.</div>
+      </div>
+    </div>
+  </div>
+</div>
