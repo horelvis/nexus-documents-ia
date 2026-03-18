@@ -36,23 +36,19 @@ type PipelinePattern = {
   icon: ActivityIcon
 }
 
-/** Routing steps that map to visible pipeline stages */
+/** Routing steps — only show when the user benefits from knowing */
 const ROUTING_PATTERNS: PipelinePattern[] = [
-  {
-    pattern: /^Intent:\s*(\S+)/,
-    text: (m) => `Clasificada como ${m[1].replace(/_/g, ' ')}`,
-    icon: 'analyze',
-  },
+  // Rewrite with actual reformulation — user sees their ambiguous query was improved
   {
     pattern: /^Rewrite:\s*'.+'\s*→\s*'(.+)'/,
-    text: 'Consulta reformulada',
+    text: (m) => `Reformulada: "${m[1]}"`,
     icon: 'analyze',
   },
-  // Rewrite pass-throughs — skip (no visible step needed)
-  { pattern: /^Rewrite:\s*(no history|query already|skipped)/, text: '', icon: 'analyze' },
+  // Everything else (Intent, Rewrite pass-through) — internal plumbing, skip
+  { pattern: /.*/, text: '', icon: 'analyze' },
 ]
 
-/** Thinking steps that map to visible pipeline stages */
+/** Thinking steps — only show memory recall for multi-turn conversations */
 const THINKING_PATTERNS: PipelinePattern[] = [
   {
     pattern: /^Memory recall:\s*(\d+)/,

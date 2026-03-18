@@ -10,24 +10,20 @@ describe('humanizeSteps()', () => {
 
   // ─── Pipeline steps (routing/thinking with known content) ────────────────
 
-  it('shows classify step from Intent routing', () => {
+  it('skips Intent routing (internal plumbing)', () => {
     const steps: RawReasoningStep[] = [
       { type: 'routing', content: 'Intent: document_query (confidence: 0.85)' },
     ]
-    const result = humanizeSteps(steps)
-    expect(result).toHaveLength(1)
-    expect(result[0].text).toBe('Clasificada como document query')
-    expect(result[0].icon).toBe('analyze')
-    expect(result[0].status).toBe('completed')
+    expect(humanizeSteps(steps)).toHaveLength(0)
   })
 
-  it('shows rewrite step when query was reformulated', () => {
+  it('shows rewrite step when query was actually reformulated', () => {
     const steps: RawReasoningStep[] = [
       { type: 'routing', content: "Rewrite: 'esos contratos' → 'contratos de ACME 2024'" },
     ]
     const result = humanizeSteps(steps)
     expect(result).toHaveLength(1)
-    expect(result[0].text).toBe('Consulta reformulada')
+    expect(result[0].text).toBe('Reformulada: "contratos de ACME 2024"')
     expect(result[0].icon).toBe('analyze')
     expect(result[0].status).toBe('completed')
   })
@@ -42,13 +38,6 @@ describe('humanizeSteps()', () => {
   it('skips rewrite pass-through (query already self-contained)', () => {
     const steps: RawReasoningStep[] = [
       { type: 'routing', content: 'Rewrite: query already self-contained' },
-    ]
-    expect(humanizeSteps(steps)).toHaveLength(0)
-  })
-
-  it('skips rewrite when skipped due to error', () => {
-    const steps: RawReasoningStep[] = [
-      { type: 'routing', content: 'Rewrite: skipped (error: timeout)' },
     ]
     expect(humanizeSteps(steps)).toHaveLength(0)
   })
@@ -195,7 +184,7 @@ describe('humanizeSteps()', () => {
 
   // ─── Full pipeline simulation ────────────────────────────────────────────
 
-  it('shows full pipeline: classify → rewrite → memory → search → read', () => {
+  it('shows full pipeline: rewrite → memory → search → read', () => {
     const steps: RawReasoningStep[] = [
       { type: 'routing', content: 'Intent: document_query (confidence: 0.92)' },
       { type: 'routing', content: "Rewrite: 'esos contratos' → 'contratos de trabajo ACME 2024'" },
@@ -209,13 +198,11 @@ describe('humanizeSteps()', () => {
       { type: 'response', content: 'Based on the analysis...' },
     ]
     const result = humanizeSteps(steps)
-    expect(result).toHaveLength(5)
-    expect(result[0].text).toBe('Clasificada como document query')
-    expect(result[1].text).toBe('Consulta reformulada')
-    expect(result[2].text).toBe('Memoria consultada (3 docs)')
-    expect(result[3].text).toBe('Encontré 4 documentos relevantes')
-    expect(result[4].text).toBe('Leí contrato_ACME.pdf')
-    // All completed
+    expect(result).toHaveLength(4) // rewrite + memory + search + read (Intent skipped)
+    expect(result[0].text).toBe('Reformulada: "contratos de trabajo ACME 2024"')
+    expect(result[1].text).toBe('Memoria consultada (3 docs)')
+    expect(result[2].text).toBe('Encontré 4 documentos relevantes')
+    expect(result[3].text).toBe('Leí contrato_ACME.pdf')
     expect(result.every(s => s.status === 'completed')).toBe(true)
   })
 
@@ -225,16 +212,26 @@ describe('humanizeSteps()', () => {
       { type: 'routing', content: 'Rewrite: query already self-contained' },
       { type: 'thinking', content: 'Memory recall: 2 documentos escaneados → pistas de búsqueda generadas' },
       { type: 'tool_call', content: 'smart_search(query=facturas 2024)' },
-      // No tool_result yet — search in progress
     ]
     const result = humanizeSteps(steps)
-    expect(result).toHaveLength(3) // classify + memory + active search (rewrite skipped)
-    expect(result[0].text).toBe('Clasificada como document query')
+    expect(result).toHaveLength(2) // memory + active search (intent+rewrite skipped)
+    expect(result[0].text).toBe('Memoria consultada (2 docs)')
     expect(result[0].status).toBe('completed')
-    expect(result[1].text).toBe('Memoria consultada (2 docs)')
-    expect(result[1].status).toBe('completed')
-    expect(result[2].text).toBe('Buscando información...')
-    expect(result[2].status).toBe('active')
+    expect(result[1].text).toBe('Buscando información...')
+    expect(result[1].status).toBe('active')
+  })
+
+  it('simple query shows only tool step (no pipeline noise)', () => {
+    const steps: RawReasoningStep[] = [
+      { type: 'routing', content: 'Intent: structural_query (confidence: 0.95)' },
+      { type: 'routing', content: 'Rewrite: no history, pass-through' },
+      { type: 'tool_call', content: 'structural_query(type=count)' },
+      { type: 'tool_result', content: 'Total de documentos**: 15 en el sistema', source: 'structural_query' },
+      { type: 'response', content: 'Tienes 15 documentos.' },
+    ]
+    const result = humanizeSteps(steps)
+    expect(result).toHaveLength(1)
+    expect(result[0].text).toBe('El grafo reportó 15 documentos')
   })
 
   // ─── Multiple sequential tool calls ──────────────────────────────────────
@@ -259,13 +256,14 @@ describe('humanizeSteps()', () => {
 
   it('assigns unique ids to all steps', () => {
     const steps: RawReasoningStep[] = [
-      { type: 'routing', content: 'Intent: document_query (confidence: 0.85)' },
+      { type: 'routing', content: "Rewrite: 'a' → 'b'" },
       { type: 'tool_call', content: 'smart_search(query=a)' },
       { type: 'tool_result', content: 'Found 1 results for query', source: 'smart_search' },
       { type: 'tool_call', content: 'web_search(query=b)' },
       { type: 'tool_result', content: 'Web results', source: 'web_search' },
     ]
     const result = humanizeSteps(steps)
+    expect(result).toHaveLength(3) // rewrite + search + web
     const ids = result.map(s => s.id)
     expect(new Set(ids).size).toBe(ids.length)
   })
