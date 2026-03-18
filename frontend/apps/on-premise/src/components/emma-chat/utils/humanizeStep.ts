@@ -3,9 +3,12 @@
  * user-friendly ActivityStep[] for display in the ActivityTimeline.
  *
  * Rules:
- * - `thinking` and `routing` steps are silently ignored
+ * - Known pipeline steps (routing, thinking) are shown with humanized labels
+ *   based on their content patterns (classify, rewrite, memory recall)
+ * - LLM internal thinking (no recognized pattern) is silently ignored
  * - A `tool_call` followed by a matching `tool_result` merges into one completed step
  * - A standalone `tool_call` (no result yet) renders as an active step
+ * - `response` steps are ignored (the synthesize phase is shown by ActivityTimeline)
  */
 
 export type ActivityIcon = 'search' | 'read' | 'analyze' | 'web' | 'legal' | 'write' | 'done'
@@ -23,7 +26,65 @@ export interface RawReasoningStep {
   source?: string
 }
 
-// ─── Internal helpers ──────────────────────────────────────────────────────────
+// ─── Pipeline step patterns ──────────────────────────────────────────────────
+// Match known content patterns from classify, rewrite, and memory_recall nodes
+// to show pipeline progression in the timeline.
+
+type PipelinePattern = {
+  pattern: RegExp
+  text: string | ((match: RegExpMatchArray) => string)
+  icon: ActivityIcon
+}
+
+/** Routing steps that map to visible pipeline stages */
+const ROUTING_PATTERNS: PipelinePattern[] = [
+  {
+    pattern: /^Intent:\s*(\S+)/,
+    text: (m) => `Clasificada como ${m[1].replace(/_/g, ' ')}`,
+    icon: 'analyze',
+  },
+  {
+    pattern: /^Rewrite:\s*'.+'\s*→\s*'(.+)'/,
+    text: 'Consulta reformulada',
+    icon: 'analyze',
+  },
+  // Rewrite pass-throughs — skip (no visible step needed)
+  { pattern: /^Rewrite:\s*(no history|query already|skipped)/, text: '', icon: 'analyze' },
+]
+
+/** Thinking steps that map to visible pipeline stages */
+const THINKING_PATTERNS: PipelinePattern[] = [
+  {
+    pattern: /^Memory recall:\s*(\d+)/,
+    text: (m) => `Memoria consultada (${m[1]} docs)`,
+    icon: 'search',
+  },
+]
+
+/**
+ * Try to match a routing or thinking step against known pipeline patterns.
+ * Returns an ActivityStep if matched, null if the step should be ignored.
+ */
+function matchPipelineStep(
+  step: RawReasoningStep,
+  stepIdx: number,
+): ActivityStep | null {
+  const patterns = step.type === 'routing' ? ROUTING_PATTERNS : THINKING_PATTERNS
+
+  for (const { pattern, text, icon } of patterns) {
+    const match = step.content.match(pattern)
+    if (match) {
+      // Empty text means "skip this step"
+      if (text === '') return null
+      const label = typeof text === 'function' ? text(match) : text
+      return { id: `step-${stepIdx}`, text: label, status: 'completed', icon }
+    }
+  }
+
+  return null // No pattern matched — ignore
+}
+
+// ─── Tool configs ────────────────────────────────────────────────────────────
 
 /** Extract the tool name from a tool_call content string like `tool_name(args...)` */
 function extractToolName(content: string): string {
@@ -50,7 +111,6 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     icon: 'read',
     activeText: 'Leyendo documento...',
     resultText: (content) => {
-      // Extract a filename: a word (no spaces) containing a dot followed by 2-5 chars extension
       const fileMatch = content.match(/\b([\w\-.]+\.\w{2,5})\b/)
       return fileMatch ? `Leí ${fileMatch[1]}` : 'Documento leído'
     },
@@ -75,84 +135,73 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
   },
 }
 
-const IGNORED_TYPES = new Set(['thinking', 'routing'])
-
 // ─── Main export ───────────────────────────────────────────────────────────────
 
 /**
  * Converts an array of raw LangGraph reasoning steps into ActivityStep[].
  *
- * Merging strategy:
- *  - Iterates sequentially; when a `tool_call` is encountered, look-ahead for
- *    the next `tool_result` with a matching source/tool name.
- *  - If found → emit one completed step, advance past both.
- *  - If not found → emit one active step (in-flight tool call).
+ * Handles three categories:
+ *  1. Pipeline steps (routing/thinking with known content patterns) → completed steps
+ *  2. Tool calls → merged with results when available, or shown as active
+ *  3. Everything else (LLM thinking, response, error, unknown) → ignored
  */
 export function humanizeSteps(steps: RawReasoningStep[]): ActivityStep[] {
   const result: ActivityStep[] = []
-
-  // Filter out ignored step types upfront for cleaner indexing
-  const relevant = steps.filter((s) => !IGNORED_TYPES.has(s.type))
+  let globalIdx = 0
 
   let i = 0
-  while (i < relevant.length) {
-    const step = relevant[i]
+  while (i < steps.length) {
+    const step = steps[i]
 
+    // 1. Pipeline steps — routing and thinking with recognized content
+    if (step.type === 'routing' || step.type === 'thinking') {
+      const pipelineStep = matchPipelineStep(step, globalIdx)
+      if (pipelineStep) {
+        result.push(pipelineStep)
+        globalIdx++
+      }
+      i++
+      continue
+    }
+
+    // 2. Tool calls — merge with result when available
     if (step.type === 'tool_call') {
       const toolName = extractToolName(step.content)
       const config = TOOL_CONFIGS[toolName]
       const icon: ActivityIcon = config?.icon ?? 'analyze'
 
       // Look for the next tool_result that belongs to this tool_call
-      // (same tool name, appears before any other tool_call)
       let resultStep: RawReasoningStep | null = null
       let resultIndex = -1
-      for (let j = i + 1; j < relevant.length; j++) {
-        if (relevant[j].type === 'tool_call') {
-          // Another tool_call before any result — stop looking
-          break
-        }
+      for (let j = i + 1; j < steps.length; j++) {
+        if (steps[j].type === 'tool_call') break
         if (
-          relevant[j].type === 'tool_result' &&
-          (relevant[j].source === toolName || extractToolName(step.content) === toolName)
+          steps[j].type === 'tool_result' &&
+          (steps[j].source === toolName || extractToolName(step.content) === toolName)
         ) {
-          resultStep = relevant[j]
+          resultStep = steps[j]
           resultIndex = j
           break
         }
       }
 
       if (resultStep !== null) {
-        // Merged completed step
-        const text = config
-          ? config.resultText(resultStep.content)
-          : 'Procesando...'
-        result.push({
-          id: `step-${i}`,
-          text,
-          status: 'completed',
-          icon,
-        })
-        // Skip past the result we consumed
+        const text = config ? config.resultText(resultStep.content) : 'Procesando...'
+        result.push({ id: `step-${globalIdx}`, text, status: 'completed', icon })
+        globalIdx++
         i = resultIndex + 1
       } else {
-        // Active (in-flight) step
         const text = config?.activeText ?? 'Procesando...'
-        result.push({
-          id: `step-${i}`,
-          text,
-          status: 'active',
-          icon,
-        })
-        i += 1
+        result.push({ id: `step-${globalIdx}`, text, status: 'active', icon })
+        globalIdx++
+        i++
       }
-    } else if (step.type === 'tool_result') {
-      // Orphaned tool_result not consumed by a preceding tool_call — skip silently
-      i += 1
-    } else {
-      // Any other step type not in ignored list but also not tool_call/result — skip
-      i += 1
+      continue
     }
+
+    // 3. Everything else — skip silently
+    // (tool_result orphans, response, error, unknown types)
+    i++
   }
 
   return result
