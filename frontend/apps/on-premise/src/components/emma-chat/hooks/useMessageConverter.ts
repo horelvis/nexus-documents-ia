@@ -76,16 +76,18 @@ export function useMessageConverter(
     const reasoningSteps = values?.reasoning_steps ?? []
     const sources = values?.sources ?? []
 
-    // 0. Deduplicate SDK messages by ID (last occurrence wins — preserves streaming updates).
-    // The SDK's `values` events reset MessageTupleManager's index tracking, so late
-    // `messages` events for already-present IDs get appended as duplicates.
+    // 0. Deduplicate SDK messages by ID (first occurrence wins — keeps correct position).
+    // When a `values` event delivers [h1, a1, h2] and a late `messages` event re-appends
+    // a1 at the end → [h1, a1, h2, a1']. First-wins keeps [h1, a1, h2] (correct order).
+    // Last-wins would produce [h1, h2, a1'] — wrong position for a1.
     const dedupedSdk = (() => {
-      const seen = new Map<string, number>()
-      for (let i = 0; i < sdkMessages.length; i++) {
-        const id = sdkMessages[i].id
-        if (id) seen.set(id, i)
-      }
-      return sdkMessages.filter((m, i) => !m.id || seen.get(m.id) === i)
+      const seen = new Set<string>()
+      return sdkMessages.filter((m) => {
+        if (!m.id) return true
+        if (seen.has(m.id)) return false
+        seen.add(m.id)
+        return true
+      })
     })()
 
     // 1. Convert SDK messages — filter empty AI (tool-call turns)
