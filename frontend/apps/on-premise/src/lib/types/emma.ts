@@ -378,6 +378,10 @@ export interface EmmaMessage {
     slmIsThinking?: boolean
     slmThinkingSteps?: SLMThinkingStep[]
     stage?: string
+    // Humanized reasoning explanation (from explain node)
+    explanation?: string
+    // Raw reasoning steps for ActivityTimeline
+    rawReasoningSteps?: Array<{ type: string; content: string; source?: string }>
   }
   suggestions?: string[]
   isStreaming?: boolean

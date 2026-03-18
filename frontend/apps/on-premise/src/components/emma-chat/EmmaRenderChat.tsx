@@ -5,12 +5,13 @@ import { IconAlertCircle, IconThumbUp, IconThumbDown, IconRotate, IconCircleChec
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
-import { EmmaMessage, WorkflowStep, DocumentInfo, SLMThinkingStep, ReasoningStep, ClarificationData } from '@/lib/types/emma'
+import { EmmaMessage, WorkflowStep, DocumentInfo, ClarificationData } from '@/lib/types/emma'
+import { ActivityTimeline } from './ActivityTimeline'
+import { humanizeSteps } from './utils/humanizeStep'
 import { EmmaMarkdown } from './EmmaMarkdown'
 import { DocumentDisplay } from './DocumentDisplay'
-import { ReasoningCollapsible } from './ReasoningCollapsible'
+import { ExplanationPanel } from './ExplanationPanel'
 import { VerifiedDocumentResult } from './VerifiedDocumentResult'
 import { PredictionResult } from './PredictionResult'
 import { DocGenResult } from './DocGenResult'
@@ -199,9 +200,8 @@ function MessageBubble({
     return <PredictionResult metadata={message.predictive} />
   }
 
-  // Document generation result — wrapped with EMMA label + reasoning steps
+  // Document generation result — wrapped with EMMA label + explanation
   if (message.type === 'docgen_result' && message.docgen) {
-    const docgenSlmSteps = message.metadata?.slmThinkingSteps || []
     return (
       <div className="w-full">
         <div className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
@@ -212,20 +212,6 @@ function MessageBubble({
               EMMA:
             </span>
           </div>
-
-          {/* Reasoning steps (if any) */}
-          {docgenSlmSteps.length > 0 && (
-            <ReasoningCollapsible
-              steps={docgenSlmSteps.map((s: SLMThinkingStep) => ({
-                type: s.type as ReasoningStep['type'],
-                content: s.content,
-                detail: s.detail,
-                entities: s.entities,
-                confidence: s.confidence,
-              }))}
-              isActive={false}
-            />
-          )}
 
           {/* Document generation card */}
           <DocGenResult metadata={message.docgen} />
@@ -292,7 +278,6 @@ function MessageBubble({
 
   // Document Forge result — analyze/render/persist
   if (message.type === 'forge_result' && message.forge) {
-    const forgeSlmSteps = message.metadata?.slmThinkingSteps || []
     return (
       <div className="w-full">
         <div className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
@@ -300,19 +285,10 @@ function MessageBubble({
             <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
             <span className="text-xs font-mono text-primary uppercase tracking-wide">EMMA:</span>
           </div>
-          {forgeSlmSteps.length > 0 && (
-            <ReasoningCollapsible
-              steps={forgeSlmSteps.map((s: SLMThinkingStep) => ({
-                type: s.type as ReasoningStep['type'],
-                content: s.content,
-                detail: s.detail,
-                entities: s.entities,
-                confidence: s.confidence,
-              }))}
-              isActive={false}
-            />
-          )}
           <ForgeResult metadata={message.forge} />
+          {message.metadata?.explanation && (
+            <ExplanationPanel explanation={message.metadata.explanation} />
+          )}
         </div>
       </div>
     )
@@ -459,6 +435,15 @@ function MessageBubble({
         ) : (
           // EMMA response
           <>
+            {/* Activity timeline — collapsed summary after completion */}
+            {message.metadata?.explanation && (message.metadata?.rawReasoningSteps?.length ?? 0) > 0 && (
+              <ActivityTimeline
+                steps={humanizeSteps(message.metadata!.rawReasoningSteps!)}
+                isStreaming={false}
+                executionTimeMs={message.metadata?.execution_time_ms}
+              />
+            )}
+
             {/* EMMA label - always shown */}
             <div className="flex items-center gap-2">
               <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
@@ -479,25 +464,6 @@ function MessageBubble({
                 </span>
               </div>
             )}
-
-            {/* Reasoning steps (collapsed after completion, expandable) */}
-            {(() => {
-              const slmSteps = message.metadata?.slmThinkingSteps || []
-              if (slmSteps.length === 0) return null
-              const allSteps: ReasoningStep[] = slmSteps.map((s: SLMThinkingStep) => ({
-                type: s.type as ReasoningStep['type'],
-                content: s.content,
-                detail: s.detail,
-                entities: s.entities,
-                confidence: s.confidence,
-              }))
-              return (
-                <ReasoningCollapsible
-                  steps={allSteps}
-                  isActive={false}
-                />
-              )
-            })()}
 
               {/* Response content */}
               <EmmaMarkdown content={message.content} />
@@ -524,6 +490,11 @@ function MessageBubble({
                   />
                 </div>
               )}
+
+            {/* Humanized explanation panel */}
+            {message.metadata?.explanation && (
+              <ExplanationPanel explanation={message.metadata.explanation} />
+            )}
 
             {/* Suggestions */}
             {message.suggestions && message.suggestions.length > 0 && (
@@ -605,10 +576,8 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
   const streamingText = message.metadata?.streaming_text || ''
   const hasStreamingText = streamingText.trim().length > 0
 
-  // SLM thinking steps
-  const slmThinkingSteps = message.metadata?.slmThinkingSteps || []
+  // Reasoning active indicator
   const slmIsThinking = message.metadata?.slmIsThinking ?? false
-  const hasSLMThinking = slmThinkingSteps.length > 0 || slmIsThinking
 
   // Get current agent name from metadata or steps
   const currentAgent = message.metadata?.agent ||
@@ -644,17 +613,11 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
           </div>
         )}
 
-        {/* SLM Thinking Display - collapsible chain-of-thought */}
-        {hasSLMThinking && (
-          <ReasoningCollapsible
-            steps={slmThinkingSteps.map((s: SLMThinkingStep) => ({
-              type: s.type as ReasoningStep['type'],
-              content: s.content,
-              detail: s.detail,
-              entities: s.entities,
-              confidence: s.confidence,
-            }))}
-            isActive={slmIsThinking}
+        {/* Activity timeline — humanized step indicator during streaming */}
+        {(message.metadata?.rawReasoningSteps?.length ?? 0) > 0 && (
+          <ActivityTimeline
+            steps={humanizeSteps(message.metadata!.rawReasoningSteps!)}
+            isStreaming={true}
           />
         )}
 
@@ -675,7 +638,7 @@ function ProgressBubble({ message }: { message: EmmaMessage }) {
               <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse ml-0.5 align-middle" />
             )}
           </div>
-        ) : !hasSLMThinking && !hasSteps ? (
+        ) : !slmIsThinking && !hasSteps ? (
           <ThinkingIndicator />
         ) : null}
 
@@ -758,11 +721,10 @@ function LoadingBubble() {
           <span className="h-2 w-2 rounded-full bg-primary animate-pulse ml-auto" />
         </div>
 
-        {/* Loading skeleton */}
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-full bg-primary/10" />
-          <Skeleton className="h-4 w-3/4 bg-primary/10" />
-          <Skeleton className="h-4 w-1/2 bg-primary/10" />
+        {/* Thinking indicator */}
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>Procesando</span>
+          <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" />
         </div>
       </Card>
     </div>

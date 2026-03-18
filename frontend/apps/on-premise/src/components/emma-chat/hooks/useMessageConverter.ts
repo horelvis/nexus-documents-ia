@@ -9,7 +9,7 @@
  */
 import { useMemo, useRef } from 'react'
 import type { Message as SDKMessage } from '@langchain/langgraph-sdk'
-import type { EmmaMessage, SLMThinkingStep, DocumentInfo } from '@/lib/types/emma'
+import type { EmmaMessage, DocumentInfo } from '@/lib/types/emma'
 import type { EmmaStateType } from '../EmmaStreamProvider'
 import { isHITLReview, isClarification } from '../types/interrupts'
 
@@ -57,19 +57,6 @@ function formatResumeMessage(content: string): string | null {
   return null
 }
 
-/** Map adapter reasoning_step.type to SLMThinkingStepType */
-function mapReasoningType(type: string): SLMThinkingStep['type'] {
-  const mapping: Record<string, SLMThinkingStep['type']> = {
-    thinking: 'thinking',
-    tool_call: 'searching',
-    tool_result: 'search_result',
-    reasoning: 'thinking',
-    search: 'searching',
-    analysis: 'analyzing',
-  }
-  return mapping[type] ?? 'thinking'
-}
-
 export function useMessageConverter(
   sdkMessages: SDKMessage[],
   values: EmmaStateType | undefined,
@@ -81,6 +68,7 @@ export function useMessageConverter(
   const reasoningLen = values?.reasoning_steps?.length ?? 0
   const sourcesLen = values?.sources?.length ?? 0
   const success = values?.success
+  const explanation = values?.explanation
   const interrupt = values?.__interrupt__
 
   const messages = useMemo(() => {
@@ -121,14 +109,15 @@ export function useMessageConverter(
       })
 
     // 2. Attach reasoning steps + sources to the current turn's AI message
-    if (reasoningSteps.length > 0 || sources.length > 0) {
+    if (reasoningSteps.length > 0 || sources.length > 0 || explanation) {
       const stepsMetadata: EmmaMessage['metadata'] = {
         slmIsThinking: !success && reasoningSteps.length > 0,
-        slmThinkingSteps: reasoningSteps.map((s, idx) => ({
-          step: idx + 1,
-          type: mapReasoningType(s.type),
-          content: s.content,
-        })),
+        rawReasoningSteps: reasoningSteps,
+      }
+
+      // Attach humanized explanation when available (from explain node)
+      if (explanation) {
+        stepsMetadata!.explanation = explanation
       }
 
       if (sources.length > 0) {
@@ -216,7 +205,7 @@ export function useMessageConverter(
 
     return converted
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sdkMessages, reasoningLen, sourcesLen, success, interrupt])
+  }, [sdkMessages, reasoningLen, sourcesLen, success, explanation, interrupt])
 
   // Flash-disappear prevention: cache last non-empty conversion
   if (messages.length > 0) {
