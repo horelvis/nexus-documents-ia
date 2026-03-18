@@ -594,6 +594,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         reasoning_steps.append({
             "type": StepType.TOOL_CALL.value,
             "content": f"{tc_name}({_summarize_args(tc_args)})",
+            "summary": _humanize_tool_call(tc_name, tc_args),
         })
         # Track for stuck detection
         tool_calls_history.append({
@@ -739,6 +740,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             "type": StepType.OBSERVATION.value,
             "content": observation[:300],
             "source": tc_name,
+            "summary": _humanize_tool_result(tc_name, tc["args"], result),
         })
 
     # ─── HITL: Email confirmation interrupt ────────────────────────────
@@ -897,3 +899,85 @@ def _summarize_args(args: Dict[str, Any], max_length: int = 100) -> str:
     if len(result) > max_length:
         result = result[:max_length - 3] + "..."
     return result
+
+
+# ─── Humanized summaries for ActivityTimeline ─────────────────────────────────
+# These are short, user-facing labels shown in the frontend timeline.
+# Built from structured data (ToolResult.data, tool args), NOT regex on output text.
+
+_TOOL_CALL_LABELS = {
+    "smart_search": lambda args: f"Buscando \"{args.get('query', '')[:40]}\"...",
+    "get_document_content": lambda args: "Leyendo documento...",
+    "structural_query": lambda args: "Consultando el grafo...",
+    "web_search": lambda args: f"Buscando en internet \"{args.get('query', '')[:40]}\"...",
+    "search_jurisprudence": lambda args: f"Buscando jurisprudencia: \"{args.get('query', '')[:40]}\"...",
+    "analyze_domain": lambda args: "Realizando análisis especializado...",
+    "verified_generation": lambda args: "Ejecutando generación verificada...",
+    "predictive_analysis": lambda args: "Ejecutando análisis predictivo...",
+    "list_sources": lambda args: "Explorando fuentes disponibles...",
+    "query_connector": lambda args: "Consultando conector externo...",
+    "generate_document": lambda args: "Generando documento...",
+    "forge_document": lambda args: "Creando documento PDF...",
+    "send_email": lambda args: f"Enviando email a {args.get('to', '...')}...",
+}
+
+
+def _humanize_tool_call(name: str, args: Dict[str, Any]) -> str:
+    """User-facing label for a tool call (active/in-progress)."""
+    fn = _TOOL_CALL_LABELS.get(name)
+    if fn:
+        try:
+            return fn(args)
+        except Exception:
+            pass
+    return "Procesando..."
+
+
+def _humanize_tool_result(name: str, args: Dict[str, Any], result) -> str:
+    """User-facing label for a completed tool result.
+
+    Uses ToolResult.data (structured) and args — never parses output text.
+    """
+    data = result.data if result.data else {}
+
+    if name == "smart_search":
+        count = data.get("result_count")
+        if count is not None:
+            return f"{count} resultados encontrados"
+        if not result.success:
+            return "Sin resultados"
+        return "Búsqueda completada"
+
+    if name == "get_document_content":
+        title = data.get("title") or ""
+        if not title and result.sources:
+            title = result.sources[0].get("title", "")
+        return f"Leí \"{title}\"" if title else "Documento leído"
+
+    if name == "structural_query":
+        raw = data.get("raw_data") or {}
+        count = raw.get("count") or raw.get("total")
+        if count is not None:
+            return f"{count} documentos en el grafo"
+        return "Consulta al grafo completada"
+
+    if name == "web_search":
+        return "Resultados de internet obtenidos"
+
+    if name == "search_jurisprudence":
+        count = data.get("result_count")
+        return f"{count} sentencias encontradas" if count else "Jurisprudencia encontrada"
+
+    if name == "analyze_domain":
+        return "Análisis especializado completado"
+
+    if name == "send_email":
+        return f"Email preparado para {args.get('to', '...')}"
+
+    if name == "generate_document":
+        return "Documento generado"
+
+    if name == "forge_document":
+        return "PDF creado"
+
+    return "Paso completado"

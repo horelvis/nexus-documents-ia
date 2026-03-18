@@ -23,6 +23,8 @@ export interface RawReasoningStep {
   type: string
   content: string
   source?: string
+  /** Pre-humanized label from the backend — used directly when present */
+  summary?: string
 }
 
 // ─── Pipeline step patterns ──────────────────────────────────────────────────
@@ -190,12 +192,16 @@ export function humanizeSteps(steps: RawReasoningStep[]): ActivityStep[] {
       }
 
       if (resultStep !== null) {
-        const text = config ? config.resultText(resultStep.content) : 'Paso completado'
+        // Prefer backend summary → frontend regex fallback
+        const text = resultStep.summary
+          || (config ? config.resultText(resultStep.content) : 'Paso completado')
         result.push({ id: `step-${globalIdx}`, text, status: 'completed', icon })
         globalIdx++
         i = resultIndex + 1
       } else {
-        const text = config?.activeText(step.content) ?? 'Procesando...'
+        const text = step.summary
+          || config?.activeText(step.content)
+          || 'Procesando...'
         result.push({ id: `step-${globalIdx}`, text, status: 'active', icon })
         globalIdx++
         i++

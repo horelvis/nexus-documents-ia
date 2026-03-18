@@ -368,15 +368,17 @@ async def stream_react_query(
                 step_type = step.get("type", "reasoning")
 
                 # Map step types to SSE event types
+                # summary (optional): pre-humanized label for frontend ActivityTimeline
+                summary = step.get("summary")
                 if step_type == "thinking":
                     yield {
                         "type": "thinking",
-                        "data": {"content": step.get("content", "")},
+                        "data": {"content": step.get("content", ""), **({"summary": summary} if summary else {})},
                     }
                 elif step_type == "tool_call":
                     yield {
                         "type": "tool_call",
-                        "data": {"content": step.get("content", "")},
+                        "data": {"content": step.get("content", ""), **({"summary": summary} if summary else {})},
                     }
                 elif step_type == "observation":
                     yield {
@@ -384,6 +386,7 @@ async def stream_react_query(
                         "data": {
                             "content": step.get("content", ""),
                             "source": step.get("source", ""),
+                            **({"summary": summary} if summary else {}),
                         },
                     }
                 else:
@@ -392,6 +395,7 @@ async def stream_react_query(
                         "data": {
                             "step_type": step_type,
                             "content": step.get("content", ""),
+                            **({"summary": summary} if summary else {}),
                         },
                     }
 

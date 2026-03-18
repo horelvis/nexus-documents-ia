@@ -138,7 +138,10 @@ async def translate_to_langgraph_sse(
             elif event_type == "tool_call":
                 content = data.get("content", "")
                 if content:
-                    reasoning_steps.append({"type": "tool_call", "content": content})
+                    step = {"type": "tool_call", "content": content}
+                    if data.get("summary"):
+                        step["summary"] = data["summary"]
+                    reasoning_steps.append(step)
                     yield _sse_line("updates", {
                         "react_loop": {"type": "tool_call", "content": content},
                     })
@@ -154,11 +157,10 @@ async def translate_to_langgraph_sse(
                 content = data.get("content", "")
                 source = data.get("source", "")
                 if content:
-                    reasoning_steps.append({
-                        "type": "tool_result",
-                        "content": content,
-                        "source": source,
-                    })
+                    step = {"type": "tool_result", "content": content, "source": source}
+                    if data.get("summary"):
+                        step["summary"] = data["summary"]
+                    reasoning_steps.append(step)
                     yield _sse_line("updates", {
                         "react_loop": {
                             "type": "tool_result",
@@ -178,10 +180,10 @@ async def translate_to_langgraph_sse(
                 step_type = data.get("step_type", "reasoning")
                 content = data.get("content", "")
                 if content:
-                    reasoning_steps.append({
-                        "type": step_type,
-                        "content": content,
-                    })
+                    step = {"type": step_type, "content": content}
+                    if data.get("summary"):
+                        step["summary"] = data["summary"]
+                    reasoning_steps.append(step)
                     yield _sse_line("updates", {
                         "react_loop": {"type": step_type, "content": content},
                     })

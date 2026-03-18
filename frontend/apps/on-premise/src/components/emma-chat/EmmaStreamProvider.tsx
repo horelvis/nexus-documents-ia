@@ -14,6 +14,7 @@ export type EmmaStateType = {
     type: string
     content: string
     source?: string
+    summary?: string
   }>
   sources?: Array<Record<string, unknown>>
   __interrupt__?: Array<{
