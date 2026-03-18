@@ -7,7 +7,7 @@
  * 3. Stable placeholder IDs: `progress-current` and `interrupt-{type}` (NOT Date.now())
  * 4. Flash-disappear cache: useRef cache for when SDK briefly empties messages
  */
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import type { Message as SDKMessage } from '@langchain/langgraph-sdk'
 import type { EmmaMessage, DocumentInfo } from '@/lib/types/emma'
 import type { EmmaStateType } from '../EmmaStreamProvider'
@@ -63,6 +63,7 @@ export function useMessageConverter(
   isLoading: boolean,
 ): { messages: EmmaMessage[] } {
   const cacheRef = useRef<EmmaMessage[]>([])
+  const metadataCacheRef = useRef<Map<string, EmmaMessage['metadata']>>(new Map())
 
   // Derive stable keys for memoization
   const reasoningLen = values?.reasoning_steps?.length ?? 0
@@ -75,8 +76,20 @@ export function useMessageConverter(
     const reasoningSteps = values?.reasoning_steps ?? []
     const sources = values?.sources ?? []
 
+    // 0. Deduplicate SDK messages by ID (last occurrence wins — preserves streaming updates).
+    // The SDK's `values` events reset MessageTupleManager's index tracking, so late
+    // `messages` events for already-present IDs get appended as duplicates.
+    const dedupedSdk = (() => {
+      const seen = new Map<string, number>()
+      for (let i = 0; i < sdkMessages.length; i++) {
+        const id = sdkMessages[i].id
+        if (id) seen.set(id, i)
+      }
+      return sdkMessages.filter((m, i) => !m.id || seen.get(m.id) === i)
+    })()
+
     // 1. Convert SDK messages — filter empty AI (tool-call turns)
-    const converted = sdkMessages
+    const converted = dedupedSdk
       .filter(
         (m): m is SDKMessage & { type: 'human' | 'ai' } =>
           (m.type === 'human' || m.type === 'ai') &&
@@ -106,7 +119,18 @@ export function useMessageConverter(
         } as EmmaMessage
       })
 
-    // 2. Attach reasoning steps + sources to the current turn's AI message
+    // 2. Restore cached metadata for previous turns' AI messages
+    for (let i = 0; i < converted.length; i++) {
+      const msg = converted[i]
+      if (msg.type === 'result' && !msg.metadata?.rawReasoningSteps) {
+        const cached = metadataCacheRef.current.get(msg.id)
+        if (cached) {
+          converted[i] = { ...msg, metadata: { ...msg.metadata, ...cached } }
+        }
+      }
+    }
+
+    // 3. Attach reasoning steps + sources to the current turn's AI message
     if (reasoningSteps.length > 0 || sources.length > 0 || explanation) {
       const stepsMetadata: EmmaMessage['metadata'] = {
         slmIsThinking: !success && reasoningSteps.length > 0,
@@ -154,8 +178,9 @@ export function useMessageConverter(
           ...converted[currentAiIdx],
           metadata: { ...converted[currentAiIdx].metadata, ...stepsMetadata },
         }
-      } else {
-        // No AI message yet — create a progress placeholder with stable ID
+      } else if (!success) {
+        // No AI message yet and turn is actively processing — create progress placeholder.
+        // Guard: if success=true, reasoning_steps are stale from the previous turn.
         converted.push({
           id: 'progress-current',
           type: 'progress',
@@ -166,7 +191,7 @@ export function useMessageConverter(
       }
     }
 
-    // 3. Detect HITL interrupt from values.__interrupt__ and create inline message
+    // 4. Detect HITL interrupt from values.__interrupt__ and create inline message
     if (Array.isArray(interrupt) && interrupt.length > 0) {
       const interruptEntry = interrupt[0]
       const interruptValue = interruptEntry?.value
@@ -203,6 +228,15 @@ export function useMessageConverter(
     return converted
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sdkMessages, reasoningLen, sourcesLen, success, explanation, interrupt])
+
+  // Write metadata to cache after render (side-effect, safe in useEffect)
+  useEffect(() => {
+    for (const msg of messages) {
+      if (msg.metadata?.rawReasoningSteps && msg.metadata.rawReasoningSteps.length > 0) {
+        metadataCacheRef.current.set(msg.id, msg.metadata)
+      }
+    }
+  }, [messages])
 
   // Flash-disappear prevention: cache last non-empty conversion
   if (messages.length > 0) {

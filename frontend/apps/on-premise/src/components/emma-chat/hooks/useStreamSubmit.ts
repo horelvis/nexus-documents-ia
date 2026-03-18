@@ -113,6 +113,12 @@ export function useStreamSubmit(
           optimisticValues: (prev: any) => ({
             ...prev,
             messages: [...(prev?.messages ?? []), newMessage],
+            // Clear turn-specific fields to prevent stale metadata from
+            // creating phantom progress bubbles in useMessageConverter
+            reasoning_steps: [],
+            sources: [],
+            success: undefined,
+            explanation: undefined,
           }),
         },
       )

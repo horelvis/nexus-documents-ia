@@ -17,7 +17,10 @@ export function useForgeDetection(messages: EmmaMessage[]) {
       .find((m) => m.type === 'forge_result' && m.forge)
 
     if (lastForge?.forge) {
-      setForgeMetadata(lastForge.forge)
+      setForgeMetadata(prev => {
+        if (prev && prev === lastForge.forge) return prev
+        return lastForge.forge!
+      })
     }
   }, [messages])
 
