@@ -158,6 +158,72 @@ def _parse_thinking(content: str) -> tuple:
     return None, content
 
 
+def _compress_prior_turns(messages: list) -> list:
+    """Remove tool data from prior turns to prevent cross-turn hallucination.
+
+    The LangGraph checkpointer restores ALL messages from previous turns,
+    including ToolMessages with raw search results (document titles, entity
+    names, amounts).  When the LLM sees this data in context it may skip
+    tool calling and fabricate answers from stale turn-1 observations.
+
+    This function identifies the boundary of the **current turn** (the last
+    HumanMessage) and for all prior messages:
+    - Drops ToolMessages (raw tool output — the main hallucination source)
+    - Drops AIMessages that only contain tool_calls (intermediate steps)
+    - Keeps AIMessages with actual content (final answers for conversation context)
+    - Keeps HumanMessages (conversation flow)
+
+    Current-turn messages are left untouched so the ReAct loop works normally.
+    """
+    from langchain_core.messages import HumanMessage
+
+    # Find index of last HumanMessage (start of current turn)
+    last_human_idx = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], HumanMessage):
+            last_human_idx = i
+            break
+
+    if last_human_idx <= 0:
+        return messages  # No prior turns to compress
+
+    prior = messages[:last_human_idx]
+    current = messages[last_human_idx:]
+
+    compressed: list = []
+    dropped = 0
+    for msg in prior:
+        if isinstance(msg, ToolMessage):
+            dropped += 1
+            continue
+        if isinstance(msg, AIMessage):
+            has_tool_calls = hasattr(msg, "tool_calls") and msg.tool_calls
+            has_content = bool(msg.content and msg.content.strip())
+            if has_tool_calls and not has_content:
+                # Pure tool-calling step (no user-facing content) — drop
+                dropped += 1
+                continue
+            if has_tool_calls and has_content:
+                # Keep the response text but strip tool_calls so the LLM
+                # doesn't see stale function calls from prior turns
+                compressed.append(AIMessage(content=msg.content, id=msg.id))
+                dropped += 1  # counts as partial compression
+                continue
+            # Content-only AI message (final answer) — keep as-is
+            compressed.append(msg)
+        else:
+            # HumanMessage, SystemMessage, etc.
+            compressed.append(msg)
+
+    if dropped:
+        logger.info(
+            f"Cross-turn compression: removed {dropped} tool/intermediate messages "
+            f"from prior turns ({len(prior)} → {len(compressed)} prior messages)"
+        )
+
+    return compressed + list(current)
+
+
 def _detect_stuck(tool_calls_history: List[Dict[str, Any]], window: int = settings.react_stuck_detection_window) -> bool:
     """Detect if the agent is stuck in a loop.
 
@@ -253,6 +319,14 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     # On first step: prepend system message
     # On subsequent steps: messages already contain system + history + tool results
     existing_messages = list(state.get("messages", []))
+
+    # Cross-turn anti-hallucination: remove ToolMessages and intermediate
+    # AI tool_call messages from prior turns so the LLM cannot fabricate
+    # answers from stale observations (e.g., inventing company names from
+    # a previous structural_query result).  Only applied on step 0 of a
+    # new turn — subsequent steps within the same turn need their tools.
+    if step == 0:
+        existing_messages = _compress_prior_turns(existing_messages)
 
     # Ensure system message is present
     has_system = any(

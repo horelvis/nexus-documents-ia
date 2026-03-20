@@ -793,6 +793,171 @@ async def emma_welcome(
 
 
 # ============================================================================
+# Session Endpoints (proxy to emma-agent-service /emma/sessions/*)
+# ============================================================================
+
+@router.get("/sessions")
+async def emma_sessions_list(
+    include_archived: bool = False,
+    limit: int = 50,
+    offset: int = 0,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    List Emma chat sessions for the current user.
+
+    Returns paginated sessions ordered by pinned first, then most recent.
+    Used to build the conversation history sidebar.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/sessions",
+                params={
+                    "user_id": str(current_user.id),
+                    "tenant_id": tenant_id,
+                    "include_archived": str(include_archived).lower(),
+                    "limit": limit,
+                    "offset": offset,
+                },
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Sessions list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sessions/{session_id}")
+async def emma_session_get(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Get a full Emma session with all messages.
+
+    Returns complete conversation history including messages, sources, and metadata.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session get error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sessions/{session_id}/continue")
+async def emma_session_continue(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Continue an old Emma session.
+
+    Loads session from cold storage (PostgreSQL) into hot cache (Redis)
+    so it can be used with /query or /query/stream endpoints.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}/continue",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session continue error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.patch("/sessions/{session_id}")
+async def emma_session_update(
+    session_id: str,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Update session properties (title, archived, pinned).
+    """
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.patch(
+                f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
+                params={
+                    "user_id": str(current_user.id),
+                    "tenant_id": tenant_id,
+                },
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                },
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session update error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/sessions/{session_id}")
+async def emma_session_delete(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Permanently delete an Emma session.
+
+    Removes from PostgreSQL and Redis. Cannot be undone.
+    Consider archiving (PATCH with is_archived=true) for recoverable deletion.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.delete(
+                f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
+                params={
+                    "user_id": str(current_user.id),
+                    "tenant_id": tenant_id,
+                },
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session delete error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
 # User Memory Endpoints (proxy to emma-agent-service /emma/memory/*)
 # ============================================================================
 
