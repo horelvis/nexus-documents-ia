@@ -2,34 +2,21 @@
   "name": "nouxcubeia",
   "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "apps/*",
-    "packages/*"
-  ],
   "scripts": {
-    "dev": "turbo dev",
-    "dev:on-premise": "turbo dev --filter=@nexus/on-premise",
-    "build": "turbo build",
-    "build:on-premise": "turbo build --filter=@nexus/on-premise",
-    "lint": "turbo lint",
-    "clean": "turbo clean && rm -rf node_modules",
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "clean": "rm -rf .next node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""
   },
   "devDependencies": {
     "@types/node": "25.5.0",
     "prettier": "^3.2.5",
-    "turbo": "^2.3.0",
     "typescript": "^5"
   },
-  "packageManager": "pnpm@9.0.0",
   "engines": {
     "node": ">=18"
-  },
-  "pnpm": {
-    "overrides": {
-      "react": "19.1.4",
-      "react-dom": "19.1.4"
-    }
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
