@@ -897,7 +897,7 @@ async def emma_session_get(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/sessions/{session_id}/history")
+@router.api_route("/sessions/{session_id}/history", methods=["GET", "POST"])
 async def emma_session_history(
     session_id: str,
     limit: int = 10,

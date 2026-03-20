@@ -1104,7 +1104,7 @@ async def continue_session(
     )
 
 
-@router.get("/sessions/{session_id}/history")
+@router.api_route("/sessions/{session_id}/history", methods=["GET", "POST"])
 async def get_session_history(
     session_id: str,
     tenant_id: str = Query(..., description="Tenant ID"),
