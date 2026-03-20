@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Frontend
 - **Requires**: Node.js 18+ (`nvm use 18` or `nvm use 20`)
-- **Dev**: `cd frontend && npm run dev` (port 3001)
+- **Dev**: `cd frontend && npm run dev` (port 3001, HTTPS)
 - **Build**: `cd frontend && npm run build`
 - **Lint**: `cd frontend && npm run lint`
 - **Install**: `cd frontend && npm install`
