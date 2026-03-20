@@ -9,7 +9,7 @@
 
 import { useRouter } from 'next/navigation'
 import { IconUser, IconSettings, IconPlug } from '@tabler/icons-react'
-import { UserMenu as SharedUserMenu, type UserMenuNavItem } from '@/components/ui'
+import { UserMenu as SharedUserMenu, type UserMenuNavItem } from '@/components/ui/user-menu'
 import { useAuth } from '@/contexts/auth-context'
 
 interface UserMenuProps {

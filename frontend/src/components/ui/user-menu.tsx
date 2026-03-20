@@ -43,7 +43,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from './avatar'
 import { Button } from './button'
 import { Badge } from './badge'
-import { cn } from '../lib/utils'
+import { cn } from '@/lib/utils'
 
 type Theme = 'light' | 'dark' | 'system'
 
