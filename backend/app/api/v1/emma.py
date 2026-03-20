@@ -897,6 +897,35 @@ async def emma_session_get(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/sessions/{session_id}/history")
+async def emma_session_history(
+    session_id: str,
+    limit: int = 10,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Get LangGraph checkpoint history for a session.
+
+    Returns state snapshots for the SDK's useStream fetchStateHistory.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}/history",
+                params={"tenant_id": tenant_id, "limit": limit},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session history error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/sessions/{session_id}/continue")
 async def emma_session_continue(
     session_id: str,

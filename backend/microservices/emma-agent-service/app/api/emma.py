@@ -1104,6 +1104,103 @@ async def continue_session(
     )
 
 
+@router.get("/sessions/{session_id}/history")
+async def get_session_history(
+    session_id: str,
+    tenant_id: str = Query(..., description="Tenant ID"),
+    limit: int = Query(10, ge=1, le=50, description="Max state snapshots to return"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Get LangGraph checkpoint history for a session.
+
+    Returns state snapshots in the format expected by the LangGraph SDK's
+    useStream hook (fetchStateHistory: true). Each snapshot contains the
+    graph state at a checkpoint boundary.
+
+    Returns [] if the session has no checkpoints yet or if the checkpointer
+    is disabled.
+    """
+    from app.core.checkpointer import get_checkpointer
+    from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+
+    # Verify session belongs to tenant (if it exists in emma_sessions).
+    # Sessions created implicitly by the checkpointer may not have an
+    # emma_sessions row yet, so we allow access if no row is found —
+    # the checkpointer itself is keyed by thread_id only.
+    persistence = get_emma_persistence_service()
+    session = await persistence.get_session(session_id)
+    if session and session["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Access denied to this session")
+
+    checkpointer = await get_checkpointer()
+    if checkpointer is None:
+        return []
+
+    config = {"configurable": {"thread_id": session_id}}
+    snapshots = []
+
+    try:
+        async for state in checkpointer.alist(config, limit=limit):
+            # CheckpointTuple has: config, checkpoint, metadata, parent_config
+            # checkpoint is a dict with channel_values containing the graph state
+            ckpt = state.checkpoint or {}
+            channel = ckpt.get("channel_values", {})
+
+            # Convert LangChain messages to SDK-compatible format
+            messages = []
+            for msg in channel.get("messages", []):
+                if isinstance(msg, HumanMessage):
+                    messages.append({"type": "human", "content": msg.content, "id": getattr(msg, "id", None)})
+                elif isinstance(msg, AIMessage):
+                    entry = {"type": "ai", "content": msg.content or "", "id": getattr(msg, "id", None)}
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        entry["tool_calls"] = msg.tool_calls
+                    messages.append(entry)
+                elif isinstance(msg, ToolMessage):
+                    messages.append({
+                        "type": "tool",
+                        "content": msg.content or "",
+                        "tool_call_id": getattr(msg, "tool_call_id", None),
+                        "id": getattr(msg, "id", None),
+                    })
+
+            # Build checkpoint info from config
+            cp = state.config.get("configurable", {})
+            parent_cp = state.parent_config.get("configurable", {}) if state.parent_config else None
+
+            snapshots.append({
+                "values": {"messages": messages},
+                "next": [],
+                "config": {
+                    "configurable": {
+                        "thread_id": cp.get("thread_id", session_id),
+                        "checkpoint_ns": cp.get("checkpoint_ns", ""),
+                        "checkpoint_id": cp.get("checkpoint_id", ""),
+                    }
+                },
+                "metadata": state.metadata or {},
+                "created_at": ckpt.get("ts"),
+                "parent_config": {
+                    "configurable": {
+                        "thread_id": parent_cp.get("thread_id", session_id),
+                        "checkpoint_ns": parent_cp.get("checkpoint_ns", ""),
+                        "checkpoint_id": parent_cp.get("checkpoint_id", ""),
+                    }
+                } if parent_cp else None,
+                "checkpoint": {
+                    "thread_id": cp.get("thread_id", session_id),
+                    "checkpoint_ns": cp.get("checkpoint_ns", ""),
+                    "checkpoint_id": cp.get("checkpoint_id", ""),
+                },
+            })
+    except Exception as e:
+        logger.error(f"Failed to get session history for {session_id}: {e}")
+        return []
+
+    return snapshots
+
+
 @router.patch("/sessions/{session_id}")
 async def update_session(
     session_id: str,

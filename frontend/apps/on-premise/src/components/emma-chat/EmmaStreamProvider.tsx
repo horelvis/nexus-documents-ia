@@ -92,7 +92,7 @@ export function EmmaStreamProvider({
     messagesKey: 'messages',
     defaultHeaders,
     onThreadId,
-    fetchStateHistory: false,
+    fetchStateHistory: true,
   })
 
   return (
