@@ -35,6 +35,7 @@ from app.core.config import settings
 from app.core.security import verify_api_key
 from app.services.emma_persistence_service import get_emma_persistence_service
 from app.schemas.emma import (
+    EmmaSessionCreate,
     EmmaSessionListResponse,
     EmmaSessionResponse,
     EmmaSessionUpdate,
@@ -949,6 +950,35 @@ async def update_cendoj_status(
 # =============================================================================
 # Session Persistence Endpoints
 # =============================================================================
+
+@router.post("/sessions")
+async def create_session(
+    body: EmmaSessionCreate,
+    user_id: str = Query(..., description="User ID"),
+    tenant_id: str = Query(..., description="Tenant ID"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Create a new empty Emma session.
+
+    Used by the frontend to create a session before the first query,
+    so the sidebar can show it immediately. The session_id returned
+    should be used as thread_id in subsequent /query calls.
+    """
+    persistence = get_emma_persistence_service()
+
+    result = await persistence.create_session(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        session_id=body.session_id,
+        title=body.title,
+    )
+
+    if not result:
+        raise HTTPException(status_code=500, detail="Failed to create session")
+
+    return result
+
 
 @router.get("/sessions", response_model=EmmaSessionListResponse)
 async def list_sessions(

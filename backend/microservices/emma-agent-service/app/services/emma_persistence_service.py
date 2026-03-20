@@ -348,6 +348,75 @@ class EmmaPersistenceService:
             logger.error(f"Failed to save message to session {session_id}: {e}")
             return False
 
+    async def create_session(
+        self,
+        user_id: str,
+        tenant_id: str,
+        session_id: Optional[str] = None,
+        title: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Create a new empty session explicitly.
+
+        Used by the frontend to create a session before the first query,
+        so the sidebar can show it immediately.
+
+        Args:
+            user_id: User's UUID
+            tenant_id: Tenant's UUID
+            session_id: Optional session ID (auto-generated if not provided)
+            title: Optional title (defaults to "Nueva conversación")
+
+        Returns:
+            Created session dict, or None on failure
+        """
+        try:
+            pool = await self._get_pool()
+            now = datetime.now(timezone.utc)
+            new_id = uuid_module.uuid4()
+            if not session_id:
+                session_id = str(uuid_module.uuid4())
+
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO emma_sessions (
+                        id, user_id, tenant_id, session_id,
+                        title, messages, message_count,
+                        is_archived, is_pinned, session_metadata,
+                        last_message_at, created_at, updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $11, $11)
+                    """,
+                    new_id,
+                    UUID(user_id),
+                    UUID(tenant_id),
+                    session_id,
+                    title or "Nueva conversación",
+                    json.dumps([]),
+                    0,
+                    False,
+                    False,
+                    json.dumps({}),
+                    now,
+                )
+
+            logger.info(f"Created empty session {session_id} for user {user_id}")
+            return {
+                "id": str(new_id),
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "title": title or "Nueva conversación",
+                "message_count": 0,
+                "is_archived": False,
+                "is_pinned": False,
+                "created_at": now.isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to create session: {e}")
+            return None
+
     async def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """
         Get a session by its ID.

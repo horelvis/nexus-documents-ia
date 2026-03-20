@@ -796,6 +796,42 @@ async def emma_welcome(
 # Session Endpoints (proxy to emma-agent-service /emma/sessions/*)
 # ============================================================================
 
+@router.post("/sessions")
+async def emma_session_create(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Create a new empty Emma session.
+
+    Returns the session_id to use as thread_id in subsequent /query calls.
+    """
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/sessions",
+                params={
+                    "user_id": str(current_user.id),
+                    "tenant_id": tenant_id,
+                },
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                },
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session create error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/sessions")
 async def emma_sessions_list(
     include_archived: bool = False,
