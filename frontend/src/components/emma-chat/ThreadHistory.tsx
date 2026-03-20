@@ -6,7 +6,7 @@ import { SquarePen, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface ThreadItem {
-  thread_id: string
+  session_id: string
   metadata?: Record<string, unknown>
   created_at?: string
 }
@@ -34,7 +34,7 @@ export function ThreadHistory({
     try {
       const headers: Record<string, string> = { 'X-Tenant-ID': tenantId }
       if (apiKey) headers['X-API-Key'] = apiKey
-      const response = await fetch(`${apiUrl}/threads?limit=20`, { headers })
+      const response = await fetch(`${apiUrl}/v1/emma/sessions?limit=20`, { headers })
       if (response.ok) {
         setThreads(await response.json())
       }
@@ -65,11 +65,11 @@ export function ThreadHistory({
       <div className="flex-1 overflow-y-auto p-2">
         {threads.map((thread) => (
           <button
-            key={thread.thread_id}
-            onClick={() => onSelectThread(thread.thread_id)}
+            key={thread.session_id}
+            onClick={() => onSelectThread(thread.session_id)}
             className={cn(
               'w-full rounded-lg px-3 py-2 text-left text-sm transition-colors',
-              thread.thread_id === currentThreadId
+              thread.session_id === currentThreadId
                 ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300'
                 : 'hover:bg-muted'
             )}
@@ -77,7 +77,7 @@ export function ThreadHistory({
             <div className="flex items-center gap-2">
               <MessageSquare className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
               <span className="truncate">
-                {(thread.metadata?.title as string) || thread.thread_id.slice(0, 8)}
+                {(thread.metadata?.title as string) || thread.session_id.slice(0, 8)}
               </span>
             </div>
           </button>
