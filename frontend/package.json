@@ -9,10 +9,8 @@
   "scripts": {
     "dev": "turbo dev",
     "dev:on-premise": "turbo dev --filter=@nexus/on-premise",
-    "dev:saas": "turbo dev --filter=@nexus/saas",
     "build": "turbo build",
     "build:on-premise": "turbo build --filter=@nexus/on-premise",
-    "build:saas": "turbo build --filter=@nexus/saas",
     "lint": "turbo lint",
     "clean": "turbo clean && rm -rf node_modules",
     "format": "prettier --write \"**/*.{ts,tsx,md}\""

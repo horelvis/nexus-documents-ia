@@ -23,12 +23,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Frontend
 - **Requires**: Node.js 18+ (`nvm use 18` or `nvm use 20`)
-- **Dev (all apps)**: `cd frontend && npm run dev` (Turbopack, all packages)
-- **Dev (on-premise only)**: `cd frontend && npm run dev:on-premise` (port 3001, HTTPS)
-- **Build**: `cd frontend && npm run build`
-- **Build (on-premise only)**: `cd frontend && npm run build:on-premise`
+- **Dev**: `cd frontend && npm run dev:on-premise` (port 3001, HTTPS)
+- **Build**: `cd frontend && npm run build:on-premise`
 - **Lint**: `cd frontend && npm run lint`
 - **Install**: `cd frontend && npm install`
+
+> **Note**: The SaaS frontend (`apps/saas/`) is **deprecated**. All development is on-premise only.
 
 ### Onboarding (New Tenant)
 - **Full docs**: [`docs/on-premise/ONBOARDING.md`](docs/on-premise/ONBOARDING.md)
@@ -84,16 +84,16 @@ The `db` service uses a custom Docker image (`Dockerfile.postgres`) based on `ap
 | vLLM Chat | internal | GPU inference — quality generation (Qwen3.5-9B) |
 | vLLM Planner | internal | GPU inference — fast tool calling (Qwen3.5-4B, dual-model only) |
 
-### Modular Architecture (SaaS vs On-Premise)
+### Deployment Mode (On-Premise Only)
 
-> **Full docs**: [`docs/architecture/MODULAR_ARCHITECTURE.md`](docs/architecture/MODULAR_ARCHITECTURE.md)
+> **Note**: SaaS mode is **deprecated**. Only on-premise deployment is supported.
 
-| Feature | SaaS | On-Premise |
-|---------|------|------------|
-| Auth | Clerk | OIDC/SAML |
-| ACL | DocumentACL table | JSONB in IndexedDocument |
-| Documents | `documents` table | `indexed_documents` table |
-| Config | `DEPLOYMENT_MODE=saas` | `DEPLOYMENT_MODE=on_premise` |
+| Feature | On-Premise |
+|---------|------------|
+| Auth | OIDC/SAML |
+| ACL | JSONB in IndexedDocument |
+| Documents | `indexed_documents` table |
+| Config | `DEPLOYMENT_MODE=on_premise` |
 
 ### Multi-Pipeline RAG Sectors
 
