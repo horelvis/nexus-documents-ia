@@ -1,32 +1,61 @@
-import type { NextConfig } from "next";
+import type { NextConfig } from "next"
+import path from "path"
 
 const nextConfig: NextConfig = {
-  output: 'standalone',
-  
-  // Disable TypeScript and ESLint errors during build for production
-  typescript: {
-    ignoreBuildErrors: true,
+  transpilePackages: ["framer-motion"],
+
+  // Force single React instance across monorepo (works with both npm and pnpm)
+  webpack: (config) => {
+    config.resolve.alias = {
+      ...config.resolve.alias,
+      react: path.dirname(require.resolve("react/package.json")),
+      "react-dom": path.dirname(require.resolve("react-dom/package.json")),
+    }
+    return config
   },
+
+  // Exclude LangChain packages from server-side bundling (SSR).
+  // They import React hooks that conflict with Next.js DevTools' segment-explorer
+  // when bundled into the SSR layer. These packages are client-only (useStream).
+  serverExternalPackages: [
+    "@langchain/langgraph-sdk",
+    "@langchain/core",
+  ],
+
+  // Enable standalone output for Docker deployments
+  output: "standalone",
+
+  // Disable x-powered-by header for security
+  poweredByHeader: false,
+
+  // Skip ESLint during production builds (linting runs in dev/CI instead)
   eslint: {
     ignoreDuringBuilds: true,
   },
-  
-  // Environment variables validation
-  env: {
-    NEXT_PUBLIC_API_BASE_URL: process.env.NEXT_PUBLIC_API_BASE_URL,
-    NEXT_PUBLIC_FRONTEND_URL: process.env.NEXT_PUBLIC_FRONTEND_URL,
-    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
-    NEXT_PUBLIC_CLERK_SIGN_IN_URL: process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL,
-    NEXT_PUBLIC_CLERK_SIGN_UP_URL: process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL,
-    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL,
-    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL,
-    NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY,
+
+  // Skip TypeScript type-checking during builds (type-check runs in dev/CI instead)
+  typescript: {
+    ignoreBuildErrors: true,
   },
 
-  // Production optimizations
-  experimental: {
-    optimizePackageImports: ['@radix-ui/react-icons', 'lucide-react'],
-  },
-};
+  // Rewrite API calls to backend
+  async rewrites() {
+    // BACKEND_URL is a server-side runtime env var (set in Docker compose).
+    // NEXT_PUBLIC_* vars are baked at build time and won't change in containers.
+    const backendUrl = process.env.BACKEND_URL ||
+                       process.env.NEXT_PUBLIC_BACKEND_URL ||
+                       process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '') ||
+                       "http://localhost:8000"
 
-export default nextConfig;
+    console.log(`[Next.js Rewrites] Backend URL: ${backendUrl}`)
+
+    return [
+      {
+        source: "/api/v1/:path*",
+        destination: `${backendUrl}/api/v1/:path*`,
+      },
+    ]
+  },
+}
+
+export default nextConfig

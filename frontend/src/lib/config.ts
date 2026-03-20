@@ -1,122 +1,98 @@
+/**
+ * API Configuration for Emma On-Premise
+ */
+
 const rawBaseUrl =
   process.env.NEXT_PUBLIC_API_BASE_URL ??
   process.env.NEXT_PUBLIC_API_URL ??
   ""
 
-// If no absolute API base URL is configured, default to Next.js rewrite proxy (/api/*).
-// This avoids "requests not reaching the backend" when env vars are missing.
 const isProxyBase = !rawBaseUrl || rawBaseUrl.startsWith("/")
-const baseUrl = isProxyBase ? "/api" : rawBaseUrl
+const cleanedRawBaseUrl = rawBaseUrl.replace(/\/+$/, '')
+const alreadyHasApiV1 = /\/api\/v1$/i.test(cleanedRawBaseUrl)
+const baseUrl = isProxyBase ? "/api" : (alreadyHasApiV1 ? cleanedRawBaseUrl.replace(/\/api\/v1$/i, '') : cleanedRawBaseUrl)
+
+// For SSE streaming, we MUST bypass Next.js proxy (rewrites buffer responses)
+// Use direct backend URL for streaming endpoints
+const getStreamingBaseUrl = () => {
+  // If explicit streaming URL is set, use it
+  if (process.env.NEXT_PUBLIC_API_STREAMING_URL) {
+    return process.env.NEXT_PUBLIC_API_STREAMING_URL
+  }
+  // If we have a direct API URL (not proxy), use it
+  if (rawBaseUrl && !rawBaseUrl.startsWith("/")) {
+    return rawBaseUrl
+  }
+  // Fallback: construct from window.location (same host, port 8000)
+  if (typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:8000`
+  }
+  // Server-side fallback
+  return 'http://localhost:8000'
+}
 
 export const API_CONFIG = {
   BASE_URL: baseUrl,
-  // When using proxy base (/api), v1 prefix becomes /v1 to form /api/v1/* (matched by next.config.js rewrites).
   API_V1: isProxyBase ? "/v1" : "/api/v1",
-  TIMEOUT: 30000, // 30 seconds (default)
-  EMMA_TIMEOUT: 180000, // 3 minutes for Emma AI (PlanningFlow with multiple agents)
-  
-  // Microservice URLs - configure via environment variable
-  // NEXT_PUBLIC_WEAVIATE_SERVICE_URL must be set in .env.local or deployment config
+  // Direct URL for streaming (bypasses Next.js proxy)
+  STREAMING_BASE_URL: getStreamingBaseUrl(),
+  TIMEOUT: 30000,
+  EMMA_TIMEOUT: 180000,
+
   WEAVIATE_SERVICE_URL: process.env.NEXT_PUBLIC_WEAVIATE_SERVICE_URL || 'http://localhost:8007',
-  
-  // Endpoints
+
   ENDPOINTS: {
     // Auth
     LOGIN: '/auth/login/access-token',
-    REGISTER: '/auth/register',
     ME: '/auth/me',
-    
+
     // Documents
     DOCUMENTS: '/documents',
     DOCUMENT_SUMMARY: (id: string) => `/documents/${id}/summary`,
     DOCUMENT_STREAM: (id: string) => `/documents/${id}/stream`,
     DOCUMENT_CONTENT: (id: string) => `/documents/${id}/content`,
-    
+
     // Search
     SEARCH: '/search',
-    SEARCH_ASK: '/search/ask',
-    
-    // Admin
-    ADMIN_USERS: '/admin/users',
-    ADMIN_STATS: '/admin/stats',
-    ADMIN: '/admin',
-    
+
     // Tenants
     TENANTS: '/tenants',
     TENANTS_CURRENT: '/tenants/current',
-    
-    // Chat
-    CHAT: '/chat',
-    
-    // Agents
-    AGENTS: '/agents',
-    
-    // Digital Signatures
-    SIGNATURES: '/signatures',
-    
-    // Dashboard
-    DASHBOARD: '/dashboard',
-    
-    // Assistant (Legacy)
-    ASSISTANT_CHAT: '/assistant/chat',
-    ASSISTANT_CHAT_STREAM: '/assistant/chat/stream',
-    ASSISTANT_CONVERSATION: (id: string) => `/assistant/conversation/${id}`,
-    ASSISTANT_WELCOME: '/assistant/welcome',
-    
-    // Emma AI (AutoGen Multi-Agent)
-    EMMA_QUERY: '/weaviate/emma/query',
-    EMMA_TOOLS: '/weaviate/emma/tools',
-    EMMA_HEALTH: '/weaviate/emma/health',
-    EMMA_FEEDBACK: '/weaviate/emma/feedback',
 
-    // Folders (Document Organization)
-    FOLDERS: '/folders',
-    FOLDERS_TREE: '/folders/tree',
-    FOLDERS_STATS: '/folders/stats',
-    FOLDER_DOCUMENTS: (path: string) => `/folders/${encodeURIComponent(path)}/documents`,
-    FOLDER_MOVE: (documentId: string) => `/folders/${documentId}/move`,
-    FOLDERS_BULK_MOVE: '/folders/bulk-move',
+    // Emma AI
+    EMMA_QUERY: '/emma/query',
+    EMMA_TOOLS: '/emma/tools',
+    EMMA_HEALTH: '/emma/health',
+    EMMA_UPLOAD_TEMP: '/emma/uploads/temp',
+    EMMA_VERIFIED_STREAM: '/emma/verified/generate/stream',
+    EMMA_VERIFIED_CLAIMS: '/emma/verified/session',
+    EMMA_VERIFIED_SESSION_PDF: (sessionId: string) => `/emma/verified/session/${sessionId}/pdf`,
+    EMMA_VERIFIED_SESSION_DOCX: (sessionId: string) => `/emma/verified/session/${sessionId}/docx`,
+    EMMA_VERIFIED_RESUME_STREAM: (sessionId: string) => `/emma/verified/session/${sessionId}/resume/stream`,
+    EMMA_GENERATED_DOWNLOAD: (docId: string) => `/emma/generated/${docId}/download`,
+    EMMA_PREDICTIVE_STREAM: '/emma/predictive/analyze/stream',
+    EMMA_MEMORY_FACTS: '/emma/memory/facts',
+    EMMA_WELCOME: '/emma/welcome',
+    EMMA_NOTIFICATIONS: '/emma/notifications',
+    EMMA_NOTIFICATION_READ: (id: string) => `/emma/notifications/${id}/read`,
+    EMMA_NOTIFICATIONS_READ_ALL: '/emma/notifications/read-all',
 
-    // Classification (RAG + LLM Auto-Classification)
-    CLASSIFICATION_STATUS: '/classification/status',
-    CLASSIFICATION_SETTINGS: '/classification/settings',
-    CLASSIFICATION_ACTIVATE: '/classification/activate',
-    CLASSIFICATION_DEACTIVATE: '/classification/deactivate',
-    CLASSIFICATION_PREVIEW: '/classification/preview',
-    CLASSIFICATION_CLASSIFY: (documentId: string) => `/classification/classify/${documentId}`,
+    // Document Forge
+    FORGE_ANALYZE: '/forge/analyze',
+    FORGE_RENDER: '/forge/render',
+    FORGE_PERSIST: '/forge/persist',
+    FORGE_SESSION_INFO: (id: string) => `/forge/sessions/${id}/info`,
+    FORGE_SESSION_DOWNLOAD: (id: string, format: string) => `/forge/sessions/${id}/download?format=${format}`,
 
-    // TTS (Text-to-Speech)
-    TTS_SYNTHESIZE: '/tts/synthesize',
+    // Connectors
+    CONNECTORS: '/connectors',
+    CONNECTORS_ADMIN: '/connectors/admin',
+    CONNECTOR_SYNC: (connectorId: string) => `/connectors/${connectorId}/sync`,
+
+    // TTS (placeholder)
     TTS_VOICES: '/tts/voices',
-    TTS_HEALTH: '/tts/health',
-    TTS_WEBSOCKET_INFO: '/tts/websocket-info',
-
-    // Site Guests (External Sharing)
-    SITE_GUESTS: '/site-guests',
-    SITE_GUESTS_SETTINGS: '/site-guests/site/settings',
-    SITE_GUESTS_STATISTICS: '/site-guests/site/statistics',
-    SITE_GUEST_BY_ID: (guestId: string) => `/site-guests/${guestId}`,
-    SITE_GUEST_INVITE: (guestId: string) => `/site-guests/${guestId}/invite`,
-    SITE_GUEST_PERMISSIONS: (guestId: string) => `/site-guests/${guestId}/permissions`,
-    SITE_GUEST_PERMISSION_DOCUMENT: (guestId: string) => `/site-guests/${guestId}/permissions/document`,
-    SITE_GUEST_PERMISSION_FOLDER: (guestId: string) => `/site-guests/${guestId}/permissions/folder`,
-    SITE_GUEST_REVOKE_PERMISSION: (guestId: string, permissionId: string) => `/site-guests/${guestId}/permissions/${permissionId}`,
-    SITE_GUEST_ACCESS_LOGS: (guestId: string) => `/site-guests/${guestId}/access-logs`,
-    SITE_GUEST_WITH_SHARE: '/site-guests/with-share',
-    SITE_GUEST_SHARES: (guestId: string) => `/site-guests/${guestId}/shares`,
-
-    // Site Portal (Public Guest Access)
-    SITE_PORTAL_TENANT: (slug: string) => `/site-portal/t/${slug}`,
-    SITE_PORTAL_REQUEST_OTP: (slug: string) => `/site-portal/t/${slug}/request-otp`,
-    SITE_PORTAL_VERIFY_OTP: (slug: string) => `/site-portal/t/${slug}/verify-otp`,
-    SITE_PORTAL_LOGOUT: '/site-portal/logout',
-    SITE_PORTAL_ME: '/site-portal/me',
-    SITE_PORTAL_CONTENT: '/site-portal/content',
-    SITE_PORTAL_SHARE_DOCUMENTS: (shareId: string) => `/site-portal/shares/${shareId}/documents`,
-    SITE_PORTAL_DOCUMENT: (documentId: string) => `/site-portal/documents/${documentId}`,
-    SITE_PORTAL_DOCUMENT_DOWNLOAD: (documentId: string) => `/site-portal/documents/${documentId}/download`,
-    SITE_PORTAL_DOCUMENT_VIEW: (documentId: string) => `/site-portal/documents/${documentId}/view`,
-  }
+    TTS_SYNTHESIZE: '/tts/synthesize',
+  },
 } as const
 
-export type ApiEndpoint = keyof typeof API_CONFIG.ENDPOINTS
+export type ApiEndpoints = typeof API_CONFIG.ENDPOINTS

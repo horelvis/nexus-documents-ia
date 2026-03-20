@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useEffect, useState, useTransition, Suspense } from 'react'
 import { usePathname, useSearchParams } from 'next/navigation'
-import { PageTransitionLoader } from '@/components/ui/unified-loader'
 
 interface PageLoaderContextType {
   isLoading: boolean
@@ -25,9 +24,9 @@ function PageLoaderProviderInner({ children }: { children: React.ReactNode }) {
   const [showLoader, setShowLoader] = useState(false)
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const [isPending, startTransition] = useTransition()
+  const [isPending] = useTransition()
 
-  // Show loader when route changes
+  // Hide loader when route changes complete
   useEffect(() => {
     setIsLoading(false)
     setShowLoader(false)
@@ -49,7 +48,6 @@ function PageLoaderProviderInner({ children }: { children: React.ReactNode }) {
 
   const startLoading = () => {
     setIsLoading(true)
-    // Show loader after a small delay to prevent flash
     const timer = setTimeout(() => {
       setShowLoader(true)
     }, 100)
@@ -64,7 +62,23 @@ function PageLoaderProviderInner({ children }: { children: React.ReactNode }) {
   return (
     <PageLoaderContext.Provider value={{ isLoading, startLoading, stopLoading }}>
       {children}
-      {showLoader && <PageTransitionLoader />}
+      {showLoader && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#05070d]/90 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative">
+              <div className="absolute -inset-3 rounded-full bg-cyan-500/20 blur-xl" />
+              <img
+                src="/logo-single.png"
+                alt="NouxCube AI"
+                className="relative h-10 w-auto"
+              />
+            </div>
+            <div className="h-1 w-24 overflow-hidden rounded-full bg-white/10">
+              <div className="h-full w-1/2 animate-[shimmer_1.5s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-transparent via-cyan-400 to-transparent" />
+            </div>
+          </div>
+        </div>
+      )}
     </PageLoaderContext.Provider>
   )
 }

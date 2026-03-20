@@ -37,7 +37,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { UserMenu as SharedUserMenu, type UserMenuUser, type UserMenuNavItem } from "@nexus/shared/ui"
+import { UserMenu as SharedUserMenu, type UserMenuUser, type UserMenuNavItem } from "@/components/ui"
 import { User, Crown, Receipt, Bell } from "lucide-react"
 
 export function NavUser({

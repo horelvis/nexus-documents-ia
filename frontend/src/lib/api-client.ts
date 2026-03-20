@@ -1,372 +1,258 @@
-"use client"
+/**
+ * API Client for Emma On-Premise
+ *
+ * Simplified API client without Clerk dependencies.
+ * Uses SSO tokens from sessionStorage.
+ */
 
-import { useEffect, useMemo } from 'react'
-import { useAuth } from '@clerk/nextjs'
-import { API_CONFIG } from './config'
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios'
 
-export interface ApiResponse<T = any> {
-  data?: T
-  error?: string
+// Always use relative path to go through Next.js proxy (avoids CORS)
+// The proxy forwards requests to the backend configured in next.config.ts
+const API_BASE_URL = '/api/v1'
+const SSO_TOKEN_KEY = 'nexus_sso_tokens'
+
+interface SSOTokens {
+  access_token: string
+  refresh_token?: string
+  id_token?: string
+  expires_at?: number
+}
+
+interface ApiResponse<T = unknown> {
+  data: T | null
+  error: string | null
   status: number
-}
-
-export interface ApiError {
-  message: string
-  status: number
-  details?: any
-}
-
-type ApiClientError = Error & {
-  response?: {
-    status: number
-    data: any
-  }
-}
-
-const createError = (message: string, name = 'Error'): ApiClientError => {
-  if (typeof Error === 'function') {
-    const err = new Error(message) as ApiClientError
-    err.name = name
-    return err
-  }
-  return { name, message } as ApiClientError
-}
-
-type ApiClientError = Error & {
-  response?: {
-    status: number
-    data: any
-  }
 }
 
 class ApiClient {
-  private baseURL: string
+  private client: AxiosInstance
 
   constructor() {
-    // API_CONFIG.BASE_URL incluye la base del servidor 
-    // Agregamos el prefijo /api/v1 para todas las rutas
-    this.baseURL = `${API_CONFIG.BASE_URL}${API_CONFIG.API_V1}`
-  }
-
-  private async getAuthToken(): Promise<string | null> {
-    // En el cliente, necesitamos usar el hook de Clerk
-    // Esta función será sobrescrita por el hook useApiClient
-    return null
-  }
-
-  private async request<T>(
-    endpoint: string,
-    options: RequestInit = {},
-    retryCount = 0
-  ): Promise<ApiResponse<T>> {
-    // Check for mock data in development/testing
-    if (typeof window !== 'undefined' && endpoint === '/stripe/subscription') {
-      const mockData = localStorage.getItem('mock_subscription')
-      if (mockData) {
-        try {
-          const parsed = JSON.parse(mockData)
-          const mockResponse = {
-            id: 'mock_subscription_id',
-            plan_id: parsed.plan_id,
-            status: parsed.status,
-            current_period_end: Date.now() / 1000 + 86400 * 30, // 30 days from now
-            subscription_status: {
-              plan_type: parsed.plan_id,
-              status: parsed.status,
-              is_active: parsed.status === 'active',
-              is_limited: parsed.status !== 'active',
-              current_period_end: null,
-              can_reactivate: parsed.status === 'canceled' || parsed.status === 'past_due',
-              permissions: {
-                max_documents: parsed.plan_id === 'free' ? 10 : -1,
-                max_monthly_uploads: parsed.plan_id === 'free' ? 5 : -1,
-                can_upload_documents: true,
-                can_view_documents: true,
-                can_search_documents: true,
-                can_use_chat: parsed.plan_id !== 'free',
-                can_use_agents: parsed.plan_id !== 'free',
-                can_export_documents: parsed.plan_id !== 'free',
-                can_use_api: parsed.plan_id !== 'free',
-                max_file_size_mb: parsed.plan_id === 'free' ? 10 : 100
-              },
-              message: 'Mock subscription for testing'
-            }
-          }
-          
-          console.log('🧪 Using mock subscription data:', mockResponse)
-          return {
-            data: mockResponse,
-            status: 200
-          }
-        } catch (e) {
-          console.error('Error parsing mock subscription data:', e)
-        }
-      }
-    }
-
-    try {
-      const token = await this.getAuthToken()
-      
-      const defaultHeaders: HeadersInit = {
-        'Content-Type': 'application/json',
-      }
-
-      if (token) {
-        defaultHeaders.Authorization = `Bearer ${token}`
-      }
-
-      const config: RequestInit = {
-        ...options,
-        headers: {
-          ...defaultHeaders,
-          ...options.headers,
-        },
-      }
-
-      const response = await fetch(`${this.baseURL}${endpoint}`, config)
-      
-      let data
-      const contentType = response.headers.get('content-type')
-      
-      if (contentType && contentType.includes('application/json')) {
-        data = await response.json()
-      } else {
-        data = await response.text()
-      }
-
-      if (!response.ok) {
-        // Handle 401 Unauthorized specifically for token refresh
-        if (response.status === 401 && retryCount === 0) {
-          console.log('Token expired, attempting to refresh...')
-          // Wait longer for Clerk to properly refresh the token
-          await new Promise(resolve => setTimeout(resolve, 500))
-          
-          // Try the request again with retry count incremented
-          return this.request<T>(endpoint, options, retryCount + 1)
-        }
-
-        const message =
-          data?.detail?.message ||
-          data?.detail ||
-          data?.message ||
-          `HTTP ${response.status}`
-
-        return {
-          error: typeof message === 'string' ? message : `HTTP ${response.status}`,
-          status: response.status,
-          data
-        }
-      }
-
-      return {
-        data,
-        status: response.status,
-      }
-    } catch (error: any) {
-      console.log('API request failed:', error)
-      
-      // Check if it's a network/connection error
-      if (error instanceof TypeError && error.message === 'Failed to fetch') {
-        // This is a connection error
-        const connectionError = createError(
-          'Unable to connect to the server. Please check if the backend is running.',
-          'ConnectionError'
-        )
-        throw connectionError
-      }
-      
-      // Check for other network errors
-      if (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK' || error.code === 'ERR_INTERNET_DISCONNECTED') {
-        const connectionError = createError(
-          'Connection refused. The server may be down or unreachable.',
-          'ConnectionError'
-        )
-        throw connectionError
-      }
-      
-      // Otherwise, wrap it in a standard format
-      return {
-        error: error instanceof Error ? error.message : 'Unknown error',
-        status: (error as ApiClientError)?.response?.status || 500,
-      }
-    }
-  }
-
-  async get<T>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, { method: 'GET' })
-  }
-
-  async post<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, {
-      method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
-    })
-  }
-
-  async put<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, {
-      method: 'PUT',
-      body: data ? JSON.stringify(data) : undefined,
-    })
-  }
-
-  async patch<T>(endpoint: string, data?: any): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, {
-      method: 'PATCH',
-      body: data ? JSON.stringify(data) : undefined,
-    })
-  }
-
-  async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, { method: 'DELETE' })
-  }
-
-  async fetchRaw(endpoint: string, options: RequestInit = {}): Promise<Response> {
-    const token = await this.getAuthToken()
-    
-    const defaultHeaders: HeadersInit = {}
-    if (token) {
-      defaultHeaders.Authorization = `Bearer ${token}`
-    }
-
-    const config: RequestInit = {
-      ...options,
+    this.client = axios.create({
+      baseURL: API_BASE_URL,
+      timeout: 30000,
       headers: {
-        ...defaultHeaders,
-        ...options.headers,
+        'Content-Type': 'application/json',
       },
-    }
-
-    return fetch(`${this.baseURL}${endpoint}`, config)
-  }
-
-  async upload<T>(endpoint: string, formData: FormData, onProgress?: (progress: number) => void): Promise<ApiResponse<T>> {
-    return new Promise((resolve) => {
-      const xhr = new XMLHttpRequest()
-      
-      // Setup progress tracking
-      if (onProgress) {
-        xhr.upload.addEventListener('progress', (e) => {
-          if (e.lengthComputable) {
-            const percentComplete = Math.round((e.loaded / e.total) * 100)
-            onProgress(percentComplete)
-          }
-        })
-      }
-      
-      // Setup completion handlers
-      xhr.addEventListener('load', async () => {
-        try {
-          const response = JSON.parse(xhr.responseText)
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve({ data: response, error: null })
-          } else {
-            resolve({ data: null, error: response.detail || 'Upload failed' })
-          }
-        } catch (error) {
-          resolve({ data: null, error: 'Invalid response from server' })
-        }
-      })
-      
-      xhr.addEventListener('error', () => {
-        resolve({ data: null, error: 'Network error during upload' })
-      })
-      
-      xhr.addEventListener('abort', () => {
-        resolve({ data: null, error: 'Upload cancelled' })
-      })
-      
-      // Open request and set headers
-      xhr.open('POST', `${this.baseURL}${endpoint}`)
-      
-      this.getAuthToken().then(token => {
-        if (token) {
-          xhr.setRequestHeader('Authorization', `Bearer ${token}`)
-        }
-        
-        // Send the request
-        xhr.send(formData)
-      })
     })
+
+    // Request interceptor - add auth token
+    this.client.interceptors.request.use(
+      async (config) => {
+        const token = await this.getAccessToken()
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`
+        }
+        return config
+      },
+      (error) => Promise.reject(error)
+    )
+
+    // Response interceptor - handle auth errors
+    this.client.interceptors.response.use(
+      (response) => response,
+      async (error: AxiosError) => {
+        if (error.response?.status === 401) {
+          // Try to refresh token
+          const refreshed = await this.refreshToken()
+          if (refreshed && error.config) {
+            // Retry the request
+            const token = await this.getAccessToken()
+            error.config.headers.Authorization = `Bearer ${token}`
+            return this.client.request(error.config)
+          }
+          // Clear tokens and redirect to login
+          this.clearTokens()
+          window.location.href = '/auth/sign-in'
+        }
+        return Promise.reject(error)
+      }
+    )
   }
 
-  // Keep the old upload method for backward compatibility
-  async uploadWithoutProgress<T>(endpoint: string, formData: FormData): Promise<ApiResponse<T>> {
+  private getStoredTokens(): SSOTokens | null {
+    if (typeof window === 'undefined') return null
+    const stored = sessionStorage.getItem(SSO_TOKEN_KEY)
+    if (!stored) return null
     try {
-      const token = await this.getAuthToken()
-      
-      const headers: HeadersInit = {}
-      if (token) {
-        headers.Authorization = `Bearer ${token}`
-      }
-
-      const response = await fetch(`${this.baseURL}${endpoint}`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      })
-
-      let data
-      const contentType = response.headers.get('content-type')
-      
-      if (contentType && contentType.includes('application/json')) {
-        data = await response.json()
-      } else {
-        data = await response.text()
-      }
-
-      if (!response.ok) {
-        throw new Error(data?.detail || data?.message || `HTTP ${response.status}`)
-      }
-
-      return {
-        data,
-        status: response.status,
-      }
-    } catch (error) {
-      console.error('Upload request failed:', error)
-      return {
-        error: error instanceof Error ? error.message : 'Upload failed',
-        status: 500,
-      }
+      return JSON.parse(stored)
+    } catch {
+      return null
     }
   }
 
-  // Método para establecer el token de autenticación
-  setAuthTokenGetter(tokenGetter: () => Promise<string | null>) {
-    this.getAuthToken = tokenGetter
+  private async getAccessToken(): Promise<string | null> {
+    const tokens = this.getStoredTokens()
+    if (!tokens?.access_token) return null
+
+    // Check if token is expired
+    if (tokens.expires_at && Date.now() >= tokens.expires_at - 60000) {
+      // Token expiring soon, try refresh
+      await this.refreshToken()
+      const refreshedTokens = this.getStoredTokens()
+      return refreshedTokens?.access_token || null
+    }
+
+    return tokens.access_token
+  }
+
+  private async refreshToken(): Promise<boolean> {
+    const tokens = this.getStoredTokens()
+    if (!tokens?.refresh_token) return false
+
+    try {
+      const response = await axios.post(`${API_BASE_URL}/auth/sso/refresh`, {
+        refresh_token: tokens.refresh_token,
+      })
+
+      const newTokens: SSOTokens = {
+        access_token: response.data.access_token,
+        refresh_token: response.data.refresh_token || tokens.refresh_token,
+        id_token: tokens.id_token,
+        expires_at: Date.now() + (response.data.expires_in || 3600) * 1000,
+      }
+
+      sessionStorage.setItem(SSO_TOKEN_KEY, JSON.stringify(newTokens))
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private clearTokens(): void {
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(SSO_TOKEN_KEY)
+    }
+  }
+
+  async get<T>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+    try {
+      const response = await this.client.get<T>(url, config)
+      return { data: response.data, error: null, status: response.status }
+    } catch (error) {
+      return this.handleError<T>(error)
+    }
+  }
+
+  async post<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+    try {
+      const response = await this.client.post<T>(url, data, config)
+      return { data: response.data, error: null, status: response.status }
+    } catch (error) {
+      return this.handleError<T>(error)
+    }
+  }
+
+  async put<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+    try {
+      const response = await this.client.put<T>(url, data, config)
+      return { data: response.data, error: null, status: response.status }
+    } catch (error) {
+      return this.handleError<T>(error)
+    }
+  }
+
+  async delete<T>(url: string, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+    try {
+      const response = await this.client.delete<T>(url, config)
+      return { data: response.data, error: null, status: response.status }
+    } catch (error) {
+      return this.handleError<T>(error)
+    }
+  }
+
+  async patch<T>(url: string, data?: unknown, config?: AxiosRequestConfig): Promise<ApiResponse<T>> {
+    try {
+      const response = await this.client.patch<T>(url, data, config)
+      return { data: response.data, error: null, status: response.status }
+    } catch (error) {
+      return this.handleError<T>(error)
+    }
+  }
+
+  async upload<T>(
+    url: string,
+    formData: FormData,
+    onProgress?: (progress: number) => void
+  ): Promise<ApiResponse<T>> {
+    try {
+      const response = await this.client.post<T>(url, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        onUploadProgress: (progressEvent) => {
+          if (onProgress && progressEvent.total) {
+            const progress = Math.round(
+              (progressEvent.loaded * 100) / progressEvent.total
+            )
+            onProgress(progress)
+          }
+        },
+      })
+      return { data: response.data, error: null, status: response.status }
+    } catch (error) {
+      return this.handleError<T>(error)
+    }
+  }
+
+  /**
+   * Download a file as a blob with authentication
+   */
+  async downloadBlob(url: string): Promise<{ blob: Blob | null; error: string | null }> {
+    try {
+      const response = await this.client.get(url, {
+        responseType: 'blob',
+      })
+      return { blob: response.data, error: null }
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const axiosError = error as AxiosError
+        return {
+          blob: null,
+          error: axiosError.message || 'Download failed',
+        }
+      }
+      return { blob: null, error: 'Unknown error' }
+    }
+  }
+
+  /**
+   * Set tenant ID for multi-tenant requests
+   */
+  setTenantId(tenantId: string): void {
+    this.client.defaults.headers.common['X-Tenant-ID'] = tenantId
+  }
+
+  private handleError<T>(error: unknown): ApiResponse<T> {
+    if (axios.isAxiosError(error)) {
+      const axiosError = error as AxiosError<{ detail?: string; message?: string }>
+      const message =
+        axiosError.response?.data?.detail ||
+        axiosError.response?.data?.message ||
+        axiosError.message ||
+        'Request failed'
+      return {
+        data: null,
+        error: message,
+        status: axiosError.response?.status || 500,
+      }
+    }
+    return {
+      data: null,
+      error: 'Unknown error',
+      status: 500,
+    }
   }
 }
 
-// Hook para usar el cliente API con autenticación de Clerk
-export function useApiClient() {
-  const { getToken } = useAuth()
-  
-  const client = useMemo(() => new ApiClient(), [])
-  
-  useEffect(() => {
-    client.setAuthTokenGetter(async () => {
-      try {
-        let token = await getToken()
-        if (!token) {
-          console.log('No token available, attempting to get fresh token...')
-          token = await getToken({ template: 'nexus' })
-        }
-        if (token) {
-          console.log('✅ Got Clerk token, length:', token.length)
-        } else {
-          console.log('❌ No Clerk token available')
-        }
-        return token
-      } catch (error) {
-        console.error('Failed to get auth token:', error)
-        return null
-      }
-    })
-  }, [client, getToken])
-  
-  return client
-}
-
-// Instancia singleton para uso en componentes que no pueden usar hooks
 export const apiClient = new ApiClient()
+export type { ApiResponse }
+
+/**
+ * Hook wrapper for consistency with saas patterns
+ * Services can use this hook to get the API client
+ */
+export function useApiClient() {
+  return apiClient
+}

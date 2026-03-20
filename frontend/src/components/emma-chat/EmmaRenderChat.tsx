@@ -1,140 +1,151 @@
-"use client"
+'use client'
 
-import { useRef, useEffect } from "react"
-import { User, Bot, AlertCircle, Info, ThumbsUp, ThumbsDown, Code, BarChart3, RotateCcw } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Skeleton } from "@/components/ui/skeleton"
-import { cn } from "@/lib/utils"
-import { EmmaMarkdownFormat } from "./EmmaMarkdownFormat"
-import { DisplayRenderer } from "./displays/DisplayRenderer"
-import { EmmaClarificationUI } from "./EmmaClarificationUI"
-import { EmmaRenderChatProps, EmmaMessage } from "./types"
-import { useTranslation } from "@/lib/i18n/hooks"
-import { TTSControls } from "./TTSControls"
-import { useTTSPreferences } from "@/contexts/tts-context"
+import { useRef, useEffect, useState } from 'react'
+import { IconAlertCircle, IconThumbUp, IconThumbDown, IconRotate, IconCircleCheck, IconPaperclip, IconSearch, IconBulb, IconGitBranch, IconArrowRight, IconHelpCircle, IconDownload, IconFileText } from '@tabler/icons-react'
+import { Button } from '@/components/ui/button'
+import { Card } from '@/components/ui/card'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { cn } from '@/lib/utils'
+import { EmmaMessage, WorkflowStep, DocumentInfo, ClarificationData } from '@/lib/types/emma'
+import { ActivityTimeline } from './ActivityTimeline'
+import { humanizeSteps } from './utils/humanizeStep'
+import { EmmaMarkdown } from './EmmaMarkdown'
+import { DocumentDisplay } from './DocumentDisplay'
+import { ExplanationPanel } from './ExplanationPanel'
+import { VerifiedDocumentResult } from './VerifiedDocumentResult'
+import { PredictionResult } from './PredictionResult'
+import { DocGenResult } from './DocGenResult'
+import { ForgeResult } from './ForgeResult'
 
-export function EmmaRenderChat(props: EmmaRenderChatProps) {
-  const {
-    messages,
-    isLoading = false,
-    error = null,
-    socketStatus = "connected",
-    onFeedback,
-    onSuggestionClick,
-    onDocumentClick,
-    onPreviewClick,
-    onRetry,
-    onClarificationSubmit,
-    currentView = "chat",
-    onViewChange,
-    className,
-    isAdmin = false
-  } = props
+interface EmmaRenderChatProps {
+  messages: EmmaMessage[]
+  isLoading?: boolean
+  error?: string | null
+  onFeedback?: (messageId: string, feedback: 'positive' | 'negative') => void
+  onSuggestionClick?: (suggestion: string) => void
+  onRetry?: (failedQuery: string) => void
+  onDocumentClick?: (doc: DocumentInfo) => void
+  onPreviewClick?: (doc: DocumentInfo) => void
+  className?: string
+  /** Show terminal-style header with traffic lights */
+  showTerminalHeader?: boolean
+  /** Render callback for HITL review cards (Approve/Edit/Reject) */
+  renderHITLReview?: (request: any, messageId: string) => React.ReactNode
+  /** Render callback for branch switcher (useStream mode) */
+  renderBranchSwitcher?: (messageId: string) => React.ReactNode
+  /** Render callback for command bar with copy/regenerate (useStream mode) */
+  renderCommandBar?: (messageId: string, content: string) => React.ReactNode
+}
 
-  // Defensive handlers - ensure they're always functions
-  const safeOnDocumentClick = typeof onDocumentClick === 'function' ? onDocumentClick : () => {}
-  const safeOnPreviewClick = typeof onPreviewClick === 'function' ? onPreviewClick : () => {}
-  const scrollAreaRef = useRef<HTMLDivElement>(null)
+export function EmmaRenderChat({
+  messages,
+  isLoading = false,
+  error = null,
+  onFeedback,
+  onSuggestionClick,
+  onRetry,
+  onDocumentClick,
+  onPreviewClick,
+  className,
+  showTerminalHeader = false,
+  renderHITLReview,
+  renderBranchSwitcher,
+  renderCommandBar,
+}: EmmaRenderChatProps) {
+  const scrollRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const prevMessageCountRef = useRef(0)
+  const isUserNearBottomRef = useRef(true)
 
-  // Auto-scroll to bottom when new messages arrive
+  // Check if user is near bottom of scroll area
+  const checkIfNearBottom = () => {
+    const scrollArea = scrollRef.current?.querySelector('[data-radix-scroll-area-viewport]')
+    if (!scrollArea) return true
+    const threshold = 150 // pixels from bottom
+    return scrollArea.scrollHeight - scrollArea.scrollTop - scrollArea.clientHeight < threshold
+  }
+
+  // Track scroll position
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages])
+    const scrollArea = scrollRef.current?.querySelector('[data-radix-scroll-area-viewport]')
+    if (!scrollArea) return
 
-  // Process messages for display (merge similar messages)
-  const processedMessages = processMessages(messages)
+    const handleScroll = () => {
+      isUserNearBottomRef.current = checkIfNearBottom()
+    }
+
+    scrollArea.addEventListener('scroll', handleScroll, { passive: true })
+    return () => scrollArea.removeEventListener('scroll', handleScroll)
+  }, [])
+
+  // Auto-scroll only when:
+  // 1. New messages are added (not just updated)
+  // 2. User is already near the bottom (hasn't scrolled up to read)
+  useEffect(() => {
+    const messageCount = messages.length
+    const isNewMessage = messageCount > prevMessageCountRef.current
+    prevMessageCountRef.current = messageCount
+
+    // Only auto-scroll for new messages when user is near bottom
+    if (isNewMessage && isUserNearBottomRef.current) {
+      // Use requestAnimationFrame to ensure DOM has updated
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+      })
+    }
+  }, [messages.length]) // Only trigger on message count change, not content updates
 
   return (
-    <div className={cn("flex flex-col h-full", className)}>
-      {/* View Controls */}
-      {onViewChange && (
-        <div className="flex items-center gap-2 p-4 border-b bg-muted/30">
-          <div className="flex items-center gap-1 border rounded-md p-1">
-            <Button
-              variant={currentView === "chat" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => onViewChange("chat")}
-              className="h-8"
-            >
-              <Bot className="h-4 w-4 mr-2" />
-              Chat
-            </Button>
-            <Button
-              variant={currentView === "code" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => onViewChange("code")}
-              className="h-8"
-            >
-              <Code className="h-4 w-4 mr-2" />
-              Código
-            </Button>
-            <Button
-              variant={currentView === "result" ? "default" : "ghost"}
-              size="sm"
-              onClick={() => onViewChange("result")}
-              className="h-8"
-            >
-              <BarChart3 className="h-4 w-4 mr-2" />
-              Resultado
-            </Button>
+    <div className={cn('h-full flex flex-col', className)}>
+      {/* Optional Terminal-style header */}
+      {showTerminalHeader && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-card/50 border-b border-border/30">
+          {/* Traffic lights */}
+          <div className="flex items-center gap-1.5">
+            <span className="h-3 w-3 rounded-full bg-red-500/80" />
+            <span className="h-3 w-3 rounded-full bg-yellow-500/80" />
+            <span className="h-3 w-3 rounded-full bg-green-500/80" />
           </div>
-
-          {/* Connection Status */}
-          <div className="ml-auto flex items-center gap-2">
-            <div className={cn(
-              "flex items-center gap-1 text-xs px-2 py-1 rounded-full",
-              socketStatus === "connected" && "bg-green-100 text-green-700",
-              socketStatus === "connecting" && "bg-yellow-100 text-yellow-700",
-              socketStatus === "disconnected" && "bg-red-100 text-red-700"
-            )}>
-              <div className={cn(
-                "w-2 h-2 rounded-full",
-                socketStatus === "connected" && "bg-green-500",
-                socketStatus === "connecting" && "bg-yellow-500 animate-pulse",
-                socketStatus === "disconnected" && "bg-red-500"
-              )} />
-              {socketStatus}
-            </div>
-          </div>
+          <span className="text-xs font-mono text-muted-foreground">
+            emma-orchestrator.log
+          </span>
         </div>
       )}
 
-      {/* Messages Area */}
-      <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-        <div className="space-y-6">
-          {processedMessages.map((message, index) => {
-            // Check if this is the latest "result" message (for auto-play)
-            const isLatestResult = message.type === "result" &&
-              index === processedMessages.length - 1;
-
+      <ScrollArea className="flex-1" ref={scrollRef}>
+        <div className="space-y-3 p-4">
+          {messages.map((message, idx) => {
+            // A clarification is "answered" if there's any message after it
+            const hasMessagesAfter = idx < messages.length - 1
             return (
-              <MessageDisplay
+              <MessageBubble
                 key={message.id}
                 message={message}
+                isLastMessage={idx === messages.length - 1}
+                clarificationAnswered={message.type === 'clarification' && hasMessagesAfter}
                 onFeedback={onFeedback}
                 onSuggestionClick={onSuggestionClick}
-                onDocumentClick={safeOnDocumentClick}
-                onPreviewClick={safeOnPreviewClick}
                 onRetry={onRetry}
-                onClarificationSubmit={onClarificationSubmit}
-                isAdmin={isAdmin}
-                isLatestResult={isLatestResult}
+                onDocumentClick={onDocumentClick}
+                onPreviewClick={onPreviewClick}
+                renderHITLReview={renderHITLReview}
+                renderBranchSwitcher={renderBranchSwitcher}
+                renderCommandBar={renderCommandBar}
               />
-            );
+            )
           })}
 
-          {/* Loading State - only show if no progress message exists */}
-          {isLoading && !processedMessages.some(m => m.type === 'progress') && <LoadingMessage />}
+          {/* Loading indicator: hide when a streamed AI message is already visible.
+              Old SSE path used 'progress' type; useStream path uses 'result' directly. */}
+          {isLoading
+            && !messages.some((m) => m.type === 'progress')
+            && !(messages.length > 0 && messages[messages.length - 1].type === 'result')
+            && (<LoadingBubble />
+          )}
 
-          {/* Error State */}
-          {error && <ErrorMessage error={error} />}
+          {/* Global error */}
+          {error && <ErrorBubble error={error} />}
 
-          {/* Scroll anchor */}
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
@@ -142,316 +153,643 @@ export function EmmaRenderChat(props: EmmaRenderChatProps) {
   )
 }
 
-// Individual Message Display Component
-interface MessageDisplayProps {
+// Message Bubble Component
+interface MessageBubbleProps {
   message: EmmaMessage
-  onFeedback?: (messageId: string, feedback: "positive" | "negative") => void
+  isLastMessage?: boolean
+  clarificationAnswered?: boolean
+  onFeedback?: (messageId: string, feedback: 'positive' | 'negative') => void
   onSuggestionClick?: (suggestion: string) => void
-  onDocumentClick?: (doc: any) => void
-  onPreviewClick?: (doc: any) => void
   onRetry?: (failedQuery: string) => void
-  onClarificationSubmit?: (messageId: string, selectedValues: string[]) => void
-  isAdmin?: boolean
-  isLatestResult?: boolean  // True if this is the latest result message (for auto-play)
+  onDocumentClick?: (doc: DocumentInfo) => void
+  onPreviewClick?: (doc: DocumentInfo) => void
+  renderHITLReview?: (request: any, messageId: string) => React.ReactNode
+  renderBranchSwitcher?: (messageId: string) => React.ReactNode
+  renderCommandBar?: (messageId: string, content: string) => React.ReactNode
 }
 
-function MessageDisplay({
+function MessageBubble({
   message,
+  isLastMessage = false,
+  clarificationAnswered = false,
   onFeedback,
   onSuggestionClick,
+  onRetry,
   onDocumentClick,
   onPreviewClick,
-  onRetry,
-  onClarificationSubmit,
-  isAdmin = false,
-  isLatestResult = false
-}: MessageDisplayProps) {
-  const { t } = useTranslation()
-  const { preferences: ttsPreferences } = useTTSPreferences()
+  renderHITLReview,
+  renderBranchSwitcher,
+  renderCommandBar,
+}: MessageBubbleProps) {
+  const isUser = message.type === 'user'
+  const isProgress = message.type === 'progress'
+  const isError = message.type === 'error'
 
-  // Check if this is a "thinking" state (progress without workflow steps)
-  const isThinkingState = message.type === "progress" && !message.metadata?.workflow_steps?.length
-
-  const getMessageIcon = () => {
-    switch (message.type) {
-      case "user":
-        return <User className="h-4 w-4" />
-      case "result":
-      case "text":
-        return <Bot className="h-4 w-4" />
-      case "clarification":
-        return <Info className="h-4 w-4" />
-      case "error":
-      case "self_healing_error":
-        return <AlertCircle className="h-4 w-4" />
-      case "warning":
-        return <Info className="h-4 w-4" />
-      default:
-        return <Bot className="h-4 w-4" />
-    }
+  // Verified generation progress — now shown in dialog, skip inline rendering
+  if (message.type === 'verified_progress') {
+    return null
   }
 
-  const getMessageColor = () => {
-    switch (message.type) {
-      case "user":
-        return "bg-secondary border border-secondary"
-      case "clarification":
-        return "bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-100 border border-blue-200 dark:border-blue-800"
-      case "error":
-      case "self_healing_error":
-        return "bg-red-50 dark:bg-red-950/50 text-red-900 dark:text-red-100 border border-red-200 dark:border-red-800"
-      case "warning":
-        return "bg-yellow-50 dark:bg-yellow-950/50 text-yellow-800 dark:text-yellow-200 border border-yellow-200 dark:border-yellow-800"
-      default:
-        return "bg-background border"
-    }
+  // Verified generation result
+  if (message.type === 'verified_result' && message.verified) {
+    return <VerifiedDocumentResult content={message.content} verified={message.verified} />
   }
 
-  // Special rendering for "thinking" state - just avatar + animated dots
-  if (isThinkingState) {
+  // Predictive analysis result
+  if (message.type === 'predictive_result' && message.predictive) {
+    return <PredictionResult metadata={message.predictive} />
+  }
+
+  // Document generation result — wrapped with EMMA label + explanation
+  if (message.type === 'docgen_result' && message.docgen) {
     return (
-      <div className="flex gap-3 items-center">
-        <Avatar className="h-8 w-8 flex-shrink-0">
-          <AvatarFallback className="bg-primary text-primary-foreground">
-            <Bot className="h-4 w-4" />
-          </AvatarFallback>
-        </Avatar>
-        <DisplayRenderer
-          message={message}
-          onDocumentClick={onDocumentClick}
-          onPreviewClick={onPreviewClick}
-          isAdmin={isAdmin}
-        />
+      <div className="w-full">
+        <div className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
+          {/* EMMA label */}
+          <div className="flex items-center gap-2">
+            <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+            <span className="text-xs font-mono text-primary uppercase tracking-wide">
+              EMMA:
+            </span>
+          </div>
+
+          {/* Document generation card */}
+          <DocGenResult metadata={message.docgen} />
+
+          {/* Suggestions */}
+          {message.suggestions && message.suggestions.length > 0 && (
+            <div className="flex flex-wrap gap-2 pt-3 border-t border-border/50">
+              {message.suggestions.map((suggestion, idx) => (
+                <Button
+                  key={idx}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSuggestionClick?.(suggestion)}
+                  className="text-xs h-7 font-mono"
+                >
+                  {suggestion}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {/* Footer */}
+          {onFeedback && (
+            <div className="flex items-center justify-between pt-2 border-t border-primary/10">
+              <span className="text-[10px] font-mono text-muted-foreground">
+                {message.timestamp.toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+                {message.metadata?.execution_time_ms && (
+                  <span className="ml-2 text-emerald-500">
+                    {message.metadata.execution_time_ms < 1000
+                      ? `${Math.round(message.metadata.execution_time_ms)}ms`
+                      : `${(message.metadata.execution_time_ms / 1000).toFixed(1)}s`}
+                  </span>
+                )}
+              </span>
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 hover:text-emerald-500"
+                  onClick={() => onFeedback(message.id, 'positive')}
+                  title="Respuesta útil"
+                >
+                  <IconThumbUp className="h-3 w-3" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 hover:text-destructive"
+                  onClick={() => onFeedback(message.id, 'negative')}
+                  title="Respuesta no útil"
+                >
+                  <IconThumbDown className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     )
   }
 
-  return (
-    <div className={cn(
-      "flex gap-3",
-      message.type === "user" && "flex-row-reverse"
-    )}>
-      {/* Avatar */}
-      <Avatar className="h-8 w-8 flex-shrink-0">
-        {message.type === "user" ? (
-          <AvatarFallback className="bg-primary text-primary-foreground">
-            {getMessageIcon()}
-          </AvatarFallback>
-        ) : (
-          <AvatarFallback className="bg-primary text-primary-foreground">
-            {getMessageIcon()}
-          </AvatarFallback>
-        )}
-      </Avatar>
+  // Document Forge result — analyze/render/persist
+  if (message.type === 'forge_result' && message.forge) {
+    return (
+      <div className="w-full">
+        <div className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
+          <div className="flex items-center gap-2">
+            <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+            <span className="text-xs font-mono text-primary uppercase tracking-wide">EMMA:</span>
+          </div>
+          <ForgeResult metadata={message.forge} />
+          {message.metadata?.explanation && (
+            <ExplanationPanel explanation={message.metadata.explanation} />
+          )}
+        </div>
+      </div>
+    )
+  }
 
-      {/* Message Content */}
-      <div className="flex-1 max-w-[85%]">
-        <Card className={cn("p-4", getMessageColor())}>
-          {/* Message Content */}
-          <div className="space-y-3">
-            {/* Human-in-the-Loop Clarification UI */}
-            {message.type === "clarification" && message.metadata?.clarification ? (
-              <EmmaClarificationUI
-                question={message.metadata.clarification.question}
-                header={message.metadata.clarification.header}
-                options={message.metadata.clarification.options}
-                multiSelect={message.metadata.clarification.multi_select}
-                severity={message.metadata.clarification.severity}
-                type={message.metadata.clarification.type}
-                onSubmit={(selectedValues) => onClarificationSubmit?.(message.id, selectedValues)}
-                className="my-2"
-              />
-            ) : (
-              <DisplayRenderer
-                message={message}
-                onDocumentClick={onDocumentClick}
-                onPreviewClick={onPreviewClick}
-                isAdmin={isAdmin}
+  // HITL Review card — Approve/Edit/Reject for tool calls
+  if (message.type === 'clarification' && message.metadata?.hitl_review && renderHITLReview) {
+    const answered = clarificationAnswered
+    return (
+      <div className="w-full">
+        {answered ? (
+          <Card className="space-y-3 p-3 rounded-lg border bg-primary/5 border-primary/20">
+            <div className="flex items-center gap-2">
+              <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+              <span className="text-xs font-mono text-primary uppercase tracking-wide">EMMA:</span>
+            </div>
+            <p className="text-sm text-muted-foreground italic">{message.content}</p>
+          </Card>
+        ) : (
+          renderHITLReview(message.metadata.hitl_review, message.id)
+        )}
+      </div>
+    )
+  }
+
+  // Clarification card — ambiguous query with clickable options
+  if (message.type === 'clarification' && message.metadata?.clarification) {
+    const clarification = message.metadata.clarification as ClarificationData
+    // Hide chips once user has responded (this message is no longer the last)
+    const answered = clarificationAnswered
+    return (
+      <div className="w-full">
+        <Card className={cn(
+          'space-y-3 p-3 rounded-lg border',
+          answered
+            ? 'bg-primary/5 border-primary/20'
+            : 'bg-amber-500/5 border-amber-500/20'
+        )}>
+          {/* EMMA label */}
+          <div className="flex items-center gap-2">
+            <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+            <span className="text-xs font-mono text-primary uppercase tracking-wide">
+              EMMA:
+            </span>
+            {!answered && <IconHelpCircle className="h-4 w-4 text-amber-500 ml-auto" />}
+          </div>
+
+          {/* Clarification question */}
+          <p className="text-sm text-foreground/90">{clarification.question}</p>
+
+          {/* Option chips — only shown when unanswered */}
+          {!answered && clarification.options.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {clarification.options.map((opt, idx) => (
+                <Button
+                  key={idx}
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onSuggestionClick?.(opt.value)}
+                  className="text-xs h-7 font-mono border-amber-500/30 hover:bg-amber-500/10 hover:border-amber-500/50"
+                >
+                  {opt.label}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {/* Hint — only when unanswered */}
+          {!answered && (
+            <p className="text-xs text-muted-foreground italic">
+              o escribe tu propia búsqueda
+            </p>
+          )}
+        </Card>
+      </div>
+    )
+  }
+
+  // Progress message with workflow steps
+  if (isProgress) {
+    return <ProgressBubble message={message} />
+  }
+
+  // Terminal/Log style - all messages aligned left with labels
+  // Different card styles for each message type
+  const getCardStyles = () => {
+    if (isUser) return 'p-4 border border-border/50 bg-card/80 rounded-lg'
+    if (isError) return 'p-4 border border-destructive/30 bg-destructive/5 rounded-lg'
+    // Emma responses - special terminal style (group enables hover for branch/command bar)
+    return 'group space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20'
+  }
+
+  return (
+    <div className="w-full">
+      <Card className={getCardStyles()}>
+        {/* Message Label */}
+        {isUser ? (
+          // USER_QUERY label
+          <div className="space-y-2">
+            <span className="text-xs font-mono text-emerald-500 uppercase tracking-wide">
+              USER_QUERY:
+            </span>
+
+            {/* Attached documents */}
+            {message.metadata?.documents && message.metadata.documents.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {message.metadata.documents.map((doc, idx) => (
+                  <div
+                    key={doc.id || idx}
+                    className="flex items-center gap-1.5 px-2 py-1 bg-primary/10 text-primary border border-primary/20 rounded text-xs font-mono"
+                  >
+                    <IconPaperclip className="h-3 w-3" />
+                    <span className="max-w-[150px] truncate">{doc.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <p className="text-sm italic text-foreground/90">"{message.content}"</p>
+          </div>
+        ) : isError ? (
+          // ERROR label
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <IconAlertCircle className="h-4 w-4 text-destructive" />
+              <span className="text-xs font-mono text-destructive uppercase tracking-wide">
+                ERROR:
+              </span>
+            </div>
+            <p className="text-sm text-destructive/80">{message.content}</p>
+
+            {message.metadata?.canRetry && message.metadata?.failedQuery && onRetry && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => onRetry(message.metadata!.failedQuery!)}
+                className="mt-2 text-xs"
+              >
+                <IconRotate className="h-3 w-3 mr-1" />
+                Reintentar
+              </Button>
+            )}
+          </div>
+        ) : (
+          // EMMA response
+          <>
+            {/* Activity timeline — collapsed summary after completion */}
+            {(message.metadata?.rawReasoningSteps?.length ?? 0) > 0 && (
+              <ActivityTimeline
+                steps={humanizeSteps(message.metadata!.rawReasoningSteps!)}
+                isStreaming={false}
+                executionTimeMs={message.metadata?.execution_time_ms}
               />
             )}
 
-              {/* Decision Path */}
-              {message.metadata?.decision_path && (
-                <div className="text-xs text-muted-foreground">
-                  <strong>Ruta de decisión:</strong> {message.metadata.decision_path.join(" → ")}
-                </div>
-              )}
-
-              {/* Tools Used */}
-              {message.metadata?.tools_used && message.metadata.tools_used.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {message.metadata.tools_used.map((tool, index) => (
-                    <Badge key={index} variant="outline" className="text-xs">
-                      {tool}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              {/* Suggestions */}
-              {message.suggestions && message.suggestions.length > 0 && (
-                <div className="space-y-2">
-                  <div className="text-sm font-medium text-muted-foreground">
-                    Sugerencias:
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {message.suggestions.map((suggestion, index) => (
-                      <Button
-                        key={index}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onSuggestionClick?.(suggestion)}
-                        className="h-8 text-xs"
-                      >
-                        {suggestion}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              )}
-          </div>
-
-          {/* Message Footer */}
-          <div className="flex items-center justify-between mt-3 pt-2 border-t border-border/50">
-            <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span>
-                {message.timestamp.toLocaleTimeString([], {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                  second: "2-digit",
-                })}
+            {/* EMMA label - always shown */}
+            <div className="flex items-center gap-2">
+              <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+              <span className="text-xs font-mono text-primary uppercase tracking-wide">
+                EMMA:
               </span>
-              {message.type !== "user" && message.metadata?.execution_time_ms && (
-                <span className="flex items-center gap-1">
-                  <span className="opacity-50">•</span>
-                  {message.metadata.execution_time_ms < 1000
-                    ? `${Math.round(message.metadata.execution_time_ms)}ms`
-                    : `${(message.metadata.execution_time_ms / 1000).toFixed(1)}s`
-                  }
-                </span>
-              )}
             </div>
 
-            <div className="flex gap-2">
-              {/* Retry Button for recoverable errors */}
-              {message.type === "error" && message.metadata?.canRetry && message.metadata?.failedQuery && onRetry && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onRetry(message.metadata!.failedQuery!)}
-                  className="h-7 px-3 text-xs gap-1"
-                >
-                  <RotateCcw className="h-3 w-3" />
-                  {t('emma.errors.retry')}
-                </Button>
+            {/* Show agent decision if available */}
+            {message.metadata?.agent && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  {message.metadata.agent_reasoning || 'Procesando con'}
+                </span>
+                <IconArrowRight className="h-3.5 w-3.5 text-primary/60" />
+                <span className="font-semibold text-primary font-mono">
+                  {message.metadata.agent}
+                </span>
+              </div>
+            )}
+
+              {/* Response content */}
+              <EmmaMarkdown content={message.content} />
+
+              {/* Download button for generated documents */}
+              {message.content && (() => {
+                // Match gen_ doc ID from generate_document tool output
+                // Handles: **ID de descarga**: gen_xxx, ID de descarga: gen_xxx, or bare gen_xxx
+                const docIdMatch = message.content.match(/\b(gen_[a-f0-9]{8,})\b/)
+                const docId = docIdMatch?.[1]
+                if (!docId) return null
+                return (
+                  <GeneratedDocDownload docId={docId} />
+                )
+              })()}
+
+              {/* Related documents */}
+              {message.metadata?.documents && message.metadata.documents.length > 0 && (
+                <div className="pt-3 border-t border-border/50">
+                  <DocumentDisplay
+                    documents={message.metadata.documents}
+                    onDocumentClick={onDocumentClick}
+                    onPreviewClick={onPreviewClick}
+                  />
+                </div>
               )}
 
-              {/* TTS Button - Read response aloud */}
-              {message.type !== "user" && message.type !== "error" && message.type !== "progress" && message.content && ttsPreferences.enabled && (
-                <TTSControls
-                  text={message.content}
-                  size="sm"
-                  iconOnly
-                  voiceId={ttsPreferences.voiceId}
-                  language={ttsPreferences.language}
-                  autoPlayOnMount={isLatestResult && ttsPreferences.autoPlay}
-                />
-              )}
+            {/* Humanized explanation panel */}
+            {message.metadata?.explanation && (
+              <ExplanationPanel explanation={message.metadata.explanation} />
+            )}
 
-              {/* Feedback Buttons */}
-              {onFeedback && message.type !== "user" && message.type !== "error" && (
+            {/* Suggestions */}
+            {message.suggestions && message.suggestions.length > 0 && (
+              <div className="flex flex-wrap gap-2 pt-3 border-t border-border/50">
+                {message.suggestions.map((suggestion, idx) => (
+                  <Button
+                    key={idx}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onSuggestionClick?.(suggestion)}
+                    className="text-xs h-7 font-mono"
+                  >
+                    {suggestion}
+                  </Button>
+                ))}
+              </div>
+            )}
+
+            {/* Footer for Emma responses */}
+            {onFeedback && (
+              <div className="flex items-center justify-between pt-2 border-t border-primary/10">
+                <span className="text-[10px] font-mono text-muted-foreground">
+                  {message.timestamp.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
+                  {message.metadata?.execution_time_ms && (
+                    <span className="ml-2 text-emerald-500">
+                      {message.metadata.execution_time_ms < 1000
+                        ? `${Math.round(message.metadata.execution_time_ms)}ms`
+                        : `${(message.metadata.execution_time_ms / 1000).toFixed(1)}s`}
+                    </span>
+                  )}
+                </span>
+
                 <div className="flex gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
-                    onClick={() => onFeedback(message.id, "positive")}
-                    className="h-6 w-6 p-0"
+                    size="icon"
+                    className="h-6 w-6 hover:text-emerald-500"
+                    onClick={() => onFeedback(message.id, 'positive')}
                     title="Respuesta útil"
                   >
-                    <ThumbsUp className="h-3 w-3" />
+                    <IconThumbUp className="h-3 w-3" />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
-                    onClick={() => onFeedback(message.id, "negative")}
-                    className="h-6 w-6 p-0"
+                    size="icon"
+                    className="h-6 w-6 hover:text-destructive"
+                    onClick={() => onFeedback(message.id, 'negative')}
                     title="Respuesta no útil"
                   >
-                    <ThumbsDown className="h-3 w-3" />
+                    <IconThumbDown className="h-3 w-3" />
                   </Button>
                 </div>
-              )}
-            </div>
-          </div>
-        </Card>
-      </div>
-    </div>
-  )
-}
+              </div>
+            )}
 
-// Loading Message Component
-function LoadingMessage() {
-  const { t } = useTranslation()
-
-  return (
-    <div className="flex gap-3">
-      <Avatar className="h-8 w-8">
-        <AvatarImage src="/emma-avatar.svg" />
-        <AvatarFallback className="bg-primary text-primary-foreground">
-          <Bot className="h-4 w-4" />
-        </AvatarFallback>
-      </Avatar>
-      <Card className="p-4 bg-muted border max-w-[85%]">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="flex space-x-1">
-            <div className="w-2 h-2 bg-primary rounded-full animate-bounce"></div>
-            <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-            <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-          </div>
-          <span className="text-sm text-muted-foreground">{t('chatPage.emmaResponding')}</span>
-        </div>
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-4 w-1/2" />
-        </div>
+            {/* Branch switcher + Command bar (useStream mode) */}
+            {(renderBranchSwitcher || renderCommandBar) && (
+              <div className="flex items-center gap-2 pt-1 opacity-0 transition-opacity group-hover:opacity-100">
+                {renderBranchSwitcher?.(message.id)}
+                {renderCommandBar?.(message.id, message.content)}
+              </div>
+            )}
+          </>
+        )}
       </Card>
     </div>
   )
 }
 
-// Error Message Component
-function ErrorMessage({ error }: { error: string }) {
+
+function ProgressBubble({ message }: { message: EmmaMessage }) {
+  const workflowSteps = message.metadata?.workflow_steps || []
+  const hasSteps = workflowSteps.length > 0
+  const isStreaming = message.metadata?.isStreaming
+  const hasContent = message.content && message.content.trim().length > 0
+  const streamingText = message.metadata?.streaming_text || ''
+  const hasStreamingText = streamingText.trim().length > 0
+
+  // Reasoning active indicator
+  const slmIsThinking = message.metadata?.slmIsThinking ?? false
+
+  // Get current agent name from metadata or steps
+  const currentAgent = message.metadata?.agent ||
+    workflowSteps.find(s => s.status === 'in_progress')?.agent ||
+    'Emma'
+
+  // Determine the content to display - use same rendering as final result
+  const displayContent = hasStreamingText ? streamingText : (hasContent ? message.content : '')
+  const showContent = displayContent.trim().length > 0
+
   return (
-    <div className="flex gap-3">
-      <Avatar className="h-8 w-8">
-        <AvatarFallback className="bg-red-500 text-white">
-          <AlertCircle className="h-4 w-4" />
-        </AvatarFallback>
-      </Avatar>
-      <Card className="p-4 bg-red-50 dark:bg-red-950/50 text-red-900 dark:text-red-100 border border-red-200 dark:border-red-800 max-w-[85%]">
+    <div className="w-full">
+      {/* Same style as final Emma response - consistent structure prevents layout shift */}
+      <Card className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
+        {/* EMMA label - always shown (same as final response) */}
         <div className="flex items-center gap-2">
-          <AlertCircle className="h-4 w-4" />
-          <span className="text-sm font-medium">Error</span>
+          <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+          <span className="text-xs font-mono text-primary uppercase tracking-wide">
+            EMMA:
+          </span>
+          {/* Show streaming indicator next to label */}
+          {(isStreaming || slmIsThinking) && (
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse ml-auto" />
+          )}
         </div>
-        <p className="text-sm mt-2">{error}</p>
+
+        {/* Agent info - same as final result */}
+        {currentAgent && currentAgent !== 'Emma' && (
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Procesando con</span>
+            <IconArrowRight className="h-3.5 w-3.5 text-primary/60" />
+            <span className="font-semibold text-primary font-mono">{currentAgent}</span>
+          </div>
+        )}
+
+        {/* Activity timeline — humanized step indicator during streaming */}
+        {(message.metadata?.rawReasoningSteps?.length ?? 0) > 0 && (
+          <ActivityTimeline
+            steps={humanizeSteps(message.metadata!.rawReasoningSteps!)}
+            isStreaming={true}
+          />
+        )}
+
+        {/* Workflow steps - shown above content like reasoning */}
+        {hasSteps && (
+          <div className="space-y-2">
+            {workflowSteps.map((step) => (
+              <WorkflowStepItem key={step.index} step={step} />
+            ))}
+          </div>
+        )}
+
+        {/* Main content - ALWAYS use EmmaMarkdown for consistent doc formatting */}
+        {showContent ? (
+          <div className="relative min-h-[2rem]">
+            <EmmaMarkdown content={displayContent} />
+            {isStreaming && (
+              <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse ml-0.5 align-middle" />
+            )}
+          </div>
+        ) : !slmIsThinking && !hasSteps ? (
+          <ThinkingIndicator />
+        ) : null}
+
+        {/* Placeholder footer - maintains consistent height during streaming */}
+        {showContent && (
+          <div className="flex items-center justify-between pt-2 border-t border-primary/10 min-h-[28px]">
+            <span className="text-[10px] font-mono text-muted-foreground">
+              {isStreaming ? 'Generando respuesta...' : ''}
+            </span>
+          </div>
+        )}
       </Card>
     </div>
   )
 }
 
-// Helper function to process and merge messages
-function processMessages(messages: EmmaMessage[]): EmmaMessage[] {
-  // For now, return messages as-is
-  // In a full implementation, you might want to merge similar consecutive messages
-  return messages.filter(message => {
-    // Don't render streaming messages that are empty
-    if (message.isStreaming && !message.content) {
-      return false
+// Workflow Step Item (terminal style)
+function WorkflowStepItem({ step }: { step: WorkflowStep }) {
+  const getStatusIndicator = () => {
+    switch (step.status) {
+      case 'completed':
+        return <IconCircleCheck className="h-3.5 w-3.5 text-emerald-500" />
+      case 'in_progress':
+        return <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+      case 'error':
+        return <IconAlertCircle className="h-3.5 w-3.5 text-destructive" />
+      default:
+        return <span className="h-2 w-2 rounded-full border border-muted-foreground/30" />
     }
-    return true
-  })
+  }
+
+  const agentName = step.agent || 'Task'
+
+  return (
+    <div className={cn(
+      'flex items-center gap-2 text-xs font-mono',
+      step.status === 'pending' && 'text-muted-foreground/50',
+      step.status === 'in_progress' && 'text-emerald-400',
+      step.status === 'completed' && 'text-muted-foreground',
+      step.status === 'error' && 'text-destructive'
+    )}>
+      {getStatusIndicator()}
+      <span className="text-muted-foreground">[{agentName}]</span>
+      <span>{step.description}</span>
+      {step.status === 'in_progress' && (
+        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500/50 animate-pulse ml-1" />
+      )}
+      {step.execution_time_ms && step.status === 'completed' && (
+        <span className="text-[10px] text-emerald-500/70 ml-auto">
+          {step.execution_time_ms < 1000
+            ? `${Math.round(step.execution_time_ms)}ms`
+            : `${(step.execution_time_ms / 1000).toFixed(1)}s`}
+        </span>
+      )}
+    </div>
+  )
 }
 
-// Backward compatibility alias
-export { EmmaRenderChat as ElysiaRenderChat }
+// Thinking Indicator (simple text)
+function ThinkingIndicator() {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <span>Procesando</span>
+      <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" />
+    </div>
+  )
+}
+
+// Loading Bubble (same style as Emma response)
+function LoadingBubble() {
+  return (
+    <div className="w-full">
+      <Card className="space-y-2 p-3 bg-primary/5 rounded-lg border border-primary/20">
+        {/* EMMA label */}
+        <div className="flex items-center gap-2">
+          <img src="/emma-avatar.png" alt="Emma" className="h-5 w-5 rounded-full object-cover object-top" />
+          <span className="text-xs font-mono text-primary uppercase tracking-wide">
+            EMMA:
+          </span>
+          <span className="h-2 w-2 rounded-full bg-primary animate-pulse ml-auto" />
+        </div>
+
+        {/* Thinking indicator */}
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span>Procesando</span>
+          <span className="inline-block w-2 h-2 rounded-full bg-primary animate-pulse" />
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// Generated Document Download Button (inline in responses)
+function GeneratedDocDownload({ docId }: { docId: string }) {
+  const [downloading, setDownloading] = useState(false)
+
+  const handleDownload = async () => {
+    if (downloading) return
+    setDownloading(true)
+    try {
+      const { apiClient } = await import('@/lib/api-client')
+      const result = await apiClient.downloadBlob(`/emma/generated/${docId}/download`)
+      if (result.error || !result.blob) throw new Error(result.error || 'Download failed')
+      const blobUrl = URL.createObjectURL(result.blob)
+      const a = document.createElement('a')
+      a.href = blobUrl
+      a.download = `documento_generado_${docId}.docx`
+      a.click()
+      URL.revokeObjectURL(blobUrl)
+    } catch (err) {
+      console.error('DOCX download failed:', err)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2 mt-3 p-2.5 rounded-lg bg-violet-500/10 border border-violet-500/20">
+      <IconFileText className="h-5 w-5 text-violet-600 flex-shrink-0" />
+      <span className="text-xs text-violet-700 dark:text-violet-400 flex-1">
+        Documento DOCX generado y listo para descargar
+      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleDownload}
+        disabled={downloading}
+        className="gap-1.5 text-xs border-violet-500/30 text-violet-600 hover:bg-violet-500/10"
+      >
+        <IconDownload className="h-3.5 w-3.5" />
+        {downloading ? 'Descargando...' : 'Descargar DOCX'}
+      </Button>
+    </div>
+  )
+}
+
+// Error Bubble (terminal style)
+function ErrorBubble({ error }: { error: string }) {
+  return (
+    <div className="w-full">
+      <Card className="p-4 border border-destructive/30 bg-destructive/5 rounded-lg">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <IconAlertCircle className="h-4 w-4 text-destructive" />
+            <span className="text-xs font-mono text-destructive uppercase tracking-wide">
+              SYSTEM_ERROR:
+            </span>
+          </div>
+          <p className="text-sm font-mono text-destructive/80">{error}</p>
+        </div>
+      </Card>
+    </div>
+  )
+}

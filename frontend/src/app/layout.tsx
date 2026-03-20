@@ -1,74 +1,46 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
-import "./globals.css";
-import { ClerkProvider } from '@clerk/nextjs'
-import { ThemeProvider } from "@/components/providers/theme-provider";
-import { PageLoaderProvider } from "@/components/providers/page-loader";
-import { TopLoader } from "@/components/providers/top-loader";
-import { Toaster } from "@/components/ui/toaster";
-import { AppProviders } from "@/components/providers/app-providers";
+import type { Metadata } from "next"
+import { Suspense } from "react"
+import { Inter } from "next/font/google"
+import { ThemeProvider } from "next-themes"
+import { Toaster } from "@/components/ui"
+import { AuthProvider } from "@/contexts/auth-context"
+import { VerifiedGenerationProvider } from "@/contexts/verified-generation-context"
+import "./globals.css"
 
-const inter = Inter({
-  variable: "--font-inter",
-  subsets: ["latin"],
-});
+const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "Nexus - Gestión Documental con IA",
-  description: "Plataforma avanzada de gestión documental potenciada por inteligencia artificial. Organiza, busca y analiza tus documentos de manera inteligente.",
-  keywords: ["gestión documental", "inteligencia artificial", "búsqueda semántica", "documentos", "IA"],
-  authors: [{ name: "Nexus Team" }],
-  creator: "Nexus",
-  openGraph: {
-    title: "Nexus - Gestión Documental con IA",
-    description: "Transforma tu gestión documental con inteligencia artificial",
-    type: "website",
-    locale: "es_ES",
+  title: "NouxCube AI",
+  description: "Plataforma de inteligencia empresarial centralizada",
+  icons: {
+    icon: "/favicon.ico",
   },
-  twitter: {
-    card: "summary_large_image",
-    title: "Nexus - Gestión Documental con IA",
-    description: "Transforma tu gestión documental con inteligencia artificial",
-  },
-  robots: {
-    index: true,
-    follow: true,
-  },
-};
+}
 
 export default function RootLayout({
   children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+}: {
+  children: React.ReactNode
+}) {
   return (
-    <ClerkProvider
-      publishableKey={process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY!}
-      signInFallbackRedirectUrl="/auth/redirect"
-      signUpFallbackRedirectUrl="/auth/redirect"
-      afterSignOutUrl="/"
-    >
-      <html lang="en" suppressHydrationWarning>
-        <body
-          className={`${inter.variable} antialiased`}
+    <html lang="es" suppressHydrationWarning>
+      <body className={inter.className}>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="dark"
+          enableSystem
+          disableTransitionOnChange
         >
-           <ThemeProvider
-            attribute="class"
-            defaultTheme="dark"
-            enableSystem
-            storageKey="nexus-theme"
-          >
-            <AppProviders>
-              <PageLoaderProvider>
-                <TopLoader />
+          <Suspense fallback={null}>
+            <AuthProvider>
+              <VerifiedGenerationProvider>
                 {children}
-                <Toaster />
-              </PageLoaderProvider>
-            </AppProviders>
-          </ThemeProvider>
-        </body>
-        
-      </html>
-    </ClerkProvider>
-  );
+              </VerifiedGenerationProvider>
+            </AuthProvider>
+          </Suspense>
+          <Toaster />
+        </ThemeProvider>
+      </body>
+    </html>
+  )
 }

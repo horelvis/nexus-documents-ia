@@ -1,72 +1,36 @@
+"use client"
+
 /**
- * Gemini Voice Service
+ * Gemini Voice Service - Stub for Emma On-Premise
  *
- * Handles communication with the backend for Emma Voice Mode.
- * Fetches ephemeral tokens for secure Gemini Live API access.
+ * Voice functionality will be implemented later with on-premise TTS services.
  */
 
-import { apiClient } from '../api-client'
-
-export interface VoiceSessionRequest {
-  system_prompt?: string
-  voice_name?: string
-}
-
-export interface VoiceSessionResponse {
-  ephemeral_token: string
-  expires_at: string
-  ws_url: string
-  model: string
-  voice_name: string
-  system_prompt: string
-}
-
-export interface VoiceConfigResponse {
-  enabled: boolean
-  gemini_enabled: boolean
-  kokoro_enabled: boolean
-  kokoro_base_url: string
-  default_voice: string
-  system_prompt: string
+export interface VoiceSession {
+  send: (text: string) => void
+  close: () => void
+  onAudio: (callback: (audio: Blob) => void) => void
+  onError: (callback: (error: Error) => void) => void
 }
 
 /**
- * Create a voice session with an ephemeral Gemini token.
- *
- * This token is short-lived (10 minutes) and single-use,
- * allowing secure direct connection to Gemini Live API.
+ * Create a voice session (stub implementation)
  */
-export async function createVoiceSession(
-  request: VoiceSessionRequest = {}
-): Promise<VoiceSessionResponse> {
-  const response = await apiClient.post<VoiceSessionResponse>(
-    '/gemini/voice-session',
-    request
-  )
+export async function createVoiceSession(): Promise<VoiceSession> {
+  console.warn('[GeminiVoice] Voice sessions not implemented for Emma on-premise')
 
-  if (response.error || !response.data) {
-    throw new Error(response.error || 'Failed to create voice session')
+  return {
+    send: () => {
+      console.warn('[GeminiVoice] send() not implemented')
+    },
+    close: () => {
+      console.warn('[GeminiVoice] close() not implemented')
+    },
+    onAudio: () => {
+      console.warn('[GeminiVoice] onAudio() not implemented')
+    },
+    onError: () => {
+      console.warn('[GeminiVoice] onError() not implemented')
+    },
   }
-
-  return response.data
-}
-
-/**
- * Get voice mode configuration.
- *
- * Returns available voice providers and their settings.
- */
-export async function getVoiceConfig(): Promise<VoiceConfigResponse> {
-  const response = await apiClient.get<VoiceConfigResponse>('/gemini/voice-config')
-
-  if (response.error || !response.data) {
-    throw new Error(response.error || 'Failed to get voice config')
-  }
-
-  return response.data
-}
-
-export const geminiVoiceService = {
-  createVoiceSession,
-  getVoiceConfig,
 }
