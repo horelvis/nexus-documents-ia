@@ -1,1 +1,1 @@
-export { Switch } from '@nexus/shared/ui'
+export { Switch } from '@/components/ui'

@@ -32,7 +32,7 @@ import {
   Badge,
   Alert,
   AlertDescription,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   connectorService,
   OAuthStatus,

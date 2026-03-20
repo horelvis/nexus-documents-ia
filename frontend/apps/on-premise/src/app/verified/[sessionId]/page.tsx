@@ -35,7 +35,7 @@ import {
   Badge,
   Card,
   CardContent,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { AppSidebar } from '@/components/layout/app-sidebar'
 import { PageHeader } from '@/components/layout/page-header'

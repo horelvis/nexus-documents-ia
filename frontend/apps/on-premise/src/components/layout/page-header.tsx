@@ -7,7 +7,7 @@
  * NotificationBell on the right. Used inside SidebarInset on every page.
  */
 
-import { SidebarTrigger } from '@nexus/shared/ui'
+import { SidebarTrigger } from '@/components/ui'
 import { NotificationBell } from '@/components/notifications'
 
 interface PageHeaderProps {

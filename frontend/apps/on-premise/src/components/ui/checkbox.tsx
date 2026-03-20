@@ -1,1 +1,1 @@
-export { Checkbox } from '@nexus/shared/ui'
+export { Checkbox } from '@/components/ui'

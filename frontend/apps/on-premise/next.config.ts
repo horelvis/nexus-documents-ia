@@ -2,7 +2,7 @@ import type { NextConfig } from "next"
 import path from "path"
 
 const nextConfig: NextConfig = {
-  transpilePackages: ["@nexus/shared", "framer-motion"],
+  transpilePackages: ["framer-motion"],
 
   // Force single React instance across monorepo (works with both npm and pnpm)
   webpack: (config) => {

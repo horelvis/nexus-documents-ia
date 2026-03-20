@@ -39,7 +39,7 @@ import {
   Textarea,
   Switch,
   ScrollArea,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth-context'
 import { AppSidebar } from '@/components/layout/app-sidebar'

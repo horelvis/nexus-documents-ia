@@ -32,7 +32,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   dataLearningService,
   LearnedFolderPattern,

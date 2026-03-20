@@ -1,1 +1,1 @@
-export { Popover, PopoverTrigger, PopoverContent } from '@nexus/shared/ui'
+export { Popover, PopoverTrigger, PopoverContent } from '@/components/ui'

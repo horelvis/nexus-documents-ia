@@ -1,1 +1,1 @@
-export * from '@nexus/shared/ui'
+export * from '@/components/ui'

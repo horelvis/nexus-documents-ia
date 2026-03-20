@@ -32,7 +32,7 @@ import {
   SelectTrigger,
   SelectValue,
   Separator,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   Connector,
   UpdateConnectorData,

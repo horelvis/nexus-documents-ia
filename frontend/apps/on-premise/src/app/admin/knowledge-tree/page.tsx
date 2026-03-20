@@ -44,7 +44,7 @@ import {
   Button,
   Input,
   Badge,
-} from "@nexus/shared/ui"
+} from "@/components/ui"
 import { useApiClient } from "@/lib/api-client"
 import { useAuth } from "@/contexts/auth-context"
 import { AppSidebar } from "@/components/layout/app-sidebar"

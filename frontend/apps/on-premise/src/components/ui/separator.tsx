@@ -1,1 +1,1 @@
-export { Separator } from '@nexus/shared/ui'
+export { Separator } from '@/components/ui'

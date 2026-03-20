@@ -28,7 +28,7 @@ import {
   CardTitle,
   Badge,
   Progress,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   connectorService,
   ConnectorOnboardingItem,

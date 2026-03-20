@@ -1,1 +1,1 @@
-export { Toggle, toggleVariants } from '@nexus/shared/ui'
+export { Toggle, toggleVariants } from '@/components/ui'

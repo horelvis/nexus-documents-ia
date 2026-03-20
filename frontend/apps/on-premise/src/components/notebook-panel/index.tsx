@@ -31,7 +31,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { cn } from '@/lib/utils'
 import {
   notebookService,

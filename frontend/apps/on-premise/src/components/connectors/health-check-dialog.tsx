@@ -39,7 +39,7 @@ import {
   Alert,
   AlertDescription,
   Separator,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   Connector,
   ConnectorType,

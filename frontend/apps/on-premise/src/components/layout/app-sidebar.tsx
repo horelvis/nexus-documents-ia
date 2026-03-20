@@ -36,7 +36,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { UserMenu } from '@/components/user-menu'
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {

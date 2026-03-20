@@ -28,7 +28,7 @@ import {
   Button,
   ScrollArea,
   Badge,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { PresentationTemplate } from '@/lib/services/notebook.service'
 

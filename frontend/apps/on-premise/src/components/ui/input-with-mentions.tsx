@@ -1,1 +1,1 @@
-export { InputWithMentions } from '@nexus/shared/ui'
+export { InputWithMentions } from '@/components/ui'

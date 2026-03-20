@@ -30,7 +30,7 @@ import {
   Badge,
   Button,
   Progress,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   dataLearningService,
   DataLearningJob,

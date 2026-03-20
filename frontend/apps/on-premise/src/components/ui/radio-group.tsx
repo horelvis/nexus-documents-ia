@@ -1,1 +1,1 @@
-export { RadioGroup, RadioGroupItem } from '@nexus/shared/ui'
+export { RadioGroup, RadioGroupItem } from '@/components/ui'

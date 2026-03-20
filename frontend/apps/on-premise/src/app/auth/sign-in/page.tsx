@@ -20,7 +20,7 @@ import {
   IconBell,
   IconBrandSlack
 } from '@tabler/icons-react'
-import { Button } from '@nexus/shared/ui'
+import { Button } from '@/components/ui'
 import { useAuth } from '@/contexts/auth-context'
 
 export default function SignInPage() {

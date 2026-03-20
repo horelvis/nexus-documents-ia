@@ -29,14 +29,14 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,11 +46,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@nexus/shared/ui'
-import { Button } from '@nexus/shared/ui'
-import { Input } from '@nexus/shared/ui'
-import { ScrollArea } from '@nexus/shared/ui'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@nexus/shared/ui'
+} from '@/components/ui'
+import { Button } from '@/components/ui'
+import { Input } from '@/components/ui'
+import { ScrollArea } from '@/components/ui'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { conversationService } from '@/lib/services/conversation.service'
 import { ConversationListItem } from '@/lib/types/conversation'

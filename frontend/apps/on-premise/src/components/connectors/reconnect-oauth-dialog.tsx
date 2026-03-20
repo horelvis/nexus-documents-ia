@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { GoogleDriveOAuthStep } from './GoogleDriveOAuthStep'
 import { Connector, connectorNames } from '@/lib/services/connector.service'
 

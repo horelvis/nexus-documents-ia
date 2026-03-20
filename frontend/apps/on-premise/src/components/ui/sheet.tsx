@@ -9,4 +9,4 @@ export {
   SheetFooter,
   SheetTitle,
   SheetDescription,
-} from '@nexus/shared/ui'
+} from '@/components/ui'

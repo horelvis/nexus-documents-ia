@@ -34,7 +34,7 @@ import {
   TableRow,
   Input,
   Switch,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   dataLearningService,
   LearnedPropertyMapping,

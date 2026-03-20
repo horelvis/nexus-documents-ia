@@ -3,4 +3,4 @@ export {
   TooltipTrigger,
   TooltipContent,
   TooltipProvider,
-} from '@nexus/shared/ui'
+} from '@/components/ui'

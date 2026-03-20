@@ -9,4 +9,4 @@ export {
   DialogFooter,
   DialogTitle,
   DialogDescription,
-} from '@nexus/shared/ui'
+} from '@/components/ui'

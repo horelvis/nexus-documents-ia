@@ -10,7 +10,7 @@
 import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { IconCheck, IconLoader2 } from '@tabler/icons-react'
-import { Button } from '@nexus/shared/ui'
+import { Button } from '@/components/ui'
 
 export default function OAuthSuccessPage() {
   return (

@@ -1,1 +1,1 @@
-export { RichTextInput } from '@nexus/shared/ui'
+export { RichTextInput } from '@/components/ui'

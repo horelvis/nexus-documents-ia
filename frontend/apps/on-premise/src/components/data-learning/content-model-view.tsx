@@ -30,7 +30,7 @@ import {
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   dataLearningService,
   ConnectorContentModel,

@@ -60,7 +60,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/contexts/auth-context'

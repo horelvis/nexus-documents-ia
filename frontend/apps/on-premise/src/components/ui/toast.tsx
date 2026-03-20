@@ -13,4 +13,4 @@ export {
   ToastDescription,
   ToastClose,
   ToastAction,
-} from '@nexus/shared/ui'
+} from '@/components/ui'

@@ -1,1 +1,1 @@
-export { ScrollArea, ScrollBar } from '@nexus/shared/ui'
+export { ScrollArea, ScrollBar } from '@/components/ui'

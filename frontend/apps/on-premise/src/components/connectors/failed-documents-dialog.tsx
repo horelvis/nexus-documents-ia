@@ -36,7 +36,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
   ScrollArea,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   Connector,
   FailedDocument,

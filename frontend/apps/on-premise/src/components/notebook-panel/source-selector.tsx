@@ -17,7 +17,7 @@ import {
   Input,
   Button,
   ScrollArea,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { connectorService, IndexedDocument } from '@/lib/services/connector.service'
 

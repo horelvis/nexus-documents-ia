@@ -1,1 +1,1 @@
-export { Skeleton } from '@nexus/shared/ui'
+export { Skeleton } from '@/components/ui'

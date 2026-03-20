@@ -10,7 +10,7 @@ import {
 import {
   SidebarProvider, SidebarInset,
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'

@@ -1,1 +1,1 @@
-export { Button, buttonVariants } from '@nexus/shared/ui'
+export { Button, buttonVariants } from '@/components/ui'

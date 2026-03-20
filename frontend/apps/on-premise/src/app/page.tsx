@@ -14,7 +14,7 @@ import { IconBrain } from '@tabler/icons-react'
 import {
   SidebarProvider,
   SidebarInset,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import { useAuth } from '@/contexts/auth-context'
 import { EmmaChat } from '@/components/emma-chat'
 import { AppSidebar } from '@/components/layout/app-sidebar'

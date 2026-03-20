@@ -16,7 +16,7 @@ import {
   IconChevronDown,
   IconChevronRight
 } from '@tabler/icons-react'
-import { Button, Progress, Collapsible, CollapsibleContent, CollapsibleTrigger } from '@nexus/shared/ui'
+import { Button, Progress, Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { NotebookPresentation, notebookService } from '@/lib/services/notebook.service'
 

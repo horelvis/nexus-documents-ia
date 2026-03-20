@@ -29,7 +29,7 @@ import {
   Button,
   Separator,
   Progress,
-} from '@nexus/shared/ui'
+} from '@/components/ui'
 import {
   Connector,
   PendingDocument,

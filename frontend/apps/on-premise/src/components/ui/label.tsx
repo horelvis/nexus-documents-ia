@@ -1,1 +1,1 @@
-export { Label } from '@nexus/shared/ui'
+export { Label } from '@/components/ui'

@@ -1,1 +1,1 @@
-export { Input } from '@nexus/shared/ui'
+export { Input } from '@/components/ui'

@@ -1,1 +1,1 @@
-export { Textarea } from '@nexus/shared/ui'
+export { Textarea } from '@/components/ui'
