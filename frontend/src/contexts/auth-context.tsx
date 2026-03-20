@@ -206,21 +206,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Check auth state on mount
   useEffect(() => {
     async function checkAuth() {
-      // Check for OIDC callback
-      const code = searchParams.get('code')
-      const state = searchParams.get('state')
-      const error = searchParams.get('error')
+      // Only handle OIDC callback on the designated callback route
+      if (pathname === '/auth/callback') {
+        const error = searchParams.get('error')
+        if (error) {
+          console.error('[Auth] OIDC error:', error, searchParams.get('error_description'))
+          clearTokens()
+          setIsAuthenticated(false)
+          setIsLoaded(true)
+          router.push('/auth/sign-in?error=' + error)
+          return
+        }
 
-      if (error) {
-        console.error('[Auth] OIDC error:', error, searchParams.get('error_description'))
-        setIsLoaded(true)
-        return
-      }
-
-      if (code && state && pathname === '/auth/callback') {
-        await handleCallback(code, state)
-        setIsLoaded(true)
-        return
+        const code = searchParams.get('code')
+        const state = searchParams.get('state')
+        if (code && state) {
+          await handleCallback(code, state)
+          setIsLoaded(true)
+          return
+        }
       }
 
       // Check stored tokens
