@@ -7,7 +7,7 @@ import { useEmmaService } from '@/lib/services/emma.service'
 import { EmmaQueryInput } from './EmmaQueryInput'
 import { EmmaRenderChat } from './EmmaRenderChat'
 import { HITLReviewCard } from './HITLReviewCard'
-import { PDFPreviewModal } from './PDFPreviewModal'
+
 import { EmmaWelcomeScreen } from './EmmaWelcomeScreen'
 import { ChatToolbar } from './ChatToolbar'
 import {
@@ -48,7 +48,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
   const [deepReasoning, setDeepReasoning] = useState(false)
   const [showThreadHistory, setShowThreadHistory] = useState(false)
   const [previewDoc, setPreviewDoc] = useState<DocumentInfo | null>(null)
-  const [showPreviewModal, setShowPreviewModal] = useState(false)
   const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false)
   const [activeArtifactTab, setActiveArtifactTab] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -133,12 +132,19 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 
   const { forgeMetadata } = useForgeDetection(allMessages)
 
+  // ── Close preview helper ──
+  const handleClosePreview = useCallback(() => {
+    setPreviewDoc(null)
+  }, [])
+
   // ── Artifact tabs (extracted hook) ──
   const artifactTabs = useArtifactTabs({
     verifiedJobs,
     predictiveJobs,
     forgeMetadata,
     onSubmitReview: handleReviewSubmit,
+    previewDoc,
+    onClosePreview: handleClosePreview,
   })
 
   // ── Derived state ──
@@ -162,7 +168,8 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 
   const handleDocumentClick = useCallback((doc: DocumentInfo) => {
     setPreviewDoc(doc)
-    setShowPreviewModal(true)
+    setArtifactsPanelOpen(true)
+    setActiveArtifactTab('preview')
   }, [])
 
   const handleFeedback = useCallback(
@@ -276,15 +283,10 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
           />
         </div>
 
-        {/* PDF Preview Modal */}
-        <PDFPreviewModal
-          document={previewDoc}
-          open={showPreviewModal}
-          onOpenChange={setShowPreviewModal}
-        />
+
       </div>
 
-      {/* Artifacts Panel */}
+      {/* Artifacts Panel — visible when there are tabs (including preview) */}
       {artifactTabs.length > 0 && (
         <ArtifactsPanel
           tabs={artifactTabs}
