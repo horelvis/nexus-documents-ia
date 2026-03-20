@@ -35,16 +35,31 @@ _SPECIFIC_NUMBER_RE = re.compile(r'\b(\d{3,})\b')
 _MONEY_RE = re.compile(r'(\d[\d.,]+)\s*[€$]|[€$]\s*(\d[\d.,]+)')
 # Invoice/document number patterns like "FRA-1234", "FAC/2025/001"
 _DOC_NUMBER_RE = re.compile(r'(?:FRA|FAC|ALB|NOM|CONT)[\s\-/]*(\d{2,}[\-/]?\d*)', re.IGNORECASE)
+# Company/entity names: "Empresa X S.L.", "ACME Corp", "TechData Inc."
+_COMPANY_RE = re.compile(
+    r'\b([A-ZÁÉÍÓÚÑ][A-Za-záéíóúñ&\-]+(?:\s+[A-Za-záéíóúñ&\-]+)*)'
+    r'\s+(?:S\.?L\.?U?\.?|S\.?A\.?|S\.?C\.?|Corp\.?|Inc\.?|Ltd\.?|GmbH|'
+    r'Group|Holdings?|Partners?|Solutions?|Services?|Technologies?|Consulting)\b',
+    re.UNICODE,
+)
 
 # Numbers to ignore (years, common counts, percentages)
 _IGNORE_NUMBERS = {str(y) for y in range(1900, 2100)} | {"100", "200", "300", "500", "1000"}
+# Common words that look like company names but aren't (Spanish context)
+_IGNORE_COMPANY_NAMES = {
+    "Estatuto", "Real Decreto", "Ley Orgánica", "Código Civil",
+    "Seguridad Social", "Tribunal Supremo", "Audiencia Nacional",
+}
 
 
 def _extract_specific_data(text: str) -> Set[str]:
-    """Extract specific numerical data points from text.
+    """Extract specific verifiable data points from text.
 
-    Returns set of number strings that represent concrete, verifiable data
-    (invoice numbers, amounts, IDs) — NOT generic counts or years.
+    Returns set of strings that represent concrete, verifiable data:
+    - Numbers: invoice numbers, amounts, IDs (3+ digits, excluding years)
+    - Money amounts: "1.234,56€"
+    - Document numbers: "FRA-1234", "FAC/2025/001"
+    - Company/entity names: "ACME S.L.", "TechData Corp"
     """
     data = set()
 
@@ -63,6 +78,13 @@ def _extract_specific_data(text: str) -> Set[str]:
     # Extract document/invoice number patterns
     for m in _DOC_NUMBER_RE.finditer(text):
         data.add(m.group(0))
+
+    # Extract company/entity names (e.g., "ACME S.L.", "TechCorp Inc.")
+    for m in _COMPANY_RE.finditer(text):
+        name = m.group(1).strip()
+        if name not in _IGNORE_COMPANY_NAMES and len(name) > 2:
+            # Store full match (name + suffix) for exact corpus comparison
+            data.add(m.group(0).strip())
 
     return data
 
