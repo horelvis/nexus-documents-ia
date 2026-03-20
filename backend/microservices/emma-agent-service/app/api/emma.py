@@ -1043,7 +1043,7 @@ async def get_session(
     return EmmaSessionResponse(**session)
 
 
-@router.post("/sessions/{session_id}/continue", response_model=EmmaContinueSessionResponse)
+@router.post("/sessions/{session_id}/continue")
 async def continue_session(
     session_id: str,
     tenant_id: str = Query(..., description="Tenant ID"),
@@ -1052,53 +1052,55 @@ async def continue_session(
     """
     Continue an old Emma session.
 
-    This endpoint:
-    1. Loads the session from PostgreSQL
-    2. Restores it to Redis (hot cache)
-    3. Returns confirmation
+    Returns SSE stream with session restoration events, matching the
+    same event format used by /query/stream so the SDK can handle
+    both endpoints uniformly.
 
-    After calling this, use the regular /query or /query/stream endpoints
-    with the same session_id to continue the conversation.
-    The LLM will have access to the full conversation history.
+    Events emitted:
+    - start: Session restoration initiated
+    - complete: Session restored successfully (includes session data)
+    - error: Restoration failed
     """
     persistence = get_emma_persistence_service()
 
-    # Check if session exists
-    session = await persistence.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    async def _generate_sse():
+        try:
+            # Check if session exists
+            session = await persistence.get_session(session_id)
+            if not session:
+                yield f"event: error\ndata: {json.dumps({'error': f'Session {session_id} not found', 'success': False})}\n\n"
+                return
 
-    # Verify tenant access
-    if session["tenant_id"] != tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied to this session")
+            # Verify tenant access
+            if session["tenant_id"] != tenant_id:
+                yield f"event: error\ndata: {json.dumps({'error': 'Access denied to this session', 'success': False})}\n\n"
+                return
 
-    # Check if already in Redis
-    in_redis = await persistence.session_exists_in_redis(session_id)
+            yield f"event: start\ndata: {json.dumps({'message': 'Restoring session...', 'session_id': session_id})}\n\n"
 
-    if in_redis:
-        return EmmaContinueSessionResponse(
-            success=True,
-            session_id=session_id,
-            message_count=session["message_count"],
-            loaded_to_redis=False,  # Already there
-            message="Session already active in cache",
-        )
+            # Check if already in Redis
+            in_redis = await persistence.session_exists_in_redis(session_id)
 
-    # Load to Redis
-    loaded = await persistence.load_session_to_redis(session_id)
+            if not in_redis:
+                loaded = await persistence.load_session_to_redis(session_id)
+                if not loaded:
+                    yield f"event: error\ndata: {json.dumps({'error': 'Failed to load session to cache', 'success': False})}\n\n"
+                    return
 
-    if not loaded:
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to load session to cache. Please try again.",
-        )
+            yield f"event: complete\ndata: {json.dumps({'success': True, 'session_id': session_id, 'message_count': session['message_count'], 'loaded_to_redis': not in_redis, 'message': 'Session restored' if not in_redis else 'Session already active'})}\n\n"
 
-    return EmmaContinueSessionResponse(
-        success=True,
-        session_id=session_id,
-        message_count=session["message_count"],
-        loaded_to_redis=True,
-        message=f"Session restored with {session['message_count']} messages",
+        except Exception as e:
+            logger.error(f"Session continue SSE error: {e}")
+            yield f"event: error\ndata: {json.dumps({'error': str(e), 'success': False})}\n\n"
+
+    return StreamingResponse(
+        _generate_sse(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

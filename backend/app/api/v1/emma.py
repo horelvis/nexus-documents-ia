@@ -904,23 +904,18 @@ async def emma_session_continue(
     current_user: User = Depends(get_current_user_async),
 ):
     """
-    Continue an old Emma session.
+    Continue an old Emma session (SSE stream).
 
-    Loads session from cold storage (PostgreSQL) into hot cache (Redis)
-    so it can be used with /query or /query/stream endpoints.
+    Loads session from cold storage (PostgreSQL) into hot cache (Redis).
+    Returns text/event-stream matching the same format as /query/stream.
     """
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
-            response = await client.post(
-                f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}/continue",
-                params={"tenant_id": tenant_id},
-                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-            return response.json()
-    except HTTPException:
-        raise
+        return await proxy_sse_stream(
+            f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}/continue?tenant_id={tenant_id}",
+            body={},
+            timeout=30.0,
+            log_prefix="Session continue",
+        )
     except Exception as e:
         logger.error(f"Session continue error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
