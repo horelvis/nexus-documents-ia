@@ -87,7 +87,7 @@ const CHANNEL_TYPES = [
   { value: 'email', label: 'Email', icon: IconMail, description: 'SMTP / IMAP' },
 ]
 
-const EMMA_SERVICE_URL = process.env.NEXT_PUBLIC_EMMA_SERVICE_URL || 'http://localhost:8009'
+const EMMA_SERVICE_URL = process.env.NEXT_PUBLIC_EMMA_SERVICE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || ''
 
 function getChannelIcon(type: string) {
   const info = CHANNEL_TYPES.find((t) => t.value === type)

@@ -55,11 +55,17 @@ interface EmmaStreamProviderProps {
 
 /**
  * Constructs the API URL for the emma-agent-service LangGraph endpoint.
- * On the client, connects directly to port 8009 (bypasses Next.js proxy).
+ * Uses NEXT_PUBLIC_API_BASE_URL from environment config.
  */
 function getApiUrl(): string {
+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || ''
+  if (baseUrl && !baseUrl.startsWith('/')) {
+    // Absolute URL configured (e.g. https://nouxcube.local)
+    return `${baseUrl.replace(/\/+$/, '')}/api`
+  }
+  // Fallback: same origin
   if (typeof window !== 'undefined') {
-    return `${window.location.protocol}//${window.location.hostname}:8009/api`
+    return `${window.location.origin}/api`
   }
   return '/api'
 }
