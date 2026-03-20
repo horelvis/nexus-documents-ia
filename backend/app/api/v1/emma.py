@@ -926,6 +926,67 @@ async def emma_session_history(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/sessions/{session_id}/state")
+async def emma_session_state(
+    session_id: str,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Get current LangGraph state from checkpointer.
+
+    Used by the SDK for initial state hydration and interrupt detection.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/api/threads/{session_id}/state",
+                headers={
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                    "X-Tenant-ID": tenant_id,
+                },
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Session state error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sessions/{session_id}/runs/stream")
+async def emma_session_run_stream(
+    session_id: str,
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: User = Depends(get_current_user_async),
+):
+    """
+    Execute a LangGraph run with SSE streaming.
+
+    Proxies to emma-agent-service's LangGraph protocol endpoint,
+    injecting tenant_id and user_id from the authenticated session.
+    This is the main endpoint consumed by the SDK's useStream hook.
+    """
+    try:
+        body = await request.json()
+        return await proxy_sse_stream(
+            f"{EMMA_SERVICE_URL}/api/threads/{session_id}/runs/stream",
+            body=body,
+            timeout=300.0,
+            log_prefix="LangGraph run",
+            extra_headers={
+                "X-Tenant-ID": tenant_id,
+                "X-User-ID": str(current_user.id),
+            },
+        )
+    except Exception as e:
+        logger.error(f"Session run stream error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/sessions/{session_id}/continue")
 async def emma_session_continue(
     session_id: str,

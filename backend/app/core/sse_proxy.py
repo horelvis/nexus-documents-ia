@@ -23,6 +23,7 @@ async def proxy_sse_stream(
     body: dict,
     timeout: float = 300.0,
     log_prefix: str = "SSE",
+    extra_headers: dict | None = None,
 ) -> StreamingResponse:
     """Proxy an SSE stream from Emma Agent Service to the client.
 
@@ -31,6 +32,7 @@ async def proxy_sse_stream(
         body: JSON body to POST to the upstream endpoint.
         timeout: Total request timeout in seconds.
         log_prefix: Prefix for log messages (e.g. "Emma stream", "Verified stream").
+        extra_headers: Additional headers to forward (e.g. X-Tenant-ID, X-User-ID).
 
     Returns:
         FastAPI StreamingResponse with proper SSE headers.
@@ -42,15 +44,19 @@ async def proxy_sse_stream(
             http2=False,
         ) as client:
             try:
+                request_headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                }
+                if extra_headers:
+                    request_headers.update(extra_headers)
+
                 async with client.stream(
                     "POST",
                     target_url,
                     json=body,
-                    headers={
-                        "Content-Type": "application/json",
-                        "Accept": "text/event-stream",
-                        "X-API-Key": settings.MICROSERVICES_API_KEY or "",
-                    },
+                    headers=request_headers,
                 ) as response:
                     if response.status_code != 200:
                         error_text = await response.aread()
