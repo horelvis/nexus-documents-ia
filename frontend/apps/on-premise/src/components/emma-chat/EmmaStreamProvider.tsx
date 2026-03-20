@@ -54,13 +54,11 @@ interface EmmaStreamProviderProps {
 }
 
 /**
- * Constructs the API URL for the emma-agent-service LangGraph endpoint.
- * On the client, connects directly to port 8009 (bypasses Next.js proxy).
+ * API URL for the LangGraph protocol endpoints.
+ * Routes through Next.js route handlers at /api/threads/* which proxy
+ * to the core API with auth, avoiding Next.js rewrites() SSE buffering.
  */
 function getApiUrl(): string {
-  if (typeof window !== 'undefined') {
-    return `${window.location.protocol}//${window.location.hostname}:8009/api`
-  }
   return '/api'
 }
 
