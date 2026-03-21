@@ -54,74 +54,18 @@ interface EmmaStreamProviderProps {
 }
 
 /**
- * Base URL for the backend API (without /api/v1 suffix).
+ * Constructs the API URL for the LangGraph-compatible backend endpoints.
+ * The backend exposes the standard LangGraph API at /api (threads, assistants, runs).
  */
-function getBackendBaseUrl(): string {
+function getApiUrl(): string {
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || ''
   if (baseUrl && !baseUrl.startsWith('/')) {
-    return baseUrl.replace(/\/+$/, '')
+    return `${baseUrl.replace(/\/+$/, '')}/api`
   }
   if (typeof window !== 'undefined') {
-    return window.location.origin
+    return `${window.location.origin}/api`
   }
-  return ''
-}
-
-/** Session-based API path prefix */
-const SESSIONS_BASE = '/api/v1/emma/sessions'
-
-/**
- * URL rewrite map: LangGraph SDK paths → backend emma/sessions paths.
- * Order matters — more specific patterns first.
- */
-const URL_REWRITES: [RegExp, string][] = [
-  // /api/threads/{id}/runs/stream → /api/v1/emma/sessions/{id}/continue
-  [/\/api\/threads\/([^/]+)\/runs\/stream/, `${SESSIONS_BASE}/$1/continue`],
-  // /api/threads/{id}/history → /api/v1/emma/sessions/{id}/history
-  [/\/api\/threads\/([^/]+)\/history/, `${SESSIONS_BASE}/$1/history`],
-  // /api/threads/{id}/state → /api/v1/emma/sessions/{id}/state
-  [/\/api\/threads\/([^/]+)\/state/, `${SESSIONS_BASE}/$1/state`],
-  // /api/threads/{id} → /api/v1/emma/sessions/{id}
-  [/\/api\/threads\/([^/]+)$/, `${SESSIONS_BASE}/$1`],
-  // /api/threads → /api/v1/emma/sessions
-  [/\/api\/threads$/, SESSIONS_BASE],
-  // /api/assistants/* → /api/v1/emma/assistants/*
-  [/\/api\/assistants(.*)/, '/api/v1/emma/assistants$1'],
-]
-
-/**
- * Custom fetch that rewrites LangGraph SDK paths (/threads/*)
- * to the backend's session-based endpoints (/api/v1/emma/sessions/*).
- */
-async function rewriteFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
-  let rewritten = url
-  for (const [pattern, replacement] of URL_REWRITES) {
-    if (pattern.test(rewritten)) {
-      rewritten = rewritten.replace(pattern, replacement)
-      break
-    }
-  }
-  if (rewritten !== url) {
-    console.log('[Emma] URL rewrite:', url, '→', rewritten)
-  }
-  const response = await fetch(rewritten, init)
-
-  // The SDK expects `thread_id` but the backend returns `session_id`.
-  // Map session_id → thread_id in JSON responses.
-  const ct = response.headers.get('content-type') || ''
-  if (ct.includes('application/json')) {
-    const body = await response.json()
-    if (body && typeof body === 'object' && 'session_id' in body && !('thread_id' in body)) {
-      body.thread_id = body.session_id
-    }
-    return new Response(JSON.stringify(body), {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    })
-  }
-  return response
+  return '/api'
 }
 
 export function EmmaStreamProvider({
@@ -143,9 +87,7 @@ export function EmmaStreamProvider({
     [tenantId, token],
   )
 
-  const apiUrl = useMemo(() => `${getBackendBaseUrl()}/api`, [])
-
-  const callerOptions = useMemo(() => ({ fetch: rewriteFetch }), [])
+  const apiUrl = useMemo(() => getApiUrl(), [])
 
   const stream = useStream<EmmaStateType>({
     apiUrl,
@@ -153,7 +95,6 @@ export function EmmaStreamProvider({
     threadId,
     messagesKey: 'messages',
     defaultHeaders,
-    callerOptions,
     onThreadId,
     fetchStateHistory: true,
   })

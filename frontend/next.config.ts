@@ -50,6 +50,20 @@ const nextConfig: NextConfig = {
     console.log(`[Next.js Rewrites] Backend URL: ${backendUrl}`)
 
     return [
+      // LangGraph SDK endpoints (threads, assistants, runs)
+      {
+        source: "/api/threads/:path*",
+        destination: `${backendUrl}/api/threads/:path*`,
+      },
+      {
+        source: "/api/threads",
+        destination: `${backendUrl}/api/threads`,
+      },
+      {
+        source: "/api/assistants/:path*",
+        destination: `${backendUrl}/api/assistants/:path*`,
+      },
+      // General API proxy
       {
         source: "/api/v1/:path*",
         destination: `${backendUrl}/api/v1/:path*`,
