@@ -762,7 +762,16 @@ async def get_document_preview(
         # El encolado solo se usa para generación proactiva en uploads
         temp_dir = tempfile.mkdtemp()
         temp_file_path = os.path.join(temp_dir, document.filename or 'document')
-        
+
+        # NOTE: MinIO cache fallback (cached_path) does NOT apply here.
+        # This endpoint only handles Document table records (direct uploads stored
+        # in the primary storage service / MinIO). The storage service IS the single
+        # source of truth for these files — there is no separate "connector source"
+        # that can go down independently. The cached_path / MinIO fallback pattern
+        # (introduced in the download endpoint for IndexedDocument/connector files)
+        # would only be relevant if this endpoint were extended to support
+        # IndexedDocument connector files, which it currently does not.
+
         # Descargar archivo como bytes
         file_content = await document_service.storage_service.download_file(document.file_path or '')
         
