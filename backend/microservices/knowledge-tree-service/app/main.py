@@ -61,6 +61,10 @@ async def lifespan(app: FastAPI):
     from app.services.memory_bank_service import memory_bank
     await memory_bank.initialize()
 
+    # Initialize legal reference bridge
+    from app.services.legal_reference_bridge import legal_reference_bridge
+    await legal_reference_bridge.initialize()
+
     yield
     logger.info("Shutting down Knowledge Tree Service...")
 
