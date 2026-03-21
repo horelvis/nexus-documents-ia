@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     # Templates directory
     templates_dir: str = "/app/templates"
 
-    # Storage (MCP storage)
-    storage_service_url: str = "http://mcp-storage:8000"
+    # Storage (MinIO via storage-service)
+    storage_service_url: str = "http://storage-service:8010"
 
     # Local storage for direct file writes
     local_storage_path: str = "/app/storage"

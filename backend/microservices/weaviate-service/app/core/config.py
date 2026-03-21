@@ -301,7 +301,7 @@ class Settings(BaseSettings):
 
     # MCP Storage Server (replaces storage-service)
     mcp_storage_enabled: bool = os.getenv("MCP_STORAGE_ENABLED", "true").lower() == "true"
-    mcp_storage_url: str = os.getenv("MCP_STORAGE_URL", "http://mcp-storage:8000")
+    mcp_storage_url: str = os.getenv("MCP_STORAGE_URL", "http://storage-service:8010")
 
     # MCP REST API Server (external APIs)
     mcp_rest_api_enabled: bool = os.getenv("MCP_REST_API_ENABLED", "false").lower() == "true"

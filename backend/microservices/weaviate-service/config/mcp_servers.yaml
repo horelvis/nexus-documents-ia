@@ -16,33 +16,10 @@ max_connections_per_server: 10
 # MCP Server definitions
 servers:
   # ============================================================================
-  # Storage Server (replaces storage-service microservice)
+  # Storage Server — REMOVED
   # ============================================================================
-  # Provides tools for file operations on GCS, NFS, SMB, etc.
-  - name: storage
-    description: "MCP Storage Server - File operations (GCS/NFS/SMB)"
-    transport: http
-    url: ${MCP_STORAGE_URL}
-    enabled: true
-    timeout: 60
-    tool_prefix: "storage_"  # Tools will be: storage_upload, storage_download, etc.
-
-    # Health check
-    health_check_enabled: true
-    health_check_interval: 60
-
-    # Access control (empty = all tenants allowed)
-    # tenant_whitelist: []
-    # tenant_blacklist: []
-
-    # Tools provided by this server:
-    # - storage_upload: Upload a file to tenant's bucket
-    # - storage_download: Download a file from bucket
-    # - storage_list: List files in a directory
-    # - storage_delete: Delete a file
-    # - storage_signed_url: Generate signed URL for direct access
-    # - storage_move: Move/rename a file
-    # - storage_info: Get file metadata
+  # Storage is now handled by storage-service (FastAPI + MinIO, REST-only).
+  # No MCP protocol needed for file storage.
 
   # ============================================================================
   # Alfresco Server (Alfresco 7.x ECM)

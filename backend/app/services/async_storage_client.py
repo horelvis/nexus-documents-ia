@@ -430,7 +430,7 @@ class AsyncStorageClient(BaseHTTPClient):
             Service status dict
         """
         try:
-            # Use /health endpoint (mcp-storage compatible)
+            # Use /health endpoint (storage-service compatible)
             response = await self.request(
                 "GET",
                 "/health",

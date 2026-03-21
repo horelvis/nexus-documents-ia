@@ -332,6 +332,8 @@ services:
         condition: service_started
       langextract-service:
         condition: service_healthy
+      storage-service:
+        condition: service_healthy
     networks:
       - backend-network
     env_file:
@@ -343,6 +345,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
       - LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
+      - STORAGE_SERVICE_URL=http://storage-service:8010
       # OCR: disabled during bulk indexing (Tika handles text extraction)
       - ENHANCED_OCR_ENABLED=false
       # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
@@ -856,7 +859,7 @@ services:
         condition: service_healthy
       emma-agent-service:
         condition: service_healthy
-      mcp-storage:
+      storage-service:
         condition: service_healthy
       mcp-alfresco:
         condition: service_healthy
@@ -864,8 +867,6 @@ services:
         condition: service_healthy
       mcp-onedrive:
         condition: service_healthy
-      presentation-service:
-        condition: service_started
       keycloak:
         condition: service_started
     networks:
@@ -880,8 +881,7 @@ services:
       - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
       # Emma Agent Service (AI chat)
       - EMMA_SERVICE_URL=${EMMA_SERVICE_URL:-http://emma-agent-service:8009}
-      - PRESENTATION_SERVICE_URL=${PRESENTATION_SERVICE_URL:-http://presentation-service:8000}
-      - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - STORAGE_SERVICE_URL=http://storage-service:8010
       - MCP_ALFRESCO_URL=${MCP_ALFRESCO_URL:-http://mcp-alfresco:8000}
       - MCP_GOOGLE_DRIVE_URL=${MCP_GOOGLE_DRIVE_URL:-http://mcp-google-drive:8000}
       - MCP_ONEDRIVE_URL=${MCP_ONEDRIVE_URL:-http://mcp-onedrive:8000}
@@ -1074,34 +1074,45 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # MCP Storage Server - Local File Storage (On-Premise)
+  # MinIO - S3-Compatible Object Storage (On-Premise)
   # =============================================================================
-  mcp-storage:
-    build:
-      context: ../microservices/mcp-storage-server
-      dockerfile: Dockerfile
-    networks:
-      - backend-network
-    env_file:
-      - .env
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
     environment:
-      - PORT=8000
-      - DEBUG=${DEBUG:-false}
-      # Use local filesystem storage instead of GCS
-      - STORAGE_PROVIDER=local
-      - LOCAL_STORAGE_PATH=/app/storage
-      - LOCAL_STORAGE_BASE_URL=${LOCAL_STORAGE_BASE_URL:-http://mcp-storage:8000}
-      - SIGNED_URL_SECRET=${SIGNED_URL_SECRET:-change-this-secret-in-production}
-      - SIGNED_URL_EXPIRATION=${SIGNED_URL_EXPIRATION:-3600}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     volumes:
-      - ../microservices/mcp-storage-server/app:/app/app:ro
-      # Persistent local storage volume
-      - local_storage_data:/app/storage
-    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # Storage Service - FastAPI + MinIO SDK (REST-only, replaces mcp-storage)
+  # =============================================================================
+  storage-service:
+    build:
+      context: ../microservices/storage-service
+    environment:
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-nexus-storage}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 10s
+      timeout: 5s
       retries: 3
     restart: unless-stopped
 
@@ -1117,7 +1128,7 @@ services:
         condition: service_healthy
       vllm:
         condition: service_healthy
-      mcp-storage:
+      storage-service:
         condition: service_healthy
     networks:
       - backend-network
@@ -1128,7 +1139,7 @@ services:
       - PRESENTATION_API_KEY=${MICROSERVICES_API_KEY}
       - PRESENTATION_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
       - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - PRESENTATION_STORAGE_SERVICE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - PRESENTATION_STORAGE_SERVICE_URL=http://storage-service:8010
       - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
       - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-https://nouxcubeai.ddns.net:8000}
       - PRESENTATION_LOCAL_STORAGE_PATH=/app/storage
@@ -1206,6 +1217,7 @@ volumes:
   fastembed_cache:
   keycloak_data:
   local_storage_data:
+  minio_data:
   easyocr_models:
   certbot_conf:
   certbot_webroot:

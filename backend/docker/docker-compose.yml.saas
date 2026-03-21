@@ -18,7 +18,7 @@ services:
         condition: service_healthy
       weaviate:
         condition: service_healthy
-      mcp-storage:
+      storage-service:
         condition: service_healthy
       langextract-service:
         condition: service_healthy
@@ -39,9 +39,9 @@ services:
       - CAG_SERVICE_URL=${CAG_SERVICE_URL:-http://weaviate-service:8000}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - LANGEXTRACT_SERVICE_URL=${LANGEXTRACT_SERVICE_URL:-http://langextract-service:8000}
-      # MCP Configuration (NEW - replaces direct storage-service calls)
+      # MCP Configuration
       - MCP_ENABLED=${MCP_ENABLED:-true}
-      - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - STORAGE_SERVICE_URL=http://storage-service:8010
       # Infrastructure
       - REDIS_HOST=redis
       - WEAVIATE_URL=http://weaviate:8080
@@ -69,36 +69,45 @@ services:
       start_period: 40s
 
   # =============================================================================
-  # MCP Storage Server (NEW - replaces storage-service)
+  # MinIO - S3-Compatible Object Storage
   # =============================================================================
-  # Model Context Protocol server for file storage operations
-  # Provides: upload, download, list, delete, signed_url, move
-  # Transport: HTTP/SSE for MCP protocol
-  mcp-storage:
-    build:
-      context: ../microservices/mcp-storage-server
-      dockerfile: Dockerfile
-    networks:
-      - backend-network
-    env_file:
-      - .env
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
     environment:
-      - PORT=8000
-      - DEBUG=${DEBUG:-false}
-      - GCS_PROJECT_ID=${GCS_PROJECT_ID}
-      - GCS_CREDENTIALS=${GCS_CREDENTIALS:-/app/credentials/nexus-document-ia-04252dae0146.json}
-      - GCS_DEFAULT_BUCKET=${GCS_DEFAULT_BUCKET:-nexus-documents}
-      - SIGNED_URL_EXPIRATION=${SIGNED_URL_EXPIRATION:-3600}
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
     volumes:
-      # Mount source code for development
-      - ../microservices/mcp-storage-server/app:/app/app:ro
-      # Mount credentials for GCS
-      - ../../credentials:/app/credentials:ro
-    command: ["python", "-m", "app.main", "--http", "--port", "8000"]
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # Storage Service - FastAPI + MinIO SDK (REST-only, replaces mcp-storage)
+  # =============================================================================
+  storage-service:
+    build:
+      context: ../microservices/storage-service
+    environment:
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-nexus-storage}
+      - MINIO_SECURE=${MINIO_SECURE:-false}
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 10s
+      timeout: 5s
       retries: 3
     restart: unless-stopped
 
@@ -350,7 +359,7 @@ services:
       - AGENT_FRAMEWORK=${AGENT_FRAMEWORK:-qwen-agent}
       # MCP Configuration (Model Context Protocol for external data sources)
       - MCP_ENABLED=${MCP_ENABLED:-true}
-      - MCP_STORAGE_URL=${MCP_STORAGE_URL:-http://mcp-storage:8000}
+      - STORAGE_SERVICE_URL=http://storage-service:8010
       - MCP_ALFRESCO_URL=${MCP_ALFRESCO_URL:-http://mcp-alfresco:8000}
       - MCP_SERVERS_CONFIG=${MCP_SERVERS_CONFIG:-/app/config/mcp_servers.yaml}
       - MCP_CONNECTION_TIMEOUT=${MCP_CONNECTION_TIMEOUT:-30}
@@ -1008,6 +1017,7 @@ volumes:
   tgi_cache:  # Cache for TGI-SLM model (Qwen2-0.5B for TOON planning)
   embedding_cache:  # Cache for embedding model (multimodal embeddings service)
   huggingface_cache:  # Cache for HuggingFace models (BGE-M3, FastEmbed, CrossEncoder, spaCy)
+  minio_data:
   keycloak_data:  # KeyCloak PostgreSQL data
   langfuse_postgres_data:  # Langfuse PostgreSQL data
   langfuse_clickhouse_data:  # Langfuse ClickHouse analytics data

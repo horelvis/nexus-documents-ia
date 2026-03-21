@@ -13,7 +13,7 @@ Example YAML configuration:
     servers:
       - name: storage
         transport: http
-        url: http://mcp-storage:8000
+        url: http://storage-service:8010
         enabled: true
         timeout: 30
 
