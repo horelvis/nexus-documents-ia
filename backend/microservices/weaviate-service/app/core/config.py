@@ -271,8 +271,8 @@ class Settings(BaseSettings):
     rag_include_section_hierarchy: bool = os.getenv("RAG_INCLUDE_SECTION_HIERARCHY", "true").lower() == "true"
     rag_include_chunk_references: bool = os.getenv("RAG_INCLUDE_CHUNK_REFERENCES", "true").lower() == "true"
 
-    # Storage service URL (LEGACY - Use MCP storage server instead)
-    storage_service_url: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8003")
+    # Storage service URL (MinIO-backed storage service)
+    storage_service_url: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8010")
 
     # Knowledge Tree Service URL (consolidated graph operations)
     knowledge_tree_service_url: str = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree:8011")

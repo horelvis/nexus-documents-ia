@@ -272,7 +272,7 @@ class Settings(BaseSettings):
     CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
     
     # Microservices URLs
-    STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8003")
+    STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8010")
     CAMUNDA_SERVICE_URL: str = os.getenv("CAMUNDA_SERVICE_URL", "http://camunda-service:8000")
     TTS_SERVICE_URL: str = os.getenv("TTS_SERVICE_URL", "http://tts-service:8000")
     
