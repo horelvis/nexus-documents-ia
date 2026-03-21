@@ -444,7 +444,33 @@ async def stream_document(
         )
 
         # Descargar contenido desde el sistema externo
-        content = await adapter.download_content(unified_doc)
+        # Try source first, fallback to cache if source unavailable
+        try:
+            content = await adapter.download_content(unified_doc)
+        except Exception as source_error:
+            # Source unavailable — try cached copy from MinIO
+            if hasattr(indexed_doc, 'cached_path') and indexed_doc.cached_path:
+                logger.info(f"Source unavailable for {doc_id}, falling back to cache: {indexed_doc.cached_path}")
+                import httpx as _httpx
+                from app.core.config import settings as _settings
+                async with _httpx.AsyncClient(timeout=30.0) as http_client:
+                    cache_response = await http_client.get(
+                        f"{_settings.STORAGE_SERVICE_URL}/files/{indexed_doc.cached_path}",
+                        params={"tenant_id": str(indexed_doc.tenant_id)},
+                    )
+                    if cache_response.status_code == 200:
+                        content = cache_response.content
+                    else:
+                        raise HTTPException(
+                            status_code=503,
+                            detail="Source connector unavailable and cached copy not found"
+                        )
+            else:
+                logger.error(f"Source unavailable for {doc_id} and no cache: {source_error}")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Source connector unavailable and no cached copy available"
+                )
 
         # Preparar respuesta
         content_type = indexed_doc.mime_type or "application/octet-stream"
