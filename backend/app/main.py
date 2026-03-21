@@ -95,6 +95,11 @@ app.include_router(
 app.include_router(v1_api_router, prefix=settings.API_PREFIX)
 app.include_router(basic_router)
 
+# LangGraph protocol — mounted at /api/threads (no /v1 prefix)
+# to match the LangGraph SDK's expected URL structure.
+from app.api.v1.threads import router as threads_router
+app.include_router(threads_router, prefix="/api/threads", tags=["langgraph-protocol"])
+
 # Include debug routes only in development
 if settings.DEBUG:
     app.include_router(debug_router)

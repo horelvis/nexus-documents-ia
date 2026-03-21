@@ -20,9 +20,9 @@ function forwardHeaders(request: NextRequest): Record<string, string> {
   }
 }
 
-/** Build the backend URL for a session endpoint. */
-export function backendUrl(sessionId: string, suffix: string): string {
-  return `${BACKEND_URL}/api/v1/emma/sessions/${sessionId}${suffix}`
+/** Build the backend URL for a thread endpoint (LangGraph protocol). */
+export function backendUrl(threadId: string, suffix: string): string {
+  return `${BACKEND_URL}/api/threads/${threadId}${suffix}`
 }
 
 /** Proxy a JSON request/response (non-streaming). */

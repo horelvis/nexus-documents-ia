@@ -11,7 +11,7 @@ const BACKEND_URL =
 export async function POST(request: NextRequest) {
   const body = await request.text()
 
-  const response = await fetch(`${BACKEND_URL}/api/v1/emma/sessions`, {
+  const response = await fetch(`${BACKEND_URL}/api/threads`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
