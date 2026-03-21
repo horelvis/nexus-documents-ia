@@ -48,6 +48,13 @@ SELECT create_elabel('medical_graph', 'DERIVADO_A');
 SELECT create_elabel('medical_graph', 'ADJUNTO');
 SELECT create_elabel('medical_graph', 'CONTRAINDICADO');
 
+-- Legal proxy nodes (synced from knowledge_graph_public, shared=true)
+SELECT create_vlabel('medical_graph', 'LegalLaw');
+SELECT create_elabel('medical_graph', 'APLICA');
+SELECT create_elabel('medical_graph', 'MODIFIES');
+SELECT create_elabel('medical_graph', 'DEROGATES');
+SELECT create_elabel('medical_graph', 'REFERENCES');
+
 -- Ontology proxy (for INSTANCE_OF edges to shared EntityType nodes)
 SELECT create_vlabel('medical_graph', 'EntityType');
 

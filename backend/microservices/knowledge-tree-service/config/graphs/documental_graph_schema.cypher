@@ -38,6 +38,13 @@ SELECT create_vlabel('documental_graph', 'Categoria');
 SELECT create_vlabel('documental_graph', 'Flujo');
 SELECT create_vlabel('documental_graph', 'Ubicacion');
 
+-- Legal proxy nodes (synced from knowledge_graph_public, shared=true)
+SELECT create_vlabel('documental_graph', 'LegalLaw');
+SELECT create_elabel('documental_graph', 'APLICA');
+SELECT create_elabel('documental_graph', 'MODIFIES');
+SELECT create_elabel('documental_graph', 'DEROGATES');
+SELECT create_elabel('documental_graph', 'REFERENCES');
+
 -- Ontology proxy (for INSTANCE_OF edges to shared EntityType nodes)
 SELECT create_vlabel('documental_graph', 'EntityType');
 

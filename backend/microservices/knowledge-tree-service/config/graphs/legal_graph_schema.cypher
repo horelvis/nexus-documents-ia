@@ -50,6 +50,12 @@ SELECT create_elabel('legal_graph', 'MODIFICA');
 SELECT create_elabel('legal_graph', 'APLICA');
 SELECT create_elabel('legal_graph', 'PARTE_DE');
 
+-- Legal proxy nodes (synced from knowledge_graph_public, shared=true)
+SELECT create_vlabel('legal_graph', 'LegalLaw');
+SELECT create_elabel('legal_graph', 'MODIFIES');
+SELECT create_elabel('legal_graph', 'DEROGATES');
+SELECT create_elabel('legal_graph', 'REFERENCES');
+
 -- Ontology proxy (for INSTANCE_OF edges to shared EntityType nodes)
 SELECT create_vlabel('legal_graph', 'EntityType');
 
