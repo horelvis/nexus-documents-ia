@@ -324,8 +324,8 @@ For documents without visual elements, maximize context window.
 │  │  └──────────┘  └─────────────────────────┘  └──────────────────┘   │    │
 │  │                                                                      │    │
 │  │  ┌──────────┐  ┌─────────────────┐  ┌──────────────────┐            │    │
-│  │  │langextract│ │  mcp-storage    │  │   tts-service    │            │    │
-│  │  │  :8009   │  │     :8003       │  │  (Google/Local)  │            │    │
+│  │  │langextract│ │ storage-service │  │   tts-service    │            │    │
+│  │  │  :8009   │  │     :8010       │  │  (Google/Local)  │            │    │
 │  │  └──────────┘  └─────────────────┘  └──────────────────┘            │    │
 │  │                                                                      │    │
 │  └──────────────────────────────────────────────────────────────────────┘    │
@@ -392,7 +392,9 @@ Usuario ──▶ API ──▶ weaviate-service
 | api | 8000 | 8000 | Main FastAPI gateway |
 | weaviate-service | 8000 | 8007 | RAG + Emma AI |
 | langextract-service | 8000 | 8009 | Entity extraction |
-| mcp-storage | 8000 | 8003 | File storage operations |
+| storage-service | 8010 | 8010 | File storage (FastAPI + MinIO SDK) |
+| minio | 9000 | 9000 | S3-compatible object storage (API) |
+| minio-console | 9001 | 9001 | MinIO web console |
 | background-worker | 8100 | - | Celery async tasks |
 | vllm | 8000 | - | LLM inference (internal) |
 | qwen3-vl-embedding | 8001 | - | Embedding (internal) |

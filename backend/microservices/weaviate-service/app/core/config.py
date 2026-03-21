@@ -299,7 +299,7 @@ class Settings(BaseSettings):
     mcp_connection_timeout: int = int(os.getenv("MCP_CONNECTION_TIMEOUT", "30"))
     mcp_max_connections: int = int(os.getenv("MCP_MAX_CONNECTIONS", "10"))
 
-    # MCP Storage Server (replaces storage-service)
+    # Storage Service (FastAPI + MinIO SDK, replaces mcp-storage-server)
     mcp_storage_enabled: bool = os.getenv("MCP_STORAGE_ENABLED", "true").lower() == "true"
     mcp_storage_url: str = os.getenv("MCP_STORAGE_URL", "http://storage-service:8010")
 
