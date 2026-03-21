@@ -376,7 +376,7 @@ Changes:
 
 ### ReAct agent prompt guardrails
 
-New section in `react_loop` system prompt (Langfuse key: `emma_react_loop_system`):
+New section in `react_loop` system prompt (Langfuse key: `emma_react_system`):
 
 ```
 ## Sobre las fuentes documentales
