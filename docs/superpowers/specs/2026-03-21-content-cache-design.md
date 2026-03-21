@@ -1,180 +1,382 @@
-# Content Cache — Design Spec (v2)
+# Content Cache — Design Spec (v3)
 
 **Date:** 2026-03-21
-**Status:** Approved (v2 — post-review)
-**Scope:** Cache original files during indexation for offline preview/download when source connectors are unavailable
-**Also:** Convert mcp-storage-server from MCP protocol to REST API (storage-service)
+**Status:** Approved (v3 — MinIO from scratch)
+**Scope:** Cache original files during indexation via new MinIO-based storage-service; offline preview/download fallback
 
 ---
 
 ## Context
 
-NouxCubeIA indexes documents from external sources (Alfresco, Google Drive, OneDrive, databases) via MCP connectors. The original files live exclusively on the source — no local copy is stored. When the source is unavailable (server down, network issue, credentials expired):
+NouxCubeIA indexes documents from external sources (Alfresco, Google Drive, OneDrive, databases) via MCP connectors. The original files live exclusively on the source — no local copy is stored. When the source is unavailable:
 
 - **Preview fails** — cannot render the PDF/DOCX
 - **Download fails** — cannot serve the file to the user
-- **Re-indexing fails** — cannot re-process the document
 - **RAG still works** — chunks are already in Weaviate with embeddings
 
-This spec adds a content cache layer that stores original files during indexation. Preview and download fall back to cache when the source is unavailable.
+### What changes
 
----
-
-## Important Notes
-
-### mcp-storage-server -> storage-service conversion
-
-The current `mcp-storage-server` speaks MCP protocol (SSE transport), not REST. It has no `POST /upload` or `GET /download` endpoints — only MCP tool calls. For service-to-service file operations (upload during indexation, download for fallback), MCP protocol is overkill.
-
-This spec converts `mcp-storage-server` into `storage-service` — a standard FastAPI REST service that exposes `POST /files/{path}` and `GET /files/{path}` endpoints. The MCP protocol layer (`/sse`, `/messages/`) is removed entirely — it served no purpose for binary file storage. The underlying `LocalStorageService` and `GCSStorageService` remain unchanged.
-
-### Path convention
-
-`LocalStorageService._get_full_path()` automatically prepends `tenant-{tenant_id}/` to object names. To avoid double-prefixing, the `cached_path` stored in the database uses the object name WITHOUT the tenant prefix:
-
-```
-cached_path = "originals/{document_id}/{filename}"
-Actual disk path = /app/storage/tenant-{tenant_id}/originals/{document_id}/{filename}
-```
-
-### Database updates from weaviate-service
-
-weaviate-service has `DATABASE_URL` configured and can write directly to PostgreSQL. No need for an HTTP round-trip to main API to update `cached_path`.
+- Delete `mcp-storage-server` entirely (MCP protocol for file storage was unnecessary)
+- New `storage-service` from scratch: FastAPI + MinIO SDK, REST-only
+- MinIO container in docker-compose (S3-compatible, on-premise, client can point to their own S3/NAS)
+- Cache original files during indexation
+- Fallback to cache for preview/download when source is down
 
 ---
 
 ## Architecture
 
-### Indexation flow (new cache step)
+### New service: storage-service
 
 ```
-MCP Connector downloads file
-  -> file_bytes -> weaviate-service (index_from_connector)
-    -> NEW: storage-service REST POST /files/originals/{doc_id}/{filename}
-    -> NEW: Direct DB UPDATE indexed_documents SET cached_path = '...'
-    -> existing: Docling extract -> chunks -> Weaviate -> AGE -> legal refs
+storage-service (FastAPI, port 8010)
+├── POST   /files/{path}?tenant_id=X     — upload file bytes
+├── GET    /files/{path}?tenant_id=X     — download file bytes
+├── DELETE /files/{path}?tenant_id=X     — delete file
+├── HEAD   /files/{path}?tenant_id=X     — check if file exists
+├── GET    /health                        — health check
+└── Uses MinIO SDK (minio Python package) for S3 operations
 ```
 
-### Preview/Download flow (fallback)
-
-The download endpoint for connector documents is in `documents.py` at line ~447:
-
-```python
-content = await adapter.download_content(unified_doc)
+MinIO bucket structure:
+```
+nexus-storage/
+├── {tenant_id}/
+│   └── originals/
+│       ├── {document_id}/{filename}          — file connector docs
+│       └── {document_id}/extracted.txt       — database connector docs
 ```
 
-This calls the MCP connector which proxies to Alfresco/GDrive. When the source is down, this raises an exception. The fallback wraps this call:
+### Indexation flow
+
+```
+MCP Connector downloads file -> file_bytes -> weaviate-service
+  -> storage-service POST /files/originals/{doc_id}/{filename}?tenant_id=X
+  -> Direct DB: UPDATE indexed_documents SET cached_path = 'originals/{doc_id}/{filename}'
+  -> Existing pipeline: Docling -> chunks -> Weaviate -> AGE -> legal refs
+```
+
+### Download fallback
 
 ```
 Frontend -> GET /api/v1/documents/{id}/content
-  -> indexed_doc = get from DB
-  -> Try 1: adapter.download_content(unified_doc)  [line ~447]
-  -> Catch (source unavailable):
-     -> Try 2: If indexed_doc.cached_path:
-          -> storage-service GET /files/{cached_path}?tenant_id={tid}
-     -> Try 3: 503 "Source unavailable and no cached copy"
+  -> Try 1: adapter.download_content(unified_doc)  [Alfresco/GDrive, line ~447]
+  -> Catch exception (source unavailable):
+     -> If indexed_doc.cached_path:
+        -> storage-service GET /files/{cached_path}?tenant_id=X
+     -> Else:
+        -> 503 "Source unavailable and no cached copy"
 ```
 
 ### Connector type handling
 
-| Connector type | Has file? | What to cache | Cache format |
-|---------------|-----------|---------------|-------------|
-| `alfresco` | Yes (PDF, DOCX) | Original file bytes | Binary as-is |
-| `google_drive` | Yes (PDF, DOCX, Sheets) | Original file bytes | Binary as-is |
-| `onedrive` | Yes (PDF, DOCX) | Original file bytes | Binary as-is |
-| `database` | No (SQL query -> text) | Extracted text snapshot | `.txt` file |
+| Connector type | Has file? | What to cache |
+|---------------|-----------|---------------|
+| `alfresco` | Yes | Original binary (PDF, DOCX) |
+| `google_drive` | Yes | Original binary |
+| `onedrive` | Yes | Original binary |
+| `database` | No | Extracted text as `.txt` |
 
 ---
 
-## Component 1: Convert mcp-storage-server to storage-service
+## Component 1: MinIO in docker-compose
 
-### Rename
+**File:** `backend/docker/docker-compose.onpremise.yml`
+
+```yaml
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"    # S3 API
+      - "9001:9001"    # Console (optional, for debugging)
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  minio_data:
+```
+
+The client can mount `minio_data` to their NAS/SAN for massive storage.
+
+Env vars in `.env`:
+```
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+MINIO_ENDPOINT=minio:9000
+MINIO_BUCKET=nexus-storage
+MINIO_SECURE=false
+```
+
+---
+
+## Component 2: storage-service (new, from scratch)
+
+**Directory:** `backend/microservices/storage-service/`
 
 ```
-backend/microservices/mcp-storage-server/ -> backend/microservices/storage-service/
-docker-compose: service name mcp-storage -> storage-service
+storage-service/
+├── app/
+│   ├── main.py           — FastAPI app, REST endpoints
+│   ├── core/
+│   │   └── config.py     — Settings (MinIO endpoint, bucket, credentials)
+│   └── services/
+│       └── minio_service.py — MinIO client wrapper (upload, download, delete, exists)
+├── Dockerfile
+└── requirements.txt      — fastapi, uvicorn, minio
 ```
 
-### New REST endpoints in main.py
-
-Add to the Starlette app alongside existing `/health` and `/tools`:
+### main.py
 
 ```python
-async def upload_file(request: Request):
-    """REST endpoint: upload file bytes."""
-    path = request.path_params["path"]
-    tenant_id = request.query_params.get("tenant_id", "default")
-    content = await request.body()
+"""
+Storage Service — REST API for file storage via MinIO (S3-compatible).
 
-    from app.services.local_service import LocalStorageService
-    storage = LocalStorageService()
-    storage.initialize()
-    result = await storage.upload_file(
-        content=content,
-        object_name=path,
-        tenant_id=tenant_id,
-    )
+Replaces mcp-storage-server. No MCP protocol — pure REST for
+service-to-service file operations.
+"""
+
+from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.responses import JSONResponse
+
+from app.core.config import settings
+from app.services.minio_service import minio_storage
+
+app = FastAPI(title="Storage Service", version="1.0.0")
+
+
+@app.on_event("startup")
+async def startup():
+    await minio_storage.initialize()
+
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "service": "storage-service"}
+
+
+@app.post("/files/{path:path}")
+async def upload_file(path: str, request: Request, tenant_id: str = "default"):
+    """Upload file bytes to MinIO."""
+    content = await request.body()
+    if not content:
+        raise HTTPException(400, "Empty body")
+
+    object_name = f"{tenant_id}/{path}"
+    content_type = request.headers.get("content-type", "application/octet-stream")
+
+    result = await minio_storage.upload(object_name, content, content_type)
     return JSONResponse(result)
 
 
-async def download_file(request: Request):
-    """REST endpoint: download file bytes."""
-    path = request.path_params["path"]
-    tenant_id = request.query_params.get("tenant_id", "default")
-
-    from app.services.local_service import LocalStorageService
-    storage = LocalStorageService()
-    storage.initialize()
-    content = storage.download_file(
-        object_name=path,
-        tenant_id=tenant_id,
-    )
+@app.get("/files/{path:path}")
+async def download_file(path: str, tenant_id: str = "default"):
+    """Download file bytes from MinIO."""
+    object_name = f"{tenant_id}/{path}"
+    content = await minio_storage.download(object_name)
     if content is None:
-        return Response(status_code=404)
+        raise HTTPException(404, "File not found")
     return Response(content=content, media_type="application/octet-stream")
 
 
-routes = [
-    Route("/health", health_check, methods=["GET"]),
-    Route("/files/{path:path}", upload_file, methods=["POST"]),
-    Route("/files/{path:path}", download_file, methods=["GET"]),
-]
+@app.delete("/files/{path:path}")
+async def delete_file(path: str, tenant_id: str = "default"):
+    """Delete file from MinIO."""
+    object_name = f"{tenant_id}/{path}"
+    success = await minio_storage.delete(object_name)
+    if not success:
+        raise HTTPException(404, "File not found")
+    return {"deleted": True}
+
+
+@app.head("/files/{path:path}")
+async def file_exists(path: str, tenant_id: str = "default"):
+    """Check if file exists in MinIO."""
+    object_name = f"{tenant_id}/{path}"
+    exists = await minio_storage.exists(object_name)
+    if not exists:
+        raise HTTPException(404)
+    return Response(status_code=200)
 ```
 
-The MCP protocol layer (`/sse`, `/messages/`, `/tools`) is removed entirely. The `app/server.py` (MCP server definition) and `app/tools/` (MCP tool definitions) can be deleted. Only `app/services/` (LocalStorageService, GCSStorageService) is kept.
+### minio_service.py
+
+```python
+"""
+MinIO storage service — S3-compatible object storage.
+
+Uses the official minio Python SDK for synchronous operations
+wrapped in asyncio.to_thread() for non-blocking calls.
+"""
+
+import io
+import logging
+from typing import Any, Dict, Optional
+
+from minio import Minio
+from minio.error import S3Error
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class MinIOStorageService:
+    """MinIO S3-compatible storage client."""
+
+    def __init__(self):
+        self._client: Optional[Minio] = None
+        self._bucket = settings.minio_bucket
+
+    async def initialize(self) -> None:
+        """Initialize MinIO client and ensure bucket exists."""
+        import asyncio
+        self._client = Minio(
+            settings.minio_endpoint,
+            access_key=settings.minio_root_user,
+            secret_key=settings.minio_root_password,
+            secure=settings.minio_secure,
+        )
+        # Ensure bucket exists
+        def _ensure_bucket():
+            if not self._client.bucket_exists(self._bucket):
+                self._client.make_bucket(self._bucket)
+                logger.info(f"Created MinIO bucket: {self._bucket}")
+        await asyncio.to_thread(_ensure_bucket)
+        logger.info(f"MinIO storage initialized: {settings.minio_endpoint}/{self._bucket}")
+
+    async def upload(self, object_name: str, data: bytes, content_type: str = "application/octet-stream") -> Dict[str, Any]:
+        """Upload bytes to MinIO."""
+        import asyncio
+        def _upload():
+            self._client.put_object(
+                self._bucket, object_name,
+                io.BytesIO(data), len(data),
+                content_type=content_type,
+            )
+        await asyncio.to_thread(_upload)
+        logger.info(f"Uploaded: {object_name} ({len(data)} bytes)")
+        return {"object_name": object_name, "size": len(data), "bucket": self._bucket}
+
+    async def download(self, object_name: str) -> Optional[bytes]:
+        """Download bytes from MinIO."""
+        import asyncio
+        def _download():
+            try:
+                response = self._client.get_object(self._bucket, object_name)
+                data = response.read()
+                response.close()
+                response.release_conn()
+                return data
+            except S3Error as e:
+                if e.code == "NoSuchKey":
+                    return None
+                raise
+        return await asyncio.to_thread(_download)
+
+    async def delete(self, object_name: str) -> bool:
+        """Delete object from MinIO."""
+        import asyncio
+        def _delete():
+            try:
+                self._client.remove_object(self._bucket, object_name)
+                return True
+            except S3Error:
+                return False
+        return await asyncio.to_thread(_delete)
+
+    async def exists(self, object_name: str) -> bool:
+        """Check if object exists in MinIO."""
+        import asyncio
+        def _exists():
+            try:
+                self._client.stat_object(self._bucket, object_name)
+                return True
+            except S3Error:
+                return False
+        return await asyncio.to_thread(_exists)
+
+
+# Singleton
+minio_storage = MinIOStorageService()
+```
+
+### config.py
+
+```python
+import os
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    service_name: str = "storage-service"
+    service_port: int = int(os.getenv("SERVICE_PORT", "8010"))
+
+    minio_endpoint: str = os.getenv("MINIO_ENDPOINT", "minio:9000")
+    minio_root_user: str = os.getenv("MINIO_ROOT_USER", "minioadmin")
+    minio_root_password: str = os.getenv("MINIO_ROOT_PASSWORD", "minioadmin")
+    minio_bucket: str = os.getenv("MINIO_BUCKET", "nexus-storage")
+    minio_secure: bool = os.getenv("MINIO_SECURE", "false").lower() == "true"
+
+    class Config:
+        env_file = ".env"
+
+
+settings = Settings()
+```
+
+### Dockerfile
+
+```dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8010"]
+```
+
+### requirements.txt
+
+```
+fastapi>=0.104.0
+uvicorn>=0.24.0
+minio>=7.2.0
+pydantic-settings>=2.0.0
+```
 
 ---
 
-## Component 2: Database Migration
-
-New column on `indexed_documents`:
+## Component 3: Database Migration
 
 ```sql
 ALTER TABLE indexed_documents ADD COLUMN cached_path TEXT;
 ```
 
-- `NULL` = no cache (legacy docs, or cache failed)
-- `originals/{document_id}/{filename}` = object name (without tenant prefix — service adds it)
+- `NULL` = no cache
+- `originals/{document_id}/{filename}` = object path (tenant_id prepended by service)
 
 ---
 
-## Component 3: Cache during indexation
+## Component 4: Cache during indexation
 
 **File:** `backend/microservices/weaviate-service/app/api/weaviate.py`
 
-New function called after `file_bytes = base64.b64decode(...)` (~line 829), before processing:
+After `file_bytes = base64.b64decode(...)` (~line 829), before Docling processing:
 
 ```python
 async def _cache_original_file(
-    tenant_id: str,
-    document_id: str,
-    filename: str,
-    file_bytes: bytes,
+    tenant_id: str, document_id: str, filename: str, file_bytes: bytes,
 ) -> Optional[str]:
-    """Cache original file in storage-service for offline access.
-
-    Returns the cached_path (object_name without tenant prefix) or None if failed.
-    """
+    """Cache original file in storage-service (MinIO) for offline access."""
     try:
         object_name = f"originals/{document_id}/{filename}"
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -190,15 +392,12 @@ async def _cache_original_file(
         return None
 ```
 
-For database connectors:
+For database connectors (no file, only text):
 
 ```python
 async def _cache_extracted_text(
-    tenant_id: str,
-    document_id: str,
-    extracted_text: str,
+    tenant_id: str, document_id: str, extracted_text: str,
 ) -> Optional[str]:
-    """Cache extracted text for database connector documents."""
     try:
         object_name = f"originals/{document_id}/extracted.txt"
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -216,11 +415,8 @@ async def _cache_extracted_text(
 
 ### Persisting cached_path (direct DB write)
 
-weaviate-service already has `DATABASE_URL` configured. Direct SQL update:
-
 ```python
 async def _update_cached_path(tenant_id: str, document_id: str, cached_path: str) -> None:
-    """Update cached_path on indexed_documents via direct DB write."""
     try:
         import asyncpg
         conn = await asyncpg.connect(settings.database_url)
@@ -235,18 +431,16 @@ async def _update_cached_path(tenant_id: str, document_id: str, cached_path: str
 
 ---
 
-## Component 4: Download fallback
+## Component 5: Download fallback
 
 **File:** `backend/app/api/v1/documents.py`
 
-In the connector download block (lines 418-471), wrap `adapter.download_content()` at line 447:
+Wrap `adapter.download_content(unified_doc)` at line ~447:
 
 ```python
     try:
-        # Existing: download from source (Alfresco/GDrive)
         content = await adapter.download_content(unified_doc)
     except Exception as source_error:
-        # NEW: Fallback to cached copy
         if indexed_doc.cached_path:
             logger.info(f"Source unavailable, falling back to cache: {indexed_doc.cached_path}")
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -259,23 +453,10 @@ In the connector download block (lines 418-471), wrap `adapter.download_content(
                 else:
                     raise HTTPException(503, "Source unavailable and cache not found")
         else:
-            logger.error(f"Source unavailable and no cache for {doc_id}: {source_error}")
-            raise HTTPException(503, "Source unavailable and no cached copy available")
+            raise HTTPException(503, "Source unavailable and no cached copy")
 ```
 
----
-
-## Component 5: Preview fallback
-
-**File:** `backend/app/api/v1/documents.py`
-
-The preview endpoint (`/{doc_id}/preview`, line ~531) calls `DocumentPreviewService.generate_preview()` which expects a **local file path**. The preview flow is:
-
-1. Download file bytes (from connector or cache)
-2. Write to temp file
-3. Pass temp path to Gotenberg for PDF conversion
-
-The fallback logic is the same as Component 4 — get file bytes from cache when source fails. The preview service itself does not need modification. The fallback is at the call site where bytes are obtained, before passing to the preview service.
+Same pattern applies to the preview call site in `documents.py` — get bytes from cache, write to temp, pass to Gotenberg.
 
 ---
 
@@ -283,83 +464,106 @@ The fallback logic is the same as Component 4 — get file bytes from cache when
 
 **File:** `backend/docker/docker-compose.onpremise.yml`
 
-### Rename service
+1. **Delete** `mcp-storage` service definition
+2. **Add** `minio` + `storage-service`:
 
 ```yaml
-# OLD
-mcp-storage:
-    build:
-      context: ../microservices/mcp-storage-server
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-# NEW
-storage-service:
+  storage-service:
     build:
       context: ../microservices/storage-service
+    environment:
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET=${MINIO_BUCKET:-nexus-storage}
+    depends_on:
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 ```
 
-### Add dependency to weaviate-service
+3. **Add** `storage-service` to `weaviate-service.depends_on` and env:
 
 ```yaml
-weaviate-service:
+  weaviate-service:
     depends_on:
       ...
       storage-service:
         condition: service_healthy
     environment:
       ...
-      - STORAGE_SERVICE_URL=${STORAGE_SERVICE_URL:-http://storage-service:8000}
+      - STORAGE_SERVICE_URL=${STORAGE_SERVICE_URL:-http://storage-service:8010}
 ```
 
-### Add dependency to api service
+4. **Add** `STORAGE_SERVICE_URL` to `api` service env for download fallback
 
-Update existing `mcp-storage` references to `storage-service`.
+5. **Update** all `mcp-storage` references to `storage-service`
 
-### Config in weaviate-service
+---
 
-Add to `weaviate-service/app/core/config.py`:
+## Deleted files
 
-```python
-storage_service_url: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8000")
-```
+| Path | Reason |
+|------|--------|
+| `backend/microservices/mcp-storage-server/` (entire directory) | MCP protocol unnecessary for file storage; replaced by MinIO-based storage-service |
 
 ---
 
 ## Files Changed Summary
 
-### Renamed (1)
-
-| From | To |
-|------|-----|
-| `backend/microservices/mcp-storage-server/` | `backend/microservices/storage-service/` |
-
-### New files (2)
+### New (1 directory + 1 migration)
 
 | File | Purpose |
 |------|---------|
-| `backend/alembic/versions/xxx_add_cached_path.py` | Migration: add `cached_path` column |
-| (REST endpoints added to existing `storage-service/app/main.py`) | |
+| `backend/microservices/storage-service/` | New service: FastAPI + MinIO SDK |
+| `backend/alembic/versions/xxx_add_cached_path.py` | Migration: `cached_path` column |
 
-### Modified files (5)
+### Modified (4)
 
 | File | Change |
 |------|--------|
-| `backend/microservices/storage-service/app/main.py` | Add REST endpoints `POST/GET /files/{path}` |
-| `backend/microservices/weaviate-service/app/api/weaviate.py` | `_cache_original_file()` + `_cache_extracted_text()` + `_update_cached_path()` |
-| `backend/microservices/weaviate-service/app/core/config.py` | Add `storage_service_url` setting |
-| `backend/app/api/v1/documents.py` | Download + preview fallback to cache |
-| `backend/app/db/models.py` | Add `cached_path` to IndexedDocument model |
-| `backend/docker/docker-compose.onpremise.yml` | Rename mcp-storage, add depends_on + env vars |
+| `backend/microservices/weaviate-service/app/api/weaviate.py` | Cache during indexation + DB update |
+| `backend/microservices/weaviate-service/app/core/config.py` | `storage_service_url` setting |
+| `backend/app/api/v1/documents.py` | Download + preview fallback |
+| `backend/docker/docker-compose.onpremise.yml` | Delete mcp-storage, add minio + storage-service |
+
+### Deleted (1)
+
+| File | Reason |
+|------|--------|
+| `backend/microservices/mcp-storage-server/` | Replaced by storage-service |
 
 ### Implementation order
 
-1. Rename `mcp-storage-server` to `storage-service` + add REST endpoints
-2. Docker-compose updates (rename, depends_on, env vars)
-3. Alembic migration — add `cached_path` column + model update
-4. Config — `storage_service_url` in weaviate-service
-5. Cache during indexation — `_cache_original_file()` + direct DB update
-6. Download fallback — try adapter, fallback to cache
-7. Preview fallback — same pattern at call site
-8. Backfill (optional) — background task for existing docs when source available
+1. Delete `mcp-storage-server/`
+2. Create `storage-service/` (FastAPI + MinIO)
+3. Docker-compose (minio + storage-service, remove mcp-storage)
+4. Alembic migration + model update
+5. Config `storage_service_url` in weaviate-service
+6. Cache during indexation
+7. Download fallback
+8. Preview fallback
 
 ---
 
@@ -370,15 +574,5 @@ storage_service_url: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-serv
 | Overhead per document | = original file size |
 | 30 docs (~5MB avg) | ~150MB |
 | 1000 docs | ~5GB |
-| Disk path on-premise | `/app/storage/tenant-{id}/originals/` (Docker volume) |
-| SaaS path | GCS bucket (via storage-service GCS provider) |
-
----
-
-## What this does NOT include
-
-- New Docker service (renames existing one, adds REST endpoints)
-- Frontend changes (fallback is transparent)
-- Cache TTL/expiration (kept indefinitely)
-- File deduplication (each doc has its own copy)
-- MCP protocol support removed (was unnecessary for binary file storage)
+| MinIO data | Docker volume `minio_data` (mountable to NAS/SAN) |
+| MinIO console | `http://localhost:9001` (admin UI for debugging) |
