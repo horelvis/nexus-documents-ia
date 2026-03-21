@@ -1,4 +1,8 @@
+"use client"
+
 import * as React from "react"
+
+import type { ToastProps, ToastActionElement } from "@/components/ui"
 
 const TOAST_LIMIT = 1
 const TOAST_REMOVE_DELAY = 1000000
@@ -85,8 +89,6 @@ export const reducer = (state: State, action: Action): State => {
     case "DISMISS_TOAST": {
       const { toastId } = action
 
-      // ! Side effects ! - This could be extracted into a dismissToast() action,
-      // but I'll keep it here for simplicity
       if (toastId) {
         addToRemoveQueue(toastId)
       } else {
@@ -184,6 +186,3 @@ function useToast() {
 }
 
 export { useToast, toast }
-
-// Types from toast component
-import type { ToastProps, ToastActionElement } from "@/components/ui/toast"

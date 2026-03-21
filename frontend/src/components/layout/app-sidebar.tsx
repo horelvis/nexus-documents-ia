@@ -1,341 +1,266 @@
-"use client"
+'use client'
 
-import * as React from "react"
-import type { AppSidebarProps } from '@/lib/types'
+/**
+ * Emma App Sidebar
+ *
+ * Sidebar navigation component for Emma on-premise deployment.
+ * Uses shadcn sidebar components from the shared package.
+ * Follows shadcn sidebar pattern with offcanvas collapsible and inset variant.
+ */
+
+import * as React from 'react'
+import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
 import {
-  IconCloudUpload,
-  IconSearch,
-  IconBrain,
-  IconMessages,
-  IconSignature,
-  IconChartBar,
-  IconDashboard,
-  IconFiles,
-  IconClock,
-  IconTrendingUp,
-  IconUsers,
-  IconUserShare,
+  IconPlug,
   IconSettings,
-  IconCreditCard,
-  IconDatabase,
   IconHelp,
-  IconInnerShadowTop,
-  IconUserCheck,
-  IconGitBranch,
-  IconRobot,
+  IconHistory,
+  IconPlus,
+  IconSchool,
+  IconDatabase,
+  IconDashboard,
+  IconBinaryTree,
+  IconMessageCircle,
   IconFileText,
-  IconScale,
-  IconPlugConnected,
-} from "@tabler/icons-react"
-
-import { NavDocuments } from "@/components/navigation/nav-documents"
-import { NavMain } from "@/components/navigation/nav-main"
-import { NavSecondary } from "@/components/navigation/nav-secondary"
-import { NavUser } from "@/components/navigation/nav-user"
-import { NavAdmin } from "@/components/navigation/nav-admin"
-import { NavLink } from "@/components/ui/nav-link"
+  IconBell,
+} from '@tabler/icons-react'
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarRail,
-} from "@/components/ui/sidebar"
-import { useBackendUser } from "@/contexts/user-context"
+} from '@/components/ui'
+import { UserMenu } from '@/components/user-menu'
 
-import { useTranslation } from "@/lib/i18n/hooks"
+interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
+  onNewConversation?: () => void
+  onOpenHistory?: () => void
+}
 
-export function AppSidebar({ tenantId, ...props }: AppSidebarProps) {
-  const { backendUser } = useBackendUser()
-  const { t } = useTranslation()
+export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSidebarProps) {
+  const pathname = usePathname()
+  const router = useRouter()
 
-  // Check if user is admin (superuser, has admin role, or is not a team member)
-  const isTenantAdmin = backendUser && (
-    backendUser.is_superuser ||
-    backendUser.roles?.some((role: any) => role.name === 'admin') ||
-    !backendUser.is_team_member
-  )
-
-  const data = {
-    user: {
-      name: "shadcn",
-      email: "m@example.com",
-      avatar: "/avatars/shadcn.jpg",
-    },
-    navMain: [
-      {
-        title: t('sidebar.dashboard'),
-        url: "/dashboard",
-        icon: IconDashboard,
-        color: "blue",
-      },
-      {
-        title: t('sidebar.documents.title'),
-        url: "/documents",
-        icon: IconFiles,
-        color: "green",
-        items: [
-          {
-            title: t('sidebar.documents.library'),
-            url: "/documents",
-          },
-          {
-            title: t('sidebar.documents.shared'),
-            url: "/shared",
-          },
-        ],
-      },
-      {
-        title: t('sidebar.search'),
-        url: "/search",
-        icon: IconBrain,
-        color: "purple",
-      },
-      {
-        title: t('sidebar.workflows.title'),
-        url: "/workflows",
-        icon: IconGitBranch,
-        color: "cyan",
-        items: [
-          {
-            title: t('sidebar.workflows.agents'),
-            url: "/workflows/ai-agents",
-          },
-          {
-            title: t('sidebar.workflows.builder'),
-            url: "/workflows/builder",
-          },
-          {
-            title: t('sidebar.workflows.renewals'),
-            url: "/workflows/contract-renewal",
-          },
-          {
-            title: t('sidebar.workflows.library'),
-            url: "/workflows/library",
-          },
-          {
-            title: t('sidebar.workflows.analytics'),
-            url: "/workflows/analytics",
-          },
-        ],
-      },
-      {
-        title: t('sidebar.signatures.title'),
-        url: "/signatures/requests",
-        icon: IconSignature,
-        color: "pink",
-        items: [
-          {
-            title: t('sidebar.signatures.requests'),
-            url: "/signatures/requests",
-          },
-          {
-            title: t('sidebar.signatures.history'),
-            url: "/signatures/history",
-          },
-        ],
-      },
-      {
-        title: t('sidebar.analytics'),
-        url: "/analytics",
-        icon: IconChartBar,
-        color: "orange",
-      },
-    ],
-    quickActions: [
-      {
-        name: t('sidebar.quickActions.upload'),
-        url: "#", // Will be handled by context
-        icon: IconCloudUpload,
-        color: "blue",
-      },
-      {
-        name: t('sidebar.quickActions.askEmma'),
-        url: "/chat",
-        icon: IconBrain,
-        color: "purple",
-      },
-      {
-        name: t('sidebar.quickActions.createWorkflow'),
-        url: "/workflows/builder",
-        icon: IconRobot,
-        color: "cyan",
-      },
-      {
-        name: t('sidebar.quickActions.sign'),
-        url: "/signatures/requests",
-        icon: IconSignature,
-        color: "pink",
-      },
-    ],
-    adminActions: [
-      {
-        title: t('sidebar.admin.teams'),
-        url: "/admin/teams",
-        icon: IconUsers,
-        color: "indigo",
-      },
-      {
-        title: t('sidebar.admin.settings'),
-        url: "/settings/tenant",
-        icon: IconSettings,
-        color: "gray",
-      },
-      {
-        title: t('sidebar.admin.siteGuest'),
-        url: "/settings/site",
-        icon: IconUserShare,
-        color: "cyan",
-      },
-      {
-        title: t('sidebar.channels.title'),
-        url: "/channels",
-        icon: IconPlugConnected,
-        color: "teal",
-      },
-      {
-        title: t('sidebar.admin.connectors'),
-        url: "/admin/connectors",
-        icon: IconDatabase,
-        color: "emerald",
-      },
-      {
-        title: t('sidebar.admin.providers'),
-        url: "/admin/signature-providers",
-        icon: IconSignature,
-        color: "pink",
-      },
-      {
-        title: t('sidebar.admin.publicKnowledge'),
-        url: "/admin/public-knowledge",
-        icon: IconScale,
-        color: "blue",
-      },
-      {
-        title: t('sidebar.admin.billing'),
-        url: "/billing",
-        icon: IconCreditCard,
-        color: "green",
-      },
-    ],
-    navSecondary: [
-      {
-        title: t('sidebar.storage'),
-        url: "/storage",
-        icon: IconDatabase,
-        color: "purple",
-      },
-      {
-        title: t('sidebar.help'),
-        url: "/help",
-        icon: IconHelp,
-        color: "orange",
-      },
-    ],
-    recentDocuments: [
-      {
-        name: t('sidebar.documents.recent'),
-        url: "/documents/recent",
-        icon: IconClock,
-      },
-      {
-        name: t('sidebar.documents.popular'),
-        url: "/documents/popular",
-        icon: IconTrendingUp,
-      },
-      {
-        name: t('sidebar.documents.sharedWithMe'),
-        url: "/documents/shared",
-        icon: IconUserCheck,
-      },
-    ],
+  // Handle new conversation - use provided handler or navigate to home
+  const handleNewConversation = () => {
+    if (onNewConversation) {
+      onNewConversation()
+    } else {
+      router.push('/')
+    }
   }
 
-  const buildNavMain = React.useCallback(() => {
-    const baseNav = [...data.navMain]
-    if (isTenantAdmin) {
-      const templateItem = {
-        title: t('sidebar.admin.templates'),
-        url: "/templates",
-        icon: IconFileText,
-        color: "orange",
-      }
-      const insertIndex = baseNav.findIndex(item => item.title === t('sidebar.signatures.title'))
-      if (insertIndex >= 0) {
-        baseNav.splice(insertIndex, 0, templateItem)
-      } else {
-        baseNav.push(templateItem)
-      }
+  // Handle history - use provided handler or navigate to home with query param
+  const handleOpenHistory = () => {
+    if (onOpenHistory) {
+      onOpenHistory()
+    } else {
+      router.push('/?history=open')
     }
-    return baseNav
-  }, [isTenantAdmin, t, data.navMain])
+  }
 
-  // Generate tenant-aware navigation data
-  const getNavData = () => {
-    const basePath = tenantId ? `/${tenantId}` : '';
-    const navMainSource = buildNavMain()
+  const mainNavItems = [
+    {
+      title: 'Nueva consulta',
+      icon: IconPlus,
+      onClick: handleNewConversation,
+      isActive: false,
+    },
+    {
+      title: 'Historial',
+      icon: IconHistory,
+      onClick: handleOpenHistory,
+      isActive: false,
+    },
+  ]
 
-    return {
-      ...data,
-      navMain: navMainSource.map(item => ({
-        ...item,
-        url: item.url.startsWith('#') ? item.url : `${basePath}${item.url}`,
-        color: item.color,
-        items: item.items?.map(subItem => ({
-          ...subItem,
-          url: `${basePath}${subItem.url}`
-        }))
-      })),
-      quickActions: data.quickActions.map(item => ({
-        ...item,
-        url: item.url.startsWith('#') ? item.url : `${basePath}${item.url}`
-      })),
-      adminActions: isTenantAdmin ? data.adminActions.map(item => ({
-        ...item,
-        url: `${basePath}${item.url}`,
-        color: item.color
-      })) : [],
-      navSecondary: data.navSecondary.map(item => ({
-        ...item,
-        url: `${basePath}${item.url}`,
-        color: item.color
-      }))
-    };
-  };
+  const configNavItems = [
+    {
+      title: 'Conectores',
+      href: '/connectors',
+      icon: IconPlug,
+    },
+    {
+      title: 'Documentos',
+      href: '/documents',
+      icon: IconFileText,
+    },
+    {
+      title: 'Data Learning',
+      href: '/data-learning',
+      icon: IconSchool,
+    },
+    {
+      title: 'Inteligencia Proactiva',
+      href: '/insights',
+      icon: IconBell,
+    },
+    {
+      title: 'Configuración',
+      href: '/settings',
+      icon: IconSettings,
+    },
+  ]
 
-  const navData = getNavData();
+  const adminNavItems = [
+    {
+      title: 'Administración',
+      href: '/admin/dashboard',
+      icon: IconDashboard,
+    },
+    {
+      title: 'Base de Conocimiento',
+      href: '/admin/public-knowledge',
+      icon: IconDatabase,
+    },
+    {
+      title: 'Knowledge Tree',
+      href: '/admin/knowledge-tree',
+      icon: IconBinaryTree,
+    },
+    {
+      title: 'Canales',
+      href: '/emma/channels',
+      icon: IconMessageCircle,
+    },
+  ]
+
+  const secondaryNavItems = [
+    {
+      title: 'Ayuda',
+      href: '/help',
+      icon: IconHelp,
+    },
+  ]
 
   return (
-    <Sidebar collapsible="icon" id="main-sidebar" {...props}>
+    <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
               asChild
+              size="lg"
               className="data-[slot=sidebar-menu-button]:!p-1.5"
-              tooltip={t('sidebar.nexusDocument')}
             >
-              <NavLink href={`/${tenantId}/dashboard`}>
-                <IconInnerShadowTop className="!size-5" />
-                <span className="text-base font-semibold">{t('sidebar.nexusDocument')}</span>
-              </NavLink>
+              <Link href="/">
+                <img
+                  src="/logo-single.png"
+                  alt="NouxCube AI"
+                  className="h-8 w-8 object-contain"
+                />
+                <span className="font-semibold">NouxCube <span className="text-muted-foreground">AI</span></span>
+              </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
+
       <SidebarContent>
-        <NavMain items={navData.navMain} />
-        <NavDocuments items={navData.quickActions} />
-        <NavAdmin items={navData.adminActions} />
-        <NavSecondary items={navData.navSecondary} className="mt-auto" />
+        {/* Main Navigation */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Chat</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {mainNavItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    tooltip={item.title}
+                    isActive={item.isActive}
+                    onClick={item.onClick}
+                  >
+                    <item.icon className="h-4 w-4" />
+                    <span>{item.title}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Configuration */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Configuración</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {configNavItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip={item.title}
+                    isActive={pathname === item.href}
+                  >
+                    <Link href={item.href}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Admin */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Admin</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {adminNavItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip={item.title}
+                    isActive={pathname === item.href || pathname.startsWith(item.href)}
+                  >
+                    <Link href={item.href}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Secondary Navigation */}
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {secondaryNavItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip={item.title}
+                    isActive={pathname === item.href}
+                  >
+                    <Link href={item.href}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
+
       <SidebarFooter>
-        <NavUser user={navData.user} />
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <UserMenu />
+          </SidebarMenuItem>
+        </SidebarMenu>
       </SidebarFooter>
-      <SidebarRail />
     </Sidebar>
   )
 }
