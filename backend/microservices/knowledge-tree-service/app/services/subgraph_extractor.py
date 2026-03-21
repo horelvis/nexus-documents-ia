@@ -1,18 +1,17 @@
 """
-Subgraph Extractor — GraphRAG Phase 5a
+Subgraph Extractor — BKG Phases 5-6
 
 Extracts multi-hop subgraphs from tenant sector graphs rooted at query entities.
 Returns structured node/edge data for LLM consumption (not flat document IDs).
 
 Architecture:
     1. Entity Resolution: Find seed nodes matching query entities
-    2. N-hop Traversal: Expand seed neighborhood (configurable depth 1-3)
-    3. Legal Cross-Reference: Match document domains to public legal graph (optional)
-    4. Pruning & Scoring: Rank paths, cap at max_nodes
+    2. N-hop Traversal: Expand neighborhood including shared nodes (LegalLaw, EntityType)
+    3. Pruning & Scoring: Rank paths, cap at max_nodes
 
-The subgraph endpoint replaces the flat graph_expander approach — instead of
-returning document IDs for re-ranking, it returns typed relationship chains
-that the LLM can reason over directly.
+Note: As of BKG Phase 6, legal proxy nodes (LegalLaw) live in the sector graph
+with shared=true. The traversal crosses into them via `neighbor.shared = true`.
+The old _lookup_legal() cross-graph approach was removed.
 """
 
 import json
@@ -45,6 +44,9 @@ _EDGE_WEIGHTS: Dict[str, float] = {
     "PARTE_DE": 0.5,
     "RELACIONADO": 0.5,
     "DEFINE": 0.4,
+    "MODIFIES": 0.85,
+    "DEROGATES": 0.85,
+    "REFERENCES": 0.8,
     "INSTANCE_OF": 0.3,
     "HAS_MEMORY": 0.2,
 }
@@ -121,11 +123,8 @@ class SubgraphExtractor:
             if node_key and node_key not in {n.get("id") for n in raw_nodes}:
                 raw_nodes.append(seed)
 
-        # Step 3: Cross-graph legal lookup (optional)
-        if include_legal:
-            legal_nodes, legal_edges = await self._lookup_legal(raw_nodes)
-            raw_nodes.extend(legal_nodes)
-            raw_edges.extend(legal_edges)
+        # Step 3: Legal cross-reference — handled by real APLICA edges in the
+        # unified graph (BKG Phase 6). No separate _lookup_legal() needed.
 
         # Step 4: Filter out DocumentMemory if not requested
         if not include_memories:
@@ -234,7 +233,7 @@ class SubgraphExtractor:
                     WITH seed LIMIT 3
                     MATCH (seed)-[r*1..{max_hops}]-(neighbor)
                     WHERE neighbor.tenant_id = '{_escape(tenant_id)}'
-                       OR labels(neighbor)[0] = 'EntityType'
+                       OR neighbor.shared = true
                     UNWIND r as rel
                     RETURN DISTINCT
                         id(startnode(rel)) as src_id,
@@ -245,6 +244,9 @@ class SubgraphExtractor:
                         startnode(rel).semantic_type as src_stype,
                         startnode(rel).domain as src_domain,
                         type(rel) as edge_label,
+                        rel.confidence as edge_confidence,
+                        rel.source as edge_source,
+                        rel.article as edge_article,
                         id(endnode(rel)) as tgt_id,
                         labels(endnode(rel))[0] as tgt_label,
                         endnode(rel).name as tgt_name,
@@ -256,6 +258,7 @@ class SubgraphExtractor:
                 $$) as (src_id agtype, src_label agtype, src_name agtype, src_title agtype,
                         src_doc_id agtype, src_stype agtype, src_domain agtype,
                         edge_label agtype,
+                        edge_confidence agtype, edge_source agtype, edge_article agtype,
                         tgt_id agtype, tgt_label agtype, tgt_name agtype, tgt_title agtype,
                         tgt_doc_id agtype, tgt_stype agtype, tgt_domain agtype)
             """
@@ -297,88 +300,24 @@ class SubgraphExtractor:
                     # Edge
                     el = _clean_agtype(row.get("edge_label")) or ""
                     if src_id and tgt_id and el:
+                        edge_props = {}
+                        if el == "APLICA":
+                            edge_props = {
+                                "confidence": _clean_agtype(row.get("edge_confidence")),
+                                "source": _clean_agtype(row.get("edge_source")),
+                                "article": _clean_agtype(row.get("edge_article")),
+                            }
+                            edge_props = {k: v for k, v in edge_props.items() if v}
                         edges.append({
                             "source_id": src_id,
                             "target_id": tgt_id,
                             "label": el,
-                            "properties": {},
+                            "properties": edge_props,
                         })
             except Exception as e:
                 logger.warning(f"Traversal failed for seed '{seed_name}': {e}")
 
         return nodes, edges
-
-    async def _lookup_legal(
-        self, tenant_nodes: List[Dict],
-    ) -> Tuple[List[Dict], List[Dict]]:
-        """Cross-reference tenant document domains with public legal graph.
-
-        Creates synthetic APLICA edges between tenant documents and
-        matching laws from knowledge_graph_public.
-        """
-        # Collect unique domains from discovered documents
-        doc_domains: Dict[str, List[str]] = {}  # domain → [node_ids]
-        for node in tenant_nodes:
-            domain = (node.get("properties") or {}).get("domain")
-            if domain and node.get("label") == "structural_document":
-                doc_domains.setdefault(domain, []).append(node["id"])
-
-        if not doc_domains:
-            return [], []
-
-        domains_list = ", ".join(f"'{_escape(d)}'" for d in doc_domains.keys())
-        query = f"""
-            SELECT * FROM cypher('knowledge_graph_public', $$
-                MATCH (law:LegalLaw)
-                WHERE law.domain IN [{domains_list}]
-                  AND law.status = 'vigente'
-                RETURN law.boe_id as boe_id,
-                       law.title as title,
-                       law.short_name as short_name,
-                       law.domain as domain
-                LIMIT 15
-            $$) as (boe_id agtype, title agtype, short_name agtype, domain agtype)
-        """
-
-        legal_nodes: List[Dict] = []
-        legal_edges: List[Dict] = []
-
-        try:
-            rows = await age_client.execute_cypher(query)
-            for row in rows:
-                boe_id = _clean_agtype(row.get("boe_id"))
-                if not boe_id:
-                    continue
-
-                domain = _clean_agtype(row.get("domain")) or ""
-                short_name = _clean_agtype(row.get("short_name")) or ""
-                title = _clean_agtype(row.get("title")) or ""
-
-                node_id = f"law:{boe_id}"
-                legal_nodes.append({
-                    "id": node_id,
-                    "label": "LegalLaw",
-                    "name": short_name or title,
-                    "properties": {
-                        "boe_id": boe_id,
-                        "domain": domain,
-                        "title": title,
-                    },
-                    "graph_source": "public",
-                })
-
-                # Create synthetic APLICA edges from matching documents
-                for doc_node_id in doc_domains.get(domain, []):
-                    legal_edges.append({
-                        "source_id": doc_node_id,
-                        "target_id": node_id,
-                        "label": "APLICA",
-                        "properties": {"synthetic": True},
-                    })
-        except Exception as e:
-            logger.debug(f"Legal cross-reference skipped: {e}")
-
-        return legal_nodes, legal_edges
 
     def _prune(
         self,
