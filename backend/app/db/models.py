@@ -2300,7 +2300,10 @@ class IndexedDocument(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
+
+    # Content cache path in MinIO (e.g., "originals/{doc_id}/{filename}")
+    cached_path = Column(Text, nullable=True)
+
     # Relationships
     tenant = relationship("Tenant")
     connector = relationship("Connector", back_populates="indexed_documents")
