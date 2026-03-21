@@ -1,7 +1,7 @@
-# Content Cache — Design Spec (v3)
+# Content Cache — Design Spec (v4)
 
 **Date:** 2026-03-21
-**Status:** Approved (v3 — MinIO from scratch)
+**Status:** Approved (v4 — post-review fixes)
 **Scope:** Cache original files during indexation via new MinIO-based storage-service; offline preview/download fallback
 
 ---
@@ -96,7 +96,7 @@ Frontend -> GET /api/v1/documents/{id}/content
       - "9000:9000"    # S3 API
       - "9001:9001"    # Console (optional, for debugging)
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -150,12 +150,14 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.services.minio_service import minio_storage
 
-app = FastAPI(title="Storage Service", version="1.0.0")
+from contextlib import asynccontextmanager
 
-
-@app.on_event("startup")
-async def startup():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     await minio_storage.initialize()
+    yield
+
+app = FastAPI(title="Storage Service", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -417,9 +419,12 @@ async def _cache_extracted_text(
 
 ```python
 async def _update_cached_path(tenant_id: str, document_id: str, cached_path: str) -> None:
+    """Direct DB update for cached_path. Uses asyncpg with plain postgresql:// DSN
+    (not the SQLAlchemy postgresql+asyncpg:// format from DATABASE_URL)."""
     try:
         import asyncpg
-        conn = await asyncpg.connect(settings.database_url)
+        dsn = f"postgresql://{settings.postgres_user}:{settings.postgres_password}@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
+        conn = await asyncpg.connect(dsn)
         await conn.execute(
             "UPDATE indexed_documents SET cached_path = $1 WHERE id = $2 AND tenant_id = $3",
             cached_path, uuid.UUID(document_id), uuid.UUID(tenant_id),
@@ -480,7 +485,7 @@ Same pattern applies to the preview call site in `documents.py` — get bytes fr
       - "9000:9000"
       - "9001:9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -516,9 +521,15 @@ Same pattern applies to the preview call site in `documents.py` — get bytes fr
       - STORAGE_SERVICE_URL=${STORAGE_SERVICE_URL:-http://storage-service:8010}
 ```
 
-4. **Add** `STORAGE_SERVICE_URL` to `api` service env for download fallback
+4. **Update `api` service**: Replace `mcp-storage` dependency with `storage-service`, replace `MCP_STORAGE_URL` with `STORAGE_SERVICE_URL`
 
-5. **Update** all `mcp-storage` references to `storage-service`
+5. **Update `presentation-service`**: Replace `mcp-storage` dependency with `storage-service`, update `PRESENTATION_STORAGE_SERVICE_URL` env var, keep shared volume
+
+6. **Update all other `mcp-storage` references** in compose to `storage-service`
+
+7. **Migrate `local_storage_data` volume**: Keep the volume but mount it in MinIO's `/data` path so existing files (presentations, etc.) are preserved. Or mount at a separate path in storage-service for backward-compatible access.
+
+8. **Update `README-ONPREMISE.md`**: Replace `mcp-storage` references
 
 ---
 
@@ -539,14 +550,17 @@ Same pattern applies to the preview call site in `documents.py` — get bytes fr
 | `backend/microservices/storage-service/` | New service: FastAPI + MinIO SDK |
 | `backend/alembic/versions/xxx_add_cached_path.py` | Migration: `cached_path` column |
 
-### Modified (4)
+### Modified (7)
 
 | File | Change |
 |------|--------|
 | `backend/microservices/weaviate-service/app/api/weaviate.py` | Cache during indexation + DB update |
 | `backend/microservices/weaviate-service/app/core/config.py` | `storage_service_url` setting |
 | `backend/app/api/v1/documents.py` | Download + preview fallback |
-| `backend/docker/docker-compose.onpremise.yml` | Delete mcp-storage, add minio + storage-service |
+| `backend/app/db/models.py` | Add `cached_path` to IndexedDocument model |
+| `backend/docker/docker-compose.onpremise.yml` | Delete mcp-storage, add minio + storage-service, update api + presentation-service deps |
+| `backend/microservices/presentation-service/app/core/config.py` | Update storage URL default |
+| `README-ONPREMISE.md` | Replace mcp-storage references |
 
 ### Deleted (1)
 
