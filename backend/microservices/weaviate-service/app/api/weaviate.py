@@ -1078,6 +1078,20 @@ async def index_from_connector(
                         semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
                     )
                 )
+            # BKG Phase 6: Legal reference detection + APLICA edges
+            try:
+                from app.clients.knowledge_tree_client import knowledge_tree_legal_client
+                asyncio.create_task(
+                    knowledge_tree_legal_client.extract_and_link_legal(
+                        tenant_id=request.tenant_id,
+                        document_id=request.document_id,
+                        text_sample=result.extracted_text[:2000] if result.extracted_text else "",
+                        semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
+                        domain=(request.learned_context.domain if request.learned_context else None) or result.contextual_domain or "",
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Legal reference extraction skipped: {e}")
 
         return ConnectorIndexResponse(
             success=True,

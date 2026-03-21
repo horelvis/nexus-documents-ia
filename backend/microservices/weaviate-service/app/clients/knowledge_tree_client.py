@@ -301,6 +301,27 @@ class KnowledgeTreeLegalClient:
         """No-op for API compatibility with old legal_graph singleton."""
         pass
 
+    async def extract_and_link_legal(
+        self,
+        tenant_id: str,
+        document_id: str,
+        text_sample: str,
+        semantic_type: str = "",
+        domain: str = "",
+    ) -> Dict[str, Any]:
+        """Extract legal references from document and create APLICA edges."""
+        return await self._request(
+            "POST",
+            "/tree/legal-links/extract-and-store",
+            json={
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "text_sample": text_sample[:2000],
+                "semantic_type": semantic_type,
+                "domain": domain,
+            },
+        )
+
 
 # Global singleton
 knowledge_tree_legal_client = KnowledgeTreeLegalClient()
