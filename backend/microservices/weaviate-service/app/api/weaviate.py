@@ -797,6 +797,63 @@ async def _memorize_document(
         logger.debug(f"MemoRAG memorize failed for doc {document_id}: {e}")
 
 
+async def _cache_original_file(
+    tenant_id: str, document_id: str, filename: str, file_bytes: bytes,
+) -> Optional[str]:
+    """Cache original file in storage-service (MinIO) for offline access.
+    Returns the object_name (cached_path) or None if caching failed."""
+    import httpx
+    try:
+        object_name = f"originals/{document_id}/{filename}"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.storage_service_url}/files/{object_name}",
+                params={"tenant_id": tenant_id},
+                content=file_bytes,
+            )
+            response.raise_for_status()
+        return object_name
+    except Exception as e:
+        logger.warning(f"Content cache failed for {document_id}: {e}")
+        return None
+
+
+async def _cache_extracted_text(
+    tenant_id: str, document_id: str, extracted_text: str,
+) -> Optional[str]:
+    """Cache extracted text for database connector documents (no file bytes)."""
+    import httpx
+    try:
+        object_name = f"originals/{document_id}/extracted.txt"
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{settings.storage_service_url}/files/{object_name}",
+                params={"tenant_id": tenant_id},
+                content=extracted_text.encode("utf-8"),
+            )
+            response.raise_for_status()
+        return object_name
+    except Exception as e:
+        logger.warning(f"Text cache failed for {document_id}: {e}")
+        return None
+
+
+async def _update_cached_path(tenant_id: str, document_id: str, cached_path: str) -> None:
+    """Direct DB update for cached_path using asyncpg."""
+    try:
+        import asyncpg
+        import uuid as _uuid
+        dsn = f"postgresql://{settings.postgres_user}:{settings.postgres_password}@{settings.postgres_host}:{settings.postgres_port}/{settings.postgres_db}"
+        conn = await asyncpg.connect(dsn)
+        await conn.execute(
+            "UPDATE indexed_documents SET cached_path = $1 WHERE id = $2 AND tenant_id = $3",
+            cached_path, _uuid.UUID(document_id), _uuid.UUID(tenant_id),
+        )
+        await conn.close()
+    except Exception as e:
+        logger.debug(f"Failed to update cached_path for {document_id}: {e}")
+
+
 @router.post("/index/from-connector", response_model=ConnectorIndexResponse)
 async def index_from_connector(
     request: ConnectorIndexRequest,
@@ -834,6 +891,14 @@ async def index_from_connector(
                 document_id=request.document_id,
                 error=f"Invalid base64 content: {e}",
             )
+
+        # Cache original file in MinIO for offline access
+        cached_path = await _cache_original_file(
+            tenant_id=request.tenant_id,
+            document_id=request.document_id,
+            filename=request.filename,
+            file_bytes=file_bytes,
+        )
 
         # Normalize filename to ensure valid extension for text extraction
         # Handles edge cases like "CamScanner 06-18-2020 13.15.09" -> adds .pdf
@@ -1052,6 +1117,13 @@ async def index_from_connector(
         text_preview = None
         if result.extracted_text:
             text_preview = result.extracted_text[:5000]
+
+        # Persist cached_path to DB (fire-and-forget)
+        if cached_path:
+            import asyncio
+            asyncio.create_task(
+                _update_cached_path(request.tenant_id, request.document_id, cached_path)
+            )
 
         # Fire-and-forget: structural indexing → AGE graph (structural_document/folder nodes)
         if True:
