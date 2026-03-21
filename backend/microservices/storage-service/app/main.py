@@ -1,124 +1,81 @@
+"""
+Storage Service — REST API for file storage via MinIO (S3-compatible).
+
+Replaces mcp-storage-server. No MCP protocol — pure REST for
+service-to-service file operations.
+"""
+
 import logging
-import time
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, Response, HTTPException
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.api.storage import router as storage_router, limiter
+from app.services.minio_service import minio_storage
 
-# Configurar logging
 logging.basicConfig(
-    level=logging.INFO if not settings.DEBUG else logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-
 logger = logging.getLogger(__name__)
 
-# Crear aplicación FastAPI
-app = FastAPI(
-    title="Storage Microservice",
-    description="Microservicio para gestión de almacenamiento en Google Cloud Storage",
-    version=settings.SERVICE_VERSION,
-    docs_url="/docs" if settings.DEBUG else None,
-    redoc_url="/redoc" if settings.DEBUG else None
-)
 
-# Rate limiting
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info(f"Starting Storage Service on port {settings.service_port}...")
+    await minio_storage.initialize()
+    yield
+    logger.info("Shutting down Storage Service...")
 
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # En producción, especificar orígenes permitidos
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# Middleware de logging
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    """Middleware para loggear requests"""
-    start_time = time.time()
-    
-    # Skip logging for health checks (Docker health check spam)
-    is_health_check = request.url.path in ["/health", "/healthz"]
-    
-    # Log request (skip health checks)
-    if not is_health_check:
-        logger.info(f"Request: {request.method} {request.url}")
-        
-        # Headers importantes para debugging (sin exponer secrets)
-        tenant_id = request.headers.get("X-Tenant-ID", "unknown")
-        user_id = request.headers.get("X-User-ID", "system")
-        
-        logger.debug(f"Tenant: {tenant_id}, User: {user_id}")
-    
-    response = await call_next(request)
-    
-    # Log response (skip health checks)
-    if not is_health_check:
-        process_time = time.time() - start_time
-        logger.info(
-            f"Response: {response.status_code} "
-            f"({process_time:.3f}s) "
-            f"for {request.method} {request.url.path}"
-        )
-    
-    return response
+app = FastAPI(title="Storage Service", version="1.0.0", lifespan=lifespan)
 
-# Incluir routers
-app.include_router(storage_router, prefix="/api/v1")
 
-# Root endpoint
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {
-        "service": settings.SERVICE_NAME,
-        "version": settings.SERVICE_VERSION,
-        "status": "running",
-        "docs": "/docs" if settings.DEBUG else "disabled"
-    }
-
-# Health check endpoint
 @app.get("/health")
 async def health():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "service": settings.SERVICE_NAME,
-        "version": settings.SERVICE_VERSION
-    }
+    return {"status": "healthy", "service": "storage-service", "version": "1.0.0"}
 
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    """Evento de inicio de la aplicación"""
-    logger.info(f"Starting {settings.SERVICE_NAME} v{settings.SERVICE_VERSION}")
-    logger.info(f"Debug mode: {settings.DEBUG}")
-    logger.info(f"Testing mode: {settings.TESTING}")
-    logger.info(f"GCS Project: {settings.GCS_PROJECT_ID}")
-    logger.info(f"Base bucket: {settings.GCS_BUCKET_NAME}")
 
-# Shutdown event
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Evento de cierre de la aplicación"""
-    logger.info(f"Shutting down {settings.SERVICE_NAME}")
+@app.post("/files/{path:path}")
+async def upload_file(path: str, request: Request, tenant_id: str = "default"):
+    """Upload file bytes to MinIO."""
+    content = await request.body()
+    if not content:
+        raise HTTPException(400, "Empty body")
 
-if __name__ == "__main__":
-    import uvicorn
-    import time
-    
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=8001,
-        reload=settings.DEBUG,
-        log_level="info"
-    )
+    object_name = f"{tenant_id}/{path}"
+    content_type = request.headers.get("content-type", "application/octet-stream")
+
+    result = await minio_storage.upload(object_name, content, content_type)
+    return JSONResponse(result)
+
+
+@app.get("/files/{path:path}")
+async def download_file(path: str, tenant_id: str = "default"):
+    """Download file bytes from MinIO."""
+    object_name = f"{tenant_id}/{path}"
+    content = await minio_storage.download(object_name)
+    if content is None:
+        raise HTTPException(404, "File not found")
+    return Response(content=content, media_type="application/octet-stream")
+
+
+@app.delete("/files/{path:path}")
+async def delete_file(path: str, tenant_id: str = "default"):
+    """Delete file from MinIO."""
+    object_name = f"{tenant_id}/{path}"
+    success = await minio_storage.delete(object_name)
+    if not success:
+        raise HTTPException(404, "File not found")
+    return {"deleted": True}
+
+
+@app.head("/files/{path:path}")
+async def file_exists(path: str, tenant_id: str = "default"):
+    """Check if file exists in MinIO."""
+    object_name = f"{tenant_id}/{path}"
+    exists = await minio_storage.exists(object_name)
+    if not exists:
+        raise HTTPException(404)
+    return Response(status_code=200)
