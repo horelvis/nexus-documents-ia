@@ -67,21 +67,46 @@ async def bootstrap_sector_graph() -> Optional[str]:
             exists = row and row["cnt"] > 0
 
         if exists:
-            logger.info(f"✅ Graph '{graph_name}' already exists — ensuring ontology labels")
-            # Ensure ontology + memory labels exist (added in BKG Phases 2-4)
+            logger.info(f"Graph '{graph_name}' already exists — ensuring labels")
             async with age_client._get_connection() as conn2:
                 for stmt in [
+                    # Ontology + memory labels (BKG Phases 2-4)
                     f"SELECT create_vlabel('{graph_name}', 'EntityType');",
                     f"SELECT create_vlabel('{graph_name}', 'DocumentMemory');",
                     f"SELECT create_elabel('{graph_name}', 'INSTANCE_OF');",
                     f"SELECT create_elabel('{graph_name}', 'EXTRACTED_FROM');",
                     f"SELECT create_elabel('{graph_name}', 'HAS_MEMORY');",
+                    # Legal proxy labels (BKG Phase 6)
+                    f"SELECT create_vlabel('{graph_name}', 'LegalLaw');",
+                    f"SELECT create_elabel('{graph_name}', 'APLICA');",
+                    f"SELECT create_elabel('{graph_name}', 'MODIFIES');",
+                    f"SELECT create_elabel('{graph_name}', 'DEROGATES');",
+                    f"SELECT create_elabel('{graph_name}', 'REFERENCES');",
                 ]:
                     try:
                         await conn2.execute(stmt)
                     except Exception as e:
                         if "already exists" not in str(e):
                             logger.debug(f"Label ensure: {e}")
+
+                # Backfill: set shared=true on existing EntityType proxy nodes
+                try:
+                    backfill_query = f"""
+                        SELECT * FROM cypher('{graph_name}', $$
+                            MATCH (et:EntityType)
+                            WHERE et.shared IS NULL
+                            SET et.shared = true
+                            RETURN count(et) as updated
+                        $$) as (updated agtype)
+                    """
+                    rows = await age_client.execute_cypher(backfill_query)
+                    if rows:
+                        count = str(rows[0].get("updated", 0)).strip('"')
+                        if count and count != "0":
+                            logger.info(f"  Backfilled shared=true on {count} EntityType nodes")
+                except Exception as e:
+                    logger.debug(f"EntityType backfill: {e}")
+
             return graph_name
 
         # Graph doesn't exist — create from schema file
