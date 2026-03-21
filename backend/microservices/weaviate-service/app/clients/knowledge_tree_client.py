@@ -295,6 +295,35 @@ class KnowledgeTreeLegalClient:
         except Exception:
             return []
 
+    # ── Structural Indexing (creates structural_document/folder nodes in AGE) ──
+
+    async def index_structural(
+        self,
+        tenant_id: str,
+        document_id: str,
+        file_path: str = "",
+        connector_metadata: Optional[Dict[str, Any]] = None,
+        learned_context: Optional[Dict[str, Any]] = None,
+        weaviate_document_id: Optional[str] = None,
+        connector_id: Optional[str] = None,
+        connector_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Index a document/folder into the AGE sector graph (structural nodes)."""
+        try:
+            return await self._request("POST", "/tree/index", json={
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "file_path": file_path,
+                "connector_metadata": connector_metadata or {},
+                "learned_context": learned_context or {},
+                "weaviate_document_id": weaviate_document_id,
+                "connector_id": connector_id,
+                "connector_type": connector_type,
+            })
+        except Exception as e:
+            logger.debug(f"Structural indexing failed for {document_id}: {e}")
+            return {"success": False, "error": str(e)}
+
     # ── Compatibility: initialize() no-op ─────────────────────────────
 
     async def initialize(self):

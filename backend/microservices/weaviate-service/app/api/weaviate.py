@@ -1053,6 +1053,26 @@ async def index_from_connector(
         if result.extracted_text:
             text_preview = result.extracted_text[:5000]
 
+        # Fire-and-forget: structural indexing → AGE graph (structural_document/folder nodes)
+        if True:
+            import asyncio
+            try:
+                from app.clients.knowledge_tree_client import knowledge_tree_legal_client
+                asyncio.create_task(
+                    knowledge_tree_legal_client.index_structural(
+                        tenant_id=request.tenant_id,
+                        document_id=request.document_id,
+                        file_path=external_path,
+                        connector_metadata=request.metadata or {},
+                        learned_context=learned_context_dict or {},
+                        weaviate_document_id=str(weaviate_result.id) if weaviate_result.id else None,
+                        connector_id=connector_id or None,
+                        connector_type=request.metadata.get("connector_type") if request.metadata else None,
+                    )
+                )
+            except Exception as e:
+                logger.debug(f"Structural indexing skipped: {e}")
+
         # Fire-and-forget: memorize document via MemoRAG (fallback to memory bank)
         if result.extracted_text:
             import asyncio
