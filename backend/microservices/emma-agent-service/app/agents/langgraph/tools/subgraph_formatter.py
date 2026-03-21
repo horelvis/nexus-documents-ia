@@ -63,7 +63,10 @@ def format_subgraph(
 
     # Build tree text via DFS from each root
     char_budget = token_budget * 4
-    lines: List[str] = ["[SUBGRAFO RELEVANTE]", "Entidades principales:"]
+    lines: List[str] = [
+        "[SUBGRAFO RELEVANTE -- relaciones verificadas del repositorio]",
+        "Entidades principales:",
+    ]
     visited: Set[str] = set()
 
     for root_id in root_ids:
@@ -77,6 +80,13 @@ def format_subgraph(
     # Summary line
     lines.append("")
     lines.append(f"Relaciones: {len(nodes)} nodos, {len(edges)} aristas")
+
+    # Guard footer (anti-hallucination)
+    lines.append("")
+    lines.append(
+        "IMPORTANTE: Solo se muestran relaciones verificadas del grafo. "
+        "No inventes relaciones adicionales entre documentos y leyes."
+    )
 
     result = "\n".join(lines)
 
@@ -142,10 +152,33 @@ def _render_tree(
 
         child_indent = "  " * (depth + 1)
         child_label = _format_node(target_node)
-        lines.append(f"{child_indent}→ {edge_label} → {child_label}")
+
+        # Add traceability for APLICA edges
+        edge_suffix = ""
+        edge_props = edge.get("properties", {})
+        if edge_label == "APLICA" and edge_props:
+            parts = []
+            if edge_props.get("confidence"):
+                parts.append(f"confidence: {edge_props['confidence']}")
+            if edge_props.get("source"):
+                parts.append(f"source: {edge_props['source']}")
+            if parts:
+                edge_suffix = f" [{', '.join(parts)}]"
+
+        lines.append(f"{child_indent}→ {edge_label} → {child_label}{edge_suffix}")
 
         # Recurse into children
         _render_tree(target_id, node_map, adjacency, visited, lines, depth + 1, max_depth)
+
+    # Note absence of APLICA edges for root document nodes
+    if depth == 0 and node.get("label") in ("structural_document",):
+        has_aplica = any(
+            e["label"] == "APLICA"
+            for e in adjacency.get(node_id, [])
+        )
+        if not has_aplica:
+            child_indent = "  " * (depth + 1)
+            lines.append(f"{child_indent}(sin referencias legales detectadas)")
 
 
 def _format_node(node: Dict) -> str:
