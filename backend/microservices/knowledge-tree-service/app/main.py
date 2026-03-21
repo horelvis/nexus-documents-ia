@@ -14,6 +14,7 @@ from app.api.legal_graph import router as legal_graph_router
 from app.api.ontology import router as ontology_router
 from app.api.entities import router as entities_router
 from app.api.memory_bank import router as memory_bank_router
+from app.api.legal_sync import router as legal_sync_router
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
@@ -32,6 +33,17 @@ async def lifespan(app: FastAPI):
     graph_name = await bootstrap_sector_graph()
     if graph_name:
         logger.info(f"Graph ready: {graph_name} (sector={settings.active_sector})")
+
+    # Sync legal proxy nodes from knowledge_graph_public
+    if graph_name:
+        from app.services.legal_proxy_sync import legal_proxy_sync
+        await legal_proxy_sync.initialize()
+        sync_result = await legal_proxy_sync.sync(graph_name)
+        if sync_result["synced_laws"] > 0:
+            logger.info(
+                f"Legal proxy sync: {sync_result['synced_laws']} laws, "
+                f"{sync_result['synced_edges']} edges ({sync_result['elapsed_ms']}ms)"
+            )
 
     # Initialize legal graph service
     from app.services.legal_graph_service import legal_graph
@@ -77,4 +89,5 @@ app.include_router(legal_graph_router, tags=["legal-knowledge-graph"])
 app.include_router(ontology_router, tags=["business-ontology"])
 app.include_router(entities_router, tags=["entity-graph"])
 app.include_router(memory_bank_router, tags=["memory-bank"])
+app.include_router(legal_sync_router, tags=["legal-proxy-sync"])
 
