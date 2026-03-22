@@ -15,11 +15,13 @@ If no memories exist, the service is down, or the feature is disabled,
 the node passes through transparently (no state changes).
 """
 
+import asyncio
 import logging
 import re
 import time
 from typing import Any, Dict, List, Optional
 
+from app.clients.knowledge_tree_client import get_knowledge_tree_client
 from app.core.config import settings
 from ..state import ReActState
 from ..reasoning_tracker import StepType
@@ -135,6 +137,106 @@ async def _generate_clues(query: str, memories_text: str) -> Optional[str]:
 
     except Exception as e:
         logger.warning(f"Memory clue generation failed: {e}")
+        return None
+
+
+async def _graph_recall(
+    query: str,
+    tenant_id: str,
+    sector_config: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """Extract structural context from the knowledge graph.
+
+    Two parallel components:
+    1. Structural summary: repo overview (counts, types, domains) — cached
+    2. Query-relevant subgraph: entities + relationships for the current query
+
+    ~30-80ms total (two HTTP calls, no LLM).
+    Returns formatted markdown, or None if disabled/failed.
+    """
+    if not settings.graph_context_enabled:
+        return None
+
+    start = time.time()
+    try:
+        client = get_knowledge_tree_client()
+
+        # Step 1: Extract entities from the (possibly rewritten) query (~1ms)
+        entity_seeds = []
+        if sector_config and sector_config.get("entity_patterns"):
+            from app.agents.langgraph.sectors.entity_extractor import extract_entities
+            entities = extract_entities(query, sector_config["entity_patterns"])
+            for etype, values in entities.items():
+                for val in values[:3]:
+                    entity_seeds.append({"value": val, "type": etype})
+
+        # Step 2: Parallel HTTP calls
+        async def _noop_dict() -> dict:
+            return {}
+
+        summary_coro = (
+            client.get_structural_summary(tenant_id=tenant_id)
+            if settings.graph_context_summary_enabled
+            else _noop_dict()
+        )
+        subgraph_coro = (
+            client.extract_subgraph(
+                tenant_id=tenant_id,
+                entities=entity_seeds,
+                max_hops=settings.graphrag_max_hops,
+                max_nodes=settings.graphrag_max_nodes,
+                include_legal=settings.graphrag_include_legal,
+            )
+            if settings.graph_context_subgraph_enabled and entity_seeds
+            else _noop_dict()
+        )
+
+        results = await asyncio.gather(
+            summary_coro, subgraph_coro, return_exceptions=True,
+        )
+
+        summary_resp = results[0] if isinstance(results[0], dict) else {}
+        subgraph_resp = results[1] if isinstance(results[1], dict) else {}
+
+        # Step 3: Format context
+        char_budget = settings.graph_context_token_budget * 4
+        lines = ["## Contexto del repositorio"]
+
+        # 3a: Structural summary
+        if isinstance(summary_resp, dict):
+            summary_text = summary_resp.get("summary", "")
+            if summary_text:
+                lines.append("")
+                lines.append("### Estructura")
+                summary_budget = int(char_budget * 0.4)
+                lines.append(summary_text[:summary_budget])
+
+        # 3b: Query-relevant subgraph
+        if isinstance(subgraph_resp, dict) and subgraph_resp.get("nodes"):
+            from app.agents.langgraph.tools.subgraph_formatter import format_subgraph
+            subgraph_budget = int(settings.graph_context_token_budget * 0.6)
+            subgraph_text = format_subgraph(subgraph_resp, token_budget=subgraph_budget)
+            if subgraph_text:
+                lines.append("")
+                lines.append("### Relaciones relevantes a tu consulta")
+                lines.append(subgraph_text)
+
+        # Only return if we have more than just the header
+        if len(lines) <= 1:
+            return None
+
+        result = "\n".join(lines)
+
+        # Hard truncate if over total budget
+        if len(result) > char_budget:
+            result = result[:char_budget] + "\n[... contexto truncado]"
+
+        latency_ms = (time.time() - start) * 1000
+        logger.info(f"Graph recall: {len(lines)-1} sections ({latency_ms:.0f}ms)")
+        return result
+
+    except Exception as e:
+        logger.debug(f"Graph recall failed (non-fatal): {e}")
         return None
 
 
