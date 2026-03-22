@@ -206,6 +206,7 @@ export function MessageBubble({
       })()}
 
       {/* Related documents — island block */}
+      {console.log('[DEBUG MessageBubble] metadata.documents:', message.metadata?.documents?.length, message.metadata?.documents)}
       {message.metadata?.documents && message.metadata.documents.length > 0 && (
         <div className="mt-3 rounded-xl border border-border/40 bg-card/30 p-3">
           <DocumentDisplay

@@ -72,11 +72,14 @@ export function useMessageConverter(
   const explanation = values?.explanation
   const interrupt = values?.__interrupt__
 
+  console.log('[DEBUG useMessageConverter] OUTSIDE memo — sourcesLen:', sourcesLen, 'success:', success, 'sdkMessages:', sdkMessages.length)
+
   const messages = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     void isLoading // tracked as dependency for progress placeholder
     const reasoningSteps = values?.reasoning_steps ?? []
     const sources = values?.sources ?? []
+    console.log('[DEBUG useMessageConverter] INSIDE memo — sources:', sources.length, 'reasoningSteps:', reasoningSteps.length, 'success:', success)
 
     // 0. Deduplicate SDK messages by ID (first occurrence wins — keeps correct position).
     // When a `values` event delivers [h1, a1, h2] and a late `messages` event re-appends
@@ -184,6 +187,7 @@ export function useMessageConverter(
       }
 
       if (sources.length > 0) {
+        console.log('[DEBUG useMessageConverter] sources from values:', sources.length, sources)
         stepsMetadata!.documents = sources.map((s) => {
           const src = s as Record<string, unknown>
           const pageRaw = src.page ?? src.page_number
