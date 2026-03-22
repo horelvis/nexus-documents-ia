@@ -5,15 +5,10 @@ Wraps KnowledgeTreeClient for structural queries against Apache AGE:
 - Counting documents/entities ("¿cuántos contratos tengo?")
 - Listing items ("lista de facturas de 2024")
 - Filtering by metadata ("documentos del proyecto ACME")
-
-Falls back to Weaviate aggregate counts when the graph doesn't have
-proper semantic_type data for document type counts.
 """
 
 import json
 import logging
-import re
-import unicodedata
 from typing import Any, Dict, Optional, Type
 
 from pydantic import BaseModel, Field
@@ -21,43 +16,6 @@ from pydantic import BaseModel, Field
 from .base import EmmaTool, ToolResult
 
 logger = logging.getLogger(__name__)
-
-# Document type keywords for Weaviate count fallback
-# Maps query terms to Weaviate semantic_type values
-_COUNT_TYPE_KEYWORDS: Dict[str, str] = {
-    "factura": "factura", "facturas": "factura",
-    "contrato": "contrato", "contratos": "contrato",
-    "nomina": "nomina", "nómina": "nomina", "nóminas": "nomina", "nominas": "nomina",
-    "informe": "informe", "informes": "informe",
-    "expediente": "expediente", "expedientes": "expediente",
-    "acta": "acta", "actas": "acta",
-    "presupuesto": "presupuesto", "presupuestos": "presupuesto",
-    "certificado": "certificado", "certificados": "certificado",
-    "escritura": "escritura", "escrituras": "escritura",
-    "demanda": "demanda", "demandas": "demanda",
-    "sentencia": "sentencia", "sentencias": "sentencia",
-}
-
-# Counting intent patterns
-_COUNT_PATTERN = re.compile(
-    r"(?:cuánt[oa]s?|cuant[oa]s?|total\s+de|número\s+de|cantidad\s+de|hay\s+de)",
-    re.IGNORECASE,
-)
-
-
-def _normalize_for_match(text: str) -> str:
-    normalized = unicodedata.normalize("NFKD", text)
-    no_accents = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    return re.sub(r"\s+", " ", no_accents.lower()).strip()
-
-
-def _contains_keyword(query: str, keyword: str) -> bool:
-    q_norm = _normalize_for_match(query)
-    kw_norm = _normalize_for_match(keyword)
-    if not q_norm or not kw_norm:
-        return False
-    pattern = rf"(?<!\w){re.escape(kw_norm)}(?!\w)"
-    return re.search(pattern, q_norm) is not None
 
 
 class StructuralQueryInput(BaseModel):
@@ -134,51 +92,6 @@ class StructuralQueryTool(EmmaTool):
         route = result.get("route", "UNKNOWN")
         data = result.get("data", {})
         context_text = result.get("context", "")
-
-        # ── Weaviate count fallback ──────────────────────────────
-        # If the graph didn't return a count but the query looks like a
-        # counting question about a document type, fall back to Weaviate
-        # aggregate (which has correct semantic_type from the classifier).
-        if (
-            isinstance(data, dict)
-            and data.get("count") is None
-            and _COUNT_PATTERN.search(query)
-        ):
-            matched_specific = False
-            for keyword, sem_type in _COUNT_TYPE_KEYWORDS.items():
-                if _contains_keyword(query, keyword):
-                    matched_specific = True
-                    try:
-                        from app.clients.weaviate_client import get_weaviate_client
-                        wv_client = get_weaviate_client()
-                        wv_result = await wv_client.count_by_semantic_type(tenant_id, sem_type)
-                        wv_count = wv_result.get("count", 0)
-                        if wv_count is not None and wv_count > 0:
-                            data["count"] = wv_count
-                            data["count_type"] = "documents"
-                            data["matched_type"] = sem_type
-                            data["count_source"] = "weaviate"
-                            logger.info(f"📊 Weaviate count fallback: {sem_type}={wv_count}")
-                    except Exception as e:
-                        logger.warning(f"Weaviate count fallback failed: {e}")
-                    break
-
-            # Generic "cuántos documentos" without specific type → sum all
-            if not matched_specific and data.get("count") is None:
-                try:
-                    from app.clients.weaviate_client import get_weaviate_client
-                    wv_client = get_weaviate_client()
-                    wv_result = await wv_client.count_by_semantic_type(tenant_id)
-                    type_counts = wv_result.get("type_counts", {})
-                    if type_counts:
-                        total = sum(type_counts.values())
-                        data["count"] = total
-                        data["count_type"] = "documents"
-                        data["count_source"] = "weaviate"
-                        data["type_breakdown"] = type_counts
-                        logger.info(f"📊 Weaviate total count fallback: {total} ({type_counts})")
-                except Exception as e:
-                    logger.warning(f"Weaviate total count fallback failed: {e}")
 
         lines = []
 

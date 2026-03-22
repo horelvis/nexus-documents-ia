@@ -63,6 +63,17 @@ _TYPE_TO_VLABEL: Dict[str, str] = {
     "compania": "Organizacion",
     "sociedad": "Organizacion",
     "entidad": "Organizacion",
+    # Legal types (public knowledge extraction)
+    "ley": "LegalLaw",
+    "real_decreto": "LegalLaw",
+    "reference": "LegalLaw",
+    "articulo": "Articulo",
+    "clause": "Articulo",
+    "concepto_legal": "ConceptoLegal",
+    "concept": "ConceptoLegal",
+    "termino": "ConceptoLegal",
+    "term": "ConceptoLegal",
+    "boe_referencia": "LegalLaw",
 }
 
 _TYPE_TO_ONTOLOGY: Dict[str, str] = {
@@ -77,6 +88,16 @@ _TYPE_TO_ONTOLOGY: Dict[str, str] = {
     "compania": "company",
     "sociedad": "company",
     "entidad": "organization",
+    "ley": "law",
+    "real_decreto": "law",
+    "reference": "law",
+    "articulo": "clause",
+    "clause": "clause",
+    "concepto_legal": "concept",
+    "concept": "concept",
+    "termino": "concept",
+    "term": "concept",
+    "boe_referencia": "law",
 }
 
 # Extraction relationship types → sector graph edge labels
@@ -410,19 +431,35 @@ class EntityGraphBridge:
                     instance_of_merge += f", et.parent = '{_escape(resolved.parent)}'"
                 instance_of_edge = f"MERGE (e)-[:INSTANCE_OF]->(et)"
 
-        cypher = f"""
-        SELECT * FROM cypher('{graph}', $$
-            MERGE (e:{vlabel} {{tenant_id: '{_escape(tenant_id)}', name: '{_escape(entity_value)}'}})
-            SET e.entity_type = '{_escape(entity_type)}',
-                e.confidence = {confidence}
-            WITH e
-            MATCH (d:structural_document {{tenant_id: '{_escape(tenant_id)}', document_id: '{_escape(document_id)}'}})
-            MERGE (e)-[:EXTRACTED_FROM]->(d)
-            {instance_of_merge}
-            {instance_of_edge}
-            RETURN e.name
-        $$) as (name agtype)
-        """
+        # For public_knowledge entities, structural_document nodes don't exist
+        # in the sector graph — create entity without EXTRACTED_FROM edge
+        if tenant_id == "public_knowledge":
+            cypher = f"""
+            SELECT * FROM cypher('{graph}', $$
+                MERGE (e:{vlabel} {{tenant_id: '{_escape(tenant_id)}', name: '{_escape(entity_value)}'}})
+                SET e.entity_type = '{_escape(entity_type)}',
+                    e.confidence = {confidence},
+                    e.source_document_id = '{_escape(document_id)}',
+                    e.shared = true
+                {instance_of_merge}
+                {instance_of_edge}
+                RETURN e.name
+            $$) as (name agtype)
+            """
+        else:
+            cypher = f"""
+            SELECT * FROM cypher('{graph}', $$
+                MERGE (e:{vlabel} {{tenant_id: '{_escape(tenant_id)}', name: '{_escape(entity_value)}'}})
+                SET e.entity_type = '{_escape(entity_type)}',
+                    e.confidence = {confidence}
+                WITH e
+                MATCH (d:structural_document {{tenant_id: '{_escape(tenant_id)}', document_id: '{_escape(document_id)}'}})
+                MERGE (e)-[:EXTRACTED_FROM]->(d)
+                {instance_of_merge}
+                {instance_of_edge}
+                RETURN e.name
+            $$) as (name agtype)
+            """
         await age_client.execute_cypher(cypher)
 
 

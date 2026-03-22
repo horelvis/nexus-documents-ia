@@ -419,6 +419,30 @@ async def extract_knowledge_from_public_documents(
                         logger.warning(f"Failed to store entity: {entity_error}")
                         continue
 
+                # Store entities in knowledge-tree-service sector graph (Apache AGE)
+                try:
+                    from app.clients.knowledge_tree_client import knowledge_tree_legal_client
+
+                    kt_entities = [
+                        {
+                            "type": e["type"],
+                            "value": e["value"],
+                            "confidence": 0.85,
+                            "attributes": {"domain": "legal", "source": "public_knowledge"},
+                        }
+                        for e in extracted_entities[:50]
+                    ]
+                    kt_result = await knowledge_tree_legal_client.store_entities(
+                        tenant_id=public_tenant,
+                        document_id=doc_id,
+                        entities=kt_entities,
+                    )
+                    kt_stored = kt_result.get("entities_stored", 0)
+                    if kt_stored > 0:
+                        logger.info(f"📊 Stored {kt_stored} entities in sector graph (AGE) for {doc_id}")
+                except Exception as kt_error:
+                    logger.warning(f"⚠️ Failed to store entities in knowledge-tree: {kt_error}")
+
                 results["processed"] += 1
                 results["details"].append({
                     "document_id": doc_id,
