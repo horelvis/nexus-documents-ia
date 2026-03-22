@@ -31,14 +31,16 @@ export function ThreadHistory({
     if (!tenantId) return
     setIsLoading(true)
     setError(null)
-    apiClient.get<ThreadItem[]>('/emma/sessions', {
+    apiClient.get<{ sessions: ThreadItem[] } | ThreadItem[]>('/emma/sessions', {
       params: { limit: 20 },
       headers: { 'X-Tenant-ID': tenantId },
     }).then((response) => {
       if (response.error) {
         setError(response.error)
       } else if (response.data) {
-        setThreads(response.data)
+        const data = response.data
+        const list = Array.isArray(data) ? data : (data.sessions ?? [])
+        setThreads(list)
       }
     }).catch((err) => {
       console.error('Failed to load threads:', err)
