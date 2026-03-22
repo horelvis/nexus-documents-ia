@@ -85,6 +85,10 @@ class DocumentResponse(BaseModel):
     folder_path: Optional[str] = None
     folder_hierarchy: List[str] = Field(default_factory=list)
     connector_id: Optional[str] = None
+    # Chunk-level source attribution (for page/excerpt in citations)
+    chunk_index: Optional[int] = None
+    page_number: Optional[int] = None
+    document_id: Optional[str] = None  # parent document UUID
     # Enrichment properties for multi-signal retrieval
     domain: Optional[str] = None
     semantic_type: Optional[str] = None

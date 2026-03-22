@@ -919,6 +919,10 @@ class SmartSearchTool(EmmaTool):
                     "folder_path": r.metadata.get("folder_path", ""),
                     "document_type": r.metadata.get("document_type", ""),
                     "tags": r.metadata.get("tags", []),
+                    # Chunk-level source attribution
+                    "chunk_index": r.metadata.get("chunk_index"),
+                    "page_number": r.metadata.get("page_number"),
+                    "excerpt": (r.content[:200] if r.content else ""),
                 }
                 for r in results
             ]
@@ -1209,6 +1213,13 @@ class SmartSearchTool(EmmaTool):
                     k: v for k, v in r.items()
                     if k in ("document_type", "created_at", "tags", "folder_path")
                 }
+            # Chunk-level source attribution (page, excerpt)
+            if r.get("page_number") is not None:
+                source["page"] = r["page_number"]
+            if r.get("chunk_index") is not None:
+                source["chunk_index"] = r["chunk_index"]
+            if r.get("excerpt"):
+                source["excerpt"] = r["excerpt"]
             sources.append(source)
 
         # Inject retrieval guard warnings into output

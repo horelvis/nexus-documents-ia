@@ -3052,6 +3052,10 @@ class WeaviateService:
                     folder_path=item.properties.get("folder_path", ""),
                     folder_hierarchy=item.properties.get("folder_hierarchy", []),
                     connector_id=item.properties.get("connector_id", ""),
+                    # Chunk-level source attribution
+                    chunk_index=item.properties.get("chunk_index"),
+                    page_number=item.properties.get("page_number"),
+                    document_id=item.properties.get("document_id", ""),
                 )
                 documents.append(doc)
 

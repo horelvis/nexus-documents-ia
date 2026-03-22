@@ -247,6 +247,9 @@ class WeaviateClient(BaseHTTPClient):
                         "semantic_type": item.get("semantic_type", ""),
                         "quality_score": item.get("quality_score"),
                         "associated_person": item.get("associated_person", ""),
+                        "chunk_index": item.get("chunk_index"),
+                        "page_number": item.get("page_number"),
+                        "document_id": item.get("document_id", ""),
                         **item.get("metadata", {})
                     }
                 ))
