@@ -110,6 +110,11 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
     if memory_clues:
         prompt += f"\n\n## Pistas de memoria documental\nBasándote en los documentos del usuario, estas pistas pueden ayudarte a buscar mejor:\n{memory_clues}"
 
+    # Inject structural graph context (knowledge graph grounding)
+    graph_context = state.get("graph_context")
+    if graph_context:
+        prompt += f"\n\n{graph_context}"
+
     # Detect email-sending action and inject strong hint for small models
     query = state.get("query", "")
     is_email_action, email_addr = _detect_email_action(query)

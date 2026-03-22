@@ -170,3 +170,56 @@ async def test_memory_recall_node_produces_graph_context():
     assert "graph_context" in result
     assert result["graph_context"] is not None
     assert "Juan García" in result["graph_context"]
+
+
+@pytest.mark.asyncio
+async def test_build_system_message_includes_graph_context():
+    """_build_system_message should inject graph_context into the prompt."""
+    from app.agents.langgraph.nodes.react_loop import _build_system_message
+
+    state = {
+        "tenant_id": "test",
+        "sector": "legal",
+        "features": {},
+        "query": "test",
+        "metadata": {},
+        "user_memory": None,
+        "memory_clues": None,
+        "graph_context": "## Contexto del repositorio\n### Estructura\n10 contratos",
+    }
+
+    with patch("app.agents.langgraph.nodes.react_loop._load_react_system_prompt",
+               return_value="System prompt {tools_description} {current_date}"):
+        with patch("app.agents.langgraph.nodes.react_loop.get_tool_registry") as mock_reg:
+            mock_reg.return_value.get_tools_description.return_value = "tools here"
+
+            msg = await _build_system_message(state)
+
+    assert "Contexto del repositorio" in msg.content
+    assert "10 contratos" in msg.content
+
+
+@pytest.mark.asyncio
+async def test_build_system_message_omits_graph_context_when_none():
+    """_build_system_message should not add graph section when graph_context is None."""
+    from app.agents.langgraph.nodes.react_loop import _build_system_message
+
+    state = {
+        "tenant_id": "test",
+        "sector": "",
+        "features": {},
+        "query": "hola",
+        "metadata": {},
+        "user_memory": None,
+        "memory_clues": None,
+        "graph_context": None,
+    }
+
+    with patch("app.agents.langgraph.nodes.react_loop._load_react_system_prompt",
+               return_value="System prompt {tools_description} {current_date}"):
+        with patch("app.agents.langgraph.nodes.react_loop.get_tool_registry") as mock_reg:
+            mock_reg.return_value.get_tools_description.return_value = "tools here"
+
+            msg = await _build_system_message(state)
+
+    assert "Contexto del repositorio" not in msg.content
