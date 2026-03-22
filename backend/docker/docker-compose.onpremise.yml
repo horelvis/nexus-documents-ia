@@ -1087,6 +1087,8 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
+    networks:
+      - backend-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -1109,6 +1111,8 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    networks:
+      - backend-network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8010/health"]
       interval: 10s
