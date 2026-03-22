@@ -4,6 +4,8 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { SquarePen, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/auth-context'
+import { apiClient } from '@/lib/api-client'
 
 interface ThreadItem {
   session_id: string
@@ -14,39 +16,36 @@ interface ThreadItem {
 interface ThreadHistoryProps {
   currentThreadId: string | null
   onSelectThread: (threadId: string | null) => void
-  apiUrl: string
-  tenantId: string
-  apiKey?: string
 }
 
 export function ThreadHistory({
   currentThreadId,
   onSelectThread,
-  apiUrl,
-  tenantId,
-  apiKey,
 }: ThreadHistoryProps) {
+  const { tenantId } = useAuth()
   const [threads, setThreads] = useState<ThreadItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
-
-  async function loadThreads() {
-    setIsLoading(true)
-    try {
-      const headers: Record<string, string> = { 'X-Tenant-ID': tenantId }
-      if (apiKey) headers['X-API-Key'] = apiKey
-      const response = await fetch(`${apiUrl}/v1/emma/sessions?limit=20`, { headers })
-      if (response.ok) {
-        setThreads(await response.json())
-      }
-    } catch (err) {
-      console.error('Failed to load threads:', err)
-    } finally {
-      setIsLoading(false)
-    }
-  }
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    loadThreads()
+    if (!tenantId) return
+    setIsLoading(true)
+    setError(null)
+    apiClient.get<ThreadItem[]>('/emma/sessions', {
+      params: { limit: 20 },
+      headers: { 'X-Tenant-ID': tenantId },
+    }).then((response) => {
+      if (response.error) {
+        setError(response.error)
+      } else if (response.data) {
+        setThreads(response.data)
+      }
+    }).catch((err) => {
+      console.error('Failed to load threads:', err)
+      setError('Error al cargar conversaciones')
+    }).finally(() => {
+      setIsLoading(false)
+    })
   }, [tenantId])
 
   return (
@@ -82,9 +81,14 @@ export function ThreadHistory({
             </div>
           </button>
         ))}
+        {isLoading && (
+          <p className="py-4 text-center text-xs text-muted-foreground">
+            Cargando...
+          </p>
+        )}
         {threads.length === 0 && !isLoading && (
           <p className="py-4 text-center text-xs text-muted-foreground">
-            No hay conversaciones
+            {error || 'No hay conversaciones'}
           </p>
         )}
       </div>

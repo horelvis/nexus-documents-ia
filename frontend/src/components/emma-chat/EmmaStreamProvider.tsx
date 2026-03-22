@@ -55,11 +55,14 @@ interface EmmaStreamProviderProps {
 
 /**
  * API URL for the LangGraph protocol endpoints.
- * Routes through Next.js route handlers at /api/threads/* which proxy
- * to the core API with auth, avoiding Next.js rewrites() SSE buffering.
+ * Routes through Next.js rewrites at /api/threads/* which proxy
+ * to the core API. Must be absolute because the SDK does `new URL(apiUrl + path)`.
  */
 function getApiUrl(): string {
-  return '/api'
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}/api`
+  }
+  return 'http://localhost:3001/api'
 }
 
 export function EmmaStreamProvider({

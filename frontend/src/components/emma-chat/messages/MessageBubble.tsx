@@ -4,6 +4,7 @@ import { IconAlertCircle, IconThumbUp, IconThumbDown, IconCopy, IconCheck, IconR
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/contexts/auth-context'
 import type { EmmaMessage, DocumentInfo, ClarificationData } from '@/lib/types/emma'
 import { ActivityTimeline } from '../ActivityTimeline'
 import { humanizeSteps } from '../utils/humanizeStep'
@@ -164,32 +165,7 @@ export function MessageBubble({
 
   // ── User message ──
   if (message.type === 'user') {
-    return (
-      <div className="w-full emma-message-enter py-3">
-        <div className="flex items-start gap-3">
-          <div className="h-7 w-7 rounded-full bg-foreground/8 flex items-center justify-center mt-0.5 shrink-0">
-            <span className="text-xs font-semibold text-foreground/50">T</span>
-          </div>
-          <div className="min-w-0 flex-1 pt-0.5">
-            {/* Attached documents — island block */}
-            {message.metadata?.documents && message.metadata.documents.length > 0 && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {message.metadata.documents.map((doc, idx) => (
-                  <div
-                    key={doc.id || idx}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-card border border-border/50 rounded-lg text-[11px] font-mono text-muted-foreground"
-                  >
-                    <IconPaperclip className="h-3 w-3 shrink-0" />
-                    <span className="max-w-[160px] truncate">{doc.name}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            <p className="text-sm text-foreground leading-relaxed">{message.content}</p>
-          </div>
-        </div>
-      </div>
-    )
+    return <UserBubble message={message} />
   }
 
   // ── Emma response (main flow) ──
@@ -264,12 +240,60 @@ export function MessageBubble({
   )
 }
 
+// ── User message — right-aligned bubble ──
+
+function UserBubble({ message }: { message: EmmaMessage }) {
+  const { user } = useAuth()
+
+  const initial = (() => {
+    const name = user?.full_name || user?.email || ''
+    if (!name) return 'U'
+    const parts = name.trim().split(/\s+/)
+    if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    return name[0].toUpperCase()
+  })()
+
+  return (
+    <div className="w-full emma-message-enter py-2">
+      <div className="flex justify-end">
+        <div className="flex items-end gap-2.5 max-w-[85%] sm:max-w-[75%]">
+          <div className="min-w-0">
+            {/* Attached documents */}
+            {message.metadata?.documents && message.metadata.documents.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2 justify-end">
+                {message.metadata.documents.map((doc, idx) => (
+                  <div
+                    key={doc.id || idx}
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-primary/5 border border-primary/10 rounded-lg text-[11px] font-mono text-muted-foreground"
+                  >
+                    <IconPaperclip className="h-3 w-3 shrink-0" />
+                    <span className="max-w-[160px] truncate">{doc.name}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="rounded-2xl rounded-br-sm bg-primary/10 px-4 py-2.5">
+              <p className="text-sm text-foreground leading-relaxed">{message.content}</p>
+            </div>
+          </div>
+          <div
+            className="h-7 w-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0 mb-0.5"
+            title={user?.full_name || user?.email || ''}
+          >
+            <span className="text-[11px] font-semibold text-primary/70 select-none">{initial}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Layout wrapper: Emma message with avatar ──
 
 function EmmaMessageFlow({ children }: { children: React.ReactNode }) {
   return (
-    <div className="w-full emma-message-enter py-3">
-      <div className="group flex items-start gap-3">
+    <div className="w-full emma-message-enter py-2">
+      <div className="group flex items-start gap-2.5 max-w-[85%] sm:max-w-[75%]">
         <img
           src="/emma-avatar.png"
           alt="Emma"

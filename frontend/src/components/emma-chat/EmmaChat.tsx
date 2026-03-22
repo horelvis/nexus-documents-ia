@@ -198,8 +198,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
         <ThreadHistory
           currentThreadId={null}
           onSelectThread={() => {}}
-          apiUrl="/api"
-          tenantId={tenantId || ''}
         />
       )}
 

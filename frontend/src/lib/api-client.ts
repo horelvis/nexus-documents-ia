@@ -6,6 +6,7 @@
  */
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios'
+import { refreshAccessToken } from '@/lib/oidc-config'
 
 // Always use relative path to go through Next.js proxy (avoids CORS)
 // The proxy forwards requests to the backend configured in next.config.ts
@@ -53,14 +54,16 @@ class ApiClient {
     this.client.interceptors.response.use(
       (response) => response,
       async (error: AxiosError) => {
-        if (error.response?.status === 401) {
+        const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean }
+        if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+          originalRequest._retry = true
           // Try to refresh token
           const refreshed = await this.refreshToken()
-          if (refreshed && error.config) {
-            // Retry the request
+          if (refreshed) {
+            // Retry the request with new token
             const token = await this.getAccessToken()
-            error.config.headers.Authorization = `Bearer ${token}`
-            return this.client.request(error.config)
+            originalRequest.headers = { ...originalRequest.headers, Authorization: `Bearer ${token}` }
+            return this.client.request(originalRequest)
           }
           // Clear tokens and redirect to login
           this.clearTokens()
@@ -102,15 +105,14 @@ class ApiClient {
     if (!tokens?.refresh_token) return false
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/auth/sso/refresh`, {
-        refresh_token: tokens.refresh_token,
-      })
+      // Refresh directly against KeyCloak (same as auth-context)
+      const response = await refreshAccessToken(tokens.refresh_token)
 
       const newTokens: SSOTokens = {
-        access_token: response.data.access_token,
-        refresh_token: response.data.refresh_token || tokens.refresh_token,
+        access_token: response.access_token,
+        refresh_token: response.refresh_token || tokens.refresh_token,
         id_token: tokens.id_token,
-        expires_at: Date.now() + (response.data.expires_in || 3600) * 1000,
+        expires_at: Date.now() + (response.expires_in || 3600) * 1000,
       }
 
       sessionStorage.setItem(SSO_TOKEN_KEY, JSON.stringify(newTokens))
