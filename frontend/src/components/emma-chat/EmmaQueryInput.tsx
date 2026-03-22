@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { IconSend, IconLoader2, IconPlus, IconUpload, IconFolder, IconFileCheck, IconScale } from '@tabler/icons-react'
+import { IconSend, IconPlayerStop, IconPlus, IconUpload, IconFolder, IconFileCheck, IconScale } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -24,6 +24,7 @@ interface EmmaQueryInputProps {
   onSendQuery: (query: string, attachments?: Attachment[]) => Promise<void>
   onVerifiedGeneration?: (topic: string, attachments?: Attachment[]) => void
   onPredictiveAnalysis?: (caseDescription: string, attachments?: Attachment[]) => void
+  onStop?: () => void
   isLoading?: boolean
   disabled?: boolean
   placeholder?: string
@@ -35,6 +36,7 @@ export function EmmaQueryInput({
   onSendQuery,
   onVerifiedGeneration,
   onPredictiveAnalysis,
+  onStop,
   isLoading = false,
   disabled = false,
   placeholder = 'Pregúntame sobre tus documentos...',
@@ -391,20 +393,29 @@ export function EmmaQueryInput({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Send button - INSIDE INPUT RIGHT */}
-        <Button
-          type="button"
-          onClick={handleSubmit}
-          disabled={!hasContent || disabled || isLoading}
-          size="icon"
-          className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg"
-        >
-          {isLoading ? (
-            <IconLoader2 className="h-4 w-4 animate-spin" />
-          ) : (
+        {/* Send / Stop button - INSIDE INPUT RIGHT */}
+        {isLoading && onStop ? (
+          <Button
+            type="button"
+            onClick={onStop}
+            size="icon"
+            variant="destructive"
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg"
+            title="Detener generación"
+          >
+            <IconPlayerStop className="h-4 w-4" />
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            onClick={handleSubmit}
+            disabled={!hasContent || disabled || isLoading}
+            size="icon"
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-lg"
+          >
             <IconSend className="h-4 w-4" />
-          )}
-        </Button>
+          </Button>
+        )}
       </div>
 
       {/* Action toolbar */}

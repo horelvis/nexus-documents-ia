@@ -50,10 +50,24 @@ interface AuthContextType {
   isAuthenticated: boolean
   user: User | null
   tenantId: string | null
+  roles: string[]
+  isAdmin: boolean
   login: () => Promise<void>
   logout: () => Promise<void>
   refreshUser: () => Promise<void>
   completeOnboarding: () => Promise<boolean>
+}
+
+/** Decode JWT payload without validation (UI-only, backend validates). */
+function parseJwtRoles(token: string): string[] {
+  try {
+    const payload = token.split('.')[1]
+    if (!payload) return []
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
+    return decoded?.realm_access?.roles ?? []
+  } catch {
+    return []
+  }
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -105,6 +119,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoaded, setIsLoaded] = useState(false)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [user, setUser] = useState<User | null>(null)
+  const [roles, setRoles] = useState<string[]>([])
+
+  const isAdmin = roles.includes('admin') || roles.includes('realm-admin')
 
   // Fetch user from backend using SSO token
   const fetchUser = useCallback(async (accessToken: string) => {
@@ -161,6 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       storeTokens(tokens)
       setIsAuthenticated(true)
+      setRoles(parseJwtRoles(tokens.access_token))
 
       // Clear OIDC state
       sessionStorage.removeItem(OIDC_STATE_KEY)
@@ -258,6 +276,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               const retryUser = await fetchUser(newTokens.access_token)
               if (retryUser) {
                 setIsAuthenticated(true)
+                setRoles(parseJwtRoles(newTokens.access_token))
                 setIsLoaded(true)
                 return
               }
@@ -272,6 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         setIsAuthenticated(true)
+        setRoles(parseJwtRoles(currentTokens.access_token))
       } else {
         setIsAuthenticated(false)
       }
@@ -402,12 +422,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAuthenticated,
       user,
       tenantId: user?.tenant_id || null,
+      roles,
+      isAdmin,
       login,
       logout,
       refreshUser,
       completeOnboarding,
     }),
-    [isLoaded, isAuthenticated, user, login, logout, refreshUser, completeOnboarding]
+    [isLoaded, isAuthenticated, user, roles, isAdmin, login, logout, refreshUser, completeOnboarding]
   )
 
   return (

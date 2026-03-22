@@ -11,6 +11,7 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
+import { useAuth } from '@/contexts/auth-context'
 import {
   IconPlug,
   IconSettings,
@@ -45,6 +46,7 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
 }
 
 export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSidebarProps) {
+  const { isAdmin } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
 
@@ -208,7 +210,8 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Admin */}
+        {/* Admin — only visible to admin users */}
+        {isAdmin && (
         <SidebarGroup>
           <SidebarGroupLabel>Admin</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -230,6 +233,7 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+        )}
 
         {/* Secondary Navigation */}
         <SidebarGroup className="mt-auto">

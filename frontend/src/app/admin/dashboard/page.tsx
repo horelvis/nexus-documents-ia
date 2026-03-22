@@ -2618,21 +2618,23 @@ const loadBoePresets = async () => {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>¿Extraer entidades al Knowledge Graph?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Se procesarán los documentos públicos (legislación) para extraer entidades:
-              <ul className="mt-2 list-disc list-inside">
-                <li>Artículos de leyes (Art. 1, Art. 2...)</li>
-                <li>Referencias legales (BOE-A-2015-11430...)</li>
-                <li>Organizaciones (Ministerios, Agencias...)</li>
-                <li>Fechas y términos clave</li>
-              </ul>
-              <p className="mt-2 text-sm">
-                Las entidades extraídas permitirán a Emma responder preguntas como
-                "¿Cuántos artículos mencionan las vacaciones?" o "¿Qué leyes regulan el teletrabajo?"
-              </p>
-              <p className="mt-2 text-sm text-amber-600">
-                ⚠️ Este proceso puede tardar varios minutos.
-              </p>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>Se procesarán los documentos públicos (legislación) para extraer entidades:</p>
+                <ul className="mt-2 list-disc list-inside">
+                  <li>Artículos de leyes (Art. 1, Art. 2...)</li>
+                  <li>Referencias legales (BOE-A-2015-11430...)</li>
+                  <li>Organizaciones (Ministerios, Agencias...)</li>
+                  <li>Fechas y términos clave</li>
+                </ul>
+                <p className="mt-2 text-sm">
+                  Las entidades extraídas permitirán a Emma responder preguntas como
+                  "¿Cuántos artículos mencionan las vacaciones?" o "¿Qué leyes regulan el teletrabajo?"
+                </p>
+                <p className="mt-2 text-sm text-amber-600">
+                  ⚠️ Este proceso puede tardar varios minutos.
+                </p>
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

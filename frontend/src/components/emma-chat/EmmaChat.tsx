@@ -262,25 +262,28 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
           />
         )}
 
-        {/* Input */}
-        <div className="border-t bg-background p-4">
-          <ChatToolbar
-            deepReasoning={deepReasoning}
-            onDeepReasoningChange={setDeepReasoning}
-            showThreadHistory={showThreadHistory}
-            onToggleThreadHistory={() => setShowThreadHistory(prev => !prev)}
-            isLoading={displayIsLoading}
-          />
+        {/* Input — centered to match message column */}
+        <div className="border-t border-border/30 bg-background/80 backdrop-blur-sm px-4 sm:px-6 lg:px-8 py-3">
+          <div className="max-w-4xl mx-auto w-full">
+            <ChatToolbar
+              deepReasoning={deepReasoning}
+              onDeepReasoningChange={setDeepReasoning}
+              showThreadHistory={showThreadHistory}
+              onToggleThreadHistory={() => setShowThreadHistory(prev => !prev)}
+              isLoading={displayIsLoading}
+            />
 
-          <EmmaQueryInput
-            onSendQuery={handleSendQuery}
-            onVerifiedGeneration={handleVerifiedGeneration}
-            onPredictiveAnalysis={handlePredictiveAnalysis}
-            isLoading={displayIsLoading}
-            disabled={!user?.id}
-            placeholder="Pregúntame sobre tus documentos..."
-            maxAttachments={10}
-          />
+            <EmmaQueryInput
+              onSendQuery={handleSendQuery}
+              onVerifiedGeneration={handleVerifiedGeneration}
+              onPredictiveAnalysis={handlePredictiveAnalysis}
+              onStop={stream.stop}
+              isLoading={displayIsLoading}
+              disabled={!user?.id}
+              placeholder="Pregúntame sobre tus documentos..."
+              maxAttachments={10}
+            />
+          </div>
         </div>
 
 

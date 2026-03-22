@@ -73,6 +73,8 @@ export function useMessageConverter(
   const interrupt = values?.__interrupt__
 
   const messages = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    void isLoading // tracked as dependency for progress placeholder
     const reasoningSteps = values?.reasoning_steps ?? []
     const sources = values?.sources ?? []
 
@@ -150,7 +152,28 @@ export function useMessageConverter(
     }
 
     // 3. Attach reasoning steps + sources to the current turn's AI message
-    if (reasoningSteps.length > 0 || sources.length > 0 || explanation) {
+
+    // Find last human message index (= current turn start)
+    let lastHumanIdx = -1
+    for (let i = converted.length - 1; i >= 0; i--) {
+      if (converted[i].type === 'user') {
+        lastHumanIdx = i
+        break
+      }
+    }
+
+    // Find a 'result' message AFTER the last human (= current turn AI)
+    let currentAiIdx = -1
+    for (let i = lastHumanIdx + 1; i < converted.length; i++) {
+      if (converted[i].type === 'result' || converted[i].type === 'progress') {
+        currentAiIdx = i
+        break
+      }
+    }
+
+    const hasMetadata = reasoningSteps.length > 0 || sources.length > 0 || explanation
+
+    if (hasMetadata) {
       const stepsMetadata: EmmaMessage['metadata'] = {
         slmIsThinking: !success && reasoningSteps.length > 0,
         rawReasoningSteps: reasoningSteps,
@@ -173,24 +196,6 @@ export function useMessageConverter(
         })) as DocumentInfo[]
       }
 
-      // Find last human message index (= current turn start)
-      let lastHumanIdx = -1
-      for (let i = converted.length - 1; i >= 0; i--) {
-        if (converted[i].type === 'user') {
-          lastHumanIdx = i
-          break
-        }
-      }
-
-      // Find a 'result' message AFTER the last human (= current turn AI)
-      let currentAiIdx = -1
-      for (let i = lastHumanIdx + 1; i < converted.length; i++) {
-        if (converted[i].type === 'result' || converted[i].type === 'progress') {
-          currentAiIdx = i
-          break
-        }
-      }
-
       if (currentAiIdx >= 0) {
         // Attach to existing current-turn AI message
         converted[currentAiIdx] = {
@@ -208,6 +213,18 @@ export function useMessageConverter(
           metadata: stepsMetadata,
         })
       }
+    }
+
+    // 3b. Guarantee a progress placeholder when loading, even without reasoning_steps.
+    // This covers the gap between submit and the first backend event.
+    if (isLoading && !success && currentAiIdx < 0 && !hasMetadata && lastHumanIdx >= 0) {
+      converted.push({
+        id: 'progress-current',
+        type: 'progress',
+        content: '',
+        timestamp: new Date(),
+        metadata: {},
+      })
     }
 
     // 4. Detect HITL interrupt from values.__interrupt__ and create inline message
@@ -246,7 +263,7 @@ export function useMessageConverter(
 
     return converted
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sdkMessages, reasoningLen, sourcesLen, success, explanation, interrupt])
+  }, [sdkMessages, reasoningLen, sourcesLen, success, explanation, interrupt, isLoading])
 
   // Write metadata to cache after render (side-effect, safe in useEffect)
   useEffect(() => {
