@@ -86,7 +86,7 @@ export function HITLReviewCard({
       <CardHeader className="pb-3">
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-blue-500 dark:text-blue-400" />
-          <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="text-xs font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-300">
             Requiere aprobacion
           </span>
         </div>
