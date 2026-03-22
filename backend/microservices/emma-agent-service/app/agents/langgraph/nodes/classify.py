@@ -1,99 +1,23 @@
 """
 Emma ReAct Agent — Classify Node
 
-Entry point of the ReAct graph. Performs fast intent classification and
-routes to either:
-- Fast-path: LLM-generated response for greetings, identity, farewells (no tools)
-- React loop: Full ReAct cycle for document queries, analysis, etc.
+Entry point of the ReAct graph. All queries go through the ReAct loop —
+the LLM decides whether to use tools or respond conversationally based
+on conversation context. No fast-path bifurcation.
 
-This is a refactored/simplified version of coordinator.py + plan.py fast-paths.
-The classify node reuses the existing IntentRouter (semantic + LLM fallback).
+The classify node performs intent classification for metadata/logging
+and complexity assessment for swarm routing.
 """
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
-
-from langchain_core.messages import AIMessage
+from typing import Any, Dict, List
 
 from app.core.config import settings
 from ..state import ReActState
-from ..reasoning_tracker import ReasoningTracker, StepType
-from .guardrail_helper import apply_guardrails
+from ..reasoning_tracker import StepType
 
 logger = logging.getLogger(__name__)
-
-async def _load_fast_path_prompt(prompt_name: str) -> str:
-    """Load a fast-path prompt from Langfuse."""
-    from app.services.langfuse_prompt_client import get_langfuse_prompt_client
-    client = get_langfuse_prompt_client()
-    cached = await client.get_prompt(prompt_name)
-    return cached.content
-
-
-async def _generate_conversational_response(
-    query: str,
-    user_name: str = "",
-    conversation_history: Optional[List[Dict[str, str]]] = None,
-    user_memory: str = "",
-    intent: str = "conversational",
-) -> str:
-    """Generate a fast-path response via LLM (no tools).
-
-    Makes a single chat completion call to produce natural responses for
-    greetings, identity, and general knowledge intents.
-    Includes conversation history and user memory for contextual replies.
-    Falls back to a simple greeting if the LLM call fails.
-
-    Prompts loaded from: Langfuse → YAML → hardcoded fallback.
-    For general_knowledge: uses CHAT model with higher token limit and markdown.
-    For conversational/identity: uses PLANNER model with low token limit.
-    """
-    from langchain_core.messages import SystemMessage as SM, HumanMessage as HM, AIMessage as AIM
-
-    is_general_knowledge = intent == "general_knowledge"
-
-    if is_general_knowledge:
-        from app.agents.llm_models import get_chat_model
-        system_msg = await _load_fast_path_prompt("emma_fast_general_knowledge_system")
-        model = get_chat_model().bind(temperature=0.5, max_tokens=2048)
-    else:
-        from app.agents.llm_models import get_planner_model
-        system_msg = await _load_fast_path_prompt("emma_fast_conversational_system")
-        model = get_planner_model().bind(temperature=0.7, max_tokens=150)
-
-    if user_name:
-        system_msg += f"\n\nEl usuario se llama: {user_name}"
-    if user_memory:
-        system_msg += f"\n\n{user_memory}"
-
-    lc_messages = [SM(content=system_msg)]
-
-    # Include prior conversation for context (last 6 messages max)
-    if conversation_history:
-        for m in conversation_history[-6:]:
-            role = m.get("role", "user")
-            if role == "assistant":
-                lc_messages.append(AIM(content=m.get("content", "")))
-            else:
-                lc_messages.append(HM(content=m.get("content", "")))
-
-    lc_messages.append(HM(content=query))
-
-    try:
-        response = await model.ainvoke(lc_messages)
-        answer = (response.content or "").strip()
-        if answer:
-            return answer
-    except Exception as e:
-        logger.warning(f"Fast-path LLM call failed (intent={intent}), using fallback: {e}")
-
-    # Minimal fallback if LLM fails
-    if is_general_knowledge:
-        return "Lo siento, no pude procesar tu consulta en este momento. ¿Podrías reformularla?"
-    first_name = user_name.split()[0] if user_name else ""
-    greeting = f"¡Hola, {first_name}!" if first_name else "¡Hola!"
-    return f"{greeting} Soy Emma, tu asistente documental. ¿En qué te ayudo?"
 
 
 def _assess_complexity(query: str, intent: str, confidence: float) -> bool:
@@ -141,27 +65,21 @@ def _assess_complexity(query: str, intent: str, confidence: float) -> bool:
 
 
 async def classify_node(state: ReActState) -> Dict[str, Any]:
-    """Classify intent and route to fast-path or react_loop.
+    """Classify intent and route ALL queries to the ReAct loop.
 
-    Fast-path intents (conversational, identity) return immediately.
-    All other intents proceed to the ReAct loop for dynamic tool use.
-
-    When PostgresSaver checkpointer is active, merge_lists fields
-    (reasoning_steps, swarm_worker_results, swarm_pending_events)
-    accumulate across invocations.  We emit a ``_checkpoint_offsets``
-    marker in metadata so downstream consumers know how many items
-    came from the checkpoint vs the current turn.
+    No fast-path — the LLM handles greetings, confirmations, and
+    document queries uniformly via the react_loop with full conversation
+    context. This prevents losing the thread on continuation replies
+    ("Sí", "Ok") and simplifies the architecture.
 
     Returns:
-        State updates including fast_path_used, fast_path_answer,
-        reasoning_steps, and metadata.
+        State updates: reasoning_steps, metadata, use_swarm flag.
     """
     start = time.time()
     query = state.get("query", "")
-    reasoning_steps = []
+    reasoning_steps: List[Dict[str, Any]] = []
 
-    # Record checkpoint baseline counts so downstream can distinguish
-    # old (accumulated) items from new (current-turn) items.
+    # Record checkpoint baseline counts
     _checkpoint_offsets = {
         "reasoning_steps": len(state.get("reasoning_steps", [])),
         "swarm_worker_results": len(state.get("swarm_worker_results", [])),
@@ -175,11 +93,11 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             "is_complete": True,
             "final_answer": "¿Puedes formular tu consulta?",
             "success": True,
-            "reasoning_steps": [{"type": "routing", "content": "Empty query — fast path"}],
+            "reasoning_steps": [{"type": "routing", "content": "Empty query — guard"}],
             "metadata": {"classify_intent": "empty", "classify_latency_ms": 0, "_checkpoint_offsets": _checkpoint_offsets},
         }
 
-    # Intent classification (reuses existing hybrid router)
+    # Intent classification (for metadata/logging, NOT for routing)
     intent = "document_query"
     confidence = 0.5
 
@@ -196,84 +114,12 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
 
     latency_ms = (time.time() - start) * 1000
 
-    # Continuation detection: short affirmative/negative replies ("Sí", "Ok", "No",
-    # "Dale", "Adelante") following an assistant question should NOT take the fast path.
-    # They are continuations of the previous intent and must go through react_loop
-    # so the LLM can see the conversation history and act on the confirmation.
-    _CONTINUATION_PATTERNS = {"si", "sí", "ok", "vale", "dale", "adelante", "claro",
-                              "no", "nope", "mejor no", "cancela", "por favor", "hazlo"}
-    _is_continuation = False
-    if query.strip().lower().rstrip(".!¡¿?") in _CONTINUATION_PATTERNS:
-        messages = state.get("messages", [])
-        # Check if the previous assistant message ended with a question
-        for msg in reversed(messages[:-1]):
-            if msg.type == "ai" and msg.content:
-                content = msg.content.strip() if isinstance(msg.content, str) else str(msg.content).strip()
-                if content.endswith("?"):
-                    _is_continuation = True
-                    intent = "document_query"
-                    confidence = 0.8
-                    reasoning_steps.append({
-                        "type": StepType.ROUTING.value,
-                        "content": f"Continuation detected: '{query}' follows assistant question → react_loop",
-                    })
-                    logger.info(f"Classify: continuation detected ('{query}') → overriding to react_loop")
-                break
-
-    # Fast-path: conversational, identity, and general_knowledge intents — LLM-generated (no tools)
-    if not _is_continuation and intent in ("conversational", "identity", "general_knowledge") and confidence >= 0.7:
-        user_name = state.get("metadata", {}).get("user_name", "") or ""
-        user_memory = state.get("user_memory") or ""
-
-        # Build conversation history from state messages (excluding current query)
-        conv_history: List[Dict[str, str]] = []
-        for msg in state.get("messages", [])[:-1]:  # skip last (current HumanMessage)
-            role = "user" if msg.type == "human" else "assistant"
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-            if content:
-                conv_history.append({"role": role, "content": content})
-
-        answer = await _generate_conversational_response(
-            query, user_name=user_name, conversation_history=conv_history,
-            user_memory=user_memory, intent=intent,
-        )
-
-        # Guardrail validation (fast-path)
-        answer, guardrail_metadata = await apply_guardrails(answer, state)
-
-        reasoning_steps.append({
-            "type": StepType.RESPONSE.value,
-            "content": f"Fast-path: {intent}",
-        })
-
-        return {
-            "fast_path_used": True,
-            "fast_path_answer": answer,
-            "is_complete": True,
-            "final_answer": answer,
-            "success": True,
-            "messages": [AIMessage(content=answer)],
-            "reasoning_steps": reasoning_steps,
-            "guardrail_metadata": guardrail_metadata,
-            "metadata": {
-                "classify_intent": intent,
-                "classify_confidence": confidence,
-                "classify_latency_ms": latency_ms,
-                "_checkpoint_offsets": _checkpoint_offsets,
-            },
-        }
-
     # Query clarification — detect ambiguous queries via interrupt() HITL pattern.
-    # When ambiguous, interrupt() pauses the graph and surfaces options to the user.
-    # On resume (Command(resume=selected_value)), the node re-executes from the
-    # beginning; interrupt() returns the user's selection which replaces the query.
-    # All code before interrupt() is idempotent (intent classification is read-only).
     if settings.react_query_clarification_enabled:
         try:
             from langgraph.types import interrupt
             from ..clarification import detect_ambiguity
 
-            # Build minimal history from state messages
             conv_history: List[Dict[str, str]] = []
             for msg in state.get("messages", [])[:-1]:
                 role = "user" if msg.type == "human" else "assistant"
@@ -291,29 +137,28 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
                     "content": "Query clarification: ambiguous query detected",
                 })
 
-                # interrupt() pauses the graph on first run.
-                # On resume, returns the user's selected option value.
                 refined_query = interrupt({
                     "type": "clarification",
                     "question": clarification_msg,
                     "options": clarification_options,
                 })
 
-                # After resume: refined_query = user's selected option
                 logger.info(f"Classify: clarification resolved → '{refined_query[:80]}'")
                 query = refined_query
-                # Re-classify with the refined query
-                intent, confidence = await _classify_intent(query, tenant_id)
+                try:
+                    from .intent_router import classify_intent as _classify
+                    intent, confidence = await _classify(query)
+                except Exception:
+                    pass
                 reasoning_steps.append({
                     "type": StepType.ROUTING.value,
                     "content": f"Re-classified after clarification: intent={intent}",
                 })
         except Exception as e:
-            # Don't let clarification failure block the pipeline
             if "GraphInterrupt" not in type(e).__name__:
                 logger.debug(f"Query clarification check failed (non-blocking): {e}")
             else:
-                raise  # Re-raise GraphInterrupt — must propagate to runner
+                raise
 
     # Assess complexity for swarm routing
     use_swarm = _assess_complexity(query, intent, confidence)
