@@ -17,6 +17,7 @@ import {
   IconPhoto,
   IconScale,
   IconTopologyRing,
+  IconBookmark,
 } from '@tabler/icons-react'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
@@ -173,6 +174,12 @@ export function DocumentDisplay({
                   )}
 
                   <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
+                    {doc.page != null && (
+                      <div className="flex items-center gap-1">
+                        <IconBookmark className="h-2.5 w-2.5 text-primary/60" />
+                        <span className="font-medium text-primary/70">Pág. {doc.page}</span>
+                      </div>
+                    )}
                     {doc.createdAt && (
                       <div className="flex items-center gap-1">
                         <IconCalendar className="h-2.5 w-2.5" />
@@ -186,6 +193,15 @@ export function DocumentDisplay({
                       </div>
                     )}
                   </div>
+
+                  {/* Excerpt / snippet from search result */}
+                  {doc.excerpt && (
+                    <div className="mt-2 pl-2.5 border-l-2 border-primary/20">
+                      <p className="text-[11px] leading-relaxed text-muted-foreground/80 italic line-clamp-3">
+                        &ldquo;{doc.excerpt}&rdquo;
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">

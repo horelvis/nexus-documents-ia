@@ -184,16 +184,22 @@ export function useMessageConverter(
       }
 
       if (sources.length > 0) {
-        stepsMetadata!.documents = sources.map((s) => ({
-          name: (s as Record<string, string>).title || (s as Record<string, string>).name || 'Fuente',
-          id: (s as Record<string, string>).document_id || (s as Record<string, string>).id,
-          url: (s as Record<string, string>).url,
-          boe_id: (s as Record<string, string>).boe_id,
-          graph_link: (s as Record<string, string>).graph_link,
-          source_type: (s as Record<string, string>).source_type || (s as Record<string, string>).type,
-          fileType: (s as Record<string, string>).file_type || (s as Record<string, string>).mime_type,
-          relevanceScore: Number((s as Record<string, string>).score || (s as Record<string, string>).relevance) || undefined,
-        })) as DocumentInfo[]
+        stepsMetadata!.documents = sources.map((s) => {
+          const src = s as Record<string, unknown>
+          const pageRaw = src.page ?? src.page_number
+          return {
+            name: (src.title as string) || (src.name as string) || 'Fuente',
+            id: (src.document_id as string) || (src.id as string),
+            url: src.url as string,
+            boe_id: src.boe_id as string,
+            graph_link: src.graph_link as string,
+            source_type: (src.source_type as string) || (src.type as string),
+            fileType: (src.file_type as string) || (src.mime_type as string),
+            relevanceScore: Number(src.score || src.relevance) || undefined,
+            page: pageRaw != null ? Number(pageRaw) : undefined,
+            excerpt: (src.excerpt as string) || (src.snippet as string) || undefined,
+          }
+        }) as DocumentInfo[]
       }
 
       if (currentAiIdx >= 0) {
