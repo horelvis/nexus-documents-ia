@@ -412,62 +412,60 @@ async def stream_document(
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
 
-    # Download content: try source connector first, fallback to MinIO cache
+    # Download content: MinIO cache first, source connector as fallback
     content = None
 
-    # Try 1: Download from source connector (Alfresco, Google Drive, etc.)
-    try:
-        adapter = ConnectorAdapterFactory.get_adapter(connector)
-
-        connector_type_str = connector.connector_type or "alfresco"
+    # Try 1: MinIO cache (fastest, always available if cached)
+    if hasattr(indexed_doc, 'cached_path') and indexed_doc.cached_path:
         try:
-            connector_type_enum = ConnectorType(connector_type_str)
-        except ValueError:
-            connector_type_enum = ConnectorType.ALFRESCO
+            import httpx as _httpx
+            from app.core.config import settings as _settings
+            async with _httpx.AsyncClient(timeout=30.0) as http_client:
+                cache_response = await http_client.get(
+                    f"{_settings.STORAGE_SERVICE_URL}/files/{indexed_doc.cached_path}",
+                    params={"tenant_id": str(indexed_doc.tenant_id)},
+                )
+                if cache_response.status_code == 200:
+                    content = cache_response.content
+                    logger.info(f"Served from cache: {doc_id}")
+        except Exception as cache_error:
+            logger.debug(f"Cache read failed for {doc_id}: {cache_error}")
 
-        unified_doc = UnifiedDocument(
-            document_id=indexed_doc.id,
-            connector_id=indexed_doc.connector_id,
-            connector_type=connector_type_enum,
-            external_id=indexed_doc.external_id,
-            external_url=indexed_doc.external_url,
-            external_path=indexed_doc.external_path,
-            filename=indexed_doc.title or "document",
-            mime_type=indexed_doc.mime_type,
-            size_bytes=indexed_doc.size_bytes or 0,
-            source_created_at=indexed_doc.source_created_at,
-            source_modified_at=indexed_doc.source_modified_at,
-            tenant_id=indexed_doc.tenant_id,
-            owner_id=indexed_doc.owner_id,
-        )
-
-        content = await adapter.download_content(unified_doc)
-    except Exception as source_error:
-        logger.info(f"Source download failed for {doc_id}: {source_error}")
-
-    # Try 2: Fallback to MinIO cache if source failed
+    # Try 2: Source connector (only if cache miss)
     if content is None:
-        if hasattr(indexed_doc, 'cached_path') and indexed_doc.cached_path:
-            logger.info(f"Falling back to cache for {doc_id}: {indexed_doc.cached_path}")
+        try:
+            adapter = ConnectorAdapterFactory.get_adapter(connector)
+
+            connector_type_str = connector.connector_type or "alfresco"
             try:
-                import httpx as _httpx
-                from app.core.config import settings as _settings
-                async with _httpx.AsyncClient(timeout=30.0) as http_client:
-                    cache_response = await http_client.get(
-                        f"{_settings.STORAGE_SERVICE_URL}/files/{indexed_doc.cached_path}",
-                        params={"tenant_id": str(indexed_doc.tenant_id)},
-                    )
-                    if cache_response.status_code == 200:
-                        content = cache_response.content
-                    else:
-                        logger.warning(f"Cache miss for {doc_id}: HTTP {cache_response.status_code}")
-            except Exception as cache_error:
-                logger.warning(f"Cache fallback failed for {doc_id}: {cache_error}")
+                connector_type_enum = ConnectorType(connector_type_str)
+            except ValueError:
+                connector_type_enum = ConnectorType.ALFRESCO
+
+            unified_doc = UnifiedDocument(
+                document_id=indexed_doc.id,
+                connector_id=indexed_doc.connector_id,
+                connector_type=connector_type_enum,
+                external_id=indexed_doc.external_id,
+                external_url=indexed_doc.external_url,
+                external_path=indexed_doc.external_path,
+                filename=indexed_doc.title or "document",
+                mime_type=indexed_doc.mime_type,
+                size_bytes=indexed_doc.size_bytes or 0,
+                source_created_at=indexed_doc.source_created_at,
+                source_modified_at=indexed_doc.source_modified_at,
+                tenant_id=indexed_doc.tenant_id,
+                owner_id=indexed_doc.owner_id,
+            )
+
+            content = await adapter.download_content(unified_doc)
+        except Exception as source_error:
+            logger.info(f"Source download failed for {doc_id}: {source_error}")
 
     if content is None:
         raise HTTPException(
             status_code=503,
-            detail="Source connector unavailable and no cached copy available"
+            detail="Document not available (no cache and source connector unavailable)"
         )
 
         # Preparar respuesta
