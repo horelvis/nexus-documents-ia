@@ -326,18 +326,15 @@ async def stream_document(
     try:
         document = await document_service.get_document(db=db, doc_id=doc_id)
 
-        # Document encontrado - streameamos desde storage service
-        storage_url = f"{settings.STORAGE_SERVICE_URL}/api/v1/storage/proxy/{document.file_path}"
-
-        headers = {
-            "X-API-Key": settings.STORAGE_API_KEY,
-            "X-Tenant-ID": tenant_id,
-            "X-User-ID": str(current_user.id)
-        }
+        # Document encontrado - streameamos desde storage service (MinIO)
+        storage_url = f"{settings.STORAGE_SERVICE_URL}/files/{document.file_path}"
 
         client = httpx.AsyncClient(timeout=60.0)
         try:
-            request = client.build_request("GET", storage_url, headers=headers)
+            request = client.build_request(
+                "GET", storage_url,
+                params={"tenant_id": tenant_id},
+            )
             response = await client.send(request, stream=True)
 
             if response.status_code == 404:
