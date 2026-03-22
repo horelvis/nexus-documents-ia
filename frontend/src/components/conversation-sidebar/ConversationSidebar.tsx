@@ -52,8 +52,32 @@ import { Input } from '@/components/ui'
 import { ScrollArea } from '@/components/ui'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import { conversationService } from '@/lib/services/conversation.service'
-import { ConversationListItem } from '@/lib/types/conversation'
+import { useAuth } from '@/contexts/auth-context'
+import { apiClient } from '@/lib/api-client'
+
+/** Backend session shape (from EmmaSessionListItem) */
+interface SessionItem {
+  id: string
+  session_id: string
+  title?: string | null
+  message_count: number
+  is_pinned: boolean
+  is_archived: boolean
+  last_message_at: string
+  created_at: string
+  first_message_preview?: string | null
+  last_message_preview?: string | null
+}
+
+/** Adapted shape for the UI list */
+interface ConversationListItem {
+  id: string
+  title: string
+  preview: string
+  updatedAt: Date
+  pinned: boolean
+  messageCount: number
+}
 
 interface ConversationSidebarProps {
   isOpen: boolean
@@ -75,7 +99,9 @@ export function ConversationSidebar({
   onDeleteConversation,
   onDeleteMultiple,
 }: ConversationSidebarProps) {
+  const { tenantId } = useAuth()
   const [conversations, setConversations] = useState<ConversationListItem[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
@@ -90,26 +116,39 @@ export function ConversationSidebar({
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false)
   const [deleteAllDialogOpen, setDeleteAllDialogOpen] = useState(false)
 
-  // Load conversations
-  const loadConversations = useCallback(() => {
-    const list = conversationService.getList({
-      search: searchQuery || undefined,
-      sortBy: 'updatedAt',
-      sortOrder: 'desc',
+  // Load conversations from backend
+  function loadConversations() {
+    if (!tenantId) return
+    setIsLoading(true)
+    apiClient.get<{ sessions: SessionItem[]; total: number }>('/emma/sessions', {
+      params: { limit: 50 },
+      headers: { 'X-Tenant-ID': tenantId },
+    }).then((response) => {
+      if (response.data) {
+        const sessions = response.data.sessions ?? response.data
+        const list: ConversationListItem[] = (Array.isArray(sessions) ? sessions : []).map((s: SessionItem) => ({
+          id: s.session_id,
+          title: s.title || s.first_message_preview || `Conversación ${s.session_id.slice(0, 8)}`,
+          preview: s.last_message_preview || '',
+          updatedAt: new Date(s.last_message_at || s.created_at),
+          pinned: s.is_pinned,
+          messageCount: s.message_count,
+        }))
+        setConversations(list)
+      }
+    }).catch((err) => {
+      console.error('[ConversationSidebar] Failed to load:', err)
+    }).finally(() => {
+      setIsLoading(false)
     })
-    setConversations(list)
-  }, [searchQuery])
-
-  useEffect(() => {
-    loadConversations()
-  }, [loadConversations])
+  }
 
   // Refresh when sidebar opens
   useEffect(() => {
     if (isOpen) {
       loadConversations()
     }
-  }, [isOpen, loadConversations])
+  }, [isOpen, tenantId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Exit selection mode when sidebar closes
   useEffect(() => {
@@ -122,8 +161,12 @@ export function ConversationSidebar({
   // Handle pin toggle
   const handleTogglePin = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    conversationService.togglePin(id)
-    loadConversations()
+    if (!tenantId) return
+    const conv = conversations.find((c) => c.id === id)
+    if (!conv) return
+    apiClient.patch(`/emma/sessions/${id}`, { is_pinned: !conv.pinned }, {
+      headers: { 'X-Tenant-ID': tenantId },
+    }).then(() => loadConversations())
   }
 
   // Handle rename
@@ -134,9 +177,10 @@ export function ConversationSidebar({
   }
 
   const handleSaveRename = (id: string) => {
-    if (editingTitle.trim()) {
-      conversationService.rename(id, editingTitle.trim())
-      loadConversations()
+    if (editingTitle.trim() && tenantId) {
+      apiClient.patch(`/emma/sessions/${id}`, { title: editingTitle.trim() }, {
+        headers: { 'X-Tenant-ID': tenantId },
+      }).then(() => loadConversations())
     }
     setEditingId(null)
     setEditingTitle('')
@@ -155,10 +199,13 @@ export function ConversationSidebar({
   }
 
   const handleConfirmDelete = () => {
-    if (conversationToDelete) {
-      onDeleteConversation(conversationToDelete)
-      conversationService.delete(conversationToDelete)
-      loadConversations()
+    if (conversationToDelete && tenantId) {
+      apiClient.delete(`/emma/sessions/${conversationToDelete}`, {
+        headers: { 'X-Tenant-ID': tenantId },
+      }).then(() => {
+        onDeleteConversation(conversationToDelete)
+        loadConversations()
+      })
     }
     setDeleteDialogOpen(false)
     setConversationToDelete(null)
@@ -195,12 +242,16 @@ export function ConversationSidebar({
   }
 
   const handleConfirmBulkDelete = () => {
+    if (!tenantId) return
     const ids = Array.from(selectedIds)
-    conversationService.deleteMultiple(ids)
-    onDeleteMultiple?.(ids)
-    setSelectedIds(new Set())
-    setSelectionMode(false)
-    loadConversations()
+    Promise.all(
+      ids.map((id) => apiClient.delete(`/emma/sessions/${id}`, { headers: { 'X-Tenant-ID': tenantId } }))
+    ).then(() => {
+      onDeleteMultiple?.(ids)
+      setSelectedIds(new Set())
+      setSelectionMode(false)
+      loadConversations()
+    })
     setBulkDeleteDialogOpen(false)
   }
 
@@ -210,12 +261,16 @@ export function ConversationSidebar({
   }
 
   const handleConfirmDeleteAll = () => {
+    if (!tenantId) return
     const allIds = conversations.map((c) => c.id)
-    conversationService.clearAll()
-    onDeleteMultiple?.(allIds)
-    setSelectionMode(false)
-    setSelectedIds(new Set())
-    loadConversations()
+    Promise.all(
+      allIds.map((id) => apiClient.delete(`/emma/sessions/${id}`, { headers: { 'X-Tenant-ID': tenantId } }))
+    ).then(() => {
+      onDeleteMultiple?.(allIds)
+      setSelectionMode(false)
+      setSelectedIds(new Set())
+      loadConversations()
+    })
     setDeleteAllDialogOpen(false)
   }
 
@@ -249,6 +304,15 @@ export function ConversationSidebar({
     if (days < 7) return `${days}d`
     return new Date(date).toLocaleDateString('es', { month: 'short', day: 'numeric' })
   }
+
+  // Client-side search filter
+  const filteredConversations = searchQuery
+    ? conversations.filter(
+        (c) =>
+          c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          c.preview.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : conversations
 
   return (
     <>
@@ -322,11 +386,11 @@ export function ConversationSidebar({
           {/* Conversation List */}
           <ScrollArea className="flex-1 h-[calc(100vh-180px)]">
             <div className="p-2 space-y-1">
-              {conversations.length === 0 ? (
+              {filteredConversations.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
                   <IconMessage className="h-12 w-12 text-muted-foreground/30 mb-3" />
                   <p className="text-sm text-muted-foreground">
-                    {searchQuery ? 'No se encontraron conversaciones' : 'Aún no tienes conversaciones'}
+                    {isLoading ? 'Cargando...' : searchQuery ? 'No se encontraron conversaciones' : 'Aún no tienes conversaciones'}
                   </p>
                   {!searchQuery && (
                     <Button
@@ -341,7 +405,7 @@ export function ConversationSidebar({
                   )}
                 </div>
               ) : (
-                conversations.map((conv) => (
+                filteredConversations.map((conv) => (
                   <div
                     key={conv.id}
                     className={cn(

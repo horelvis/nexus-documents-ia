@@ -28,11 +28,9 @@ export function ThreadHistory({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    console.log('[ThreadHistory] tenantId:', tenantId)
     if (!tenantId) return
     setIsLoading(true)
     setError(null)
-    console.log('[ThreadHistory] Fetching sessions...')
     apiClient.get<ThreadItem[]>('/emma/sessions', {
       params: { limit: 20 },
       headers: { 'X-Tenant-ID': tenantId },
