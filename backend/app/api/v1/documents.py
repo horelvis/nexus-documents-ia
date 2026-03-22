@@ -412,17 +412,18 @@ async def stream_document(
     if not connector:
         raise HTTPException(status_code=404, detail="Connector not found")
 
-    # Crear adapter y descargar contenido
+    # Download content: try source connector first, fallback to MinIO cache
+    content = None
+
+    # Try 1: Download from source connector (Alfresco, Google Drive, etc.)
     try:
         adapter = ConnectorAdapterFactory.get_adapter(connector)
 
-        # Crear UnifiedDocument para el adapter
-        # Determinar el tipo de conector
         connector_type_str = connector.connector_type or "alfresco"
         try:
             connector_type_enum = ConnectorType(connector_type_str)
         except ValueError:
-            connector_type_enum = ConnectorType.ALFRESCO  # Fallback
+            connector_type_enum = ConnectorType.ALFRESCO
 
         unified_doc = UnifiedDocument(
             document_id=indexed_doc.id,
@@ -440,14 +441,15 @@ async def stream_document(
             owner_id=indexed_doc.owner_id,
         )
 
-        # Descargar contenido desde el sistema externo
-        # Try source first, fallback to cache if source unavailable
-        try:
-            content = await adapter.download_content(unified_doc)
-        except Exception as source_error:
-            # Source unavailable — try cached copy from MinIO
-            if hasattr(indexed_doc, 'cached_path') and indexed_doc.cached_path:
-                logger.info(f"Source unavailable for {doc_id}, falling back to cache: {indexed_doc.cached_path}")
+        content = await adapter.download_content(unified_doc)
+    except Exception as source_error:
+        logger.info(f"Source download failed for {doc_id}: {source_error}")
+
+    # Try 2: Fallback to MinIO cache if source failed
+    if content is None:
+        if hasattr(indexed_doc, 'cached_path') and indexed_doc.cached_path:
+            logger.info(f"Falling back to cache for {doc_id}: {indexed_doc.cached_path}")
+            try:
                 import httpx as _httpx
                 from app.core.config import settings as _settings
                 async with _httpx.AsyncClient(timeout=30.0) as http_client:
@@ -458,16 +460,15 @@ async def stream_document(
                     if cache_response.status_code == 200:
                         content = cache_response.content
                     else:
-                        raise HTTPException(
-                            status_code=503,
-                            detail="Source connector unavailable and cached copy not found"
-                        )
-            else:
-                logger.error(f"Source unavailable for {doc_id} and no cache: {source_error}")
-                raise HTTPException(
-                    status_code=503,
-                    detail="Source connector unavailable and no cached copy available"
-                )
+                        logger.warning(f"Cache miss for {doc_id}: HTTP {cache_response.status_code}")
+            except Exception as cache_error:
+                logger.warning(f"Cache fallback failed for {doc_id}: {cache_error}")
+
+    if content is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Source connector unavailable and no cached copy available"
+        )
 
         # Preparar respuesta
         content_type = indexed_doc.mime_type or "application/octet-stream"
