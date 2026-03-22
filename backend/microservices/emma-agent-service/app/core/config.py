@@ -163,6 +163,12 @@ class Settings(BaseSettings):
     graphrag_include_legal: bool = os.getenv("GRAPHRAG_INCLUDE_LEGAL", "true").lower() == "true"
     graphrag_token_budget: int = int(os.getenv("GRAPHRAG_TOKEN_BUDGET", "1500"))
 
+    # Graph Context — inject structural context into react_loop system prompt
+    graph_context_enabled: bool = os.getenv("GRAPH_CONTEXT_ENABLED", "true").lower() == "true"
+    graph_context_summary_enabled: bool = os.getenv("GRAPH_CONTEXT_SUMMARY_ENABLED", "true").lower() == "true"
+    graph_context_subgraph_enabled: bool = os.getenv("GRAPH_CONTEXT_SUBGRAPH_ENABLED", "true").lower() == "true"
+    graph_context_token_budget: int = int(os.getenv("GRAPH_CONTEXT_TOKEN_BUDGET", "1200"))
+
     # SmartSearch — Cross-Encoder Reranking (neural, FlashRank CPU)
     smart_search_cross_encoder_enabled: bool = os.getenv("SMART_SEARCH_CROSS_ENCODER_ENABLED", "true").lower() == "true"
     smart_search_cross_encoder_model: str = os.getenv("SMART_SEARCH_CROSS_ENCODER_MODEL", "ms-marco-MiniLM-L-12-v2")
