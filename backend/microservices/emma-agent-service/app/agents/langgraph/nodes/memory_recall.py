@@ -240,7 +240,7 @@ async def _graph_recall(
         return None
 
 
-async def memory_recall_node(state: ReActState) -> Dict[str, Any]:
+async def _memory_recall_inner(state: ReActState) -> Dict[str, Any]:
     """Scan document memories and generate retrieval clues for the ReAct agent.
 
     This node is lightweight (~50-200ms):
@@ -352,3 +352,43 @@ async def memory_recall_node(state: ReActState) -> Dict[str, Any]:
             "memory_recall_clues": True,
         },
     }
+
+
+async def memory_recall_node(state: ReActState) -> Dict[str, Any]:
+    """Scan document memories AND extract graph context for the ReAct agent.
+
+    Runs two independent I/O tasks in parallel via asyncio.gather:
+    1. Memory recall (existing): MemoRAG/Memory Bank → memory_clues
+    2. Graph recall (new): structural summary + subgraph → graph_context
+
+    Returns combined state updates. Either can fail independently.
+    """
+    query = state.get("query", "")
+    tenant_id = state.get("tenant_id", "")
+
+    if not query or not tenant_id:
+        return {}
+
+    sector_config = state.get("sector_config")
+
+    memory_result, graph_context = await asyncio.gather(
+        _memory_recall_inner(state),
+        _graph_recall(query, tenant_id, sector_config),
+        return_exceptions=True,
+    )
+
+    # Merge results
+    combined: Dict[str, Any] = {}
+
+    if isinstance(memory_result, dict):
+        combined.update(memory_result)
+    elif isinstance(memory_result, Exception):
+        logger.debug(f"Memory recall failed: {memory_result}")
+
+    if isinstance(graph_context, str):
+        combined["graph_context"] = graph_context
+        combined.setdefault("metadata", {})["graph_context_injected"] = True
+    elif isinstance(graph_context, Exception):
+        logger.debug(f"Graph recall failed: {graph_context}")
+
+    return combined

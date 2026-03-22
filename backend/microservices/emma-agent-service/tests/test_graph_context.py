@@ -127,3 +127,46 @@ async def test_graph_recall_summary_only_when_no_entities():
     assert "## Contexto del repositorio" in result
     assert "20 documentos" in result
     client.extract_subgraph.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_memory_recall_node_produces_graph_context():
+    """memory_recall_node should return graph_context alongside memory_clues."""
+    from app.agents.langgraph.nodes.memory_recall import memory_recall_node
+
+    state = {
+        "query": "contratos de Juan García",
+        "tenant_id": "test-tenant",
+        "sector_config": {"entity_patterns": {"persona": [r"([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)"]}},
+    }
+
+    mock_summary = {"summary": "10 documentos", "total_nodes": 10}
+    mock_subgraph = {
+        "nodes": [
+            {"id": "1", "name": "Juan García", "label": "Persona", "properties": {}},
+        ],
+        "edges": [],
+        "root_entities": ["Juan García"],
+    }
+
+    with patch("app.agents.langgraph.nodes.memory_recall.settings") as mock_settings:
+        mock_settings.memory_recall_enabled = False
+        mock_settings.graph_context_enabled = True
+        mock_settings.graph_context_summary_enabled = True
+        mock_settings.graph_context_subgraph_enabled = True
+        mock_settings.graph_context_token_budget = 1200
+        mock_settings.graphrag_max_hops = 2
+        mock_settings.graphrag_max_nodes = 30
+        mock_settings.graphrag_include_legal = True
+
+        with patch("app.agents.langgraph.nodes.memory_recall.get_knowledge_tree_client") as mock_client_fn:
+            client = AsyncMock()
+            client.get_structural_summary.return_value = mock_summary
+            client.extract_subgraph.return_value = mock_subgraph
+            mock_client_fn.return_value = client
+
+            result = await memory_recall_node(state)
+
+    assert "graph_context" in result
+    assert result["graph_context"] is not None
+    assert "Juan García" in result["graph_context"]
