@@ -196,8 +196,32 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
 
     latency_ms = (time.time() - start) * 1000
 
+    # Continuation detection: short affirmative/negative replies ("Sí", "Ok", "No",
+    # "Dale", "Adelante") following an assistant question should NOT take the fast path.
+    # They are continuations of the previous intent and must go through react_loop
+    # so the LLM can see the conversation history and act on the confirmation.
+    _CONTINUATION_PATTERNS = {"si", "sí", "ok", "vale", "dale", "adelante", "claro",
+                              "no", "nope", "mejor no", "cancela", "por favor", "hazlo"}
+    _is_continuation = False
+    if query.strip().lower().rstrip(".!¡¿?") in _CONTINUATION_PATTERNS:
+        messages = state.get("messages", [])
+        # Check if the previous assistant message ended with a question
+        for msg in reversed(messages[:-1]):
+            if msg.type == "ai" and msg.content:
+                content = msg.content.strip() if isinstance(msg.content, str) else str(msg.content).strip()
+                if content.endswith("?"):
+                    _is_continuation = True
+                    intent = "document_query"
+                    confidence = 0.8
+                    reasoning_steps.append({
+                        "type": StepType.ROUTING.value,
+                        "content": f"Continuation detected: '{query}' follows assistant question → react_loop",
+                    })
+                    logger.info(f"Classify: continuation detected ('{query}') → overriding to react_loop")
+                break
+
     # Fast-path: conversational, identity, and general_knowledge intents — LLM-generated (no tools)
-    if intent in ("conversational", "identity", "general_knowledge") and confidence >= 0.7:
+    if not _is_continuation and intent in ("conversational", "identity", "general_knowledge") and confidence >= 0.7:
         user_name = state.get("metadata", {}).get("user_name", "") or ""
         user_memory = state.get("user_memory") or ""
 
