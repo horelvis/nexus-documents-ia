@@ -1,14 +1,16 @@
 """
 Tenant Knowledge Service
 
-Queries Apache AGE for tenant-specific structure and terminology.
+Queries FalkorDB for tenant-specific structure and terminology.
+
+Node labels: Document, Folder, Entity
+Edge labels: CONTAINED_IN, MENTIONED_IN, RELATED_TO
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 
-from app.core.config import settings
-from app.services.age_client import age_client
+from app.services.falkordb_client import falkordb_client
 
 logger = logging.getLogger(__name__)
 
@@ -20,25 +22,24 @@ class TenantKnowledgeService:
     async def initialize(self):
         if self._initialized:
             return
-        await age_client.initialize()
+        await falkordb_client.initialize()
         self._initialized = True
 
     async def get_container_types(self, tenant_id: str, limit: int = 20) -> List[str]:
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                    WHERE f.folder_type IS NOT NULL
-                    RETURN f.folder_type as folder_type
-                $$) as (folder_type agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (f:Folder {tenant_id: $tenant_id})
+                WHERE f.folder_type IS NOT NULL
+                RETURN f.folder_type as folder_type
+                """,
+                {"tenant_id": tenant_id},
             )
             type_counts: Dict[str, int] = {}
             for row in result:
-                ft = str(row["folder_type"]).strip('"') if row.get("folder_type") else None
-                if ft and ft != "null":
+                ft = row.get("folder_type")
+                if ft:
                     type_counts[ft] = type_counts.get(ft, 0) + 1
             sorted_types = sorted(type_counts.keys(), key=lambda x: type_counts[x], reverse=True)
             return sorted_types[:limit]
@@ -49,19 +50,18 @@ class TenantKnowledgeService:
     async def get_document_types(self, tenant_id: str, limit: int = 20) -> List[str]:
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                    WHERE d.semantic_type IS NOT NULL
-                    RETURN d.semantic_type as doc_type
-                $$) as (doc_type agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (d:Document {tenant_id: $tenant_id})
+                WHERE d.semantic_type IS NOT NULL
+                RETURN d.semantic_type as doc_type
+                """,
+                {"tenant_id": tenant_id},
             )
             type_counts: Dict[str, int] = {}
             for row in result:
-                dt = str(row["doc_type"]).strip('"') if row.get("doc_type") else None
-                if dt and dt != "null":
+                dt = row.get("doc_type")
+                if dt:
                     type_counts[dt] = type_counts.get(dt, 0) + 1
             sorted_types = sorted(type_counts.keys(), key=lambda x: type_counts[x], reverse=True)
             return sorted_types[:limit]
@@ -73,20 +73,20 @@ class TenantKnowledgeService:
         """Return counts per folder_type."""
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                    WHERE f.folder_type IS NOT NULL
-                    RETURN f.folder_type as folder_type
-                $$) as (folder_type agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (f:Folder {tenant_id: $tenant_id})
+                WHERE f.folder_type IS NOT NULL
+                RETURN f.folder_type as folder_type, count(f) as cnt
+                """,
+                {"tenant_id": tenant_id},
             )
             type_counts: Dict[str, int] = {}
             for row in result:
-                ft = str(row["folder_type"]).strip('"') if row.get("folder_type") else None
-                if ft and ft != "null":
-                    type_counts[ft] = type_counts.get(ft, 0) + 1
+                ft = row.get("folder_type")
+                cnt = row.get("cnt", 0)
+                if ft:
+                    type_counts[ft] = int(cnt)
             sorted_types = sorted(type_counts.keys(), key=lambda x: type_counts[x], reverse=True)
             return {k: type_counts[k] for k in sorted_types[:limit]}
         except Exception as e:
@@ -97,20 +97,20 @@ class TenantKnowledgeService:
         """Return counts per document semantic_type."""
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                    WHERE d.semantic_type IS NOT NULL
-                    RETURN d.semantic_type as doc_type
-                $$) as (doc_type agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (d:Document {tenant_id: $tenant_id})
+                WHERE d.semantic_type IS NOT NULL
+                RETURN d.semantic_type as doc_type, count(d) as cnt
+                """,
+                {"tenant_id": tenant_id},
             )
             type_counts: Dict[str, int] = {}
             for row in result:
-                dt = str(row["doc_type"]).strip('"') if row.get("doc_type") else None
-                if dt and dt != "null":
-                    type_counts[dt] = type_counts.get(dt, 0) + 1
+                dt = row.get("doc_type")
+                cnt = row.get("cnt", 0)
+                if dt:
+                    type_counts[dt] = int(cnt)
             sorted_types = sorted(type_counts.keys(), key=lambda x: type_counts[x], reverse=True)
             return {k: type_counts[k] for k in sorted_types[:limit]}
         except Exception as e:
@@ -123,27 +123,25 @@ class TenantKnowledgeService:
         documents = 0
         try:
             await self.initialize()
-            f_result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                    RETURN count(f) as cnt
-                $$) as (cnt agtype)
+            f_result = await falkordb_client.execute_cypher(
                 """
+                MATCH (f:Folder {tenant_id: $tenant_id})
+                RETURN count(f) as cnt
+                """,
+                {"tenant_id": tenant_id},
             )
             if f_result:
-                folders = int(str(f_result[0].get("cnt", "0")).strip('"') or 0)
+                folders = int(f_result[0].get("cnt", 0))
 
-            d_result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                    RETURN count(d) as cnt
-                $$) as (cnt agtype)
+            d_result = await falkordb_client.execute_cypher(
                 """
+                MATCH (d:Document {tenant_id: $tenant_id})
+                RETURN count(d) as cnt
+                """,
+                {"tenant_id": tenant_id},
             )
             if d_result:
-                documents = int(str(d_result[0].get("cnt", "0")).strip('"') or 0)
+                documents = int(d_result[0].get("cnt", 0))
         except Exception as e:
             logger.debug(f"get_totals failed: {e}")
         return {"folders": folders, "documents": documents}
@@ -152,19 +150,18 @@ class TenantKnowledgeService:
         """Count documents where title/path includes the given year."""
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                    WHERE (d.title IS NOT NULL AND toString(d.title) CONTAINS '{year}')
-                       OR (d.file_path IS NOT NULL AND toString(d.file_path) CONTAINS '{year}')
-                       OR (d.folder_path IS NOT NULL AND toString(d.folder_path) CONTAINS '{year}')
-                    RETURN count(d) as cnt
-                $$) as (cnt agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (d:Document {tenant_id: $tenant_id})
+                WHERE (d.title IS NOT NULL AND d.title CONTAINS $year)
+                   OR (d.file_path IS NOT NULL AND d.file_path CONTAINS $year)
+                   OR (d.folder_path IS NOT NULL AND d.folder_path CONTAINS $year)
+                RETURN count(d) as cnt
+                """,
+                {"tenant_id": tenant_id, "year": year},
             )
             if result:
-                return int(str(result[0].get("cnt", "0")).strip('"') or 0)
+                return int(result[0].get("cnt", 0))
         except Exception as e:
             logger.debug(f"get_document_count_by_year failed: {e}")
         return 0
@@ -173,18 +170,17 @@ class TenantKnowledgeService:
         """Count folders where name/path includes the given year."""
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                    WHERE (f.name IS NOT NULL AND toString(f.name) CONTAINS '{year}')
-                       OR (f.path IS NOT NULL AND toString(f.path) CONTAINS '{year}')
-                    RETURN count(f) as cnt
-                $$) as (cnt agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (f:Folder {tenant_id: $tenant_id})
+                WHERE (f.name IS NOT NULL AND f.name CONTAINS $year)
+                   OR (f.path IS NOT NULL AND f.path CONTAINS $year)
+                RETURN count(f) as cnt
+                """,
+                {"tenant_id": tenant_id, "year": year},
             )
             if result:
-                return int(str(result[0].get("cnt", "0")).strip('"') or 0)
+                return int(result[0].get("cnt", 0))
         except Exception as e:
             logger.debug(f"get_folder_count_by_year failed: {e}")
         return 0
@@ -193,18 +189,17 @@ class TenantKnowledgeService:
         """Count folders of a specific type where name/path includes the given year."""
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (f:structural_folder {{tenant_id: '{tenant_id}', folder_type: '{folder_type}'}})
-                    WHERE (f.name IS NOT NULL AND toString(f.name) CONTAINS '{year}')
-                       OR (f.path IS NOT NULL AND toString(f.path) CONTAINS '{year}')
-                    RETURN count(f) as cnt
-                $$) as (cnt agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (f:Folder {tenant_id: $tenant_id, folder_type: $folder_type})
+                WHERE (f.name IS NOT NULL AND f.name CONTAINS $year)
+                   OR (f.path IS NOT NULL AND f.path CONTAINS $year)
+                RETURN count(f) as cnt
+                """,
+                {"tenant_id": tenant_id, "year": year, "folder_type": folder_type},
             )
             if result:
-                return int(str(result[0].get("cnt", "0")).strip('"') or 0)
+                return int(result[0].get("cnt", 0))
         except Exception as e:
             logger.debug(f"get_folder_count_by_year_and_type failed: {e}")
         return 0
@@ -214,21 +209,18 @@ class TenantKnowledgeService:
         try:
             await self.initialize()
             seg = segment.lower()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                    WHERE (
-                        f.path IS NOT NULL
-                        AND toLower(toString(f.path)) CONTAINS '{seg}'
-                        AND toString(f.path) CONTAINS '{year}'
-                    )
-                    RETURN count(f) as cnt
-                $$) as (cnt agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (f:Folder {tenant_id: $tenant_id})
+                WHERE f.path IS NOT NULL
+                  AND toLower(f.path) CONTAINS $segment
+                  AND f.path CONTAINS $year
+                RETURN count(f) as cnt
+                """,
+                {"tenant_id": tenant_id, "year": year, "segment": seg},
             )
             if result:
-                return int(str(result[0].get("cnt", "0")).strip('"') or 0)
+                return int(result[0].get("cnt", 0))
         except Exception as e:
             logger.debug(f"get_folder_count_by_year_and_path_segment failed: {e}")
         return 0
@@ -237,22 +229,21 @@ class TenantKnowledgeService:
         """Count documents of a specific type where title/path includes the given year."""
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                    WHERE (d.semantic_type = '{doc_type}' OR d.document_type = '{doc_type}')
-                      AND (
-                        (d.title IS NOT NULL AND toString(d.title) CONTAINS '{year}')
-                        OR (d.file_path IS NOT NULL AND toString(d.file_path) CONTAINS '{year}')
-                        OR (d.folder_path IS NOT NULL AND toString(d.folder_path) CONTAINS '{year}')
-                      )
-                    RETURN count(d) as cnt
-                $$) as (cnt agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (d:Document {tenant_id: $tenant_id})
+                WHERE (d.semantic_type = $doc_type OR d.document_type = $doc_type)
+                  AND (
+                    (d.title IS NOT NULL AND d.title CONTAINS $year)
+                    OR (d.file_path IS NOT NULL AND d.file_path CONTAINS $year)
+                    OR (d.folder_path IS NOT NULL AND d.folder_path CONTAINS $year)
+                  )
+                RETURN count(d) as cnt
+                """,
+                {"tenant_id": tenant_id, "year": year, "doc_type": doc_type},
             )
             if result:
-                return int(str(result[0].get("cnt", "0")).strip('"') or 0)
+                return int(result[0].get("cnt", 0))
         except Exception as e:
             logger.debug(f"get_document_count_by_year_and_type failed: {e}")
         return 0
@@ -262,21 +253,18 @@ class TenantKnowledgeService:
         try:
             await self.initialize()
             seg = segment.lower()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                    WHERE (
-                        d.folder_path IS NOT NULL
-                        AND toLower(toString(d.folder_path)) CONTAINS '{seg}'
-                        AND toString(d.folder_path) CONTAINS '{year}'
-                    )
-                    RETURN count(d) as cnt
-                $$) as (cnt agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (d:Document {tenant_id: $tenant_id})
+                WHERE d.folder_path IS NOT NULL
+                  AND toLower(d.folder_path) CONTAINS $segment
+                  AND d.folder_path CONTAINS $year
+                RETURN count(d) as cnt
+                """,
+                {"tenant_id": tenant_id, "year": year, "segment": seg},
             )
             if result:
-                return int(str(result[0].get("cnt", "0")).strip('"') or 0)
+                return int(result[0].get("cnt", 0))
         except Exception as e:
             logger.debug(f"get_document_count_by_year_and_path_segment failed: {e}")
         return 0
@@ -284,19 +272,18 @@ class TenantKnowledgeService:
     async def get_clients(self, tenant_id: str, limit: int = 50) -> List[str]:
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (c:client {{tenant_id: '{tenant_id}'}})
-                    RETURN c.name as name
-                    LIMIT {limit}
-                $$) as (name agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (c:Entity {tenant_id: $tenant_id, entity_type: 'client'})
+                RETURN c.name as name
+                LIMIT $limit
+                """,
+                {"tenant_id": tenant_id, "limit": limit},
             )
             clients = []
             for row in result:
-                name = str(row["name"]).strip('"') if row.get("name") else None
-                if name and name != "null":
+                name = row.get("name")
+                if name:
                     clients.append(name)
             return clients
         except Exception as e:
@@ -307,19 +294,18 @@ class TenantKnowledgeService:
         """Return document IDs from the structural graph."""
         try:
             await self.initialize()
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                    RETURN d.document_id as document_id
-                    LIMIT {limit}
-                $$) as (document_id agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (d:Document {tenant_id: $tenant_id})
+                RETURN d.document_id as document_id
+                LIMIT $limit
+                """,
+                {"tenant_id": tenant_id, "limit": limit},
             )
             doc_ids = []
             for row in result:
-                doc_id = str(row["document_id"]).strip('"') if row.get("document_id") else None
-                if doc_id and doc_id != "null":
+                doc_id = row.get("document_id")
+                if doc_id:
                     doc_ids.append(doc_id)
             return doc_ids
         except Exception as e:
@@ -330,21 +316,19 @@ class TenantKnowledgeService:
         """Clear structural nodes for a tenant."""
         try:
             await self.initialize()
-            await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                    DETACH DELETE d
-                $$) as (d agtype)
+            await falkordb_client.execute_cypher(
                 """
+                MATCH (d:Document {tenant_id: $tenant_id})
+                DETACH DELETE d
+                """,
+                {"tenant_id": tenant_id},
             )
-            await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                    DETACH DELETE f
-                $$) as (f agtype)
+            await falkordb_client.execute_cypher(
                 """
+                MATCH (f:Folder {tenant_id: $tenant_id})
+                DETACH DELETE f
+                """,
+                {"tenant_id": tenant_id},
             )
             return True
         except Exception as e:
@@ -352,47 +336,36 @@ class TenantKnowledgeService:
             return False
 
     async def get_top_folders(self, tenant_id: str, limit: int = 15) -> List[Dict[str, str]]:
-        """
-        Return top folders with counts when HAS_DOCUMENT edges exist.
-        """
+        """Return top folders with document counts."""
         try:
             await self.initialize()
-            # Note: Apache AGE doesn't support using aliases in ORDER BY for aggregations
-            # Use WITH to project the aggregation result, then ORDER BY the alias
-            result = await age_client.execute_cypher(
-                f"""
-                SELECT * FROM cypher('{settings.age_graph_name}', $$
-                    MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                    OPTIONAL MATCH (f)-[:HAS_DOCUMENT]->(d:structural_document {{tenant_id: '{tenant_id}'}})
-                    WITH f.name as name, f.folder_type as folder_type, count(d) as doc_count
-                    RETURN name, folder_type, doc_count
-                    ORDER BY doc_count DESC
-                    LIMIT {limit}
-                $$) as (name agtype, folder_type agtype, doc_count agtype)
+            result = await falkordb_client.execute_cypher(
                 """
+                MATCH (f:Folder {tenant_id: $tenant_id})
+                OPTIONAL MATCH (d:Document {tenant_id: $tenant_id})-[:CONTAINED_IN]->(f)
+                WITH f.name as name, f.folder_type as folder_type, count(d) as doc_count
+                RETURN name, folder_type, doc_count
+                ORDER BY doc_count DESC
+                LIMIT $limit
+                """,
+                {"tenant_id": tenant_id, "limit": limit},
             )
             folders = []
             for row in result:
-                name = str(row["name"]).strip('"') if row.get("name") else None
-                folder_type = str(row["folder_type"]).strip('"') if row.get("folder_type") else None
-                doc_count = str(row["doc_count"]).strip('"') if row.get("doc_count") else "0"
-                if name and name != "null":
-                    folders.append(
-                        {
-                            "name": name,
-                            "folder_type": folder_type or "",
-                            "doc_count": doc_count,
-                        }
-                    )
+                name = row.get("name")
+                if name:
+                    folders.append({
+                        "name": name,
+                        "folder_type": row.get("folder_type") or "",
+                        "doc_count": str(row.get("doc_count", 0)),
+                    })
             return folders
         except Exception as e:
             logger.debug(f"get_top_folders failed: {e}")
         return []
 
     async def build_toon_context(self, tenant_id: str, limit: int = 15) -> Dict[str, str]:
-        """
-        Build a TOON-like context block for LLMs.
-        """
+        """Build a TOON-like context block for LLMs."""
         container_types = await self.get_container_types(tenant_id, limit=10)
         document_types = await self.get_document_types(tenant_id, limit=10)
         container_type_counts = await self.get_container_type_counts(tenant_id, limit=10)

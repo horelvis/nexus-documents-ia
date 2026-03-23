@@ -108,7 +108,7 @@ async def summary(request: SummaryRequest, _: bool = Depends(verify_api_key)):
 @tree_router.post("/structural/query", response_model=StructuralQueryResponse)
 async def structural_query(request: StructuralQueryRequest, _: bool = Depends(verify_api_key)):
     """
-    Execute structural query against Apache AGE graph for a tenant.
+    Execute structural query against FalkorDB graph for a tenant.
     Returns GRAPH_ONLY results with structural context and counts.
     """
     await tenant_knowledge_service.initialize()
@@ -248,8 +248,8 @@ async def index_structural_batch(request: BatchIndexRequest, _: bool = Depends(v
 
 
 class GraphQueryRequest(BaseModel):
-    cypher: str = Field(..., description="Cypher query wrapped in AGE SQL syntax")
-    graph_name: str = Field(..., description="Apache AGE graph name")
+    cypher: str = Field(..., description="Native openCypher query (no AGE SQL wrapping)")
+    graph_name: str = Field("", description="Graph name (ignored, uses configured FalkorDB graph)")
     tenant_id: str = Field(..., description="Tenant identifier")
 
 
@@ -260,27 +260,26 @@ class GraphQueryResponse(BaseModel):
 
 @tree_router.post("/graph/query", response_model=GraphQueryResponse)
 async def graph_query(request: GraphQueryRequest, _: bool = Depends(verify_api_key)):
-    """Execute a Cypher query against Apache AGE for sector-aware entity expansion."""
-    from app.services.age_client import age_client
+    """Execute a native openCypher query against FalkorDB for sector-aware entity expansion."""
+    from app.services.falkordb_client import falkordb_client
 
-    await age_client.initialize()
+    await falkordb_client.initialize()
 
     results: list[Dict[str, Any]] = []
     paths: list[str] = []
 
     try:
-        rows = await age_client.execute_cypher(request.cypher)
+        rows = await falkordb_client.execute_cypher(request.cypher)
         for row in rows:
             parsed: Dict[str, Any] = {}
             for key, val in row.items():
-                parsed[key] = str(val).strip('"') if val is not None else None
+                parsed[key] = val
             results.append(parsed)
 
             # Build path string from node-rel-node triples
             if "n" in parsed and "rel" in parsed and "m" in parsed:
                 paths.append(f"{parsed['n']} --[{parsed['rel']}]--> {parsed['m']}")
     except Exception as e:
-        import logging
         logging.getLogger(__name__).error(f"Graph query execution failed: {e}")
 
     return GraphQueryResponse(results=results, paths=paths)
@@ -301,12 +300,10 @@ async def graph_stats(
     tenant_id: str = Query(..., description="Tenant identifier"),
     _: bool = Depends(verify_api_key),
 ):
-    """Get knowledge graph statistics for a tenant from Apache AGE."""
-    from app.services.age_client import age_client
-    from app.core.config import settings
+    """Get knowledge graph statistics for a tenant from FalkorDB."""
+    from app.services.falkordb_client import falkordb_client
 
-    await age_client.initialize()
-    graph = settings.age_graph_name
+    await falkordb_client.initialize()
 
     total_documents = 0
     total_folders = 0
@@ -315,49 +312,46 @@ async def graph_stats(
 
     try:
         # Count documents
-        rows = await age_client.execute_cypher(f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                RETURN count(d) as total
-            $$) as (total agtype)
-        """)
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (d:Document {tenant_id: $tenant_id}) RETURN count(d) as total",
+            {"tenant_id": tenant_id},
+        )
         if rows:
-            total_documents = int(str(rows[0]["total"]))
+            total_documents = int(rows[0].get("total", 0))
 
         # Count folders
-        rows = await age_client.execute_cypher(f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                RETURN count(f) as total
-            $$) as (total agtype)
-        """)
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (f:Folder {tenant_id: $tenant_id}) RETURN count(f) as total",
+            {"tenant_id": tenant_id},
+        )
         if rows:
-            total_folders = int(str(rows[0]["total"]))
+            total_folders = int(rows[0].get("total", 0))
 
         # Documents by semantic_type
-        rows = await age_client.execute_cypher(f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                RETURN d.semantic_type as stype, count(d) as total
-            $$) as (stype agtype, total agtype)
-        """)
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (d:Document {tenant_id: $tenant_id})
+            RETURN d.semantic_type as stype, count(d) as total
+            """,
+            {"tenant_id": tenant_id},
+        )
         for r in rows:
-            stype = str(r["stype"]).strip('"') if r["stype"] else "unknown"
-            types_breakdown[stype] = int(str(r["total"]))
+            stype = r.get("stype") or "unknown"
+            types_breakdown[stype] = int(r.get("total", 0))
 
         # Folders by folder_type
-        rows = await age_client.execute_cypher(f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                RETURN f.folder_type as ftype, count(f) as total
-            $$) as (ftype agtype, total agtype)
-        """)
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (f:Folder {tenant_id: $tenant_id})
+            RETURN f.folder_type as ftype, count(f) as total
+            """,
+            {"tenant_id": tenant_id},
+        )
         for r in rows:
-            ftype = str(r["ftype"]).strip('"') if r["ftype"] else "unknown"
-            domains_breakdown[f"folder:{ftype}"] = int(str(r["total"]))
+            ftype = r.get("ftype") or "unknown"
+            domains_breakdown[f"folder:{ftype}"] = int(r.get("total", 0))
 
     except Exception as e:
-        import logging
         logging.getLogger(__name__).error(f"Graph stats query failed: {e}")
 
     return GraphStatsResponse(
@@ -374,29 +368,28 @@ async def graph_structure(
     _: bool = Depends(verify_api_key),
 ):
     """Get full graph structure (nodes + edges) for visualization."""
-    from app.services.age_client import age_client
-    from app.core.config import settings
+    from app.services.falkordb_client import falkordb_client
 
-    await age_client.initialize()
-    graph = settings.age_graph_name
+    await falkordb_client.initialize()
 
     nodes = []
     edges = []
 
     try:
         # Get folders with document counts
-        rows = await age_client.execute_cypher(f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})
-                OPTIONAL MATCH (f)-[:HAS_DOCUMENT]->(d:structural_document)
-                RETURN f.path as path, f.name as name, f.folder_type as folder_type, count(d) as doc_count
-            $$) as (path agtype, name agtype, folder_type agtype, doc_count agtype)
-        """)
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (f:Folder {tenant_id: $tenant_id})
+            OPTIONAL MATCH (d:Document)-[:CONTAINED_IN]->(f)
+            RETURN f.path as path, f.name as name, f.folder_type as folder_type, count(d) as doc_count
+            """,
+            {"tenant_id": tenant_id},
+        )
         for r in rows:
-            path = str(r["path"]).strip('"') if r["path"] else ""
-            name = str(r["name"]).strip('"') if r["name"] else path.split("/")[-1]
-            folder_type = str(r["folder_type"]).strip('"') if r["folder_type"] else "unknown"
-            doc_count = int(str(r["doc_count"])) if r["doc_count"] else 0
+            path = r.get("path") or ""
+            name = r.get("name") or path.split("/")[-1] if path else ""
+            folder_type = r.get("folder_type") or "unknown"
+            doc_count = int(r.get("doc_count", 0))
             nodes.append({
                 "id": f"f:{path}",
                 "label": name,
@@ -407,18 +400,19 @@ async def graph_structure(
             })
 
         # Get documents
-        rows = await age_client.execute_cypher(f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (d:structural_document {{tenant_id: '{tenant_id}'}})
-                RETURN d.document_id as document_id, d.title as title,
-                       d.semantic_type as semantic_type, d.folder_path as folder_path
-            $$) as (document_id agtype, title agtype, semantic_type agtype, folder_path agtype)
-        """)
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (d:Document {tenant_id: $tenant_id})
+            RETURN d.document_id as document_id, d.title as title,
+                   d.semantic_type as semantic_type, d.folder_path as folder_path
+            """,
+            {"tenant_id": tenant_id},
+        )
         for r in rows:
-            doc_id = str(r["document_id"]).strip('"') if r["document_id"] else ""
-            title = str(r["title"]).strip('"') if r["title"] else "Sin título"
-            semantic_type = str(r["semantic_type"]).strip('"') if r["semantic_type"] else "unknown"
-            folder_path = str(r["folder_path"]).strip('"') if r["folder_path"] else ""
+            doc_id = r.get("document_id") or ""
+            title = r.get("title") or "Sin titulo"
+            semantic_type = r.get("semantic_type") or "unknown"
+            folder_path = r.get("folder_path") or ""
             nodes.append({
                 "id": f"d:{doc_id}",
                 "label": title,
@@ -427,24 +421,25 @@ async def graph_structure(
                 "file_path": folder_path,
             })
 
-        # Get edges (folder -> document)
-        rows = await age_client.execute_cypher(f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (f:structural_folder {{tenant_id: '{tenant_id}'}})-[:HAS_DOCUMENT]->(d:structural_document)
-                RETURN f.path as folder_path, d.document_id as document_id
-            $$) as (folder_path agtype, document_id agtype)
-        """)
+        # Get edges (document -> folder via CONTAINED_IN)
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (d:Document {tenant_id: $tenant_id})-[:CONTAINED_IN]->(f:Folder)
+            RETURN f.path as folder_path, d.document_id as document_id
+            """,
+            {"tenant_id": tenant_id},
+        )
         for r in rows:
-            fp = str(r["folder_path"]).strip('"') if r["folder_path"] else ""
-            did = str(r["document_id"]).strip('"') if r["document_id"] else ""
+            fp = r.get("folder_path") or ""
+            did = r.get("document_id") or ""
             edges.append({
                 "id": f"e:f:{fp}->d:{did}",
                 "source": f"f:{fp}",
                 "target": f"d:{did}",
-                "label": "HAS_DOCUMENT",
+                "label": "CONTAINED_IN",
             })
 
-        # Deduplicate folder->document edges
+        # Deduplicate edges
         seen_edge_keys: set[str] = set()
         unique_edges = []
         for e in edges:
@@ -502,7 +497,6 @@ async def graph_structure(
                     })
 
     except Exception as e:
-        import logging
         logging.getLogger(__name__).error(f"Graph structure query failed: {e}")
 
     return {"nodes": nodes, "edges": edges}
@@ -512,7 +506,7 @@ class EntityDocumentRequest(BaseModel):
     """Request to find documents linked to a named entity via the graph."""
     tenant_id: str = Field(..., description="Tenant identifier")
     entity_name: str = Field(..., description="Entity name to search (e.g., person name)")
-    entity_type: str = Field(default="Persona", description="Graph node label (e.g., Persona, structural_folder)")
+    entity_type: str = Field(default="person", description="Entity type (e.g., person, organization)")
 
 
 class EntityDocumentResponse(BaseModel):
@@ -524,66 +518,70 @@ async def documents_by_entity(
     request: EntityDocumentRequest,
     _: bool = Depends(verify_api_key),
 ):
-    """Fast: get document IDs linked to a named entity in the structural graph."""
-    from app.services.age_client import age_client
-    from app.core.config import settings
+    """Fast: get document IDs linked to a named entity in the knowledge graph."""
+    from app.services.falkordb_client import falkordb_client
 
-    await age_client.initialize()
-    graph = settings.age_graph_name
+    await falkordb_client.initialize()
 
     doc_ids: List[str] = []
 
-    # Sanitize entity name — escape single quotes, strip dangerous chars
-    safe_name = re.sub(r"['\";\\]", "", request.entity_name)
-
     try:
-        # Search for documents associated with the entity via ASOCIADO_A or HAS_DOCUMENT
-        cypher = f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (d:structural_document)-[r]-(p:{request.entity_type})
-                WHERE p.name =~ '(?i).*{safe_name}.*'
-                  AND d.tenant_id = '{request.tenant_id}'
-                RETURN DISTINCT d.document_id as doc_id
-                LIMIT 50
-            $$) AS (doc_id agtype)
-        """
-        rows = await age_client.execute_cypher(cypher)
+        # Search for documents associated with the entity via any relationship
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (d:Document)-[r]-(e:Entity)
+            WHERE e.name =~ $pattern
+              AND d.tenant_id = $tenant_id
+            RETURN DISTINCT d.document_id as doc_id
+            LIMIT 50
+            """,
+            {
+                "pattern": f"(?i).*{re.sub(r'[\\\\\"\\';]', '', request.entity_name)}.*",
+                "tenant_id": request.tenant_id,
+            },
+        )
         for row in rows:
-            did = str(row["doc_id"]).strip('"') if row.get("doc_id") else ""
+            did = row.get("doc_id")
             if did:
                 doc_ids.append(did)
 
         # Also try matching via associated_person property on documents
         if not doc_ids:
-            cypher_fallback = f"""
-                SELECT * FROM cypher('{graph}', $$
-                    MATCH (d:structural_document)
-                    WHERE d.associated_person =~ '(?i).*{safe_name}.*'
-                      AND d.tenant_id = '{request.tenant_id}'
-                    RETURN DISTINCT d.document_id as doc_id
-                    LIMIT 50
-                $$) AS (doc_id agtype)
-            """
-            rows = await age_client.execute_cypher(cypher_fallback)
+            rows = await falkordb_client.execute_cypher(
+                """
+                MATCH (d:Document)
+                WHERE d.associated_person =~ $pattern
+                  AND d.tenant_id = $tenant_id
+                RETURN DISTINCT d.document_id as doc_id
+                LIMIT 50
+                """,
+                {
+                    "pattern": f"(?i).*{re.sub(r'[\\\\\"\\';]', '', request.entity_name)}.*",
+                    "tenant_id": request.tenant_id,
+                },
+            )
             for row in rows:
-                did = str(row["doc_id"]).strip('"') if row.get("doc_id") else ""
+                did = row.get("doc_id")
                 if did:
                     doc_ids.append(did)
 
         # Also look for documents inside folders named like the person
         if not doc_ids:
-            cypher_folder = f"""
-                SELECT * FROM cypher('{graph}', $$
-                    MATCH (f:structural_folder)-[:HAS_DOCUMENT]->(d:structural_document)
-                    WHERE f.name =~ '(?i).*{safe_name}.*'
-                      AND d.tenant_id = '{request.tenant_id}'
-                    RETURN DISTINCT d.document_id as doc_id
-                    LIMIT 50
-                $$) AS (doc_id agtype)
-            """
-            rows = await age_client.execute_cypher(cypher_folder)
+            rows = await falkordb_client.execute_cypher(
+                """
+                MATCH (d:Document)-[:CONTAINED_IN]->(f:Folder)
+                WHERE f.name =~ $pattern
+                  AND d.tenant_id = $tenant_id
+                RETURN DISTINCT d.document_id as doc_id
+                LIMIT 50
+                """,
+                {
+                    "pattern": f"(?i).*{re.sub(r'[\\\\\"\\';]', '', request.entity_name)}.*",
+                    "tenant_id": request.tenant_id,
+                },
+            )
             for row in rows:
-                did = str(row["doc_id"]).strip('"') if row.get("doc_id") else ""
+                did = row.get("doc_id")
                 if did:
                     doc_ids.append(did)
 
@@ -602,7 +600,7 @@ async def clear_graph(
     return {"success": result}
 
 
-# ─── GraphRAG: Subgraph Extraction ─────────────────────────────────────────
+# --- GraphRAG: Subgraph Extraction ---
 
 class EntitySeed(BaseModel):
     value: str = Field(..., description="Entity name or value to search")
@@ -614,8 +612,8 @@ class SubgraphRequest(BaseModel):
     entities: List[EntitySeed] = Field(..., description="Seed entities for subgraph extraction")
     max_hops: int = Field(2, ge=1, le=3, description="Max traversal depth")
     max_nodes: int = Field(30, ge=5, le=100, description="Max nodes in response")
-    include_legal: bool = Field(True, description="Cross-reference public legal graph")
-    include_memories: bool = Field(False, description="Include DocumentMemory nodes")
+    include_legal: bool = Field(True, description="Include Law nodes in traversal")
+    include_memories: bool = Field(False, description="Include Memory nodes")
 
 
 @tree_router.post("/graph/subgraph")
@@ -626,8 +624,8 @@ async def extract_subgraph(
     """Extract a multi-hop subgraph rooted at query entities (GraphRAG).
 
     Returns structured nodes and edges for LLM consumption instead of
-    flat document IDs. Optionally cross-references the public legal graph
-    for applicable legislation.
+    flat document IDs. Optionally includes Law nodes for applicable
+    legislation.
     """
     import time
     start = time.time()

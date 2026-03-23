@@ -180,75 +180,18 @@ async def legal_article_lookup(
     """
     Look up specific articles from a law.
 
-    Uses the Legal Graph Service to find articles
-    and their content within Spanish laws.
+    Falls back to BOE semantic search since the legal graph service
+    has been removed (FalkorDB migration — legal data lives in
+    PublicKnowledge Weaviate collection now).
     """
     try:
-        from app.services.legal_graph_service import legal_graph as legal_graph_service
-
-        # Initialize if needed
-        if not legal_graph_service._initialized:
-            await legal_graph_service.initialize()
-
-        # Try to find the law
-        law = await legal_graph_service.find_law(law_name)
-
-        if not law:
-            # Fallback to BOE search
-            return await boe_search(
-                query=f"{law_name} artículo {article_number}" if article_number else law_name,
-                limit=3,
-            )
-
-        if article_number:
-            # Get specific article
-            article = await legal_graph_service.get_article(
-                law_boe_id=law.boe_id,
-                article_number=article_number,
-            )
-
-            if article:
-                return f"""**{law.title}** ({law.short_name})
-📜 Referencia BOE: {law.boe_id}
-📅 Estado: {law.status.value}
-
-**Artículo {article.number}: {article.title}**
-{article.content}
-
-{"⚠️ Este artículo ha sido modificado." if article.modified else ""}
-{"📋 Última modificación: " + article.last_modified if article.last_modified else ""}"""
-
-            return f"No se encontró el artículo {article_number} en {law.title}"
-
-        else:
-            # Return law summary with article list
-            articles = await legal_graph_service.get_law_articles(law.boe_id, limit=10)
-
-            article_list = "\n".join([
-                f"  - Art. {a.number}: {a.title}"
-                for a in articles
-            ]) if articles else "  (Lista de artículos no disponible)"
-
-            return f"""**{law.title}** ({law.short_name})
-📜 Referencia BOE: {law.boe_id}
-📅 Estado: {law.status.value}
-📅 Publicación: {law.publication_date or "No disponible"}
-
-**Resumen**:
-{law.summary or "Sin resumen disponible"}
-
-**Artículos principales**:
-{article_list}
-
-💡 Usa el parámetro `article_number` para ver un artículo específico."""
-
-    except Exception as e:
-        logger.error(f"Article lookup failed: {e}")
-        # Fallback to simple search
         return await boe_search(
             query=f"{law_name} artículo {article_number}" if article_number else law_name,
-            limit=3,
+            limit=5,
         )
+    except Exception as e:
+        logger.error(f"Article lookup failed: {e}")
+        return f"Error buscando artículos de {law_name}: {str(e)}"
 
 
 async def law_cross_references(
@@ -258,63 +201,15 @@ async def law_cross_references(
     """
     Find related laws and cross-references.
 
-    Uses the Legal Graph Service to find relationships
-    between laws (modifications, references, etc.).
+    Falls back to BOE semantic search since the legal graph service
+    has been removed (FalkorDB migration — legal cross-reference data
+    lives in PublicKnowledge Weaviate collection now).
     """
     try:
-        from app.services.legal_graph_service import legal_graph as legal_graph_service
-
-        # Initialize if needed
-        if not legal_graph_service._initialized:
-            await legal_graph_service.initialize()
-
-        # Get law info
-        law = await legal_graph_service.get_law_by_boe_id(law_boe_id)
-
-        if not law:
-            return f"No se encontró la ley con referencia BOE: {law_boe_id}"
-
-        # Get cross-references
-        references = await legal_graph_service.get_law_references(
-            law_boe_id=law_boe_id,
-            relation_type=relation_type if relation_type != "all" else None,
-        )
-
-        if not references:
-            return f"""**{law.title}** ({law.short_name})
-📜 {law_boe_id}
-
-No se encontraron referencias cruzadas para esta ley."""
-
-        # Format references
-        modifies = [r for r in references if r.relation == "modifies"]
-        modified_by = [r for r in references if r.relation == "modified_by"]
-        refs = [r for r in references if r.relation == "references"]
-
-        result = f"""**{law.title}** ({law.short_name})
-📜 {law_boe_id}
-
-"""
-
-        if modifies:
-            result += "**Esta ley modifica**:\n"
-            for ref in modifies:
-                result += f"  - {ref.target_title} ({ref.target_boe_id})\n"
-            result += "\n"
-
-        if modified_by:
-            result += "**Modificada por**:\n"
-            for ref in modified_by:
-                result += f"  - {ref.source_title} ({ref.source_boe_id})\n"
-            result += "\n"
-
-        if refs:
-            result += "**Referencias a otras leyes**:\n"
-            for ref in refs:
-                result += f"  - {ref.target_title}\n"
-
-        return result
-
+        query = f"referencias cruzadas {law_boe_id}"
+        if relation_type and relation_type != "all":
+            query += f" {relation_type}"
+        return await boe_search(query=query, limit=5)
     except Exception as e:
         logger.error(f"Cross-references lookup failed: {e}")
         return f"Error buscando referencias cruzadas: {str(e)}"
