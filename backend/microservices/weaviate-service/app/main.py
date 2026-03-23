@@ -6,7 +6,6 @@ This service provides:
 - RAG Pipeline (7-layer retrieval-augmented generation)
 - Document indexing and chunking
 - Semantic and hybrid search
-- Knowledge graph operations (Apache AGE)
 - Cache management (retrieval, context, semantic)
 
 Note: Agent orchestration (Emma v2, LangGraph) has been separated into
@@ -132,7 +131,7 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Weaviate Service - RAG & Vector Search",
-    description="Vector database operations, RAG pipeline, and knowledge graph queries",
+    description="Vector database operations and RAG pipeline",
     version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,

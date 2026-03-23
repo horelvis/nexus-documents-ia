@@ -242,7 +242,7 @@ async def extract_knowledge_from_public_documents(
     for semantic search and entity-based queries.
 
     **Note**: For legislation (BOE laws), use the Legal Graph instead.
-    Legislation is indexed directly to Apache AGE via /boe/download endpoint,
+    Legislation is indexed to the knowledge graph via /boe/download endpoint,
     which creates legal_law nodes with proper law-to-law relationships.
 
     Requires API key authentication (admin only).
@@ -252,7 +252,7 @@ async def extract_knowledge_from_public_documents(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Legislation uses law-to-law relationships in the Legal Graph (Apache AGE). "
+                "Legislation uses law-to-law relationships in the Legal Graph (knowledge-tree-service). "
                 "Use POST /boe/download to index laws with their relationships. "
                 "For existing legislation, run: python scripts/sync_public_knowledge_to_legal_graph.py"
             )
@@ -419,7 +419,7 @@ async def extract_knowledge_from_public_documents(
                         logger.warning(f"Failed to store entity: {entity_error}")
                         continue
 
-                # Store entities in knowledge-tree-service sector graph (Apache AGE)
+                # Store entities in knowledge-tree-service sector graph
                 try:
                     from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
@@ -439,7 +439,7 @@ async def extract_knowledge_from_public_documents(
                     )
                     kt_stored = kt_result.get("entities_stored", 0)
                     if kt_stored > 0:
-                        logger.info(f"📊 Stored {kt_stored} entities in sector graph (AGE) for {doc_id}")
+                        logger.info(f"📊 Stored {kt_stored} entities in sector graph for {doc_id}")
                 except Exception as kt_error:
                     logger.warning(f"⚠️ Failed to store entities in knowledge-tree: {kt_error}")
 

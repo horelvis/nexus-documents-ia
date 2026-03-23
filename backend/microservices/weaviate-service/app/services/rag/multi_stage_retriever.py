@@ -143,7 +143,7 @@ class MultiStageRetriever:
             if settings.rag_knowledge_graph_enabled:
                 try:
                     await graph_retriever.initialize()
-                    logger.info("✅ Graph-Enhanced Retriever initialized (Apache AGE)")
+                    logger.info("✅ Graph-Enhanced Retriever initialized (knowledge-tree-service)")
                 except Exception as e:
                     logger.warning(f"⚠️ Graph-Enhanced Retriever not available: {e}")
 

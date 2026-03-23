@@ -499,11 +499,11 @@ class KnowledgeExtractionService:
         acl_everyone: bool = False
     ) -> Dict[str, str]:
         """
-        Store entities in Weaviate and Knowledge Graph (Apache AGE).
+        Store entities in Weaviate and knowledge-tree-service graph.
 
         Entities are persisted in two places:
         1. Weaviate _knowledge collection (for semantic entity search)
-        2. knowledge-tree-service sector graph (for graph traversal + ontology)
+        2. knowledge-tree-service sector graph (for graph traversal via HTTP)
 
         Returns a mapping of entity_value -> entity_id for relationship storage.
         """
@@ -541,7 +541,7 @@ class KnowledgeExtractionService:
                 logger.warning(f"⚠️ Failed to store entity {entity.entity_value}: {e}")
                 continue
 
-        # Store in knowledge-tree-service sector graph (Apache AGE)
+        # Store in knowledge-tree-service sector graph
         # This creates typed nodes (Persona, Organizacion) with INSTANCE_OF
         # edges to the ontology — replacing the old NetworkX graph_service
         if entity_map:
@@ -570,7 +570,7 @@ class KnowledgeExtractionService:
 
                 kt_stored = kt_result.get("entities_stored", 0)
                 if kt_stored > 0:
-                    logger.info(f"📊 Stored {kt_stored} entities in sector graph (AGE)")
+                    logger.info(f"📊 Stored {kt_stored} entities in sector graph")
 
             except Exception as e:
                 logger.warning(f"⚠️ Failed to store entities in knowledge-tree: {e}")
@@ -586,7 +586,7 @@ class KnowledgeExtractionService:
         entity_map: Dict[str, str]
     ) -> int:
         """
-        Store relationships in the sector graph (Apache AGE) via knowledge-tree-service.
+        Store relationships in the sector graph via knowledge-tree-service.
 
         Creates edges between typed entity nodes (Persona, Organizacion, etc.)
         that were persisted by _store_entities().

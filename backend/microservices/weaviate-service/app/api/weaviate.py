@@ -1607,20 +1607,16 @@ async def get_related_entities(
                 detail="tenant_id and entity_id are required"
             )
 
-        # Use legal graph service for entity relationships
-        from app.services.legal_graph_service import legal_graph_service
+        # Use knowledge-tree-service for entity relationships (via HTTP)
+        from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
-        await legal_graph_service.initialize()
-
-        entities = await legal_graph_service.get_related_entities(
-            tenant_id=tenant_id,
-            entity_id=entity_id,
+        neighbors = await knowledge_tree_legal_client.get_law_neighbors(
+            boe_id=entity_id,
+            max_depth=depth,
             relationship_types=relationship_types,
-            depth=depth,
-            limit=limit,
         )
 
-        return {"entities": entities}
+        return {"entities": neighbors[:limit]}
 
     except HTTPException:
         raise

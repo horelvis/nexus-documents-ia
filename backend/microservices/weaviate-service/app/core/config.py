@@ -239,27 +239,21 @@ class Settings(BaseSettings):
     child_chunk_overlap: int = int(os.getenv("CHILD_CHUNK_OVERLAP", "50"))
 
     # ==========================================================================
-    # RAG Pipeline - Knowledge Graph (Apache AGE)
+    # RAG Pipeline - Knowledge Graph (via knowledge-tree-service)
     # ==========================================================================
-    # Knowledge Graph - Apache AGE (PostgreSQL extension) for persistent graph storage
-    # Supports Cypher query language for complex graph traversals
-    # Fallback: NetworkX in-memory + Redis (set RAG_GRAPH_USE_AGE=false)
+    # Graph operations are handled by knowledge-tree-service (FalkorDB).
+    # weaviate-service calls knowledge-tree-service via HTTP.
     rag_knowledge_graph_enabled: bool = os.getenv("RAG_KNOWLEDGE_GRAPH_ENABLED", "true").lower() == "true"
-    rag_graph_use_age: bool = os.getenv("RAG_GRAPH_USE_AGE", "true").lower() == "true"  # Use Apache AGE backend
+    rag_graph_max_neighbors: int = int(os.getenv("RAG_GRAPH_MAX_NEIGHBORS", "10"))  # Max neighbors in traversal
+    rag_graph_traversal_depth: int = int(os.getenv("RAG_GRAPH_TRAVERSAL_DEPTH", "2"))  # Graph path depth
+    rag_graph_cache_ttl: int = int(os.getenv("RAG_GRAPH_CACHE_TTL", "3600"))  # Graph cache TTL (seconds)
 
-    # PostgreSQL connection for Apache AGE (graph database)
-    # Uses same database as main app, with AGE extension enabled
+    # PostgreSQL connection (used by session persistence, cached_path updates — NOT for graph)
     postgres_host: str = os.getenv("POSTGRES_SERVER", os.getenv("POSTGRES_HOST", "db"))
     postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
     postgres_db: str = os.getenv("POSTGRES_DB", "nexus_db")
     postgres_user: str = os.getenv("POSTGRES_USER", "nexus_user")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "nexus_password")
-    age_graph_name: str = os.getenv("AGE_GRAPH_NAME", "knowledge_graph")
-    rag_graph_max_neighbors: int = int(os.getenv("RAG_GRAPH_MAX_NEIGHBORS", "10"))  # Max neighbors in traversal
-    rag_graph_traversal_depth: int = int(os.getenv("RAG_GRAPH_TRAVERSAL_DEPTH", "2"))  # Cypher path depth
-    rag_graph_redis_prefix: str = os.getenv("RAG_GRAPH_REDIS_PREFIX", "kg:")  # Redis key prefix (fallback)
-    rag_graph_cache_ttl: int = int(os.getenv("RAG_GRAPH_CACHE_TTL", "3600"))  # Graph cache TTL (seconds)
-    rag_graph_min_relationship_strength: float = float(os.getenv("RAG_GRAPH_MIN_RELATIONSHIP_STRENGTH", "0.3"))  # Min strength to store
 
     # ==========================================================================
     # RAG Pipeline - Dependency Graph (Hierarchical Structure)

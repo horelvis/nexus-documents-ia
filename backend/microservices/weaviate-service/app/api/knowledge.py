@@ -261,7 +261,7 @@ async def get_knowledge_stats(
 
     Combines data from multiple sources:
     1. Weaviate Knowledge collection (extracted entities)
-    2. SIL structural graph (document types from connectors)
+    2. Knowledge-tree-service graph (document types from connectors)
 
     This ensures on-premise deployments with connector documents
     also show meaningful knowledge statistics.
@@ -291,7 +291,7 @@ async def get_knowledge_stats(
 
         total_entities = len(results)
 
-        # If no entities in Weaviate, check knowledge-tree-service (Apache AGE)
+        # If no entities in Weaviate, check knowledge-tree-service
         # This is important for on-premise deployments where documents
         # come from connectors and may not have extracted entities yet
         if total_entities == 0:
