@@ -27,6 +27,12 @@ class Settings(BaseSettings):
         ),
     )
 
+    # FalkorDB
+    falkordb_host: str = os.getenv("FALKORDB_HOST", "falkordb")
+    falkordb_port: int = int(os.getenv("FALKORDB_PORT", "6379"))
+    falkordb_graph_name: str = os.getenv("FALKORDB_GRAPH_NAME", "knowledge_graph")
+    falkordb_password: str = os.getenv("FALKORDB_PASSWORD", "")
+
     # Microservice auth
     MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "")
 

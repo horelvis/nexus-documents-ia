@@ -396,7 +396,28 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # Knowledge Tree Service - Structural Context (Apache AGE)
+  # FalkorDB - Graph Database (OpenCypher, Redis-based)
+  # =============================================================================
+  # Replaces Apache AGE for knowledge graph operations. Redis-compatible
+  # protocol with native OpenCypher support and sub-millisecond queries.
+  falkordb:
+    image: falkordb/falkordb:v4.2.0
+    ports:
+      - "6380:6379"   # Redis-compatible protocol (offset to avoid clash with Redis)
+      - "3003:3000"   # FalkorDB Browser UI
+    volumes:
+      - falkordb_data:/data
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # =============================================================================
+  # Knowledge Tree Service - Structural Context (Apache AGE + FalkorDB)
   # =============================================================================
   knowledge-tree-service:
     build:
@@ -406,6 +427,8 @@ services:
       - "8011:8011"
     depends_on:
       db:
+        condition: service_healthy
+      falkordb:
         condition: service_healthy
     networks:
       - backend-network
@@ -418,9 +441,15 @@ services:
       - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
       - AGE_GRAPH_NAME=${AGE_GRAPH_NAME:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # FalkorDB Configuration
+      - FALKORDB_HOST=${FALKORDB_HOST:-falkordb}
+      - FALKORDB_PORT=${FALKORDB_PORT:-6379}
+      - FALKORDB_GRAPH_NAME=${FALKORDB_GRAPH_NAME:-knowledge_graph}
+      - FALKORDB_PASSWORD=${FALKORDB_PASSWORD:-}
     volumes:
       - ../microservices/knowledge-tree-service/app:/app/app:ro
-      - ../microservices/emma-agent-service/config/graphs:/app/config/graphs:ro
+      - ../microservices/knowledge-tree-service/config:/app/config:ro
+      - ../microservices/emma-agent-service/config/graphs:/app/config/graphs/age:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8011", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
@@ -1223,5 +1252,6 @@ volumes:
   local_storage_data:
   minio_data:
   easyocr_models:
+  falkordb_data:
   certbot_conf:
   certbot_webroot:
