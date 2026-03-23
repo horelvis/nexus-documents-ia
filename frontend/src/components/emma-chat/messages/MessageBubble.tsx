@@ -9,7 +9,7 @@ import type { EmmaMessage, DocumentInfo, ClarificationData } from '@/lib/types/e
 import { ActivityTimeline } from '../ActivityTimeline'
 import { humanizeSteps } from '../utils/humanizeStep'
 import { EmmaMarkdown } from '../EmmaMarkdown'
-import { DocumentDisplay } from '../DocumentDisplay'
+import { InlineSourceCard } from '../InlineSourceCard'
 import { ExplanationPanel } from '../ExplanationPanel'
 import { VerifiedDocumentResult } from '../VerifiedDocumentResult'
 import { PredictionResult } from '../PredictionResult'
@@ -26,8 +26,7 @@ export interface MessageBubbleProps {
   onFeedback?: (messageId: string, feedback: 'positive' | 'negative') => void
   onSuggestionClick?: (suggestion: string) => void
   onRetry?: (failedQuery: string) => void
-  onDocumentClick?: (doc: DocumentInfo) => void
-  onPreviewClick?: (doc: DocumentInfo) => void
+  onOpenFullscreen?: (doc: DocumentInfo) => void
   renderHITLReview?: (request: any, messageId: string) => React.ReactNode
   renderBranchSwitcher?: (messageId: string) => React.ReactNode
   renderCommandBar?: (messageId: string, content: string) => React.ReactNode
@@ -40,8 +39,7 @@ export function MessageBubble({
   onFeedback,
   onSuggestionClick,
   onRetry,
-  onDocumentClick,
-  onPreviewClick,
+  onOpenFullscreen,
   renderHITLReview,
   renderBranchSwitcher,
   renderCommandBar,
@@ -169,6 +167,7 @@ export function MessageBubble({
   }
 
   // ── Emma response (main flow) ──
+  // ── Emma response (main flow) ──
   return (
     <EmmaMessageFlow>
       {/* Activity timeline — island block */}
@@ -205,15 +204,16 @@ export function MessageBubble({
         return docIdMatch?.[1] ? <GeneratedDocDownload docId={docIdMatch[1]} /> : null
       })()}
 
-      {/* Related documents — island block */}
-      {console.log('[DEBUG MessageBubble] metadata.documents:', message.metadata?.documents?.length, message.metadata?.documents)}
+      {/* Related documents — inline source cards */}
       {message.metadata?.documents && message.metadata.documents.length > 0 && (
-        <div className="mt-3 rounded-xl border border-border/40 bg-card/30 p-3">
-          <DocumentDisplay
-            documents={message.metadata.documents}
-            onDocumentClick={onDocumentClick}
-            onPreviewClick={onPreviewClick}
-          />
+        <div className="mt-3 flex flex-col gap-3">
+          {message.metadata.documents.map((doc, idx) => (
+            <InlineSourceCard
+              key={doc.id || idx}
+              document={doc}
+              onOpenFullscreen={onOpenFullscreen}
+            />
+          ))}
         </div>
       )}
 
@@ -294,7 +294,7 @@ function UserBubble({ message }: { message: EmmaMessage }) {
 function EmmaMessageFlow({ children }: { children: React.ReactNode }) {
   return (
     <div className="w-full emma-message-enter py-2">
-      <div className="group flex items-start gap-2.5 max-w-[85%] sm:max-w-[75%]">
+      <div className="group flex items-start gap-2.5 w-full">
         <img
           src="/emma-avatar.png"
           alt="Emma"

@@ -64,7 +64,11 @@ function parseJwtRoles(token: string): string[] {
     const payload = token.split('.')[1]
     if (!payload) return []
     const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')))
-    return decoded?.realm_access?.roles ?? []
+    const realmRoles: string[] = decoded?.realm_access?.roles ?? []
+    // Also collect roles from resource_access (e.g. realm-management.roles contains "realm-admin")
+    const resourceRoles: string[] = Object.values(decoded?.resource_access ?? {})
+      .flatMap((r: any) => r?.roles ?? [])
+    return [...new Set([...realmRoles, ...resourceRoles])]
   } catch {
     return []
   }

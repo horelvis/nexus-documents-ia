@@ -126,9 +126,9 @@ export function ArtifactsPanel({
       ref={panelRef}
       style={{ width }}
       className={cn(
-        'relative flex flex-col h-full',
+        'relative flex flex-col',
         'bg-background border-l border-border',
-        'overflow-hidden shrink-0',
+        'shrink-0 sticky top-0 h-screen max-h-screen overflow-hidden',
       )}
     >
       {/* Resize handle — left edge */}

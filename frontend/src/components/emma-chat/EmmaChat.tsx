@@ -17,6 +17,7 @@ import {
   Attachment,
 } from '@/lib/types/emma'
 import { ArtifactsPanel } from './ArtifactsPanel'
+import { FullscreenDocumentViewer } from './FullscreenDocumentViewer'
 import { EmmaStreamProvider, useEmmaStream } from './EmmaStreamProvider'
 import { BranchSwitcher } from './messages/BranchSwitcher'
 import { CommandBar } from './messages/CommandBar'
@@ -47,7 +48,7 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
   // ── Local state ──
   const [deepReasoning, setDeepReasoning] = useState(false)
   const [showThreadHistory, setShowThreadHistory] = useState(false)
-  const [previewDoc, setPreviewDoc] = useState<DocumentInfo | null>(null)
+  const [fullscreenDoc, setFullscreenDoc] = useState<DocumentInfo | null>(null)
   const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false)
   const [activeArtifactTab, setActiveArtifactTab] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -96,7 +97,7 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
     const prev = prevAllMessagesRef.current
     if (
       prev.length === merged.length &&
-      prev.every((m, i) => m.id === merged[i].id && m.content === merged[i].content)
+      prev.every((m, i) => m === merged[i])
     ) {
       return prev
     }
@@ -132,19 +133,12 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 
   const { forgeMetadata } = useForgeDetection(allMessages)
 
-  // ── Close preview helper ──
-  const handleClosePreview = useCallback(() => {
-    setPreviewDoc(null)
-  }, [])
-
   // ── Artifact tabs (extracted hook) ──
   const artifactTabs = useArtifactTabs({
     verifiedJobs,
     predictiveJobs,
     forgeMetadata,
     onSubmitReview: handleReviewSubmit,
-    previewDoc,
-    onClosePreview: handleClosePreview,
   })
 
   // ── Derived state ──
@@ -166,10 +160,8 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
     [submit],
   )
 
-  const handleDocumentClick = useCallback((doc: DocumentInfo) => {
-    setPreviewDoc(doc)
-    setArtifactsPanelOpen(true)
-    setActiveArtifactTab('preview')
+  const handleOpenFullscreen = useCallback((doc: DocumentInfo) => {
+    setFullscreenDoc(doc)
   }, [])
 
   const handleFeedback = useCallback(
@@ -212,8 +204,7 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
               onFeedback={handleFeedback}
               onSuggestionClick={handleSendQuery}
               onRetry={handleSendQuery}
-              onDocumentClick={handleDocumentClick}
-              onPreviewClick={handleDocumentClick}
+              onOpenFullscreen={handleOpenFullscreen}
               renderHITLReview={(request) => (
                 <HITLReviewCard
                   request={request}
@@ -287,7 +278,15 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 
       </div>
 
-      {/* Artifacts Panel — visible when there are tabs (including preview) */}
+      {/* Fullscreen document viewer overlay */}
+      {fullscreenDoc && (
+        <FullscreenDocumentViewer
+          document={fullscreenDoc}
+          onClose={() => setFullscreenDoc(null)}
+        />
+      )}
+
+      {/* Artifacts Panel — visible when there are tabs */}
       {artifactTabs.length > 0 && (
         <ArtifactsPanel
           tabs={artifactTabs}

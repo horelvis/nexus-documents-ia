@@ -15,8 +15,7 @@ interface EmmaRenderChatProps {
   onFeedback?: (messageId: string, feedback: 'positive' | 'negative') => void
   onSuggestionClick?: (suggestion: string) => void
   onRetry?: (failedQuery: string) => void
-  onDocumentClick?: (doc: DocumentInfo) => void
-  onPreviewClick?: (doc: DocumentInfo) => void
+  onOpenFullscreen?: (doc: DocumentInfo) => void
   className?: string
   showTerminalHeader?: boolean
   renderHITLReview?: (request: any, messageId: string) => React.ReactNode
@@ -31,8 +30,7 @@ export function EmmaRenderChat({
   onFeedback,
   onSuggestionClick,
   onRetry,
-  onDocumentClick,
-  onPreviewClick,
+  onOpenFullscreen,
   className,
   showTerminalHeader = false,
   renderHITLReview,
@@ -101,8 +99,7 @@ export function EmmaRenderChat({
               onFeedback={onFeedback}
               onSuggestionClick={onSuggestionClick}
               onRetry={onRetry}
-              onDocumentClick={onDocumentClick}
-              onPreviewClick={onPreviewClick}
+              onOpenFullscreen={onOpenFullscreen}
               renderHITLReview={renderHITLReview}
               renderBranchSwitcher={renderBranchSwitcher}
               renderCommandBar={renderCommandBar}

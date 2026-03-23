@@ -1,18 +1,15 @@
-import { FileCheck, TrendingUp, Hammer, Eye } from 'lucide-react'
+import { FileCheck, TrendingUp, Hammer } from 'lucide-react'
 import type { ArtifactTab } from '../ArtifactsPanel'
 import { VerifiedGenTab } from '../artifacts/VerifiedGenTab'
 import { PredictiveTab } from '../artifacts/PredictiveTab'
 import { ForgeTab } from '../artifacts/ForgeTab'
-import { DocumentPreviewTab } from '../artifacts/DocumentPreviewTab'
-import type { DocumentInfo, ForgeMetadata } from '@/lib/types/emma'
+import type { ForgeMetadata } from '@/lib/types/emma'
 
 interface UseArtifactTabsParams {
   verifiedJobs: Record<string, any>
   predictiveJobs: Record<string, any>
   forgeMetadata: ForgeMetadata | null
   onSubmitReview: (jobId: string, review: any) => void
-  previewDoc?: DocumentInfo | null
-  onClosePreview?: () => void
 }
 
 export function useArtifactTabs({
@@ -20,20 +17,8 @@ export function useArtifactTabs({
   predictiveJobs,
   forgeMetadata,
   onSubmitReview,
-  previewDoc,
-  onClosePreview,
 }: UseArtifactTabsParams): ArtifactTab[] {
   const tabs: ArtifactTab[] = []
-
-  // Preview tab — inserted first when a document is selected
-  if (previewDoc) {
-    tabs.push({
-      id: 'preview',
-      label: 'Vista Previa',
-      icon: <Eye className="h-3.5 w-3.5" />,
-      content: <DocumentPreviewTab document={previewDoc} onClose={onClosePreview} />,
-    })
-  }
 
   if (Object.keys(verifiedJobs).length > 0) {
     const totalClaims = Object.values(verifiedJobs).reduce(
