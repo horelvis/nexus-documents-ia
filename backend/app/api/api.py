@@ -75,7 +75,7 @@ api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"]
 # Weaviate microservice gateway (includes Elysia)
 api_router.include_router(weaviate.router, prefix="/weaviate", tags=["weaviate"])
 
-# Knowledge Tree - Apache AGE graph proxy to knowledge-tree-service
+# Knowledge Tree - FalkorDB graph proxy to knowledge-tree-service
 from app.api.v1 import knowledge_tree
 api_router.include_router(knowledge_tree.router, prefix="/knowledge-tree", tags=["knowledge-tree"])
 

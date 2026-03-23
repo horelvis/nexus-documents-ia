@@ -1403,7 +1403,7 @@ async def weaviate_service_health():
 
 
 # ============================================================================
-# KNOWLEDGE TREE ENDPOINTS (Apache AGE graph visualization)
+# KNOWLEDGE TREE ENDPOINTS (FalkorDB graph visualization)
 # ============================================================================
 
 KNOWLEDGE_TREE_SERVICE_URL = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree-service:8011")
@@ -1414,7 +1414,7 @@ WEAVIATE_SERVICE_URL = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-servic
 async def tree_stats(
     tenant_id: str = Depends(get_current_tenant_id_async),
 ):
-    """Get knowledge tree stats from Apache AGE via knowledge-tree-service"""
+    """Get knowledge tree stats from FalkorDB via knowledge-tree-service"""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.get(

@@ -460,7 +460,7 @@ async def delete_all_documents(
 
         await db.commit()
 
-        # Step 7: Clear knowledge graph (Apache AGE) for this tenant
+        # Step 7: Clear knowledge graph (FalkorDB) for this tenant
         results["knowledge_graph_cleared"] = False
         try:
             import httpx

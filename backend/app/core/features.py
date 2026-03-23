@@ -103,7 +103,7 @@ _MODE_DEFAULTS: Dict[DeploymentMode, Dict[Feature, bool]] = {
         Feature.DIGITAL_SIGNATURES: True,
         Feature.SITE_PORTAL: True,
         Feature.DASHBOARD_ANALYTICS: True,
-        Feature.ELASTICSEARCH_SEARCH: False,  # Disabled - replaced by Weaviate + Apache AGE
+        Feature.ELASTICSEARCH_SEARCH: False,  # Disabled - replaced by Weaviate + FalkorDB
         Feature.DOCUMENT_EDITING: True,
         Feature.DOCUMENT_LIBRARY_UI: True,
         Feature.STRIPE_BILLING: True,
@@ -137,7 +137,7 @@ _MODE_DEFAULTS: Dict[DeploymentMode, Dict[Feature, bool]] = {
         Feature.DIGITAL_SIGNATURES: True,
         Feature.SITE_PORTAL: True,
         Feature.DASHBOARD_ANALYTICS: True,
-        Feature.ELASTICSEARCH_SEARCH: False,  # Disabled - replaced by Weaviate + Apache AGE
+        Feature.ELASTICSEARCH_SEARCH: False,  # Disabled - replaced by Weaviate + FalkorDB
         Feature.DOCUMENT_EDITING: True,
         Feature.DOCUMENT_LIBRARY_UI: True,
         Feature.STRIPE_BILLING: True,
