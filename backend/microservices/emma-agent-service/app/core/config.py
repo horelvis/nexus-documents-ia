@@ -274,7 +274,7 @@ class Settings(BaseSettings):
     # Enables: conversation continuity, time travel, HITL interrupts
     langgraph_checkpointer_enabled: bool = os.getenv("LANGGRAPH_CHECKPOINTER_ENABLED", "true").lower() == "true"
 
-    # PostgreSQL for Apache AGE (graph queries via weaviate-service)
+    # PostgreSQL (graph queries routed via knowledge-tree-service to FalkorDB)
     postgres_host: str = os.getenv("POSTGRES_SERVER", os.getenv("POSTGRES_HOST", "db"))
     postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
     postgres_db: str = os.getenv("POSTGRES_DB", "nexus_db")

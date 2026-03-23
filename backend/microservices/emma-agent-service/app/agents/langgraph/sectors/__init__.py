@@ -7,7 +7,7 @@ Each sector (legal, medical, documental) configures:
 - Hybrid search alpha and top_k
 - Chunk strategy and sizes
 - Entity extraction patterns
-- Graph schema for Apache AGE
+- Graph schema for FalkorDB knowledge graph
 - System prompts
 
 Usage:

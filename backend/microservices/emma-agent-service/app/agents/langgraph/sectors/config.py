@@ -50,12 +50,12 @@ class SectorConfig:
         chunk_size: Target chunk size in characters
         chunk_overlap: Overlap between chunks in characters
         entity_patterns: Regex patterns for entity extraction by type
-        graph_name: Apache AGE graph name
-        graph_schema: Path to Cypher schema file
+        graph_name: Deprecated — unified FalkorDB graph (kept for backward compat)
+        graph_schema: Deprecated — schema lives in knowledge-tree-service
         system_prompt_key: Langfuse prompt name for sector system prompt
         collection_suffix: Optional suffix for Weaviate collection names
         men_domain: MEN service domain mapping
-        graph_search_properties: Node properties to search in Cypher queries
+        graph_search_properties: Node properties to search in graph queries
     """
     name: str
     sector: Sector
@@ -68,9 +68,9 @@ class SectorConfig:
     chunk_size: int
     chunk_overlap: int
     entity_patterns: Dict[str, List[str]]
-    graph_name: str
-    graph_schema: str
-    system_prompt_key: str
+    graph_name: str = ""
+    graph_schema: str = ""
+    system_prompt_key: str = ""
     collection_suffix: Optional[str] = None
     men_domain: str = "general"
     predictive_config: Optional[PredictiveConfig] = None

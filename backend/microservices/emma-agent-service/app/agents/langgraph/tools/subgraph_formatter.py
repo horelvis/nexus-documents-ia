@@ -7,10 +7,10 @@ into a tree-indented text format optimized for LLM comprehension.
 Output format:
     [SUBGRAFO RELEVANTE]
     Entidades principales:
-    - Javier Martínez (Persona)
-      → ASOCIADO_A → Contrato-Servicios-2024.pdf (contrato, domain=mercantil) [ID: abc-123]
-        → APLICA → Estatuto de los Trabajadores (BOE-A-2015-11430)
-      → EXTRACTED_FROM → Informe-RRHH-Q1.pdf (informe) [ID: ghi-789]
+    - Javier Martínez (Entity, person)
+      → MENTIONED_IN → Contrato-Servicios-2024.pdf (contrato, domain=mercantil) [ID: abc-123]
+        → REFERENCES_LAW → Estatuto de los Trabajadores (BOE-A-2015-11430)
+      → MENTIONED_IN → Informe-RRHH-Q1.pdf (informe) [ID: ghi-789]
 
     Relaciones: 7 nodos, 6 aristas, profundidad máx. 2
 """
@@ -153,10 +153,10 @@ def _render_tree(
         child_indent = "  " * (depth + 1)
         child_label = _format_node(target_node)
 
-        # Add traceability for APLICA edges
+        # Add traceability for REFERENCES_LAW edges (formerly APLICA)
         edge_suffix = ""
         edge_props = edge.get("properties", {})
-        if edge_label == "APLICA" and edge_props:
+        if edge_label in ("REFERENCES_LAW", "APLICA") and edge_props:
             parts = []
             if edge_props.get("confidence"):
                 parts.append(f"confidence: {edge_props['confidence']}")
@@ -170,10 +170,10 @@ def _render_tree(
         # Recurse into children
         _render_tree(target_id, node_map, adjacency, visited, lines, depth + 1, max_depth)
 
-    # Note absence of APLICA edges for root document nodes
-    if depth == 0 and node.get("label") in ("structural_document",):
+    # Note absence of legal reference edges for root document nodes
+    if depth == 0 and node.get("label") in ("Document", "structural_document"):
         has_aplica = any(
-            e["label"] == "APLICA"
+            e["label"] in ("REFERENCES_LAW", "APLICA")
             for e in adjacency.get(node_id, [])
         )
         if not has_aplica:
@@ -191,7 +191,7 @@ def _format_node(node: Dict) -> str:
 
     # Node type in parentheses
     type_parts = []
-    if label and label not in ("unknown", "structural_document", "structural_folder"):
+    if label and label not in ("unknown", "Document", "Folder", "structural_document", "structural_folder"):
         type_parts.append(label)
 
     stype = props.get("semantic_type")

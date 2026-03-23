@@ -1,17 +1,22 @@
 """
 Sector-aware Graph Expander
 
-Expands query context by querying the Apache AGE graph for the active sector.
-Uses extracted entities to build Cypher queries and retrieves related
-nodes/edges from the sector's knowledge graph.
+Expands query context by querying the FalkorDB knowledge graph for the
+active sector. Uses extracted entities and semantic HTTP endpoints on
+knowledge-tree-service (get_documents_by_person, extract_subgraph).
 
-Calls the knowledge-tree-service via HTTP.
+No raw Cypher is constructed here — all graph logic lives in
+knowledge-tree-service.
 """
 
+import asyncio
 import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# Maximum entities per type to expand (avoids runaway fan-out)
+_MAX_ENTITIES_PER_TYPE = 5
 
 
 async def expand_with_sector_graph(
@@ -21,10 +26,13 @@ async def expand_with_sector_graph(
     tenant_id: str,
 ) -> Dict[str, Any]:
     """
-    Expand context using the sector's Apache AGE graph.
+    Expand context using the sector's FalkorDB knowledge graph.
 
-    Builds Cypher queries from extracted entities and the sector's graph schema,
-    then calls knowledge-tree-service to execute them.
+    Uses semantic HTTP endpoints on knowledge-tree-service:
+    - get_documents_by_person() for person/entity lookups
+    - extract_subgraph() for multi-hop graph expansion
+
+    All entity lookups are batched with asyncio.gather() to avoid N+1.
 
     Args:
         query: User query
@@ -37,48 +45,86 @@ async def expand_with_sector_graph(
             - graph_context: str — textual context from graph expansion
             - related_entities: list — related nodes found
             - paths: list — relationship paths found
-            - cypher_queries: list — queries executed (for tracing)
+            - expanded_doc_ids: list — document IDs found via entity lookup
     """
-    graph_name = sector_config.get("graph_name", "")
-    if not graph_name or not entities:
+    if not entities:
         return {
             "graph_context": "",
             "related_entities": [],
             "paths": [],
-            "cypher_queries": [],
+            "expanded_doc_ids": [],
         }
 
-    cypher_queries: List[str] = []
     related_entities: List[Dict[str, Any]] = []
     paths: List[str] = []
+    expanded_doc_ids: List[str] = []
 
     try:
         from app.clients.knowledge_tree_client import get_knowledge_tree_client
 
         client = get_knowledge_tree_client()
 
-        search_properties = sector_config.get("graph_search_properties")
+        # ------------------------------------------------------------------
+        # Phase 1: Batch entity → document lookups via asyncio.gather()
+        # ------------------------------------------------------------------
+        lookup_tasks = []
+        lookup_meta = []  # Track (entity_type, value) for each task
 
         for entity_type, values in entities.items():
-            for value in values[:5]:  # Limit per type
-                cypher = _build_cypher_query(graph_name, entity_type, value, search_properties)
-                if not cypher:
+            for value in values[:_MAX_ENTITIES_PER_TYPE]:
+                if not value or not value.strip():
                     continue
-
-                cypher_queries.append(cypher)
-
-                try:
-                    data = await client.graph_query(
-                        cypher=cypher,
-                        graph_name=graph_name,
+                # Map entity types to FalkorDB convention
+                ft_type = _map_entity_type(entity_type)
+                lookup_tasks.append(
+                    client.get_documents_by_person(
                         tenant_id=tenant_id,
+                        person_name=value.strip(),
+                        entity_type=ft_type,
                     )
-                    for row in data.get("results", []):
-                        related_entities.append(row)
-                    for path in data.get("paths", []):
-                        paths.append(str(path))
-                except Exception as e:
-                    logger.warning(f"Graph query failed for {entity_type}={value}: {e}")
+                )
+                lookup_meta.append((entity_type, value))
+
+        if lookup_tasks:
+            results = await asyncio.gather(*lookup_tasks, return_exceptions=True)
+            for (etype, evalue), result in zip(lookup_meta, results):
+                if isinstance(result, Exception):
+                    logger.warning(f"Entity lookup failed for {etype}={evalue}: {result}")
+                    continue
+                if result:
+                    expanded_doc_ids.extend(result)
+
+        # Deduplicate document IDs
+        expanded_doc_ids = list(dict.fromkeys(expanded_doc_ids))
+
+        # ------------------------------------------------------------------
+        # Phase 2: Extract subgraph for richer context
+        # ------------------------------------------------------------------
+        subgraph_entities = []
+        for entity_type, values in entities.items():
+            for value in values[:_MAX_ENTITIES_PER_TYPE]:
+                if value and value.strip():
+                    subgraph_entities.append({
+                        "name": value.strip(),
+                        "type": _map_entity_type(entity_type),
+                    })
+
+        if subgraph_entities:
+            subgraph = await client.extract_subgraph(
+                tenant_id=tenant_id,
+                entities=subgraph_entities,
+                max_hops=2,
+                max_nodes=30,
+                include_legal=True,
+            )
+
+            for node in subgraph.get("nodes", []):
+                related_entities.append(node)
+            for edge in subgraph.get("edges", []):
+                src = edge.get("source_id", "?")
+                tgt = edge.get("target_id", "?")
+                label = edge.get("label", "?")
+                paths.append(f"{src} -[{label}]-> {tgt}")
 
     except Exception as e:
         logger.warning(f"Graph expansion failed: {e}")
@@ -90,44 +136,34 @@ async def expand_with_sector_graph(
         "graph_context": graph_context,
         "related_entities": related_entities,
         "paths": paths,
-        "cypher_queries": cypher_queries,
+        "expanded_doc_ids": expanded_doc_ids,
     }
 
 
-_DEFAULT_GRAPH_PROPERTIES = ["name", "title"]
-
-
-def _build_cypher_query(
-    graph_name: str,
-    entity_type: str,
-    value: str,
-    search_properties: Optional[List[str]] = None,
-) -> Optional[str]:
-    """Build a Cypher query for an entity type and value.
-
-    Uses sector-specific graph_search_properties to build the WHERE clause,
-    so only relevant properties are searched per sector.
-
-    Args:
-        graph_name: Apache AGE graph name
-        entity_type: Entity type from extraction
-        value: Entity value to search
-        search_properties: Node properties to search (from SectorConfig.graph_search_properties)
-    """
-    # Escape single quotes in value
-    safe_value = value.replace("'", "\\'")
-
-    props = search_properties or _DEFAULT_GRAPH_PROPERTIES
-    where_clauses = [f"n.{prop} =~ '(?i).*{safe_value}.*'" for prop in props]
-    where_str = " OR ".join(where_clauses)
-
-    return (
-        f"SELECT * FROM cypher('{graph_name}', $$ "
-        f"MATCH (n)-[r]-(m) "
-        f"WHERE {where_str} "
-        f"RETURN n, type(r) as rel, m LIMIT 10 "
-        f"$$) AS (n agtype, rel agtype, m agtype)"
-    )
+def _map_entity_type(entity_type: str) -> str:
+    """Map extraction entity types to FalkorDB entity_type values."""
+    mapping = {
+        "persona": "person",
+        "person": "person",
+        "ley": "law",
+        "law": "law",
+        "sentencia": "ruling",
+        "ruling": "ruling",
+        "articulo": "article",
+        "article": "article",
+        "boe": "law",
+        "expediente": "case",
+        "case": "case",
+        "cie10": "medical_code",
+        "farmaco": "drug",
+        "procedimiento": "procedure",
+        "paciente": "patient",
+        "nif": "person",
+        "importe": "amount",
+        "referencia": "reference",
+        "fecha": "date",
+    }
+    return mapping.get(entity_type.lower(), "person")
 
 
 def _build_context_text(

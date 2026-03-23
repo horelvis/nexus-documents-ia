@@ -1,7 +1,7 @@
 """
 Emma ReAct Agent — Graph Tool (structural_query)
 
-Wraps KnowledgeTreeClient for structural queries against Apache AGE:
+Wraps KnowledgeTreeClient for structural queries against the FalkorDB knowledge graph:
 - Counting documents/entities ("¿cuántos contratos tengo?")
 - Listing items ("lista de facturas de 2024")
 - Filtering by metadata ("documentos del proyecto ACME")
@@ -33,7 +33,7 @@ class StructuralQueryInput(BaseModel):
 
 
 class StructuralQueryTool(EmmaTool):
-    """Execute structural queries against the knowledge graph (Apache AGE).
+    """Execute structural queries against the FalkorDB knowledge graph.
 
     Handles quantitative queries that semantic search can't answer well:
     counts, lists, filters, aggregations, and entity relationships.

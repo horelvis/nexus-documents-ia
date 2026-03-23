@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from functools import lru_cache
 
 from app.clients import get_knowledge_tree_client
+from app.clients.weaviate_client import get_weaviate_client
 
 logger = logging.getLogger(__name__)
 

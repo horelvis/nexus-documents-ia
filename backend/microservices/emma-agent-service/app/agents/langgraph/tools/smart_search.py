@@ -4,7 +4,7 @@ Emma ReAct Agent — SmartSearch Tool
 Unified multi-store search that orchestrates 3 data stores:
   1. Weaviate (hybrid vector+keyword) — tenant documents
   2. PublicKnowledge (hybrid) — BOE legislation
-  3. Apache AGE (knowledge graph) — entity relationships
+  3. FalkorDB (knowledge graph) — entity relationships
 
 Pipeline:
   Entity extraction (regex ~3ms)
@@ -755,7 +755,7 @@ class SmartSearchTool(EmmaTool):
         sector_config: Dict[str, Any],
         tenant_id: str,
     ) -> tuple[Set[str], List[str]]:
-        """Expand context via Apache AGE graph. Returns (doc_ids, boe_ids)."""
+        """Expand context via FalkorDB knowledge graph. Returns (doc_ids, boe_ids)."""
         doc_ids: Set[str] = set()
         boe_ids: List[str] = []
 
@@ -769,8 +769,13 @@ class SmartSearchTool(EmmaTool):
                 tenant_id=tenant_id,
             )
 
+            # Include document IDs from entity lookups (Phase 1)
+            for did in graph_result.get("expanded_doc_ids", []):
+                if did:
+                    doc_ids.add(did)
+
+            # Include document IDs and BOE IDs from subgraph nodes (Phase 2)
             for entity in graph_result.get("related_entities", []):
-                # Extract document_id from graph nodes
                 if isinstance(entity, dict):
                     did = entity.get("document_id") or entity.get("doc_id", "")
                     if did:

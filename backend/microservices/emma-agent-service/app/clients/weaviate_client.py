@@ -58,7 +58,7 @@ class WeaviateClient(BaseHTTPClient):
     - Vector search (semantic similarity)
     - RAG pipeline execution
     - Document content retrieval
-    - Structural queries (Apache AGE graph)
+    - Structural queries (knowledge graph)
 
     Example:
         client = WeaviateClient()
@@ -467,7 +467,7 @@ class WeaviateClient(BaseHTTPClient):
             return []
 
     # =========================================================================
-    # Structural Queries (Apache AGE Graph)
+    # Structural Queries (Knowledge Graph)
     # =========================================================================
 
     async def structural_query(
@@ -480,7 +480,7 @@ class WeaviateClient(BaseHTTPClient):
         Execute structural query via weaviate-service.
 
         For structural queries (count, list, filter), this endpoint
-        attempts to use Apache AGE graph database when available,
+        attempts to use the knowledge graph when available,
         falling back to hybrid vector search.
 
         Structural queries are queries like:
@@ -560,7 +560,7 @@ class WeaviateClient(BaseHTTPClient):
         """
         Get entities related to a given entity.
 
-        Uses Apache AGE graph traversal for:
+        Uses knowledge graph traversal for:
         - Finding related documents
         - Entity relationship exploration
         - Knowledge graph navigation

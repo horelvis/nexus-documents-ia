@@ -138,9 +138,9 @@ class KnowledgeTreeClient(BaseHTTPClient):
             return []
 
     async def get_documents_by_person(
-        self, tenant_id: str, person_name: str, entity_type: str = "Persona"
+        self, tenant_id: str, person_name: str, entity_type: str = "person"
     ) -> List[str]:
-        """Get document IDs linked to a person via the knowledge graph."""
+        """Get document IDs linked to a person via the FalkorDB knowledge graph."""
         payload = {
             "tenant_id": tenant_id,
             "entity_name": person_name,
@@ -164,7 +164,7 @@ class KnowledgeTreeClient(BaseHTTPClient):
         max_nodes: int = 30,
         include_legal: bool = True,
     ) -> Dict[str, Any]:
-        """Extract a multi-hop subgraph rooted at entities (GraphRAG).
+        """Extract a multi-hop subgraph rooted at entities from FalkorDB (GraphRAG).
 
         Returns structured nodes/edges for LLM context, not flat document IDs.
         """
