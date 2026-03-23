@@ -1,14 +1,15 @@
 # =============================================================================
-# Custom PostgreSQL image with Apache AGE + pgvector
+# Custom PostgreSQL image with pgvector
 # =============================================================================
-# Base: apache/age (PG15 + Apache AGE for knowledge graph)
+# Base: apache/age (PG15) — kept as base image for PG15 compatibility.
+# Apache AGE extension is no longer used (knowledge graph moved to FalkorDB).
 # Added: pgvector (compiled from source — no apt package for PG15)
 #
-# Why custom image:
-#   - apache/age:release_PG15_1.6.0 ships AGE but NOT pgvector
-#   - Debian repos only have pgvector for PG16+ (no PG15 package)
-#   - MemoRAG requires VECTOR column type for embedding similarity search
-#   - Few-shot retriever also uses pgvector for semantic example matching
+# pgvector is used by:
+#   - Few-shot retriever (backend/app/api/v1/prompts.py)
+#   - Prompt composer semantic search
+#
+# TODO: Migrate to plain postgres:15 base once AGE init scripts are removed.
 #
 # Build: docker compose build db
 # =============================================================================
