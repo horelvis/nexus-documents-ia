@@ -10,8 +10,9 @@ These tests verify:
 6. Graph traversals for GraphRAG
 """
 
+import time
+
 import pytest
-import pytest_asyncio
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +88,7 @@ class TestDocumentNodes:
                 domain: 'legal',
                 quality_score: 0.92,
                 chunk_count: 15,
-                indexed_at: datetime()
+                indexed_at: timestamp()
             })
             RETURN d.document_id AS id, d.title AS title
         """)
@@ -394,7 +395,7 @@ class TestTenantIsolation:
 class TestGraphRAGTraversals:
     """Test multi-hop traversals for evidence assembly."""
 
-    @pytest_asyncio.fixture(autouse=True)
+    @pytest.fixture(autouse=True)
     async def seed_graph(self, falkordb_client):
         """Seed a small graph for traversal tests."""
         await falkordb_client.execute_cypher("""

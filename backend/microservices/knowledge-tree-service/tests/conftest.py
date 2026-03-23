@@ -4,9 +4,7 @@ Shared fixtures for knowledge-tree-service tests.
 Requires a running FalkorDB instance (docker-compose.onpremise.yml).
 """
 
-import asyncio
 import os
-from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
@@ -23,38 +21,27 @@ os.environ.setdefault("LOG_LEVEL", "DEBUG")
 os.environ.setdefault("DATABASE_URL", "postgresql://nexus_user:nexus_password@localhost:5432/nexus_db")
 
 
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create a session-scoped event loop for async tests."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def falkordb_client():
-    """Session-scoped FalkorDB client connected to test graph."""
+    """Per-test FalkorDB client — fresh connection for each test."""
     from app.services.falkordb_client import FalkorDBClient
 
     client = FalkorDBClient()
     await client.initialize()
-    yield client
-    # Cleanup: drop the test graph
+
+    # Clean graph before test
     if client._graph:
         try:
-            await client._graph.delete()
+            await client._graph.query("MATCH (n) DETACH DELETE n")
+        except Exception:
+            pass
+
+    yield client
+
+    # Cleanup after test
+    if client._graph:
+        try:
+            await client._graph.query("MATCH (n) DETACH DELETE n")
         except Exception:
             pass
     await client.close()
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def clean_graph(falkordb_client):
-    """Clean the test graph before each test."""
-    if falkordb_client._graph:
-        try:
-            # Delete all nodes and relationships
-            await falkordb_client.execute_cypher("MATCH (n) DETACH DELETE n")
-        except Exception:
-            pass
-    yield
