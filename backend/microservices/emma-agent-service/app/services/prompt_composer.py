@@ -4,7 +4,7 @@ Prompt Composer — Main orchestrator for the Prompt Management system.
 Combines:
 - Langfuse Prompts (versioning, web UI, A/B testing)
 - Rule Engine (dynamic injection by conditions)
-- Few-Shot Retriever (pgvector similarity)
+- Few-Shot Retriever (via Main API, no direct pgvector)
 - Guardrail Service (post-processing validation)
 
 Usage:

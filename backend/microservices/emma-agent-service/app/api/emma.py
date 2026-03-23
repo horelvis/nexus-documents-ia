@@ -1413,13 +1413,13 @@ async def generate_document_memory(
 
 
 # ============================================================================
-# MemoRAG Memorize (Global Memory Model)
+# MemoRAG Memorize (DEPRECATED — no-op, kept for backward compatibility)
 # ============================================================================
 
 class MemorizeRequest(BaseModel):
     tenant_id: str
     document_id: str
-    document_text: str = Field(..., description="Full or partial document text")
+    document_text: str = Field("", description="Full or partial document text")
     filename: str = Field("", description="Document filename")
     domain: str = Field("", description="Business domain")
     semantic_type: str = Field("", description="Document type")
@@ -1430,23 +1430,12 @@ async def memorag_memorize(
     request: MemorizeRequest,
     _: bool = Depends(verify_api_key),
 ):
-    """
-    Memorize a document into the MemoRAG global memory store.
+    """No-op: documents are already indexed in Weaviate by the indexing pipeline.
 
-    Called by weaviate-service after document indexing.
+    Kept for backward compatibility — callers (weaviate-service) may still
+    hit this endpoint during rolling deployments.
     """
-    from app.services.memorag import get_memorag_service
-
-    service = get_memorag_service()
-    result = await service.memorize(
-        tenant_id=request.tenant_id,
-        document_id=request.document_id,
-        document_text=request.document_text,
-        filename=request.filename,
-        domain=request.domain,
-        semantic_type=request.semantic_type,
-    )
-    return result
+    return {"success": True, "skipped": True, "document_id": request.document_id}
 
 
 # ============================================================================

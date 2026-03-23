@@ -1,14 +1,14 @@
 """
-Few-Shot Retriever — Semantic search for Q&A examples using pgvector.
+Few-Shot Retriever — Retrieves Q&A examples via the Main API.
 
-Retrieves relevant Q&A examples based on query similarity to inject
-into prompts as few-shot examples, improving response consistency.
-
-Uses BGE-M3 embeddings (1024 dimensions) via weaviate-service's embedding endpoint.
+Replaces the old pgvector-based retriever.  The Main API (backend)
+still stores few-shot examples in PostgreSQL and exposes them via
+REST endpoints.  This retriever calls those endpoints instead of
+querying pgvector directly.
 
 Usage:
     retriever = get_few_shot_retriever()
-    examples = await retriever.search("¿Cuántos días de preaviso para despido?", limit=3)
+    examples = await retriever.search("Cuantos dias de preaviso para despido?", limit=3)
 """
 
 import logging
@@ -20,7 +20,7 @@ from uuid import UUID
 import httpx
 
 from app.core.config import settings
-from app.schemas.prompts import FewShotExampleResponse, FewShotDomain
+from app.schemas.prompts import FewShotDomain
 
 logger = logging.getLogger(__name__)
 
@@ -40,15 +40,15 @@ class FewShotExample:
 
 class FewShotRetriever:
     """
-    Retriever for few-shot examples using pgvector similarity search.
+    Retriever for few-shot examples via Main API HTTP endpoints.
 
-    Uses weaviate-service's embedding endpoint for BGE-M3 embeddings,
-    then queries PostgreSQL with pgvector for similarity search.
+    The Main API stores examples in PostgreSQL (with optional pgvector
+    similarity).  This retriever delegates entirely to those endpoints,
+    removing the need for a direct database connection from emma-agent-service.
     """
 
     def __init__(self):
         self._http_client: Optional[httpx.AsyncClient] = None
-        self._db_session = None
         self._embedding_cache: Dict[str, List[float]] = {}
         self._cache_max_size = 100
 
@@ -58,28 +58,9 @@ class FewShotRetriever:
             self._http_client = httpx.AsyncClient(timeout=30.0)
         return self._http_client
 
-    async def _get_db_session(self):
-        """Get async database session factory."""
-        if self._db_session is None:
-            try:
-                from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-                from sqlalchemy.orm import sessionmaker
-
-                engine = create_async_engine(settings.database_url)
-                self._db_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-            except Exception as e:
-                logger.error(f"Failed to create DB session: {e}")
-                return None
-        return self._db_session
-
     async def _get_embedding(self, text: str) -> Optional[List[float]]:
-        """
-        Get embedding for text using weaviate-service.
-
-        Uses the /embed endpoint which provides BGE-M3 embeddings.
-        """
-        # Check cache
-        cache_key = text[:200]  # Truncate for cache key
+        """Get embedding for text using weaviate-service."""
+        cache_key = text[:200]
         if cache_key in self._embedding_cache:
             return self._embedding_cache[cache_key]
 
@@ -95,9 +76,7 @@ class FewShotRetriever:
                 data = response.json()
                 embedding = data.get("embedding")
                 if embedding:
-                    # Cache the result
                     if len(self._embedding_cache) >= self._cache_max_size:
-                        # Remove oldest entry (simple FIFO)
                         self._embedding_cache.pop(next(iter(self._embedding_cache)))
                     self._embedding_cache[cache_key] = embedding
                     return embedding
@@ -121,19 +100,11 @@ class FewShotRetriever:
         min_similarity: Optional[float] = None,
     ) -> List[FewShotExample]:
         """
-        Search for similar few-shot examples.
+        Search for similar few-shot examples via the Main API.
 
-        Args:
-            query: The query to find similar examples for
-            limit: Maximum number of examples to return
-            tenant_id: Filter by tenant (also includes global examples)
-            domain: Filter by domain (legal, medical, documental)
-            category: Filter by category
-            min_quality_score: Minimum quality score threshold
-            min_similarity: Minimum similarity threshold (default from settings)
-
-        Returns:
-            List of FewShotExample sorted by similarity (descending)
+        Gets an embedding from weaviate-service, then sends it to the
+        Main API's /prompts/few-shot/search endpoint which performs
+        the pgvector similarity search in the backend database.
         """
         if not settings.few_shot_enabled:
             return []
@@ -146,85 +117,66 @@ class FewShotRetriever:
         # Get embedding for query
         embedding = await self._get_embedding(query)
         if embedding is None:
-            logger.warning("Could not get embedding for query, skipping few-shot retrieval")
-            return []
-
-        session_factory = await self._get_db_session()
-        if not session_factory:
-            return []
+            logger.warning("Could not get embedding for query, trying keyword fallback")
+            return await self._fallback_search(query, limit, tenant_id, domain, category, min_quality_score)
 
         try:
-            from sqlalchemy import text
+            client = await self._get_http_client()
+            headers = {
+                "X-API-Key": settings.MICROSERVICES_API_KEY,
+            }
+            if tenant_id:
+                headers["X-Tenant-ID"] = str(tenant_id)
 
-            async with session_factory() as session:
-                # Build the query with pgvector cosine similarity
-                # NOTE: This assumes pgvector extension is installed
-                query_sql = text("""
-                    SELECT
-                        id, tenant_id, question, answer, category, domain, tags,
-                        quality_score, usage_count, positive_feedback, negative_feedback,
-                        is_active, created_at, updated_at,
-                        1 - (embedding_vector <=> :embedding::vector) as similarity
-                    FROM emma_few_shot_examples
-                    WHERE is_active = true
-                      AND embedding_vector IS NOT NULL
-                      AND quality_score >= :min_quality
-                      AND (tenant_id = :tenant_id OR tenant_id IS NULL)
-                      AND (:domain IS NULL OR domain = :domain)
-                      AND (:category IS NULL OR category = :category)
-                    ORDER BY embedding_vector <=> :embedding::vector
-                    LIMIT :limit
-                """)
+            params: Dict[str, Any] = {"limit": limit * 2}
+            if domain:
+                params["domain"] = domain.value if hasattr(domain, "value") else str(domain)
+            if category:
+                params["category"] = category
+            params["min_quality_score"] = min_quality_score
 
-                # Format embedding as pgvector string
-                embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
+            response = await client.post(
+                f"{settings.api_url}/api/v1/prompts/few-shot/search",
+                params=params,
+                json={"query_text": query, "embedding": embedding},
+                headers=headers,
+            )
 
-                result = await session.execute(
-                    query_sql,
-                    {
-                        "embedding": embedding_str,
-                        "tenant_id": str(tenant_id) if tenant_id else None,
-                        "domain": domain.value if domain else None,
-                        "category": category,
-                        "min_quality": min_quality_score,
-                        "limit": limit * 2,  # Fetch more for filtering
-                    },
-                )
-                rows = result.fetchall()
+            if response.status_code != 200:
+                logger.warning(f"Few-shot search API returned {response.status_code}")
+                return await self._fallback_search(query, limit, tenant_id, domain, category, min_quality_score)
 
-                examples = []
-                for row in rows:
-                    similarity = row[14] if row[14] is not None else 0.0
+            rows = response.json()
+            examples = []
+            for row in rows:
+                similarity = row.get("similarity_score", 0.0) or 0.0
+                if similarity < min_similarity:
+                    continue
 
-                    # Filter by minimum similarity
-                    if similarity < min_similarity:
-                        continue
+                examples.append(FewShotExample(
+                    id=UUID(row["id"]),
+                    question=row["question"],
+                    answer=row["answer"],
+                    category=row.get("category"),
+                    domain=row.get("domain"),
+                    tags=row.get("tags"),
+                    quality_score=row.get("quality_score", 1.0),
+                    similarity_score=similarity,
+                ))
 
-                    examples.append(FewShotExample(
-                        id=row[0],
-                        question=row[2],
-                        answer=row[3],
-                        category=row[4],
-                        domain=row[5],
-                        tags=row[6],
-                        quality_score=row[7] or 1.0,
-                        similarity_score=similarity,
-                    ))
+                if len(examples) >= limit:
+                    break
 
-                    if len(examples) >= limit:
-                        break
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.info(
+                f"Few-shot search via API: found {len(examples)} examples "
+                f"(query_len={len(query)}, time={elapsed_ms:.1f}ms)"
+            )
 
-                elapsed_ms = (time.time() - start_time) * 1000
-                logger.info(
-                    f"🔍 Few-shot search: found {len(examples)} examples "
-                    f"(query_len={len(query)}, time={elapsed_ms:.1f}ms)"
-                )
-
-                return examples
+            return examples
 
         except Exception as e:
             logger.error(f"Few-shot search failed: {e}")
-            # Try fallback without pgvector (keyword-based)
             return await self._fallback_search(
                 query, limit, tenant_id, domain, category, min_quality_score
             )
@@ -238,65 +190,52 @@ class FewShotRetriever:
         category: Optional[str],
         min_quality_score: float,
     ) -> List[FewShotExample]:
-        """Fallback keyword-based search when pgvector is unavailable."""
-        session_factory = await self._get_db_session()
-        if not session_factory:
-            return []
-
+        """Fallback: list examples from Main API (no vector search, sorted by quality)."""
         try:
-            from sqlalchemy import text
+            client = await self._get_http_client()
+            headers = {
+                "X-API-Key": settings.MICROSERVICES_API_KEY,
+            }
+            if tenant_id:
+                headers["X-Tenant-ID"] = str(tenant_id)
 
-            # Extract keywords from query
-            keywords = [w.lower() for w in query.split() if len(w) > 3]
+            params: Dict[str, Any] = {
+                "limit": limit,
+                "active_only": True,
+            }
+            if domain:
+                params["domain"] = domain.value if hasattr(domain, "value") else str(domain)
+            if category:
+                params["category"] = category
 
-            async with session_factory() as session:
-                # Simple LIKE-based search
-                query_sql = text("""
-                    SELECT
-                        id, tenant_id, question, answer, category, domain, tags,
-                        quality_score, usage_count, positive_feedback, negative_feedback,
-                        is_active, created_at, updated_at
-                    FROM emma_few_shot_examples
-                    WHERE is_active = true
-                      AND quality_score >= :min_quality
-                      AND (tenant_id = :tenant_id OR tenant_id IS NULL)
-                      AND (:domain IS NULL OR domain = :domain)
-                      AND (:category IS NULL OR category = :category)
-                      AND LOWER(question) LIKE ANY(:keywords)
-                    ORDER BY quality_score DESC, usage_count DESC
-                    LIMIT :limit
-                """)
+            response = await client.get(
+                f"{settings.api_url}/api/v1/prompts/few-shot",
+                params=params,
+                headers=headers,
+            )
 
-                keyword_patterns = [f"%{kw}%" for kw in keywords[:5]]  # Limit keywords
+            if response.status_code != 200:
+                logger.warning(f"Few-shot fallback API returned {response.status_code}")
+                return []
 
-                result = await session.execute(
-                    query_sql,
-                    {
-                        "tenant_id": str(tenant_id) if tenant_id else None,
-                        "domain": domain.value if domain else None,
-                        "category": category,
-                        "min_quality": min_quality_score,
-                        "keywords": keyword_patterns,
-                        "limit": limit,
-                    },
-                )
-                rows = result.fetchall()
+            rows = response.json()
+            examples = []
+            for row in rows:
+                if (row.get("quality_score", 0) or 0) < min_quality_score:
+                    continue
+                examples.append(FewShotExample(
+                    id=UUID(row["id"]),
+                    question=row["question"],
+                    answer=row["answer"],
+                    category=row.get("category"),
+                    domain=row.get("domain"),
+                    tags=row.get("tags"),
+                    quality_score=row.get("quality_score", 1.0),
+                    similarity_score=0.5,  # Fallback doesn't provide real similarity
+                ))
 
-                examples = []
-                for row in rows:
-                    examples.append(FewShotExample(
-                        id=row[0],
-                        question=row[2],
-                        answer=row[3],
-                        category=row[4],
-                        domain=row[5],
-                        tags=row[6],
-                        quality_score=row[7] or 1.0,
-                        similarity_score=0.5,  # Fallback doesn't provide real similarity
-                    ))
-
-                logger.info(f"🔍 Few-shot fallback search: found {len(examples)} examples")
-                return examples
+            logger.info(f"Few-shot fallback search: found {len(examples)} examples")
+            return examples
 
         except Exception as e:
             logger.error(f"Few-shot fallback search failed: {e}")
@@ -313,127 +252,72 @@ class FewShotRetriever:
         tags: Optional[List[str]] = None,
         quality_score: float = 1.0,
     ) -> Optional[UUID]:
-        """
-        Add a new few-shot example with auto-generated embedding.
-
-        Returns the ID of the created example, or None if failed.
-        """
-        # Get embedding for the question
+        """Add a new few-shot example via Main API."""
         embedding = await self._get_embedding(question)
 
-        session_factory = await self._get_db_session()
-        if not session_factory:
-            return None
-
         try:
-            from sqlalchemy import text
+            client = await self._get_http_client()
+            headers = {
+                "X-API-Key": settings.MICROSERVICES_API_KEY,
+            }
+            if tenant_id:
+                headers["X-Tenant-ID"] = str(tenant_id)
 
-            async with session_factory() as session:
-                # Insert example
-                if embedding:
-                    embedding_str = "[" + ",".join(str(x) for x in embedding) + "]"
-                    query_sql = text("""
-                        INSERT INTO emma_few_shot_examples
-                            (tenant_id, question, answer, category, domain, tags,
-                             quality_score, embedding_vector)
-                        VALUES
-                            (:tenant_id, :question, :answer, :category, :domain, :tags,
-                             :quality_score, :embedding::vector)
-                        RETURNING id
-                    """)
-                else:
-                    query_sql = text("""
-                        INSERT INTO emma_few_shot_examples
-                            (tenant_id, question, answer, category, domain, tags, quality_score)
-                        VALUES
-                            (:tenant_id, :question, :answer, :category, :domain, :tags, :quality_score)
-                        RETURNING id
-                    """)
+            payload: Dict[str, Any] = {
+                "question": question,
+                "answer": answer,
+                "category": category,
+                "domain": domain.value if domain and hasattr(domain, "value") else domain,
+                "tags": tags,
+                "quality_score": quality_score,
+            }
+            if embedding:
+                payload["embedding"] = embedding
 
-                params = {
-                    "tenant_id": str(tenant_id) if tenant_id else None,
-                    "question": question,
-                    "answer": answer,
-                    "category": category,
-                    "domain": domain.value if domain else None,
-                    "tags": tags,
-                    "quality_score": quality_score,
-                }
-                if embedding:
-                    params["embedding"] = embedding_str
+            response = await client.post(
+                f"{settings.api_url}/api/v1/prompts/few-shot",
+                json=payload,
+                headers=headers,
+            )
 
-                result = await session.execute(query_sql, params)
-                row = result.fetchone()
-                await session.commit()
-
-                example_id = row[0] if row else None
-                if example_id:
-                    logger.info(f"✅ Added few-shot example {example_id}")
+            if response.status_code == 200:
+                data = response.json()
+                example_id = UUID(data["id"])
+                logger.info(f"Added few-shot example {example_id}")
                 return example_id
+
+            logger.warning(f"Failed to add few-shot example: HTTP {response.status_code}")
+            return None
 
         except Exception as e:
             logger.error(f"Failed to add few-shot example: {e}")
             return None
 
     async def update_usage(self, example_id: UUID) -> None:
-        """Increment usage count for an example."""
-        session_factory = await self._get_db_session()
-        if not session_factory:
-            return
-
+        """Increment usage count via Main API feedback endpoint."""
         try:
-            from sqlalchemy import text
-
-            async with session_factory() as session:
-                await session.execute(
-                    text("""
-                        UPDATE emma_few_shot_examples
-                        SET usage_count = usage_count + 1, updated_at = now()
-                        WHERE id = :id
-                    """),
-                    {"id": str(example_id)},
-                )
-                await session.commit()
-
+            client = await self._get_http_client()
+            await client.post(
+                f"{settings.api_url}/api/v1/prompts/few-shot/{example_id}/feedback",
+                params={"is_positive": True},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+            )
         except Exception as e:
-            logger.error(f"Failed to update usage count: {e}")
+            logger.debug(f"Failed to update usage count: {e}")
 
     async def submit_feedback(
         self,
         example_id: UUID,
         is_positive: bool,
     ) -> None:
-        """Submit feedback for an example (updates quality score)."""
-        session_factory = await self._get_db_session()
-        if not session_factory:
-            return
-
+        """Submit feedback via Main API."""
         try:
-            from sqlalchemy import text
-
-            async with session_factory() as session:
-                if is_positive:
-                    query = text("""
-                        UPDATE emma_few_shot_examples
-                        SET positive_feedback = positive_feedback + 1,
-                            quality_score = LEAST(1.0, quality_score + 0.02),
-                            updated_at = now()
-                        WHERE id = :id
-                    """)
-                else:
-                    query = text("""
-                        UPDATE emma_few_shot_examples
-                        SET negative_feedback = negative_feedback + 1,
-                            quality_score = GREATEST(0.0, quality_score - 0.05),
-                            updated_at = now()
-                        WHERE id = :id
-                    """)
-
-                await session.execute(query, {"id": str(example_id)})
-                await session.commit()
-
-                logger.info(f"📊 Feedback recorded for example {example_id}: {'👍' if is_positive else '👎'}")
-
+            client = await self._get_http_client()
+            await client.post(
+                f"{settings.api_url}/api/v1/prompts/few-shot/{example_id}/feedback",
+                params={"is_positive": is_positive},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+            )
         except Exception as e:
             logger.error(f"Failed to submit feedback: {e}")
 
@@ -442,19 +326,7 @@ class FewShotRetriever:
         examples: List[FewShotExample],
         format_type: str = "qa",
     ) -> str:
-        """
-        Format examples for inclusion in a prompt.
-
-        Args:
-            examples: List of FewShotExample objects
-            format_type: How to format examples
-                - "qa": Q: ... A: ... format
-                - "chat": User: ... Assistant: ... format
-                - "xml": <example> tags format
-
-        Returns:
-            Formatted string ready for prompt injection
-        """
+        """Format examples for inclusion in a prompt."""
         if not examples:
             return ""
 
@@ -487,7 +359,6 @@ class FewShotRetriever:
         if self._http_client and not self._http_client.is_closed:
             await self._http_client.aclose()
         self._http_client = None
-        self._db_session = None
         self._embedding_cache.clear()
 
 
