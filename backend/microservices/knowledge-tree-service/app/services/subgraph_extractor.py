@@ -143,9 +143,9 @@ class SubgraphExtractor:
             query = """
                 MATCH (n)
                 WHERE n.tenant_id = $tenant_id
-                  AND (n.name =~ $pattern
-                       OR n.associated_person =~ $pattern
-                       OR n.title =~ $pattern)
+                  AND (toLower(n.name) CONTAINS $search_val
+                       OR toLower(n.associated_person) CONTAINS $search_val
+                       OR toLower(n.title) CONTAINS $search_val)
                 RETURN id(n) as node_id, labels(n)[0] as label,
                        n.name as name, n.title as title,
                        n.document_id as document_id,
@@ -154,10 +154,10 @@ class SubgraphExtractor:
                        n.associated_person as associated_person
                 LIMIT 5
             """
-            pattern = f"(?i).*{value}.*"
+            search_val = value.lower()
             try:
                 rows = await falkordb_client.execute_cypher(
-                    query, {"tenant_id": tenant_id, "pattern": pattern}
+                    query, {"tenant_id": tenant_id, "search_val": search_val}
                 )
                 for row in rows:
                     label = row.get("label") or "unknown"

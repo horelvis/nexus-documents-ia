@@ -391,11 +391,13 @@ def _extract_date_parts(text: str) -> Optional[Tuple[int, ...]]:
 
 def _extract_numeric_value(text: str) -> Optional[float]:
     """Extract a numeric value from text, normalizing decimal separators."""
-    # Remove currency symbols and words
+    # Remove currency symbols, words, and whitespace around them
     cleaned = re.sub(r"[€$]", "", text)
     cleaned = re.sub(r"\b(EUR|euros?|USD)\b", "", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"%", "", cleaned)
     cleaned = cleaned.strip()
+    # Remove any remaining non-numeric chars except . and ,
+    cleaned = re.sub(r"[^\d.,\-]", "", cleaned)
 
     # Handle European format: 45.000,50 -> 45000.50
     if "," in cleaned and "." in cleaned:
@@ -406,6 +408,13 @@ def _extract_numeric_value(text: str) -> Optional[float]:
         else:
             # 45,000.50 format
             cleaned = cleaned.replace(",", "")
+    elif "." in cleaned:
+        # Could be thousands separator (45.000) or decimal (45.5)
+        parts = cleaned.split(".")
+        if len(parts) == 2 and len(parts[1]) == 3:
+            # 45.000 = European thousands separator
+            cleaned = cleaned.replace(".", "")
+        # else keep as-is (decimal point)
     elif "," in cleaned:
         # Could be decimal comma (45,50) or thousands (45,000)
         parts = cleaned.split(",")
