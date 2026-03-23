@@ -32,12 +32,17 @@ _EDGE_WEIGHTS: Dict[str, float] = {
     "REFERENCES_LAW": 0.85,
     "HAS_MEMORY": 0.2,
     "INSTANCE_OF": 0.3,
+    "EXTRACTED_FROM": 0.9,
+    "ABOUT": 0.85,
+    "CONTRADICTS": 1.0,
+    "SUPPORTS": 0.7,
 }
 
 # Node type bonus (higher = more useful for LLM context)
 _NODE_TYPE_BONUS: Dict[str, float] = {
     "Document": 1.0,
     "Entity": 0.9,
+    "Claim": 0.95,
     "Law": 0.8,
     "Folder": 0.4,
     "Memory": 0.3,
@@ -286,6 +291,130 @@ class SubgraphExtractor:
                         })
             except Exception as e:
                 logger.warning(f"Traversal failed for seed '{seed_name}': {e}")
+
+        # --- Phase 3: Fetch Claims connected to discovered entities ---
+        entity_ids = [
+            n["id"] for n in nodes
+            if n.get("label") == "Entity" and n.get("id")
+        ]
+        if entity_ids:
+            claim_nodes, claim_edges = await self._fetch_entity_claims(
+                tenant_id, entity_ids, seen_nodes,
+            )
+            nodes.extend(claim_nodes)
+            edges.extend(claim_edges)
+
+        return nodes, edges
+
+    async def _fetch_entity_claims(
+        self,
+        tenant_id: str,
+        entity_ids: List[str],
+        seen_nodes: Set[str],
+    ) -> Tuple[List[Dict], List[Dict]]:
+        """Fetch Claims connected to discovered entities via ABOUT edges.
+
+        Also retrieves CONTRADICTS/SUPPORTS edges between claims.
+        """
+        nodes: List[Dict] = []
+        edges: List[Dict] = []
+
+        # Query: Entity <- ABOUT - Claim - EXTRACTED_FROM -> Document
+        # Plus optional CONTRADICTS / SUPPORTS between claims
+        for eid in entity_ids[:10]:  # Cap to avoid huge queries
+            query = """
+                MATCH (e) WHERE id(e) = $entity_id
+                MATCH (c:Claim)-[:ABOUT]->(e)
+                WHERE c.tenant_id = $tenant_id
+                OPTIONAL MATCH (c)-[:EXTRACTED_FROM]->(d:Document)
+                RETURN id(c) AS claim_id,
+                       c.claim_id AS claim_uuid,
+                       c.statement AS statement,
+                       c.claim_type AS claim_type,
+                       c.confidence AS confidence,
+                       c.source_chunk AS source_chunk,
+                       c.verified AS verified,
+                       id(e) AS entity_id,
+                       id(d) AS doc_id
+                LIMIT 20
+            """
+            try:
+                rows = await falkordb_client.execute_cypher(
+                    query, {"tenant_id": tenant_id, "entity_id": int(eid)},
+                )
+            except Exception as e:
+                logger.debug(f"Claim fetch failed for entity {eid}: {e}")
+                continue
+
+            claim_ids_in_batch: List[str] = []
+
+            for row in rows:
+                cid = str(row.get("claim_id") or "")
+                if not cid or cid in seen_nodes:
+                    continue
+                seen_nodes.add(cid)
+                claim_ids_in_batch.append(cid)
+
+                nodes.append({
+                    "id": cid,
+                    "label": "Claim",
+                    "name": row.get("statement") or "",
+                    "properties": {
+                        "claim_id": row.get("claim_uuid"),
+                        "claim_type": row.get("claim_type"),
+                        "confidence": row.get("confidence"),
+                        "source_chunk": row.get("source_chunk"),
+                        "verified": row.get("verified"),
+                    },
+                    "graph_source": "tenant",
+                })
+
+                # ABOUT edge
+                edges.append({
+                    "source_id": cid,
+                    "target_id": str(eid),
+                    "label": "ABOUT",
+                    "properties": {},
+                })
+
+                # EXTRACTED_FROM edge
+                doc_id = row.get("doc_id")
+                if doc_id is not None:
+                    edges.append({
+                        "source_id": cid,
+                        "target_id": str(doc_id),
+                        "label": "EXTRACTED_FROM",
+                        "properties": {},
+                    })
+
+            # Fetch CONTRADICTS edges between claims in this batch
+            if len(claim_ids_in_batch) >= 2:
+                try:
+                    contra_query = """
+                        MATCH (c1:Claim)-[r:CONTRADICTS]->(c2:Claim)
+                        WHERE c1.tenant_id = $tenant_id
+                          AND c2.tenant_id = $tenant_id
+                        RETURN id(c1) AS src, id(c2) AS tgt,
+                               r.contradiction_type AS contra_type
+                    """
+                    contra_rows = await falkordb_client.execute_cypher(
+                        contra_query, {"tenant_id": tenant_id},
+                    )
+                    batch_set = set(claim_ids_in_batch)
+                    for cr in contra_rows:
+                        src = str(cr.get("src") or "")
+                        tgt = str(cr.get("tgt") or "")
+                        if src in batch_set or tgt in batch_set:
+                            edges.append({
+                                "source_id": src,
+                                "target_id": tgt,
+                                "label": "CONTRADICTS",
+                                "properties": {
+                                    "contradiction_type": cr.get("contra_type"),
+                                },
+                            })
+                except Exception as e:
+                    logger.debug(f"Contradiction edge fetch failed: {e}")
 
         return nodes, edges
 

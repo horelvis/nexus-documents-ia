@@ -255,7 +255,7 @@ class StructuralIndexer:
         # Detect person name from folder hierarchy (e.g., /Empleados/Javier Martinez/...)
         associated_person = _detect_person_from_path(path_parts)
 
-        return await self._upsert_document(
+        result = await self._upsert_document(
             tenant_id=tenant_id,
             document_id=document_id,
             title=doc_name or payload.get("title"),
@@ -273,6 +273,25 @@ class StructuralIndexer:
             custom_properties=custom_properties,
             associated_person=associated_person,
         )
+
+        # Extract claims from document text if provided
+        document_text = payload.get("text") or payload.get("document_text") or ""
+        if result.get("success") and document_text:
+            try:
+                from app.services.claim_extractor import claim_extractor
+                claims = await claim_extractor.extract_claims(
+                    tenant_id=tenant_id,
+                    document_id=document_id,
+                    text=document_text,
+                    domain=str(domain or ""),
+                    semantic_type=str(semantic_type or ""),
+                )
+                result["claims_extracted"] = len(claims)
+            except Exception as e:
+                logger.warning(f"Claim extraction failed for {document_id}: {e}")
+                result["claims_extracted"] = 0
+
+        return result
 
     async def _upsert_folder(
         self,

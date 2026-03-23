@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.api.tree import tree_router
 from app.api.entities import router as entities_router
 from app.api.memory_bank import router as memory_bank_router
+from app.api.claims import router as claims_router
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
@@ -39,6 +40,10 @@ async def lifespan(app: FastAPI):
     from app.services.memory_bank_service import memory_bank
     await memory_bank.initialize()
 
+    # Initialize claim extractor
+    from app.services.claim_extractor import claim_extractor
+    logger.info("Claim extractor ready")
+
     yield
     logger.info("Shutting down Knowledge Tree Service...")
 
@@ -65,3 +70,4 @@ async def health_check():
 app.include_router(tree_router, prefix="/tree", tags=["tree"])
 app.include_router(entities_router, tags=["entity-graph"])
 app.include_router(memory_bank_router, tags=["memory-bank"])
+app.include_router(claims_router, tags=["claims"])
