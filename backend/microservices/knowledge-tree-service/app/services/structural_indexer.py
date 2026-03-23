@@ -1,8 +1,9 @@
 """
-Structural indexer for Apache AGE (Knowledge Graph).
+Structural indexer for FalkorDB (Knowledge Graph).
 
-Builds/updates structural_folder and structural_document nodes using
-connector metadata and learned context.
+Builds/updates :Folder and :Document nodes using connector metadata
+and learned context. Detects person entities from folder hierarchy
+and links them via :MENTIONED_IN edges.
 """
 
 import json
@@ -11,7 +12,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
-from app.services.age_client import age_client
+from app.services.falkordb_client import falkordb_client
 from app.services.ontology_service import ontology_service
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ _GENERIC_TYPES = {
     "document",
 }
 
-# Infrastructure path segments (not business-relevant) — per connector type
+# Infrastructure path segments (not business-relevant) -- per connector type
 _INFRA_PATH_SEGMENTS = {
     # Alfresco
     "company home", "sites", "documentlibrary", "document library",
@@ -35,12 +36,6 @@ _INFRA_PATH_SEGMENTS = {
     # OneDrive
     "documents",
 }
-
-
-def _escape(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    return value.replace("'", "''")
 
 
 def _normalize_type_name(value: str) -> str:
@@ -90,7 +85,7 @@ def _extract_business_path(path_parts: list) -> list:
 
     Example:
         ["Company Home", "Sites", "abc123", "documentLibrary", "CLIENTES", "DNI-001", "DOCS"]
-        → ["CLIENTES", "DNI-001", "DOCS"]
+        -> ["CLIENTES", "DNI-001", "DOCS"]
     """
     # Find the index after the last infra segment
     last_infra = -1
@@ -144,7 +139,7 @@ def _detect_person_from_path(path_parts: list) -> Optional[str]:
 
     Example:
         ["Drive", "Empleados", "Javier Martinez", "Contratos"]
-        → "Javier Martinez"
+        -> "Javier Martinez"
     """
     business_parts = _extract_business_path(path_parts)
 
@@ -209,7 +204,7 @@ class StructuralIndexer:
         if not settings.rag_knowledge_graph_enabled:
             return {"success": False, "error": "Knowledge graph disabled"}
 
-        await age_client.initialize()
+        await falkordb_client.initialize()
 
         tenant_id = str(payload.get("tenant_id") or "").strip()
         document_id = str(payload.get("document_id") or "").strip()
@@ -293,50 +288,55 @@ class StructuralIndexer:
         aspects: Optional[List[str]] = None,
         custom_properties: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        graph = settings.age_graph_name
         if not path and not name:
             return {"success": False, "error": "Folder path or name required"}
 
-        set_clauses = []
+        # Build SET clauses for properties
+        props: Dict[str, Any] = {}
         if name:
-            set_clauses.append(f"f.name = '{_escape(name)}'")
+            props["name"] = name
         if path:
-            set_clauses.append(f"f.path = '{_escape(path)}'")
+            props["path"] = path
         if folder_type:
-            set_clauses.append(f"f.folder_type = '{_escape(folder_type)}'")
+            props["folder_type"] = folder_type
         if connector_id:
-            set_clauses.append(f"f.connector_id = '{_escape(str(connector_id))}'")
+            props["connector_id"] = str(connector_id)
         if connector_type:
-            set_clauses.append(f"f.connector_type = '{_escape(connector_type)}'")
+            props["connector_type"] = connector_type
         if node_type:
-            set_clauses.append(f"f.node_type = '{_escape(node_type)}'")
+            props["node_type"] = node_type
         if folder_id:
-            set_clauses.append(f"f.folder_id = '{_escape(folder_id)}'")
+            props["folder_id"] = folder_id
         if aspects:
-            set_clauses.append(f"f.aspects = '{_escape(','.join(aspects))}'")
+            props["aspects"] = ",".join(aspects)
         if custom_properties:
-            set_clauses.append(f"f.custom_properties = '{_escape(json.dumps(custom_properties, ensure_ascii=False))}'")
+            props["custom_properties"] = json.dumps(custom_properties, ensure_ascii=False)
 
-        set_stmt = "SET " + ", ".join(set_clauses) if set_clauses else ""
-        merge_key = f"tenant_id: '{_escape(tenant_id)}'"
+        # Build SET clause string from props
+        set_parts = [f"f.{k} = ${k}" for k in props]
+        set_stmt = "SET " + ", ".join(set_parts) if set_parts else ""
+
+        # MERGE key: tenant_id + path (or folder_id)
         if path:
-            merge_key += f", path: '{_escape(path)}'"
+            merge_key = "tenant_id: $tenant_id, path: $path_key"
+            props["tenant_id"] = tenant_id
+            props["path_key"] = path
         else:
-            merge_key += f", folder_id: '{_escape(folder_id)}'"
+            merge_key = "tenant_id: $tenant_id, folder_id: $folder_id_key"
+            props["tenant_id"] = tenant_id
+            props["folder_id_key"] = folder_id
 
         cypher = f"""
-        SELECT * FROM cypher('{graph}', $$
-            MERGE (f:structural_folder {{{merge_key}}})
+            MERGE (f:Folder {{{merge_key}}})
             {set_stmt}
-            RETURN f.folder_type as folder_type
-        $$) as (folder_type agtype)
+            RETURN f.folder_type AS folder_type
         """
         try:
-            await age_client.execute_cypher(cypher)
+            await falkordb_client.execute_cypher(cypher, props)
             return {
                 "success": True,
                 "indexed_to_graph": True,
-                "node_type": "structural_folder",
+                "node_type": "Folder",
                 "folder_type": folder_type,
             }
         except Exception as e:
@@ -362,109 +362,146 @@ class StructuralIndexer:
         custom_properties: Optional[Dict[str, Any]] = None,
         associated_person: Optional[str] = None,
     ) -> Dict[str, Any]:
-        graph = settings.age_graph_name
-
-        doc_set = []
+        # --- Query 1: MERGE Document node ---
+        doc_props: Dict[str, Any] = {"tenant_id": tenant_id, "document_id": document_id}
+        set_parts = []
         if title:
-            doc_set.append(f"d.title = '{_escape(title)}'")
+            doc_props["title"] = title
+            set_parts.append("d.title = $title")
         if file_path:
-            doc_set.append(f"d.file_path = '{_escape(file_path)}'")
+            doc_props["file_path"] = file_path
+            set_parts.append("d.file_path = $file_path")
         if folder_path:
-            doc_set.append(f"d.folder_path = '{_escape(folder_path)}'")
+            doc_props["folder_path"] = folder_path
+            set_parts.append("d.folder_path = $folder_path")
         if semantic_type:
-            doc_set.append(f"d.semantic_type = '{_escape(semantic_type)}'")
+            doc_props["semantic_type"] = semantic_type
+            set_parts.append("d.semantic_type = $semantic_type")
         if domain:
-            doc_set.append(f"d.domain = '{_escape(str(domain))}'")
+            doc_props["domain"] = str(domain)
+            set_parts.append("d.domain = $domain")
         if document_type:
-            doc_set.append(f"d.document_type = '{_escape(str(document_type))}'")
+            doc_props["document_type"] = str(document_type)
+            set_parts.append("d.document_type = $document_type")
         if connector_id:
-            doc_set.append(f"d.connector_id = '{_escape(str(connector_id))}'")
+            doc_props["connector_id"] = str(connector_id)
+            set_parts.append("d.connector_id = $connector_id")
         if connector_type:
-            doc_set.append(f"d.connector_type = '{_escape(connector_type)}'")
+            doc_props["connector_type"] = connector_type
+            set_parts.append("d.connector_type = $connector_type")
         if weaviate_document_id:
-            doc_set.append(f"d.weaviate_id = '{_escape(str(weaviate_document_id))}'")
+            doc_props["weaviate_id"] = str(weaviate_document_id)
+            set_parts.append("d.weaviate_id = $weaviate_id")
         if aspects:
-            doc_set.append(f"d.aspects = '{_escape(','.join(aspects))}'")
+            doc_props["aspects"] = ",".join(aspects)
+            set_parts.append("d.aspects = $aspects")
         if custom_properties:
-            doc_set.append(f"d.custom_properties = '{_escape(json.dumps(custom_properties, ensure_ascii=False))}'")
+            doc_props["custom_properties"] = json.dumps(custom_properties, ensure_ascii=False)
+            set_parts.append("d.custom_properties = $custom_properties")
         if associated_person:
-            doc_set.append(f"d.associated_person = '{_escape(associated_person)}'")
+            doc_props["associated_person"] = associated_person
+            set_parts.append("d.associated_person = $associated_person")
 
-        doc_set_stmt = "SET " + ", ".join(doc_set) if doc_set else ""
+        set_parts.append("d.indexed_at = timestamp()")
+        doc_set_stmt = "SET " + ", ".join(set_parts) if set_parts else ""
 
-        folder_merge = ""
-        folder_set = ""
-        folder_edge = ""
+        doc_cypher = f"""
+            MERGE (d:Document {{tenant_id: $tenant_id, document_id: $document_id}})
+            {doc_set_stmt}
+            RETURN d.semantic_type AS semantic_type
+        """
+
+        try:
+            await falkordb_client.execute_cypher(doc_cypher, doc_props)
+        except Exception as e:
+            logger.warning(f"Failed to upsert document: {e}")
+            return {"success": False, "error": str(e)}
+
+        # --- Query 2: MERGE Folder + CONTAINED_IN edge (Document -> Folder) ---
         if folder_path:
-            folder_merge = (
-                f"MERGE (f:structural_folder {{tenant_id: '{_escape(tenant_id)}', path: '{_escape(folder_path)}'}})"
-            )
-            folder_set_clauses = []
+            folder_props: Dict[str, Any] = {
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "folder_path": folder_path,
+            }
+            folder_set_parts = []
             if folder_name:
-                folder_set_clauses.append(f"f.name = '{_escape(folder_name)}'")
+                folder_props["folder_name"] = folder_name
+                folder_set_parts.append("f.name = $folder_name")
             if folder_type:
-                folder_set_clauses.append(f"f.folder_type = '{_escape(folder_type)}'")
-            if folder_set_clauses:
-                folder_set = "SET " + ", ".join(folder_set_clauses)
-            folder_edge = "MERGE (f)-[:HAS_DOCUMENT]->(d)"
+                folder_props["folder_type"] = folder_type
+                folder_set_parts.append("f.folder_type = $folder_type")
+            folder_set_stmt = "SET " + ", ".join(folder_set_parts) if folder_set_parts else ""
 
-        # Persona entity extraction: link document to person detected from folder path
-        persona_merge = ""
-        persona_edge = ""
+            folder_cypher = f"""
+                MATCH (d:Document {{tenant_id: $tenant_id, document_id: $document_id}})
+                MERGE (f:Folder {{tenant_id: $tenant_id, path: $folder_path}})
+                {folder_set_stmt}
+                MERGE (d)-[:CONTAINED_IN]->(f)
+            """
+            try:
+                await falkordb_client.execute_cypher(folder_cypher, folder_props)
+            except Exception as e:
+                logger.warning(f"Failed to link document to folder: {e}")
+
+        # --- Query 3: MERGE Person Entity + MENTIONED_IN edge ---
         if associated_person:
-            persona_merge = (
-                f"MERGE (p:Persona {{tenant_id: '{_escape(tenant_id)}', name: '{_escape(associated_person)}'}})"
-            )
-            persona_edge = "MERGE (d)-[:ASOCIADO_A]->(p)"
+            person_props: Dict[str, Any] = {
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "person_name": associated_person,
+                "normalized_name": associated_person.lower().strip(),
+            }
+            person_cypher = """
+                MATCH (d:Document {tenant_id: $tenant_id, document_id: $document_id})
+                MERGE (p:Entity {tenant_id: $tenant_id, entity_type: 'person', normalized_name: $normalized_name})
+                SET p.name = $person_name, p.confidence = 0.8
+                MERGE (p)-[:MENTIONED_IN]->(d)
+            """
+            try:
+                await falkordb_client.execute_cypher(person_cypher, person_props)
+                logger.info(f"Linked document {document_id} to Entity(person) '{associated_person}'")
+            except Exception as e:
+                logger.warning(f"Failed to link person entity: {e}")
 
-        # INSTANCE_OF: link document to ontology EntityType proxy node
-        instance_of_merge = ""
-        instance_of_edge = ""
+        # --- Query 4: INSTANCE_OF ontology link ---
         ontology_type = None
         if semantic_type:
             resolved = ontology_service.resolve_type(semantic_type)
             if resolved:
                 ontology_type = resolved.name
-                instance_of_merge = (
-                    f"MERGE (et:EntityType {{name: '{_escape(resolved.name)}'}})"
-                    f" SET et.display_name = '{_escape(resolved.display_name)}'"
-                    f", et.category = '{_escape(resolved.category)}'"
-                )
+                onto_props: Dict[str, Any] = {
+                    "tenant_id": tenant_id,
+                    "document_id": document_id,
+                    "et_name": resolved.name,
+                    "et_display": resolved.display_name,
+                    "et_category": resolved.category,
+                }
+                onto_set = "SET et.display_name = $et_display, et.category = $et_category"
                 if resolved.parent:
-                    instance_of_merge += f", et.parent = '{_escape(resolved.parent)}'"
-                instance_of_edge = "MERGE (d)-[:INSTANCE_OF]->(et)"
+                    onto_props["et_parent"] = resolved.parent
+                    onto_set += ", et.parent = $et_parent"
 
-        cypher = f"""
-        SELECT * FROM cypher('{graph}', $$
-            MERGE (d:structural_document {{tenant_id: '{_escape(tenant_id)}', document_id: '{_escape(document_id)}'}})
-            {doc_set_stmt}
-            {folder_merge}
-            {folder_set}
-            {folder_edge}
-            {persona_merge}
-            {persona_edge}
-            {instance_of_merge}
-            {instance_of_edge}
-            RETURN d.semantic_type as semantic_type
-        $$) as (semantic_type agtype)
-        """
-        try:
-            await age_client.execute_cypher(cypher)
-            if associated_person:
-                logger.info(f"Linked document {document_id} to Persona '{associated_person}'")
-            if ontology_type:
-                logger.debug(f"Linked document {document_id} INSTANCE_OF '{ontology_type}'")
-            return {
-                "success": True,
-                "indexed_to_graph": True,
-                "node_type": "structural_document",
-                "semantic_type": semantic_type,
-                "ontology_type": ontology_type,
-                "associated_person": associated_person,
-            }
-        except Exception as e:
-            logger.warning(f"Failed to upsert document: {e}")
-            return {"success": False, "error": str(e)}
+                onto_cypher = f"""
+                    MATCH (d:Document {{tenant_id: $tenant_id, document_id: $document_id}})
+                    MERGE (et:EntityType {{name: $et_name}})
+                    {onto_set}
+                    MERGE (d)-[:INSTANCE_OF]->(et)
+                """
+                try:
+                    await falkordb_client.execute_cypher(onto_cypher, onto_props)
+                    logger.debug(f"Linked document {document_id} INSTANCE_OF '{ontology_type}'")
+                except Exception as e:
+                    logger.warning(f"Failed to link ontology type: {e}")
+
+        return {
+            "success": True,
+            "indexed_to_graph": True,
+            "node_type": "Document",
+            "semantic_type": semantic_type,
+            "ontology_type": ontology_type,
+            "associated_person": associated_person,
+        }
 
 
 structural_indexer = StructuralIndexer()
