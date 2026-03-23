@@ -2,7 +2,6 @@
 
 Defines schemas for:
 - Prompt Rules (dynamic injection based on context)
-- Few-Shot Examples (Q&A with embeddings for similarity search)
 - Guardrails (post-processing validation)
 """
 from datetime import datetime
@@ -40,14 +39,6 @@ class GuardrailAction(str, Enum):
     BLOCK = "block"    # Reject the response entirely
     WARN = "warn"      # Log warning but allow response
     REDACT = "redact"  # Remove matched content
-
-
-class FewShotDomain(str, Enum):
-    """Valid domains for few-shot examples."""
-    LEGAL = "legal"
-    MEDICAL = "medical"
-    DOCUMENTAL = "documental"
-    GENERAL = "general"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -151,83 +142,6 @@ class RuleEvaluationResult(BaseModel):
     matched_rules: List[PromptRuleResponse]
     actions_to_apply: List[Dict[str, Any]]
     context_modifications: Dict[str, Any]
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# FEW-SHOT EXAMPLES
-# ══════════════════════════════════════════════════════════════════════════════
-
-class FewShotExampleCreate(BaseModel):
-    """Create a new few-shot example."""
-    question: str = Field(..., min_length=10, description="Example question")
-    answer: str = Field(..., min_length=10, description="Example answer")
-    category: Optional[str] = Field(None, max_length=100, description="Category for grouping")
-    domain: Optional[FewShotDomain] = Field(None, description="Applicable domain")
-    tags: Optional[List[str]] = Field(None, description="Tags for filtering")
-    quality_score: float = Field(default=1.0, ge=0.0, le=1.0, description="Quality rating")
-
-
-class FewShotExampleUpdate(BaseModel):
-    """Update an existing few-shot example."""
-    question: Optional[str] = Field(None, min_length=10)
-    answer: Optional[str] = Field(None, min_length=10)
-    category: Optional[str] = Field(None, max_length=100)
-    domain: Optional[FewShotDomain] = None
-    tags: Optional[List[str]] = None
-    quality_score: Optional[float] = Field(None, ge=0.0, le=1.0)
-    is_active: Optional[bool] = None
-
-
-class FewShotExampleResponse(BaseModel):
-    """Few-shot example response."""
-    id: UUID
-    tenant_id: Optional[UUID] = None
-    question: str
-    answer: str
-    category: Optional[str] = None
-    domain: Optional[str] = None
-    tags: Optional[List[str]] = None
-    quality_score: float
-    usage_count: int
-    positive_feedback: int
-    negative_feedback: int
-    is_active: bool
-    created_at: datetime
-    updated_at: datetime
-    # Similarity score when returned from search
-    similarity_score: Optional[float] = None
-
-    class Config:
-        from_attributes = True
-
-
-class FewShotExampleListResponse(BaseModel):
-    """List of few-shot examples."""
-    examples: List[FewShotExampleResponse]
-    total: int
-
-
-class FewShotSearchRequest(BaseModel):
-    """Search for similar few-shot examples."""
-    query: str = Field(..., min_length=3, description="Query to find similar examples")
-    limit: int = Field(default=3, ge=1, le=10, description="Maximum examples to return")
-    domain: Optional[FewShotDomain] = Field(None, description="Filter by domain")
-    category: Optional[str] = Field(None, description="Filter by category")
-    min_quality_score: float = Field(default=0.5, ge=0.0, le=1.0)
-
-
-class FewShotSearchResponse(BaseModel):
-    """Search results for few-shot examples."""
-    examples: List[FewShotExampleResponse]
-    query: str
-    search_time_ms: float
-
-
-class FewShotFeedbackRequest(BaseModel):
-    """Submit feedback for a few-shot example."""
-    example_id: UUID
-    is_positive: bool
-    comment: Optional[str] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -368,7 +282,6 @@ class PromptHealthResponse(BaseModel):
     use_langfuse_prompts: bool
     cached_prompt_count: int
     rules_count: int
-    few_shot_count: int
     guardrails_count: int
     last_sync: Optional[datetime] = None
 

@@ -3,14 +3,13 @@ Prompt Management API — Proxy endpoints that call the main API for database op
 
 This module provides REST endpoints for:
 - Rules: CRUD and evaluation
-- Few-Shot: CRUD, search, and feedback
 - Guardrails: CRUD and testing
 - Utilities: Cache invalidation, health, Langfuse sync
 
 Architecture:
 - Database operations are handled by the main API (backend:8000)
 - This service calls the main API via HTTP for all CRUD operations
-- Local services (RuleEngine, FewShotRetriever, GuardrailService) handle business logic
+- Local services (RuleEngine, GuardrailService) handle business logic
 """
 
 import logging
@@ -24,7 +23,6 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from app.core.config import settings
 from app.services.prompt_composer import get_prompt_composer
 from app.services.rule_engine import get_rule_engine, RuleContext
-from app.services.few_shot_retriever import get_few_shot_retriever
 from app.services.guardrail_service import get_guardrail_service
 from app.services.langfuse_prompt_client import get_langfuse_prompt_client
 from app.schemas.prompts import (
@@ -35,15 +33,6 @@ from app.schemas.prompts import (
     PromptRuleListResponse,
     RuleEvaluationRequest,
     RuleEvaluationResult,
-    # Few-Shot
-    FewShotExampleCreate,
-    FewShotExampleUpdate,
-    FewShotExampleResponse,
-    FewShotExampleListResponse,
-    FewShotSearchRequest,
-    FewShotSearchResponse,
-    FewShotFeedbackRequest,
-    FewShotDomain,
     # Guardrails
     GuardrailCreate,
     GuardrailUpdate,
@@ -264,159 +253,6 @@ async def evaluate_rules(
     except Exception as e:
         logger.error(f"Failed to evaluate rules: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# FEW-SHOT ENDPOINTS
-# ══════════════════════════════════════════════════════════════════════════════
-
-@router.post("/few-shot", response_model=FewShotExampleResponse)
-async def create_few_shot_example(
-    example: FewShotExampleCreate,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
-    _: bool = Depends(verify_api_key),
-):
-    """Add a new few-shot example with auto-generated embedding."""
-    try:
-        retriever = get_few_shot_retriever()
-
-        # Generate embedding locally (we have the embedding model)
-        embedding = await retriever._get_embedding(example.question)
-
-        # Call main API with embedding
-        result = await _call_main_api(
-            "POST",
-            "/few-shot",
-            tenant_id=tenant_id,
-            json_data={
-                "question": example.question,
-                "answer": example.answer,
-                "category": example.category,
-                "domain": example.domain.value if example.domain else None,
-                "tags": example.tags,
-                "quality_score": example.quality_score,
-                "embedding": embedding,
-            },
-        )
-
-        return result
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to create few-shot example: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/few-shot", response_model=FewShotExampleListResponse)
-async def list_few_shot_examples(
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
-    domain: Optional[FewShotDomain] = Query(None),
-    category: Optional[str] = Query(None),
-    active_only: bool = Query(True),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    _: bool = Depends(verify_api_key),
-):
-    """List few-shot examples with filtering."""
-    params = {
-        "active_only": active_only,
-        "limit": limit,
-        "offset": offset,
-    }
-    if domain:
-        params["domain"] = domain.value
-    if category:
-        params["category"] = category
-
-    examples = await _call_main_api(
-        "GET",
-        "/few-shot",
-        tenant_id=tenant_id,
-        params=params,
-    )
-
-    return FewShotExampleListResponse(examples=examples, total=len(examples))
-
-
-@router.post("/few-shot/search", response_model=FewShotSearchResponse)
-async def search_few_shot_examples(
-    request: FewShotSearchRequest,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
-    _: bool = Depends(verify_api_key),
-):
-    """Search for similar few-shot examples using semantic similarity."""
-    try:
-        start_time = time.time()
-        retriever = get_few_shot_retriever()
-
-        # Use local retriever for search (has embedding model)
-        examples = await retriever.search(
-            request.query,
-            limit=request.limit,
-            tenant_id=tenant_id,
-            domain=request.domain,
-            category=request.category,
-            min_quality_score=request.min_quality_score,
-        )
-
-        elapsed_ms = (time.time() - start_time) * 1000
-
-        return FewShotSearchResponse(
-            examples=[
-                FewShotExampleResponse(
-                    id=ex.id,
-                    tenant_id=tenant_id,
-                    question=ex.question,
-                    answer=ex.answer,
-                    category=ex.category,
-                    domain=ex.domain,
-                    tags=ex.tags,
-                    quality_score=ex.quality_score,
-                    usage_count=0,
-                    positive_feedback=0,
-                    negative_feedback=0,
-                    is_active=True,
-                    created_at=None,
-                    updated_at=None,
-                    similarity_score=ex.similarity_score,
-                )
-                for ex in examples
-            ],
-            query=request.query,
-            search_time_ms=elapsed_ms,
-        )
-
-    except Exception as e:
-        logger.error(f"Failed to search few-shot examples: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/few-shot/{example_id}")
-async def delete_few_shot_example(
-    example_id: UUID,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
-    _: bool = Depends(verify_api_key),
-):
-    """Delete (deactivate) a few-shot example."""
-    return await _call_main_api(
-        "DELETE",
-        f"/few-shot/{example_id}",
-        tenant_id=tenant_id,
-    )
-
-
-@router.post("/few-shot/feedback")
-async def submit_few_shot_feedback(
-    request: FewShotFeedbackRequest,
-    _: bool = Depends(verify_api_key),
-):
-    """Submit feedback for a few-shot example."""
-    return await _call_main_api(
-        "POST",
-        f"/few-shot/{request.example_id}/feedback",
-        params={"is_positive": request.is_positive},
-    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -645,7 +481,6 @@ async def health_check(
             use_langfuse_prompts=True,  # Langfuse is mandatory
             cached_prompt_count=health.get("cached_prompt_count", 0),
             rules_count=counts.get("rules", 0),
-            few_shot_count=counts.get("few_shot_examples", 0),
             guardrails_count=counts.get("guardrails", 0),
             last_sync=None,
         )

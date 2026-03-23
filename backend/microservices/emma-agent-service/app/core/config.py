@@ -195,7 +195,7 @@ class Settings(BaseSettings):
     memory_recall_max_clue_tokens: int = int(os.getenv("MEMORY_RECALL_MAX_CLUE_TOKENS", "300"))
     memory_recall_fallback_enabled: bool = os.getenv("MEMORY_RECALL_FALLBACK_ENABLED", "true").lower() == "true"
 
-    # MemoRAG — global memory model (pgvector)
+    # MemoRAG — global memory model (delegates to Weaviate)
     memorag_enabled: bool = os.getenv("MEMORAG_ENABLED", "true").lower() == "true"
     memorag_table_name: str = os.getenv("MEMORAG_TABLE_NAME", "memorag_memory")
     memorag_embedding_dim: int = int(os.getenv("MEMORAG_EMBEDDING_DIM", "1024"))
@@ -245,12 +245,6 @@ class Settings(BaseSettings):
     langfuse_prompt_label: str = os.getenv("LANGFUSE_PROMPT_LABEL", "production")
     # Local cache TTL for Langfuse prompts (seconds)
     langfuse_prompt_cache_ttl: int = int(os.getenv("LANGFUSE_PROMPT_CACHE_TTL", "300"))
-    # Enable few-shot example retrieval
-    few_shot_enabled: bool = os.getenv("FEW_SHOT_ENABLED", "true").lower() == "true"
-    # Max few-shot examples to include in prompts
-    few_shot_max_examples: int = int(os.getenv("FEW_SHOT_MAX_EXAMPLES", "3"))
-    # Min similarity score for few-shot retrieval (0.0-1.0)
-    few_shot_min_similarity: float = float(os.getenv("FEW_SHOT_MIN_SIMILARITY", "0.6"))
     # Enable guardrail validation
     guardrails_enabled: bool = os.getenv("GUARDRAILS_ENABLED", "true").lower() == "true"
     # Enable rule engine for dynamic prompt injection

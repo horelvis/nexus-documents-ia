@@ -2,8 +2,7 @@
 
 Memorization is no longer needed: documents are already indexed in Weaviate
 by the standard indexing pipeline.  Recall delegates to Weaviate hybrid
-search (BM25 + vector), which is superior to the old pgvector vector-only
-approach.
+search (BM25 + vector), which is superior to the old vector-only approach.
 """
 
 import logging
@@ -44,7 +43,7 @@ class MemoRAGService:
             semantic_type: Optional semantic type filter (contrato, factura, ...).
 
         Returns:
-            List[RecallItem] compatible with the old pgvector interface.
+            List[RecallItem] compatible with the legacy interface.
         """
         try:
             from app.clients.weaviate_client import get_weaviate_client

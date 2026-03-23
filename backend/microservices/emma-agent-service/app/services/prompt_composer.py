@@ -4,7 +4,6 @@ Prompt Composer — Main orchestrator for the Prompt Management system.
 Combines:
 - Langfuse Prompts (versioning, web UI, A/B testing)
 - Rule Engine (dynamic injection by conditions)
-- Few-Shot Retriever (via Main API, no direct pgvector)
 - Guardrail Service (post-processing validation)
 
 Usage:
@@ -22,9 +21,7 @@ from uuid import UUID
 from app.core.config import settings
 from app.services.langfuse_prompt_client import get_langfuse_prompt_client, CachedPrompt
 from app.services.rule_engine import get_rule_engine, RuleContext, RuleAction
-from app.services.few_shot_retriever import get_few_shot_retriever, FewShotExample
 from app.services.guardrail_service import get_guardrail_service, OverallValidationResult
-from app.schemas.prompts import FewShotDomain
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +37,6 @@ class ComposedPrompt:
     is_fallback: bool = False
     # Applied modifications
     rules_applied: List[str] = field(default_factory=list)
-    few_shot_count: int = 0
-    few_shot_examples: List[FewShotExample] = field(default_factory=list)
     context_modifications: Dict[str, Any] = field(default_factory=dict)
     # Timing
     composition_time_ms: float = 0.0
@@ -78,7 +73,6 @@ class PromptComposer:
     def __init__(self):
         self._prompt_client = get_langfuse_prompt_client()
         self._rule_engine = get_rule_engine()
-        self._few_shot_retriever = get_few_shot_retriever()
         self._guardrail_service = get_guardrail_service()
 
     def _build_template_context(self, state: Dict[str, Any]) -> Dict[str, Any]:
@@ -144,7 +138,6 @@ class PromptComposer:
         state: Dict[str, Any],
         *,
         fallback_prompt: Optional[str] = None,
-        include_few_shot: bool = True,
         include_sector: bool = True,
         tenant_id: Optional[UUID] = None,
     ) -> ComposedPrompt:
@@ -155,9 +148,8 @@ class PromptComposer:
             agent_name: Name of the agent (e.g., "LaborAgent", "DocGenAgent")
             state: RAG pipeline state
             fallback_prompt: Fallback prompt if nothing else is found
-            include_few_shot: Whether to include few-shot examples
             include_sector: Whether to include sector context
-            tenant_id: Tenant ID for tenant-specific rules/examples
+            tenant_id: Tenant ID for tenant-specific rules
 
         Returns:
             ComposedPrompt with fully assembled prompt and metadata
@@ -224,33 +216,7 @@ class PromptComposer:
                 # Update context with modifications
                 template_context.update(rule_result.context_modifications)
 
-        # 3. Retrieve and add few-shot examples
-        if include_few_shot and settings.few_shot_enabled:
-            query = state.get("query", "")
-            if query:
-                domain = self._get_few_shot_domain(template_context.get("sector"))
-
-                examples = await self._few_shot_retriever.search(
-                    query,
-                    limit=settings.few_shot_max_examples,
-                    tenant_id=tenant_id,
-                    domain=domain,
-                    min_similarity=settings.few_shot_min_similarity,
-                )
-
-                if examples:
-                    result.few_shot_count = len(examples)
-                    result.few_shot_examples = examples
-
-                    # Format and prepend examples
-                    examples_text = self._few_shot_retriever.format_for_prompt(examples, "qa")
-                    result.content = examples_text + "\n\n" + result.content
-
-                    # Update usage counts (fire and forget)
-                    for ex in examples:
-                        await self._few_shot_retriever.update_usage(ex.id)
-
-        # 4. Add sector context if enabled
+        # 3. Add sector context if enabled
         if include_sector and template_context.get("sector"):
             sector_prompt = await self._get_sector_prompt(template_context["sector"], template_context)
             if sector_prompt:
@@ -261,7 +227,7 @@ class PromptComposer:
         logger.info(
             f"📝 Composed prompt for {agent_name}: "
             f"prompt={prompt_name}, version={prompt_version}, "
-            f"rules={len(result.rules_applied)}, few_shot={result.few_shot_count}, "
+            f"rules={len(result.rules_applied)}, "
             f"time={result.composition_time_ms:.1f}ms"
         )
 
@@ -428,19 +394,6 @@ class PromptComposer:
 
         return f"emma_agent_{name}"
 
-    def _get_few_shot_domain(self, sector: Optional[str]) -> Optional[FewShotDomain]:
-        """Map sector to FewShotDomain."""
-        if not sector:
-            return None
-
-        sector_mapping = {
-            "legal": FewShotDomain.LEGAL,
-            "medical": FewShotDomain.MEDICAL,
-            "documental": FewShotDomain.DOCUMENTAL,
-        }
-
-        return sector_mapping.get(sector.lower())
-
     def invalidate_cache(self, prompt_names: Optional[List[str]] = None) -> int:
         """Invalidate all caches."""
         count = self._prompt_client.invalidate_cache(prompt_names)
@@ -463,14 +416,12 @@ class PromptComposer:
             "use_langfuse_prompts": True,  # Langfuse is mandatory
             "cached_prompt_count": cache_stats.get("total_cached", 0),
             "rules_enabled": settings.rule_engine_enabled,
-            "few_shot_enabled": settings.few_shot_enabled,
             "guardrails_enabled": settings.guardrails_enabled,
         }
 
     async def close(self) -> None:
         """Clean up resources."""
         await self._rule_engine.close()
-        await self._few_shot_retriever.close()
         await self._guardrail_service.close()
 
 
