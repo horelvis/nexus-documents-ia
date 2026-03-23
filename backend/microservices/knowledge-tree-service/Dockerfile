@@ -1,5 +1,5 @@
 # Knowledge Tree Service Dockerfile
-# Structural context service for Emma (Apache AGE)
+# Structural context service for Emma (FalkorDB graph backend)
 
 FROM python:3.12-slim
 

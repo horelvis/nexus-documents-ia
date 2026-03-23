@@ -12,7 +12,7 @@ Domain Coverage:
 
 Data Sources:
 - PublicKnowledge (Weaviate) - Full-text legal documents
-- LegalGraphService (Apache AGE) - Laws, articles, relationships
+- LegalGraphService (FalkorDB) - Laws, articles, relationships
 
 Tools:
 - boe_search: Semantic search in BOE legislation

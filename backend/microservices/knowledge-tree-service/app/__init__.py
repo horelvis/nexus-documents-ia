@@ -2,7 +2,7 @@
 Knowledge Tree Service
 
 Provides structural summaries and tree context for Emma
-using Apache AGE as the source of truth.
+using FalkorDB as the graph backend.
 """
 
 __version__ = "1.0.0"

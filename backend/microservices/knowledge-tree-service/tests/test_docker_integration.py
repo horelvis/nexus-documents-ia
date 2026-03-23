@@ -30,11 +30,12 @@ class TestDockerIntegration:
         assert result[0]["val"] == "integration_test"
 
     @pytest.mark.asyncio
-    async def test_age_client_still_works(self):
-        """AGE client should still be functional (dual-period)."""
+    async def test_falkordb_config_complete(self):
+        """FalkorDB config should have all required settings."""
         from app.core.config import settings
-        assert settings.database_url is not None
-        # We don't actually connect to AGE here — just verify config exists
+        assert settings.falkordb_host is not None
+        assert settings.falkordb_port > 0
+        assert settings.falkordb_graph_name is not None
 
     @pytest.mark.asyncio
     async def test_falkordb_config_loaded(self):

@@ -1,6 +1,11 @@
-"""MemoRAG service: memorize and recall using pgvector."""
+"""DEPRECATED: This module will be removed. Memory recall should use
+Weaviate hybrid search instead of pgvector.
+
+MemoRAG service: memorize and recall using pgvector.
+"""
 
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -28,6 +33,11 @@ class MemoRAGService:
         self._cache_max_size = 200
 
     async def initialize(self) -> None:
+        warnings.warn(
+            "MemoRAG pgvector is deprecated. Use Weaviate hybrid search.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         await self._store.initialize()
 
     async def _get_http_client(self) -> httpx.AsyncClient:

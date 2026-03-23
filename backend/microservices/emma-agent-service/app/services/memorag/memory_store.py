@@ -1,6 +1,11 @@
-"""MemoRAG memory store using pgvector."""
+"""DEPRECATED: This module will be removed. Memory recall should use
+Weaviate hybrid search instead of pgvector.
+
+MemoRAG memory store using pgvector.
+"""
 
 import hashlib
+import warnings
 import json
 import logging
 from dataclasses import dataclass
@@ -41,6 +46,12 @@ class MemoRAGStore:
     async def initialize(self) -> None:
         if self._initialized:
             return
+
+        warnings.warn(
+            "MemoRAG pgvector is deprecated. Use Weaviate hybrid search.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         session_factory = await self._get_session_factory()
 

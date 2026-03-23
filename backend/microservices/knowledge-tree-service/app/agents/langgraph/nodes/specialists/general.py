@@ -7,7 +7,7 @@ Handles general document search, analysis, and Q&A.
 Domain Coverage:
 - General document search and retrieval
 - Document summarization
-- Structural queries (counting, listing, filtering via Apache AGE graph)
+- Structural queries (counting, listing, filtering via FalkorDB graph)
 - Cross-domain questions
 - Fallback when no specialist matches
 
@@ -92,7 +92,7 @@ class DocumentSummaryInput(BaseModel):
 
 
 class StructuralQueryInput(BaseModel):
-    """Input for structural queries using Apache AGE graph."""
+    """Input for structural queries using FalkorDB graph."""
     query: str = Field(
         description="Natural language query about document structure. Examples: "
                     "'¿Cuántos expedientes tengo del año 2006?', "
@@ -227,7 +227,7 @@ async def structural_query(
     user_id: str = "",
 ) -> Dict[str, Any]:
     """
-    Execute structural query using Apache AGE graph.
+    Execute structural query using FalkorDB graph.
 
     Use this for:
     - Counting documents/folders by criteria (year, type, client)
@@ -274,22 +274,22 @@ async def structural_query(
 
         # Step 2: Routing to graph
         tracker.add_connector_step(
-            "Apache AGE",
+            "FalkorDB",
             "conectando",
             "base de datos de grafos"
         )
 
-        # Initialize AGE connection
+        # Initialize FalkorDB connection
         await tenant_knowledge_service.initialize()
 
-        # Step 3: Route determination - always GRAPH_ONLY (direct AGE)
+        # Step 3: Route determination - always GRAPH_ONLY (direct FalkorDB)
         tracker.add_step(
             StepType.ROUTING,
-            "Ruta: GRAPH_ONLY - Consulta directa al grafo Apache AGE (rápido, sin leer contenido)",
+            "Ruta: GRAPH_ONLY - Consulta directa al grafo FalkorDB (rápido, sin leer contenido)",
             confidence=0.95
         )
 
-        # Gather data from AGE graph
+        # Gather data from FalkorDB graph
         totals = await tenant_knowledge_service.get_totals(tenant_id)
         type_counts = await tenant_knowledge_service.get_document_type_counts(tenant_id)
         top_folders = await tenant_knowledge_service.get_top_folders(tenant_id)
@@ -387,7 +387,7 @@ general_tools = [
         coroutine=structural_query,
         name="structural_query",
         description=(
-            "Query document structure using Apache AGE graph. "
+            "Query document structure using FalkorDB graph. "
             "USE THIS FIRST for counting, listing, or filtering queries. "
             "Examples: '¿Cuántos expedientes tengo del año 2006?', "
             "'Lista todos los contratos de ACME', 'Documentos del último mes'"

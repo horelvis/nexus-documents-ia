@@ -1,7 +1,7 @@
 """
-Apache AGE Structural Connector
+FalkorDB Structural Connector
 
-Conector para consultas estructurales usando Apache AGE (grafo PostgreSQL).
+Conector para consultas estructurales usando FalkorDB (grafo).
 Maneja consultas de conteo, listado y filtrado de documentos.
 
 Este es el conector por defecto para consultas estructurales.
@@ -47,7 +47,7 @@ _STRUCTURAL_REGEX = [re.compile(p, re.IGNORECASE) for p in STRUCTURAL_PATTERNS]
 @register_connector("apache_age")
 class ApacheAGEConnector(BaseConnector):
     """
-    Connector for Apache AGE graph database.
+    Connector for FalkorDB graph database.
 
     Handles structural queries like:
     - Counting documents/folders
@@ -56,7 +56,7 @@ class ApacheAGEConnector(BaseConnector):
     - Existence checks
     """
 
-    name = "Apache AGE"
+    name = "FalkorDB"
     description = "Base de datos de grafos para consultas estructurales (conteo, listado, filtrado)"
     capabilities = [
         ConnectorCapability.COUNT,
@@ -71,7 +71,7 @@ class ApacheAGEConnector(BaseConnector):
         self._client = None
 
     async def initialize(self) -> bool:
-        """Initialize connection to Apache AGE via tenant_knowledge_service."""
+        """Initialize connection to FalkorDB via tenant_knowledge_service."""
         try:
             from app.services.tenant_knowledge_service import tenant_knowledge_service
             await tenant_knowledge_service.initialize()
@@ -79,7 +79,7 @@ class ApacheAGEConnector(BaseConnector):
             self._initialized = True
             return True
         except Exception as e:
-            logger.error(f"Failed to initialize Apache AGE connector: {e}")
+            logger.error(f"Failed to initialize FalkorDB connector: {e}")
             return False
 
     async def can_handle(self, query: str, context: Dict[str, Any]) -> float:
@@ -111,7 +111,7 @@ class ApacheAGEConnector(BaseConnector):
         context: Dict[str, Any],
     ) -> ConnectorResult:
         """
-        Execute structural query via Apache AGE.
+        Execute structural query via FalkorDB.
         """
         tracker = ReasoningTracker.get_current()
         tracker.set_source("apache_age")
@@ -121,7 +121,7 @@ class ApacheAGEConnector(BaseConnector):
 
         # Step 1: Connection
         tracker.add_connector_step(
-            "Apache AGE",
+            "FalkorDB",
             "conectando",
             "base de datos de grafos"
         )
@@ -182,7 +182,7 @@ class ApacheAGEConnector(BaseConnector):
             )
 
         except Exception as e:
-            logger.error(f"Apache AGE query failed: {e}")
+            logger.error(f"FalkorDB query failed: {e}")
             tracker.add_error_step(str(e), source="apache_age")
 
             return ConnectorResult(

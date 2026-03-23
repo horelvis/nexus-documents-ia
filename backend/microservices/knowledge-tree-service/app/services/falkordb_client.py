@@ -3,7 +3,7 @@ Async FalkorDB client for Knowledge Tree Service.
 
 Provides graph database operations via FalkorDB (Redis-based graph DB
 with OpenCypher support). Follows the same singleton + retry pattern
-as age_client.py for consistency.
+as the former age_client.py (now removed) for consistency.
 """
 
 import asyncio

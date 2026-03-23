@@ -50,7 +50,7 @@ class WeaviateClient(BaseHTTPClient):
     - Vector search (semantic similarity)
     - RAG pipeline execution
     - Document content retrieval
-    - Structural queries (Apache AGE graph)
+    - Structural queries (FalkorDB graph)
 
     Example:
         client = WeaviateClient()
@@ -367,7 +367,7 @@ class WeaviateClient(BaseHTTPClient):
         """
         Get entities related to a given entity.
 
-        Uses Apache AGE graph traversal for:
+        Uses FalkorDB graph traversal for:
         - Finding related documents
         - Entity relationship exploration
         - Knowledge graph navigation

@@ -3,7 +3,7 @@ Entity Graph API
 
 Endpoints for storing and querying extracted entities in the sector graph.
 Called by weaviate-service during indexing to persist entities from
-the KnowledgeExtractionService into Apache AGE.
+the KnowledgeExtractionService into FalkorDB.
 """
 
 import logging

@@ -9,7 +9,7 @@ Design Decisions:
 2. For complex queries, use LLM to reason about agent selection
 3. Support multi-domain queries (e.g., "labor + fiscal")
 4. Detect structural queries (count, list, filter) and route to general_agent
-5. Structural queries use Apache AGE graph via weaviate-service
+5. Structural queries use FalkorDB graph via weaviate-service
 
 The node populates:
 - detected_domains: What domains are relevant
@@ -84,7 +84,7 @@ def _is_structural_query(query: str) -> Tuple[bool, str]:
     """
     Detect if query is structural (count, list, filter, exists).
 
-    Structural queries should use the Apache AGE graph via structural_query tool.
+    Structural queries should use the FalkorDB graph via structural_query tool.
 
     Args:
         query: User's natural language query
@@ -387,7 +387,7 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
         }
 
     # Step 2: Check for structural queries (count, list, filter, exists)
-    # These should use general_agent with structural_query tool (Apache AGE graph)
+    # These should use general_agent with structural_query tool (FalkorDB graph)
     is_structural, matched_pattern = _is_structural_query(query)
 
     if is_structural:
@@ -401,14 +401,14 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
         )
         tracker.add_step(
             StepType.ROUTING,
-            "Decisión: usar Apache AGE (base de datos de grafos)",
+            "Decisión: usar FalkorDB (base de datos de grafos)",
             confidence=0.95,
             metadata={"route": "GRAPH", "pattern": matched_pattern}
         )
 
         plan_reasoning = (
             f"Consulta estructural detectada (patrón: '{matched_pattern}'). "
-            f"Ejecutando en Apache AGE (grafo)."
+            f"Ejecutando en FalkorDB (grafo)."
         )
 
         logger.info(
@@ -535,7 +535,7 @@ async def plan_node(state: RAGState) -> Dict[str, Any]:
 
 # NOTE: SLM Router fast-path removed - SLM Router is in weaviate-service, not emma-agent-service.
 # Structural queries are now handled via general_agent's structural_query tool which calls
-# weaviate-service's /weaviate/structural/query endpoint (Apache AGE graph).
+# weaviate-service's /weaviate/structural/query endpoint (FalkorDB graph).
 
 
 async def _detect_domains(
