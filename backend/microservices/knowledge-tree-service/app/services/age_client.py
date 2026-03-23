@@ -2,6 +2,7 @@
 Minimal Apache AGE client for Knowledge Tree Service.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Any, Dict, List, Optional
@@ -11,6 +12,9 @@ import asyncpg
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+MAX_RETRIES = 10
+RETRY_BASE_DELAY = 2.0
 
 
 class AGEClient:
@@ -33,14 +37,34 @@ class AGEClient:
         if "+asyncpg" in db_url:
             db_url = db_url.replace("+asyncpg", "")
 
-        self._pool = await asyncpg.create_pool(
-            db_url,
-            min_size=1,
-            max_size=5,
-            command_timeout=30,
-        )
-        self._initialized = True
-        logger.info("✅ AGE client initialized")
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                self._pool = await asyncpg.create_pool(
+                    db_url,
+                    min_size=1,
+                    max_size=5,
+                    command_timeout=30,
+                )
+                self._initialized = True
+                logger.info("✅ AGE client initialized")
+                return
+            except (
+                asyncpg.exceptions.CannotConnectNowError,
+                ConnectionRefusedError,
+                OSError,
+            ) as e:
+                delay = RETRY_BASE_DELAY * attempt
+                if attempt < MAX_RETRIES:
+                    logger.warning(
+                        f"⏳ Database not ready (attempt {attempt}/{MAX_RETRIES}): {e} "
+                        f"— retrying in {delay:.0f}s"
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(
+                        f"❌ Could not connect to database after {MAX_RETRIES} attempts: {e}"
+                    )
+                    raise
 
     @asynccontextmanager
     async def _get_connection(self):

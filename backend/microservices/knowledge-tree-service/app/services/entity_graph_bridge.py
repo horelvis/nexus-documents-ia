@@ -15,7 +15,6 @@ Flow:
         -> HTTP POST /tree/entities/store
         -> EntityGraphBridge.store_entities()
         -> FalkorDB knowledge graph (:Entity nodes)
-           + :INSTANCE_OF -> :EntityType (ontology proxy)
            + :MENTIONED_IN -> :Document (provenance)
 
 Usage:
@@ -36,7 +35,6 @@ from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.services.falkordb_client import falkordb_client
-from app.services.ontology_service import ontology_service
 
 logger = logging.getLogger(__name__)
 
@@ -77,43 +75,13 @@ _TYPE_TO_ENTITY_TYPE: Dict[str, str] = {
     "diagnostico": "diagnosis",
 }
 
-_TYPE_TO_ONTOLOGY: Dict[str, str] = {
-    "person": "person",
-    "empleado": "employee",
-    "trabajador": "employee",
-    "representante": "person",
-    "firmante": "person",
-    "organization": "organization",
-    "organizacion": "organization",
-    "empresa": "company",
-    "compania": "company",
-    "sociedad": "company",
-    "entidad": "organization",
-    "ley": "law",
-    "real_decreto": "law",
-    "reference": "law",
-    "normativa": "law",
-    "articulo": "clause",
-    "clause": "clause",
-    "concepto_legal": "concept",
-    "concept": "concept",
-    "termino": "concept",
-    "term": "concept",
-    "boe_referencia": "law",
-    "contrato": "contract",
-    "farmaco": "medication",
-    "medicamento": "medication",
-    "diagnostico": "diagnosis",
-}
-
-
 class EntityGraphBridge:
     """
     Bridges extracted entities into the FalkorDB knowledge graph.
 
-    Creates :Entity nodes with entity_type property and links them to:
-    - The source document via :MENTIONED_IN edges (with provenance)
-    - The ontology via :INSTANCE_OF edges to :EntityType proxy nodes
+    Creates :Entity nodes with entity_type property and links them to
+    the source document via :MENTIONED_IN edges (with provenance).
+    Entity type is stored as a string property on the node.
     """
 
     def __init__(self):
@@ -123,8 +91,6 @@ class EntityGraphBridge:
         if self._initialized:
             return
         await falkordb_client.initialize()
-        if not ontology_service._initialized:
-            await ontology_service.initialize()
         self._initialized = True
 
     async def store_entities(
@@ -138,7 +104,6 @@ class EntityGraphBridge:
 
         Each entity becomes an :Entity node with edges:
         - (entity)-[:MENTIONED_IN {extraction_method, confidence}]->(Document)
-        - (entity)-[:INSTANCE_OF]->(EntityType)
 
         Args:
             tenant_id: Tenant identifier
@@ -174,8 +139,6 @@ class EntityGraphBridge:
                 skipped += 1
                 continue
 
-            ontology_type = _TYPE_TO_ONTOLOGY.get(raw_type)
-
             try:
                 await self._upsert_entity_node(
                     tenant_id=tenant_id,
@@ -183,7 +146,6 @@ class EntityGraphBridge:
                     entity_value=entity_value,
                     entity_type=entity_type,
                     confidence=confidence,
-                    ontology_type=ontology_type,
                 )
                 stored += 1
             except Exception as e:
@@ -280,9 +242,8 @@ class EntityGraphBridge:
                     tenant_id: $tenant_id,
                     document_id: $document_id
                 })
-                OPTIONAL MATCH (e)-[:INSTANCE_OF]->(et:EntityType)
                 RETURN e.entity_type AS entity_type, e.name AS name,
-                       e.confidence AS confidence, et.name AS ontology_type
+                       e.confidence AS confidence
             """
             rows = await falkordb_client.execute_cypher(cypher, {
                 "tenant_id": tenant_id,
@@ -293,7 +254,6 @@ class EntityGraphBridge:
                     "entity_type": r.get("entity_type"),
                     "name": r.get("name"),
                     "confidence": r.get("confidence"),
-                    "ontology_type": r.get("ontology_type"),
                 }
                 for r in rows
             ]
@@ -388,7 +348,6 @@ class EntityGraphBridge:
         entity_value: str,
         entity_type: str,
         confidence: float,
-        ontology_type: Optional[str],
     ) -> None:
         """
         MERGE an :Entity node and link it to the source :Document.
@@ -396,60 +355,37 @@ class EntityGraphBridge:
         Creates:
         - :Entity node with name, entity_type, confidence
         - :MENTIONED_IN edge to :Document (with extraction_method + confidence)
-        - :INSTANCE_OF edge to :EntityType (ontology proxy)
         """
-        # Build INSTANCE_OF clause if ontology type is known
-        instance_of_cypher = ""
-        onto_params: Dict[str, Any] = {}
-        if ontology_type:
-            resolved = ontology_service.resolve_type(ontology_type)
-            if resolved:
-                instance_of_cypher = """
-                    WITH e
-                    MERGE (et:EntityType {name: $et_name})
-                    SET et.display_name = $et_display, et.category = $et_category
-                """
-                onto_params["et_name"] = resolved.name
-                onto_params["et_display"] = resolved.display_name
-                onto_params["et_category"] = resolved.category
-                if resolved.parent:
-                    instance_of_cypher += ", et.parent = $et_parent"
-                    onto_params["et_parent"] = resolved.parent
-                instance_of_cypher += "\nMERGE (e)-[:INSTANCE_OF]->(et)"
-
-        base_params: Dict[str, Any] = {
+        params: Dict[str, Any] = {
             "tenant_id": tenant_id,
             "document_id": document_id,
             "entity_value": entity_value,
             "entity_type": entity_type,
             "confidence": confidence,
         }
-        all_params = {**base_params, **onto_params}
 
         # For public_knowledge entities, Document nodes may not exist
         # in the graph -- create entity without MENTIONED_IN edge
         if tenant_id == "public_knowledge":
-            cypher = f"""
-                MERGE (e:Entity {{tenant_id: $tenant_id, name: $entity_value}})
+            cypher = """
+                MERGE (e:Entity {tenant_id: $tenant_id, name: $entity_value})
                 SET e.entity_type = $entity_type,
                     e.confidence = $confidence,
                     e.source_document_id = $document_id,
                     e.shared = true
-                {instance_of_cypher}
                 RETURN e.name AS name
             """
         else:
-            cypher = f"""
-                MERGE (e:Entity {{tenant_id: $tenant_id, name: $entity_value}})
+            cypher = """
+                MERGE (e:Entity {tenant_id: $tenant_id, name: $entity_value})
                 SET e.entity_type = $entity_type,
                     e.confidence = $confidence
                 WITH e
-                MATCH (d:Document {{tenant_id: $tenant_id, document_id: $document_id}})
-                MERGE (e)-[:MENTIONED_IN {{extraction_method: 'entity_extraction', confidence: $confidence}}]->(d)
-                {instance_of_cypher}
+                MATCH (d:Document {tenant_id: $tenant_id, document_id: $document_id})
+                MERGE (e)-[:MENTIONED_IN {extraction_method: 'entity_extraction', confidence: $confidence}]->(d)
                 RETURN e.name AS name
             """
-        await falkordb_client.execute_cypher(cypher, all_params)
+        await falkordb_client.execute_cypher(cypher, params)
 
 
 # Singleton

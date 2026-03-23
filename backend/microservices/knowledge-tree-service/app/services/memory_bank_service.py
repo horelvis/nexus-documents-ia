@@ -1,24 +1,24 @@
 """
-Memory Bank Service — MemoRAG-inspired Document Memory Store
+Memory Bank Service -- MemoRAG-inspired Document Memory Store (FalkorDB)
 
 Stores compact document "memories" (summaries, key entities, topics) as
-DocumentMemory nodes in the Apache AGE sector graph, linked to their
-source structural_document via HAS_MEMORY edges.
+DocumentMemory nodes in the FalkorDB knowledge graph, linked to their
+source Document node via HAS_MEMORY edges.
 
 These memories serve as retrieval clues for the planner model (4B):
 instead of searching raw chunks, the planner scans lightweight memory
 nodes to decide what documents are relevant, then retrieves full content.
 
 Architecture:
-    structural_document -[:HAS_MEMORY]-> DocumentMemory
-                                            |
-                                            +-- summary (2-3 sentences)
-                                            +-- key_entities (JSON array)
-                                            +-- key_topics (JSON array)
-                                            +-- domain (legal, fiscal, etc.)
-                                            +-- semantic_type (factura, contrato, etc.)
-                                            +-- memory_version (for re-generation)
-                                            +-- created_at (ISO timestamp)
+    Document -[:HAS_MEMORY]-> DocumentMemory
+                                    |
+                                    +-- summary (2-3 sentences)
+                                    +-- key_entities (JSON array)
+                                    +-- key_topics (JSON array)
+                                    +-- domain (legal, fiscal, etc.)
+                                    +-- semantic_type (factura, contrato, etc.)
+                                    +-- memory_version (for re-generation)
+                                    +-- updated_at (ISO timestamp)
 
 Usage:
     from app.services.memory_bank_service import memory_bank
@@ -41,28 +41,16 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from app.core.config import settings
-from app.services.age_client import age_client
+from app.services.falkordb_client import falkordb_client
 
 logger = logging.getLogger(__name__)
 
 MEMORY_VERSION = 1
 
 
-def _escape(value: Optional[str]) -> Optional[str]:
-    if value is None:
-        return None
-    return value.replace("'", "''")
-
-
-def _json_escape(items: List[str]) -> str:
-    """Escape a list as a JSON string safe for Cypher property."""
-    return _escape(json.dumps(items, ensure_ascii=False))
-
-
 class MemoryBankService:
     """
-    CRUD service for DocumentMemory nodes in the sector graph.
+    CRUD service for DocumentMemory nodes in the FalkorDB graph.
 
     Each document gets at most one memory node (MERGE by document_id).
     Memories are lightweight (~200 tokens) and designed for bulk scan
@@ -75,7 +63,7 @@ class MemoryBankService:
     async def initialize(self) -> None:
         if self._initialized:
             return
-        await age_client.initialize()
+        await falkordb_client.initialize()
         self._initialized = True
 
     async def store_memory(
@@ -89,14 +77,14 @@ class MemoryBankService:
         semantic_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Store or update a document memory in the sector graph.
+        Store or update a document memory in the graph.
 
         Creates a DocumentMemory node and links it to the source
-        structural_document via HAS_MEMORY edge.
+        Document node via HAS_MEMORY edge.
 
         Args:
             tenant_id: Tenant identifier
-            document_id: Source document ID (matches structural_document.document_id)
+            document_id: Source document ID (matches Document.document_id)
             summary: Compact summary (2-3 sentences, ~100 tokens)
             key_entities: List of important entity names
             key_topics: List of key topics/themes
@@ -109,41 +97,46 @@ class MemoryBankService:
         if not self._initialized:
             await self.initialize()
 
-        if not age_client._pool:
-            return {"success": False, "error": "AGE client not available"}
-
-        graph = settings.age_graph_name
-        if not graph:
-            return {"success": False, "error": "No sector graph configured"}
+        if not falkordb_client._initialized:
+            return {"success": False, "error": "FalkorDB client not available"}
 
         now = datetime.now(timezone.utc).isoformat()
-        entities_json = _json_escape(key_entities or [])
-        topics_json = _json_escape(key_topics or [])
+        entities_json = json.dumps(key_entities or [], ensure_ascii=False)
+        topics_json = json.dumps(key_topics or [], ensure_ascii=False)
 
         try:
-            cypher = f"""
-            SELECT * FROM cypher('{graph}', $$
-                MERGE (m:DocumentMemory {{
-                    tenant_id: '{_escape(tenant_id)}',
-                    document_id: '{_escape(document_id)}'
-                }})
-                SET m.summary = '{_escape(summary)}',
-                    m.key_entities = '{entities_json}',
-                    m.key_topics = '{topics_json}',
-                    m.domain = '{_escape(domain or "")}',
-                    m.semantic_type = '{_escape(semantic_type or "")}',
-                    m.memory_version = {MEMORY_VERSION},
-                    m.updated_at = '{now}'
+            query = """
+                MERGE (m:DocumentMemory {
+                    tenant_id: $tenant_id,
+                    document_id: $document_id
+                })
+                SET m.summary = $summary,
+                    m.key_entities = $entities_json,
+                    m.key_topics = $topics_json,
+                    m.domain = $domain,
+                    m.semantic_type = $semantic_type,
+                    m.memory_version = $memory_version,
+                    m.updated_at = $updated_at
                 WITH m
-                MATCH (d:structural_document {{
-                    tenant_id: '{_escape(tenant_id)}',
-                    document_id: '{_escape(document_id)}'
-                }})
+                MATCH (d:Document {
+                    tenant_id: $tenant_id,
+                    document_id: $document_id
+                })
                 MERGE (d)-[:HAS_MEMORY]->(m)
-                RETURN id(m)
-            $$) as (memory_id agtype)
+                RETURN id(m) AS memory_id
             """
-            await age_client.execute_cypher(cypher)
+            params = {
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "summary": summary,
+                "entities_json": entities_json,
+                "topics_json": topics_json,
+                "domain": domain or "",
+                "semantic_type": semantic_type or "",
+                "memory_version": MEMORY_VERSION,
+                "updated_at": now,
+            }
+            await falkordb_client.execute_cypher(query, params)
 
             logger.info(
                 f"MemoryBank: stored memory for doc {document_id} "
@@ -162,33 +155,28 @@ class MemoryBankService:
         document_id: str,
     ) -> Optional[Dict[str, Any]]:
         """Get the memory for a specific document."""
-        if not age_client._pool:
-            return None
-
-        graph = settings.age_graph_name
-        if not graph:
+        if not falkordb_client._initialized:
             return None
 
         try:
-            cypher = f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (m:DocumentMemory {{
-                    tenant_id: '{_escape(tenant_id)}',
-                    document_id: '{_escape(document_id)}'
-                }})
-                RETURN m.document_id as document_id,
-                       m.summary as summary,
-                       m.key_entities as key_entities,
-                       m.key_topics as key_topics,
-                       m.domain as domain,
-                       m.semantic_type as semantic_type,
-                       m.memory_version as memory_version,
-                       m.updated_at as updated_at
-            $$) as (document_id agtype, summary agtype, key_entities agtype,
-                    key_topics agtype, domain agtype, semantic_type agtype,
-                    memory_version agtype, updated_at agtype)
+            query = """
+                MATCH (m:DocumentMemory {
+                    tenant_id: $tenant_id,
+                    document_id: $document_id
+                })
+                RETURN m.document_id AS document_id,
+                       m.summary AS summary,
+                       m.key_entities AS key_entities,
+                       m.key_topics AS key_topics,
+                       m.domain AS domain,
+                       m.semantic_type AS semantic_type,
+                       m.memory_version AS memory_version,
+                       m.updated_at AS updated_at
             """
-            rows = await age_client.execute_cypher(cypher)
+            rows = await falkordb_client.execute_cypher(query, {
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+            })
             if not rows:
                 return None
 
@@ -222,46 +210,42 @@ class MemoryBankService:
         Returns:
             List of memory dicts sorted by relevance
         """
-        if not age_client._pool:
+        if not falkordb_client._initialized:
             return []
 
-        graph = settings.age_graph_name
-        if not graph:
-            return []
+        # Build WHERE clause with parameters
+        where_parts = ["m.tenant_id = $tenant_id"]
+        params: Dict[str, Any] = {"tenant_id": tenant_id, "limit": limit}
 
-        # Build WHERE clause
-        where_parts = [f"m.tenant_id = '{_escape(tenant_id)}'"]
         if domain:
-            where_parts.append(f"m.domain = '{_escape(domain)}'")
+            where_parts.append("m.domain = $domain")
+            params["domain"] = domain
         if semantic_type:
-            where_parts.append(f"m.semantic_type = '{_escape(semantic_type)}'")
+            where_parts.append("m.semantic_type = $semantic_type")
+            params["semantic_type"] = semantic_type
 
         where_clause = " AND ".join(where_parts)
 
         try:
-            cypher = f"""
-            SELECT * FROM cypher('{graph}', $$
+            query = f"""
                 MATCH (m:DocumentMemory)
                 WHERE {where_clause}
-                RETURN m.document_id as document_id,
-                       m.summary as summary,
-                       m.key_entities as key_entities,
-                       m.key_topics as key_topics,
-                       m.domain as domain,
-                       m.semantic_type as semantic_type,
-                       m.memory_version as memory_version,
-                       m.updated_at as updated_at
+                RETURN m.document_id AS document_id,
+                       m.summary AS summary,
+                       m.key_entities AS key_entities,
+                       m.key_topics AS key_topics,
+                       m.domain AS domain,
+                       m.semantic_type AS semantic_type,
+                       m.memory_version AS memory_version,
+                       m.updated_at AS updated_at
                 ORDER BY m.updated_at DESC
-                LIMIT {limit}
-            $$) as (document_id agtype, summary agtype, key_entities agtype,
-                    key_topics agtype, domain agtype, semantic_type agtype,
-                    memory_version agtype, updated_at agtype)
+                LIMIT $limit
             """
-            rows = await age_client.execute_cypher(cypher)
+            rows = await falkordb_client.execute_cypher(query, params)
 
             memories = [self._parse_memory_row(r) for r in rows]
 
-            # Client-side topic filtering (AGE doesn't support JSON array containment)
+            # Client-side topic filtering (graph DB doesn't support JSON array containment)
             if query_topics:
                 query_set = {t.lower() for t in query_topics}
                 scored = []
@@ -289,23 +273,16 @@ class MemoryBankService:
 
         Used by the indexing pipeline to skip re-generation.
         """
-        if not age_client._pool:
-            return []
-
-        graph = settings.age_graph_name
-        if not graph:
+        if not falkordb_client._initialized:
             return []
 
         try:
-            cypher = f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (m:DocumentMemory {{tenant_id: '{_escape(tenant_id)}'}})
-                RETURN m.document_id as document_id
-            $$) as (document_id agtype)
+            query = """
+                MATCH (m:DocumentMemory {tenant_id: $tenant_id})
+                RETURN m.document_id AS document_id
             """
-            rows = await age_client.execute_cypher(cypher)
-            from app.services.ontology_service import _clean_agtype
-            return [_clean_agtype(r.get("document_id")) for r in rows if r.get("document_id")]
+            rows = await falkordb_client.execute_cypher(query, {"tenant_id": tenant_id})
+            return [r.get("document_id") for r in rows if r.get("document_id")]
         except Exception as e:
             logger.warning(f"MemoryBank: get_all_document_ids_with_memory failed: {e}")
             return []
@@ -316,25 +293,21 @@ class MemoryBankService:
         document_id: str,
     ) -> bool:
         """Delete a document's memory node and its HAS_MEMORY edge."""
-        if not age_client._pool:
-            return False
-
-        graph = settings.age_graph_name
-        if not graph:
+        if not falkordb_client._initialized:
             return False
 
         try:
-            cypher = f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (m:DocumentMemory {{
-                    tenant_id: '{_escape(tenant_id)}',
-                    document_id: '{_escape(document_id)}'
-                }})
+            query = """
+                MATCH (m:DocumentMemory {
+                    tenant_id: $tenant_id,
+                    document_id: $document_id
+                })
                 DETACH DELETE m
-                RETURN true
-            $$) as (deleted agtype)
             """
-            await age_client.execute_cypher(cypher)
+            await falkordb_client.execute_cypher(query, {
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+            })
             logger.info(f"MemoryBank: deleted memory for doc {document_id}")
             return True
         except Exception as e:
@@ -343,33 +316,27 @@ class MemoryBankService:
 
     async def get_stats(self, tenant_id: str) -> Dict[str, Any]:
         """Get memory bank statistics for a tenant."""
-        if not age_client._pool:
-            return {"total_memories": 0, "by_domain": {}, "by_type": {}}
-
-        graph = settings.age_graph_name
-        if not graph:
+        if not falkordb_client._initialized:
             return {"total_memories": 0, "by_domain": {}, "by_type": {}}
 
         try:
-            cypher = f"""
-            SELECT * FROM cypher('{graph}', $$
-                MATCH (m:DocumentMemory {{tenant_id: '{_escape(tenant_id)}'}})
-                RETURN m.domain as domain, m.semantic_type as semantic_type, count(*) as cnt
-            $$) as (domain agtype, semantic_type agtype, cnt agtype)
+            query = """
+                MATCH (m:DocumentMemory {tenant_id: $tenant_id})
+                RETURN m.domain AS domain, m.semantic_type AS semantic_type,
+                       count(*) AS cnt
             """
-            rows = await age_client.execute_cypher(cypher)
+            rows = await falkordb_client.execute_cypher(query, {"tenant_id": tenant_id})
 
-            from app.services.ontology_service import _clean_agtype
             total = 0
             by_domain: Dict[str, int] = {}
             by_type: Dict[str, int] = {}
 
             for r in rows:
-                count = int(_clean_agtype(r.get("cnt")) or 0)
+                count = int(r.get("cnt", 0))
                 total += count
-                domain = _clean_agtype(r.get("domain")) or "unknown"
-                stype = _clean_agtype(r.get("semantic_type")) or "unknown"
-                by_domain[domain] = by_domain.get(domain, 0) + count
+                domain_val = r.get("domain") or "unknown"
+                stype = r.get("semantic_type") or "unknown"
+                by_domain[domain_val] = by_domain.get(domain_val, 0) + count
                 by_type[stype] = by_type.get(stype, 0) + count
 
             return {
@@ -381,35 +348,39 @@ class MemoryBankService:
             logger.warning(f"MemoryBank: get_stats failed: {e}")
             return {"total_memories": 0, "by_domain": {}, "by_type": {}}
 
-    # ─── Internal ─────────────────────────────────────────────
+    # --- Internal ---------------------------------------------------------
 
     @staticmethod
     def _parse_memory_row(row: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse an AGE row into a clean memory dict."""
-        from app.services.ontology_service import _clean_agtype
-
-        key_entities_raw = _clean_agtype(row.get("key_entities")) or "[]"
-        key_topics_raw = _clean_agtype(row.get("key_topics")) or "[]"
+        """Parse a FalkorDB row into a clean memory dict."""
+        key_entities_raw = row.get("key_entities") or "[]"
+        key_topics_raw = row.get("key_topics") or "[]"
 
         try:
-            key_entities = json.loads(key_entities_raw) if isinstance(key_entities_raw, str) else []
+            key_entities = json.loads(key_entities_raw) if isinstance(key_entities_raw, str) else key_entities_raw
         except (json.JSONDecodeError, TypeError):
             key_entities = []
 
         try:
-            key_topics = json.loads(key_topics_raw) if isinstance(key_topics_raw, str) else []
+            key_topics = json.loads(key_topics_raw) if isinstance(key_topics_raw, str) else key_topics_raw
         except (json.JSONDecodeError, TypeError):
             key_topics = []
 
+        # Ensure lists
+        if not isinstance(key_entities, list):
+            key_entities = []
+        if not isinstance(key_topics, list):
+            key_topics = []
+
         return {
-            "document_id": _clean_agtype(row.get("document_id")),
-            "summary": _clean_agtype(row.get("summary")),
+            "document_id": row.get("document_id"),
+            "summary": row.get("summary"),
             "key_entities": key_entities,
             "key_topics": key_topics,
-            "domain": _clean_agtype(row.get("domain")),
-            "semantic_type": _clean_agtype(row.get("semantic_type")),
-            "memory_version": _clean_agtype(row.get("memory_version")),
-            "updated_at": _clean_agtype(row.get("updated_at")),
+            "domain": row.get("domain"),
+            "semantic_type": row.get("semantic_type"),
+            "memory_version": row.get("memory_version"),
+            "updated_at": row.get("updated_at"),
         }
 
 

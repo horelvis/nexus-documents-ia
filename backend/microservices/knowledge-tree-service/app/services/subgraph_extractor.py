@@ -20,7 +20,18 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.core.config import settings
 from app.services.age_client import age_client
-from app.services.ontology_service import _clean_agtype
+
+
+def _clean_agtype(val):
+    """Strip agtype quotes and ::type suffix from AGE return values.
+    TODO: Remove once subgraph_extractor is migrated to FalkorDB (Phase 2c).
+    """
+    if val is None:
+        return None
+    s = str(val).strip('"').strip("'")
+    if "::" in s:
+        s = s.split("::")[0].strip('"').strip("'")
+    return s if s and s != "null" else None
 
 logger = logging.getLogger(__name__)
 

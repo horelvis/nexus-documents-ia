@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
 from app.services.falkordb_client import falkordb_client
-from app.services.ontology_service import ontology_service
 
 logger = logging.getLogger(__name__)
 
@@ -464,42 +463,11 @@ class StructuralIndexer:
             except Exception as e:
                 logger.warning(f"Failed to link person entity: {e}")
 
-        # --- Query 4: INSTANCE_OF ontology link ---
-        ontology_type = None
-        if semantic_type:
-            resolved = ontology_service.resolve_type(semantic_type)
-            if resolved:
-                ontology_type = resolved.name
-                onto_props: Dict[str, Any] = {
-                    "tenant_id": tenant_id,
-                    "document_id": document_id,
-                    "et_name": resolved.name,
-                    "et_display": resolved.display_name,
-                    "et_category": resolved.category,
-                }
-                onto_set = "SET et.display_name = $et_display, et.category = $et_category"
-                if resolved.parent:
-                    onto_props["et_parent"] = resolved.parent
-                    onto_set += ", et.parent = $et_parent"
-
-                onto_cypher = f"""
-                    MATCH (d:Document {{tenant_id: $tenant_id, document_id: $document_id}})
-                    MERGE (et:EntityType {{name: $et_name}})
-                    {onto_set}
-                    MERGE (d)-[:INSTANCE_OF]->(et)
-                """
-                try:
-                    await falkordb_client.execute_cypher(onto_cypher, onto_props)
-                    logger.debug(f"Linked document {document_id} INSTANCE_OF '{ontology_type}'")
-                except Exception as e:
-                    logger.warning(f"Failed to link ontology type: {e}")
-
         return {
             "success": True,
             "indexed_to_graph": True,
             "node_type": "Document",
             "semantic_type": semantic_type,
-            "ontology_type": ontology_type,
             "associated_person": associated_person,
         }
 
