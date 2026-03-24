@@ -390,3 +390,133 @@ class TestBatchClaims:
         # Normalise to frozenset pairs for undirected dedup check
         pairs = [frozenset([e["source_id"], e["target_id"]]) for e in contra_edges]
         assert len(pairs) == len(set(pairs)), "Duplicate CONTRADICTS edges found"
+
+
+@pytest.mark.asyncio
+class TestFullSubgraphExtraction:
+    """End-to-end: full extract() call uses ≤4 total Cypher queries."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def seed_data(self, falkordb_client):
+        await falkordb_client.execute_cypher("""
+            CREATE (e1:Entity {name: 'Juan Garcia', entity_type: 'person', tenant_id: 't1', normalized_name: 'juan garcia'})
+            CREATE (e2:Entity {name: 'Acme Corp', entity_type: 'organization', tenant_id: 't1', normalized_name: 'acme corp'})
+            CREATE (d1:Document {document_id: 'doc-int-1', title: 'Contrato', tenant_id: 't1'})
+            CREATE (c1:Claim {claim_id: 'claim-int-1', statement: '45000 EUR', claim_type: 'numeric', confidence: 0.9, tenant_id: 't1'})
+            CREATE (e1)-[:MENTIONED_IN]->(d1)
+            CREATE (e2)-[:MENTIONED_IN]->(d1)
+            CREATE (e1)-[:RELATED_TO]->(e2)
+            CREATE (c1)-[:ABOUT]->(e1)
+            CREATE (c1)-[:EXTRACTED_FROM]->(d1)
+        """)
+
+    def _make_extractor(self, client):
+        """Create a SubgraphExtractor wired to the fixture client."""
+        import app.services.subgraph_extractor as mod
+        mod.falkordb_client = client
+        extractor = mod.SubgraphExtractor()
+        extractor._initialized = True
+        return extractor
+
+    async def test_total_queries_within_budget(self, falkordb_client):
+        """Full subgraph extraction must use ≤4 Cypher queries.
+
+        The expected pipeline is exactly 3 queries:
+            1. _resolve_seeds  — single UNWIND batch
+            2. _traverse       — single 2-hop batch
+            3. _fetch_entity_claims — single claims batch
+
+        Budget is ≤4 to allow one extra query in future without breaking the test.
+        """
+        from app.services.falkordb_client import QueryCounter
+        extractor = self._make_extractor(falkordb_client)
+
+        entities = [
+            {"value": "juan garcia", "type": "person"},
+            {"value": "acme corp", "type": "organization"},
+        ]
+
+        async with QueryCounter() as counter:
+            result = await extractor.extract(
+                tenant_id='t1',
+                entities=entities,
+                max_hops=2,
+                max_nodes=30,
+            )
+            assert counter.count <= 4, (
+                f"Query budget exceeded: {counter.count} queries (max 4). "
+                f"Each of seed-resolution, traversal, and claims should be "
+                f"exactly 1 batch query."
+            )
+
+        assert result is not None
+
+    async def test_extract_returns_nodes_and_edges(self, falkordb_client):
+        """extract() returns a dict with nodes, edges, root_entities, pruned_count."""
+        extractor = self._make_extractor(falkordb_client)
+
+        entities = [{"value": "juan garcia", "type": "person"}]
+        result = await extractor.extract(
+            tenant_id='t1',
+            entities=entities,
+            max_hops=2,
+            max_nodes=30,
+        )
+
+        assert isinstance(result, dict), f"Expected dict, got {type(result)}"
+        assert "nodes" in result, "Result must have 'nodes' key"
+        assert "edges" in result, "Result must have 'edges' key"
+        assert "root_entities" in result, "Result must have 'root_entities' key"
+        assert "pruned_count" in result, "Result must have 'pruned_count' key"
+
+        # Should find nodes — at minimum the Document and Entity seeds
+        assert len(result["nodes"]) > 0, "Expected at least some nodes"
+
+    async def test_extract_empty_entities_returns_empty(self, falkordb_client):
+        """extract() with no matching entities returns empty graph."""
+        from app.services.falkordb_client import QueryCounter
+        extractor = self._make_extractor(falkordb_client)
+
+        async with QueryCounter() as counter:
+            result = await extractor.extract(
+                tenant_id='t1',
+                entities=[{"value": "nonexistent entity xyz", "type": "person"}],
+                max_hops=2,
+                max_nodes=30,
+            )
+
+        assert result["nodes"] == []
+        assert result["edges"] == []
+        # Seed resolution fires 1 query (finds nothing), then returns early
+        assert counter.count <= 2, f"Empty result must use ≤2 queries, got {counter.count}"
+
+    async def test_extract_query_count_does_not_scale_with_entities(self, falkordb_client):
+        """Query count must stay constant regardless of how many entities are searched."""
+        from app.services.falkordb_client import QueryCounter
+        extractor = self._make_extractor(falkordb_client)
+
+        # Single entity
+        async with QueryCounter() as c1:
+            await extractor.extract(
+                tenant_id='t1',
+                entities=[{"value": "juan garcia", "type": "person"}],
+                max_hops=2,
+                max_nodes=30,
+            )
+
+        # Two entities — query count must not double
+        async with QueryCounter() as c2:
+            await extractor.extract(
+                tenant_id='t1',
+                entities=[
+                    {"value": "juan garcia", "type": "person"},
+                    {"value": "acme corp", "type": "organization"},
+                ],
+                max_hops=2,
+                max_nodes=30,
+            )
+
+        assert c2.count <= c1.count + 1, (
+            f"Query count jumped from {c1.count} (1 entity) to {c2.count} (2 entities). "
+            f"Batch queries should not scale linearly with entity count."
+        )
