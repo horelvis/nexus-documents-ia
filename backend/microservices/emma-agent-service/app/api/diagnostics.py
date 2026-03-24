@@ -526,6 +526,75 @@ async def _check_smart_search_person(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
+async def _check_smart_search_legislation(tenant_id: str) -> Dict[str, Any]:
+    """Verify SmartSearch can query PublicKnowledge (legislation scope)."""
+    t0 = time.time()
+    try:
+        from app.agents.langgraph.tools.smart_search import SmartSearchTool
+
+        tool = SmartSearchTool()
+        result = await tool.execute(
+            arguments={
+                "query": "despido improcedente plazo",
+                "scope": "legislation",
+                "limit": 3,
+            },
+            context={"tenant_id": tenant_id, "sector_config": {}},
+        )
+        ms = (time.time() - t0) * 1000
+        if result.success:
+            lines = result.output.count("──")
+            if lines > 0:
+                return _ok(ms, f"legislation search OK, ~{lines} result blocks")
+            return _ok(ms, "legislation search OK (0 results, collection may be empty)")
+        return _fail(ms, f"legislation search failed: {result.output[:100]}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_graph_entity_query(tenant_id: str) -> Dict[str, Any]:
+    """Verify FalkorDB entity query via KTS documents-by-entity endpoint."""
+    t0 = time.time()
+    try:
+        from app.clients.knowledge_tree_client import get_knowledge_tree_client
+
+        client = get_knowledge_tree_client()
+        # Use a probe entity name — may return 0 results, but must not crash
+        result = await client.get_documents_by_person(
+            tenant_id=tenant_id,
+            person_name="__diagnostics_probe__",
+        )
+        ms = (time.time() - t0) * 1000
+        # Success = endpoint responds without error (0 results is fine)
+        doc_ids = result if isinstance(result, list) else result.get("document_ids", [])
+        return _ok(ms, f"entity query OK ({len(doc_ids)} docs for probe)")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_claims_endpoint() -> Dict[str, Any]:
+    """Verify KTS claims extraction endpoint is reachable and functional."""
+    t0 = time.time()
+    try:
+        import httpx
+        from app.core.config import settings
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{settings.knowledge_tree_service_url}/claims",
+                params={"tenant_id": "00000000-0000-0000-0000-000000000001", "document_id": "__probe__"},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+            )
+            ms = (time.time() - t0) * 1000
+            if resp.status_code == 200:
+                data = resp.json()
+                total = data.get("total", len(data.get("claims", [])))
+                return _ok(ms, f"claims endpoint OK ({total} claims for probe doc)")
+            return _fail(ms, f"HTTP {resp.status_code}: {resp.text[:80]}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
 async def _check_react_pipeline(tenant_id: str) -> Dict[str, Any]:
     """Run a full ReAct query (greeting, fast-path) to verify the pipeline."""
     t0 = time.time()
@@ -722,6 +791,9 @@ async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
         ("smart_search", _check_smart_search(tenant_id)),
         ("smart_search_temporal", _check_smart_search_temporal(tenant_id)),
         ("smart_search_person", _check_smart_search_person(tenant_id)),
+        ("smart_search_legislation", _check_smart_search_legislation(tenant_id)),
+        ("graph_entity_query", _check_graph_entity_query(tenant_id)),
+        ("claims_endpoint", _check_claims_endpoint()),
         ("react_pipeline", _check_react_pipeline(tenant_id)),
         ("conversation_context", _check_conversation_context(tenant_id)),
         ("user_memory", _check_user_memory(tenant_id)),
