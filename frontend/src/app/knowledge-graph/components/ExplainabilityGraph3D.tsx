@@ -72,7 +72,7 @@ export default function ExplainabilityGraph3D({
     const node = nodes.find((n) => n.id === focusNodeId)
     if (!node) return
     const distance = 120
-    const distRatio = 1 + distance / Math.hypot(node.x ?? 0, node.y ?? 0, node.z ?? 0 || 1)
+    const distRatio = 1 + distance / Math.hypot(node.x ?? 0, node.y ?? 0, (node.z ?? 0) || 1)
     graphRef.current.cameraPosition(
       {
         x: (node.x ?? 0) * distRatio,
