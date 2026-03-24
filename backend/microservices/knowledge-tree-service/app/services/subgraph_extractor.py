@@ -93,9 +93,10 @@ class SubgraphExtractor:
         if not seeds:
             return {"nodes": [], "edges": [], "root_entities": [], "pruned_count": 0}
 
-        # Step 2: N-hop traversal from seeds
+        # Step 2: N-hop traversal from seeds — batch by node ID
+        seed_nids = [s["nid"] for s in seeds if s.get("nid") is not None]
         raw_nodes, raw_edges = await self._traverse(
-            tenant_id, seed_names, max_hops, max_nodes * 3,
+            seed_nids, tenant_id, max_nodes * 3,
         )
 
         # Merge seed nodes into raw_nodes
@@ -197,115 +198,150 @@ class SubgraphExtractor:
 
     async def _traverse(
         self,
+        seed_nids: List[int],
         tenant_id: str,
-        seed_names: Set[str],
-        max_hops: int,
         limit: int,
     ) -> Tuple[List[Dict], List[Dict]]:
-        """Multi-hop traversal from seed entities.
+        """Batch 2-hop traversal from all seed nodes in a single Cypher query.
 
-        Returns (nodes, edges) discovered in the neighborhood.
+        Uses explicit hop1 + OPTIONAL hop2 instead of variable-length paths
+        so FalkorDB can bind individual relationship variables.  One query
+        replaces the previous per-seed loop (N seeds → N queries → 1 query).
+
+        Args:
+            seed_nids: Integer node IDs returned by _resolve_seeds.
+            tenant_id: Tenant identifier for neighbour visibility filter.
+            limit: Maximum rows to fetch (applied at Cypher level).
+
+        Returns:
+            (nodes, edges) discovered in the neighbourhood.
         """
-        if not seed_names:
+        if not seed_nids:
             return [], []
 
         nodes: List[Dict] = []
         edges: List[Dict] = []
         seen_nodes: Set[str] = set()
 
-        for seed_name in list(seed_names)[:5]:
-            # FalkorDB does not support variable-length relationship binding
-            # for UNWIND, so we use a 2-step approach: find neighbors then
-            # collect the connecting edges.
-            query = f"""
-                MATCH (seed)
-                WHERE seed.tenant_id = $tenant_id
-                  AND (seed.name = $seed_name
-                       OR seed.associated_person = $seed_name
-                       OR seed.title = $seed_name)
-                WITH seed LIMIT 3
-                MATCH (seed)-[r*1..{max_hops}]-(neighbor)
-                WHERE neighbor.tenant_id = $tenant_id
-                   OR neighbor.shared = true
-                UNWIND r as rel
-                RETURN DISTINCT
-                    id(startNode(rel)) as src_id,
-                    labels(startNode(rel))[0] as src_label,
-                    startNode(rel).name as src_name,
-                    startNode(rel).title as src_title,
-                    startNode(rel).document_id as src_doc_id,
-                    startNode(rel).semantic_type as src_stype,
-                    startNode(rel).domain as src_domain,
-                    type(rel) as edge_label,
-                    rel.confidence as edge_confidence,
-                    rel.source as edge_source,
-                    rel.article as edge_article,
-                    id(endNode(rel)) as tgt_id,
-                    labels(endNode(rel))[0] as tgt_label,
-                    endNode(rel).name as tgt_name,
-                    endNode(rel).title as tgt_title,
-                    endNode(rel).document_id as tgt_doc_id,
-                    endNode(rel).semantic_type as tgt_stype,
-                    endNode(rel).domain as tgt_domain
-                LIMIT $limit
-            """
-            try:
-                rows = await falkordb_client.execute_cypher(
-                    query,
-                    {"tenant_id": tenant_id, "seed_name": seed_name, "limit": limit},
-                )
-                for row in rows:
-                    # Source node
-                    src_id = str(row.get("src_id") or "")
-                    if src_id and src_id not in seen_nodes:
-                        seen_nodes.add(src_id)
-                        nodes.append({
-                            "id": src_id,
-                            "label": row.get("src_label") or "unknown",
-                            "name": row.get("src_name") or row.get("src_title") or "",
-                            "properties": {
-                                "document_id": row.get("src_doc_id"),
-                                "semantic_type": row.get("src_stype"),
-                                "domain": row.get("src_domain"),
-                            },
-                            "graph_source": "tenant",
-                        })
+        query = """
+            MATCH (seed)
+            WHERE id(seed) IN $seed_ids
+            MATCH (seed)-[r1]-(hop1)
+            WHERE hop1.tenant_id = $tid OR hop1.shared = true
+            OPTIONAL MATCH (hop1)-[r2]-(hop2)
+            WHERE (hop2.tenant_id = $tid OR hop2.shared = true)
+              AND id(hop2) <> id(seed)
+            RETURN
+              id(seed)        AS seed_id,
+              seed.name       AS seed_name,
+              type(r1)        AS r1_type,
+              r1.confidence   AS r1_confidence,
+              r1.source       AS r1_source,
+              r1.article      AS r1_article,
+              id(hop1)                   AS h1_id,
+              labels(hop1)[0]            AS h1_label,
+              hop1.name                  AS h1_name,
+              hop1.title                 AS h1_title,
+              hop1.document_id           AS h1_doc_id,
+              hop1.semantic_type         AS h1_stype,
+              hop1.domain                AS h1_domain,
+              type(r2)        AS r2_type,
+              r2.confidence   AS r2_confidence,
+              r2.source       AS r2_source,
+              r2.article      AS r2_article,
+              id(hop2)                   AS h2_id,
+              labels(hop2)[0]            AS h2_label,
+              hop2.name                  AS h2_name,
+              hop2.title                 AS h2_title,
+              hop2.document_id           AS h2_doc_id,
+              hop2.semantic_type         AS h2_stype,
+              hop2.domain                AS h2_domain
+            LIMIT $limit
+        """
+        try:
+            rows = await falkordb_client.execute_cypher(
+                query,
+                {"seed_ids": seed_nids, "tid": tenant_id, "limit": limit},
+            )
+        except Exception as e:
+            logger.warning(f"Batch traversal failed: {e}")
+            return [], []
 
-                    # Target node
-                    tgt_id = str(row.get("tgt_id") or "")
-                    if tgt_id and tgt_id not in seen_nodes:
-                        seen_nodes.add(tgt_id)
-                        nodes.append({
-                            "id": tgt_id,
-                            "label": row.get("tgt_label") or "unknown",
-                            "name": row.get("tgt_name") or row.get("tgt_title") or "",
-                            "properties": {
-                                "document_id": row.get("tgt_doc_id"),
-                                "semantic_type": row.get("tgt_stype"),
-                                "domain": row.get("tgt_domain"),
-                            },
-                            "graph_source": "tenant",
-                        })
+        for row in rows:
+            seed_id = str(row.get("seed_id") or "")
 
-                    # Edge
-                    el = row.get("edge_label") or ""
-                    if src_id and tgt_id and el:
-                        edge_props = {}
-                        if el == "REFERENCES_LAW":
-                            edge_props = {
-                                "confidence": row.get("edge_confidence"),
-                                "source": row.get("edge_source"),
-                                "article": row.get("edge_article"),
-                            }
-                            edge_props = {k: v for k, v in edge_props.items() if v}
-                        edges.append({
-                            "source_id": src_id,
-                            "target_id": tgt_id,
-                            "label": el,
-                            "properties": edge_props,
-                        })
-            except Exception as e:
-                logger.warning(f"Traversal failed for seed '{seed_name}': {e}")
+            # --- hop1 node ---
+            h1_id = str(row.get("h1_id") or "")
+            if h1_id and h1_id not in seen_nodes:
+                seen_nodes.add(h1_id)
+                nodes.append({
+                    "id": h1_id,
+                    "label": row.get("h1_label") or "unknown",
+                    "name": row.get("h1_name") or row.get("h1_title") or "",
+                    "properties": {
+                        "document_id": row.get("h1_doc_id"),
+                        "semantic_type": row.get("h1_stype"),
+                        "domain": row.get("h1_domain"),
+                    },
+                    "graph_source": "tenant",
+                })
+
+            # --- r1 edge: seed → hop1 ---
+            r1_type = row.get("r1_type") or ""
+            if seed_id and h1_id and r1_type:
+                edge_props: Dict[str, Any] = {}
+                if r1_type == "REFERENCES_LAW":
+                    edge_props = {
+                        k: v for k, v in {
+                            "confidence": row.get("r1_confidence"),
+                            "source": row.get("r1_source"),
+                            "article": row.get("r1_article"),
+                        }.items() if v is not None
+                    }
+                edges.append({
+                    "source_id": seed_id,
+                    "target_id": h1_id,
+                    "label": r1_type,
+                    "properties": edge_props,
+                })
+
+            # --- hop2 node (OPTIONAL) ---
+            h2_id_raw = row.get("h2_id")
+            if h2_id_raw is None:
+                continue
+            h2_id = str(h2_id_raw)
+            if h2_id and h2_id not in seen_nodes:
+                seen_nodes.add(h2_id)
+                nodes.append({
+                    "id": h2_id,
+                    "label": row.get("h2_label") or "unknown",
+                    "name": row.get("h2_name") or row.get("h2_title") or "",
+                    "properties": {
+                        "document_id": row.get("h2_doc_id"),
+                        "semantic_type": row.get("h2_stype"),
+                        "domain": row.get("h2_domain"),
+                    },
+                    "graph_source": "tenant",
+                })
+
+            # --- r2 edge: hop1 → hop2 ---
+            r2_type = row.get("r2_type") or ""
+            if h1_id and h2_id and r2_type:
+                edge_props2: Dict[str, Any] = {}
+                if r2_type == "REFERENCES_LAW":
+                    edge_props2 = {
+                        k: v for k, v in {
+                            "confidence": row.get("r2_confidence"),
+                            "source": row.get("r2_source"),
+                            "article": row.get("r2_article"),
+                        }.items() if v is not None
+                    }
+                edges.append({
+                    "source_id": h1_id,
+                    "target_id": h2_id,
+                    "label": r2_type,
+                    "properties": edge_props2,
+                })
 
         # --- Phase 3: Fetch Claims connected to discovered entities ---
         entity_ids = [
