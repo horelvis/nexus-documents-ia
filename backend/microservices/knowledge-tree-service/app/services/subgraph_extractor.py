@@ -130,53 +130,68 @@ class SubgraphExtractor:
         """Find graph nodes matching the query entities.
 
         Searches by name, associated_person, and title properties.
+        Uses a single UNWIND batch query instead of one query per entity.
         Returns (seed_nodes, seed_names).
         """
-        all_seeds = []
-        seed_names: Set[str] = set()
-
-        for entity in entities[:5]:  # Cap at 5 seed entities
+        # Collect search values from entities (cap at 5, skip blanks)
+        search_vals = []
+        for entity in entities[:5]:
             value = entity.get("value", "").strip()
-            if not value or len(value) < 2:
-                continue
+            if value and len(value) >= 2:
+                search_vals.append(value.lower())
 
-            query = """
-                MATCH (n)
-                WHERE n.tenant_id = $tenant_id
-                  AND (toLower(n.name) CONTAINS $search_val
-                       OR toLower(n.associated_person) CONTAINS $search_val
-                       OR toLower(n.title) CONTAINS $search_val)
-                RETURN id(n) as node_id, labels(n)[0] as label,
-                       n.name as name, n.title as title,
-                       n.document_id as document_id,
-                       n.semantic_type as semantic_type,
-                       n.domain as domain,
-                       n.associated_person as associated_person
-                LIMIT 5
-            """
-            search_val = value.lower()
-            try:
-                rows = await falkordb_client.execute_cypher(
-                    query, {"tenant_id": tenant_id, "search_val": search_val}
-                )
-                for row in rows:
-                    label = row.get("label") or "unknown"
-                    name = row.get("name") or row.get("title") or value
-                    node_id = row.get("node_id")
-                    if node_id is None:
-                        node_id = name
+        if not search_vals:
+            return [], set()
 
-                    node = {
-                        "id": str(node_id),
-                        "label": label,
-                        "name": name,
-                        "properties": _extract_properties(row),
-                        "graph_source": "tenant",
-                    }
-                    all_seeds.append(node)
-                    seed_names.add(name)
-            except Exception as e:
-                logger.warning(f"Seed resolution failed for '{value}': {e}")
+        query = """
+            UNWIND $search_vals AS search_val
+            MATCH (n)
+            WHERE n.tenant_id = $tenant_id
+              AND (toLower(n.name) CONTAINS search_val
+                   OR toLower(n.associated_person) CONTAINS search_val
+                   OR toLower(n.title) CONTAINS search_val)
+            RETURN id(n) as node_id, labels(n)[0] as label,
+                   n.name as name, n.title as title,
+                   n.document_id as document_id,
+                   n.semantic_type as semantic_type,
+                   n.domain as domain,
+                   n.associated_person as associated_person,
+                   search_val as matched_query
+            LIMIT 25
+        """
+        all_seeds: List[Dict] = []
+        seed_names: Set[str] = set()
+        seen_ids: Set[str] = set()
+
+        try:
+            rows = await falkordb_client.execute_cypher(
+                query, {"tenant_id": tenant_id, "search_vals": search_vals}
+            )
+            for row in rows:
+                node_id = row.get("node_id")
+                node_id_str = str(node_id) if node_id is not None else None
+
+                # Deduplicate by node ID
+                if node_id_str is None or node_id_str in seen_ids:
+                    continue
+                seen_ids.add(node_id_str)
+
+                label = row.get("label") or "unknown"
+                matched_query = row.get("matched_query") or ""
+                name = row.get("name") or row.get("title") or matched_query
+
+                node = {
+                    "id": node_id_str,
+                    "label": label,
+                    "name": name,
+                    "properties": _extract_properties(row),
+                    "graph_source": "tenant",
+                    "nid": node_id,
+                }
+                all_seeds.append(node)
+                seed_names.add(name)
+        except Exception as e:
+            logger.warning(f"Batch seed resolution failed: {e}")
 
         return all_seeds, seed_names
 

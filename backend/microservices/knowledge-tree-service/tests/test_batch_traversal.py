@@ -69,3 +69,77 @@ class TestBatchDocumentsByEntity:
         from app.api.tree import _batch_documents_by_entity
         doc_ids = await _batch_documents_by_entity('juan garcia', 't1', client=falkordb_client)
         assert len(doc_ids) == len(set(doc_ids))
+
+
+@pytest.mark.asyncio
+class TestBatchSeedResolution:
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def seed_data(self, falkordb_client):
+        await falkordb_client.execute_cypher("""
+            CREATE (e1:Entity {name: 'Juan Garcia', entity_type: 'person', tenant_id: 't1', normalized_name: 'juan garcia'})
+            CREATE (e2:Entity {name: 'Acme Corp', entity_type: 'organization', tenant_id: 't1', normalized_name: 'acme corp'})
+            CREATE (d1:Document {document_id: 'doc-seed-1', title: 'Contrato Laboral', tenant_id: 't1'})
+            CREATE (e1)-[:MENTIONED_IN]->(d1)
+            CREATE (e2)-[:MENTIONED_IN]->(d1)
+        """)
+
+    def _make_extractor(self, falkordb_client):
+        """Create a SubgraphExtractor wired to the fixture's client connection."""
+        import app.services.subgraph_extractor as mod
+        # Point the module-level singleton at the fixture's live client
+        mod.falkordb_client = falkordb_client
+        extractor = mod.SubgraphExtractor()
+        extractor._initialized = True  # client already initialized by fixture
+        return extractor
+
+    async def test_resolves_multiple_seeds_in_one_query(self, falkordb_client):
+        extractor = self._make_extractor(falkordb_client)
+
+        entities = [
+            {"value": "juan garcia", "type": "person"},
+            {"value": "acme corp", "type": "organization"},
+        ]
+        async with QueryCounter() as counter:
+            seeds, seed_names = await extractor._resolve_seeds('t1', entities)
+            assert counter.count == 1, f"Expected 1 query, got {counter.count}"
+
+        seed_names_lower = [s["name"].lower() for s in seeds]
+        assert any("juan" in n for n in seed_names_lower)
+        assert any("acme" in n for n in seed_names_lower)
+
+    async def test_returns_node_ids(self, falkordb_client):
+        extractor = self._make_extractor(falkordb_client)
+
+        entities = [{"value": "juan garcia", "type": "person"}]
+        seeds, _ = await extractor._resolve_seeds('t1', entities)
+        assert len(seeds) >= 1
+        assert "nid" in seeds[0], "Seed must include node ID for Phase 2"
+        assert isinstance(seeds[0]["nid"], int), "Node ID must be integer"
+
+    async def test_matches_by_title(self, falkordb_client):
+        extractor = self._make_extractor(falkordb_client)
+
+        entities = [{"value": "contrato laboral", "type": "document"}]
+        seeds, _ = await extractor._resolve_seeds('t1', entities)
+        assert len(seeds) >= 1
+
+    async def test_empty_entities_returns_empty(self, falkordb_client):
+        extractor = self._make_extractor(falkordb_client)
+
+        seeds, seed_names = await extractor._resolve_seeds('t1', [])
+        assert seeds == []
+        assert seed_names == set()
+
+    async def test_deduplicates_nodes_across_entities(self, falkordb_client):
+        """Same node matched by two search terms must appear only once."""
+        extractor = self._make_extractor(falkordb_client)
+
+        # Duplicate search terms — same node must appear only once
+        entities = [
+            {"value": "juan garcia", "type": "person"},
+            {"value": "juan garcia", "type": "person"},
+        ]
+        seeds, _ = await extractor._resolve_seeds('t1', entities)
+        ids = [s["id"] for s in seeds]
+        assert len(ids) == len(set(ids)), "Duplicate node IDs found in seed results"
