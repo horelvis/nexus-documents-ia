@@ -513,6 +513,81 @@ class EntityDocumentResponse(BaseModel):
     document_ids: List[str] = Field(default_factory=list)
 
 
+async def _batch_documents_by_entity(entity_name: str, tenant_id: str, client=None) -> List[str]:
+    """Find document IDs by entity name using batched query.
+
+    Searches 3 sources in one query instead of 3 sequential fallbacks:
+    1. Entity nodes linked via relationships
+    2. Document associated_person property
+    3. Folder names matching entity
+
+    Args:
+        entity_name: Name to search for (case-insensitive substring match).
+        tenant_id: Tenant scope for all graph queries.
+        client: Optional FalkorDBClient to use; defaults to the module singleton.
+    """
+    if client is None:
+        from app.services.falkordb_client import falkordb_client as _client
+        client = _client
+
+    sanitized = re.sub(r'[\\"\';]', '', entity_name).lower()
+    if not sanitized:
+        return []
+
+    # Try UNION first (covers all 3 sources in 1 query)
+    try:
+        rows = await client.execute_cypher(
+            """
+            MATCH (d:Document)-[]-(e:Entity)
+            WHERE toLower(e.name) CONTAINS $name AND d.tenant_id = $tid
+            RETURN DISTINCT d.document_id AS doc_id
+            UNION
+            MATCH (d:Document)
+            WHERE d.associated_person IS NOT NULL
+              AND toLower(d.associated_person) CONTAINS $name
+              AND d.tenant_id = $tid
+            RETURN DISTINCT d.document_id AS doc_id
+            UNION
+            MATCH (d:Document)-[:CONTAINED_IN]->(f:Folder)
+            WHERE toLower(f.name) CONTAINS $name AND d.tenant_id = $tid
+            RETURN DISTINCT d.document_id AS doc_id
+            """,
+            {"name": sanitized, "tid": tenant_id},
+        )
+    except Exception:
+        # FalkorDB may not support UNION — fall back to 2 separate queries
+        rows1 = await client.execute_cypher(
+            """
+            MATCH (d:Document {tenant_id: $tid})
+            OPTIONAL MATCH (d)-[]-(e:Entity)
+            WITH d, e
+            WHERE (e IS NOT NULL AND toLower(e.name) CONTAINS $name)
+               OR (d.associated_person IS NOT NULL AND toLower(d.associated_person) CONTAINS $name)
+            RETURN DISTINCT d.document_id AS doc_id
+            """,
+            {"name": sanitized, "tid": tenant_id},
+        )
+        rows2 = await client.execute_cypher(
+            """
+            MATCH (d:Document {tenant_id: $tid})-[:CONTAINED_IN]->(f:Folder)
+            WHERE toLower(f.name) CONTAINS $name
+            RETURN DISTINCT d.document_id AS doc_id
+            """,
+            {"name": sanitized, "tid": tenant_id},
+        )
+        rows = rows1 + rows2
+
+    # Deduplicate while preserving order
+    seen: set = set()
+    doc_ids: List[str] = []
+    for row in rows:
+        did = row.get("doc_id")
+        if did and did not in seen:
+            seen.add(did)
+            doc_ids.append(did)
+    return doc_ids[:50]
+
+
 @tree_router.post("/graph/documents-by-entity", response_model=EntityDocumentResponse)
 async def documents_by_entity(
     request: EntityDocumentRequest,
@@ -526,66 +601,7 @@ async def documents_by_entity(
     doc_ids: List[str] = []
 
     try:
-        # Search for documents associated with the entity via any relationship
-        sanitized_name = re.sub(r'[\\"\';]', '', request.entity_name).lower()
-        rows = await falkordb_client.execute_cypher(
-            """
-            MATCH (d:Document)-[r]-(e:Entity)
-            WHERE toLower(e.name) CONTAINS $name_lower
-              AND d.tenant_id = $tenant_id
-            RETURN DISTINCT d.document_id as doc_id
-            LIMIT 50
-            """,
-            {
-                "name_lower": sanitized_name,
-                "tenant_id": request.tenant_id,
-            },
-        )
-        for row in rows:
-            did = row.get("doc_id")
-            if did:
-                doc_ids.append(did)
-
-        # Also try matching via associated_person property on documents
-        if not doc_ids:
-            rows = await falkordb_client.execute_cypher(
-                """
-                MATCH (d:Document)
-                WHERE toLower(d.associated_person) CONTAINS $name_lower
-                  AND d.tenant_id = $tenant_id
-                RETURN DISTINCT d.document_id as doc_id
-                LIMIT 50
-                """,
-                {
-                    "name_lower": sanitized_name,
-                    "tenant_id": request.tenant_id,
-                },
-            )
-            for row in rows:
-                did = row.get("doc_id")
-                if did:
-                    doc_ids.append(did)
-
-        # Also look for documents inside folders named like the person
-        if not doc_ids:
-            rows = await falkordb_client.execute_cypher(
-                """
-                MATCH (d:Document)-[:CONTAINED_IN]->(f:Folder)
-                WHERE toLower(f.name) CONTAINS $name_lower
-                  AND d.tenant_id = $tenant_id
-                RETURN DISTINCT d.document_id as doc_id
-                LIMIT 50
-                """,
-                {
-                    "name_lower": sanitized_name,
-                    "tenant_id": request.tenant_id,
-                },
-            )
-            for row in rows:
-                did = row.get("doc_id")
-                if did:
-                    doc_ids.append(did)
-
+        doc_ids = await _batch_documents_by_entity(request.entity_name, request.tenant_id, client=falkordb_client)
     except Exception as e:
         logging.getLogger(__name__).error(f"Documents-by-entity query failed: {e}")
 

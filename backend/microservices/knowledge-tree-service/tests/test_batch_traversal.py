@@ -26,3 +26,46 @@ class TestQueryCounter:
                 await falkordb_client.execute_cypher("RETURN 2 AS n")
                 assert inner.count == 1
             assert outer.count == 2
+
+
+@pytest.mark.asyncio
+class TestBatchDocumentsByEntity:
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def seed_data(self, falkordb_client):
+        await falkordb_client.execute_cypher("""
+            CREATE (d1:Document {document_id: 'doc-batch-1', title: 'Contrato Juan', tenant_id: 't1', associated_person: 'juan garcia'})
+            CREATE (d2:Document {document_id: 'doc-batch-2', title: 'Nomina Maria', tenant_id: 't1'})
+            CREATE (d3:Document {document_id: 'doc-batch-3', title: 'Factura', tenant_id: 't1'})
+            CREATE (e1:Entity {name: 'Juan Garcia', entity_type: 'person', tenant_id: 't1'})
+            CREATE (f1:Folder {name: 'Maria Lopez', tenant_id: 't1'})
+            CREATE (e1)-[:MENTIONED_IN]->(d1)
+            CREATE (d2)-[:CONTAINED_IN]->(f1)
+        """)
+
+    async def test_finds_by_entity_name(self, falkordb_client):
+        from app.api.tree import _batch_documents_by_entity
+        doc_ids = await _batch_documents_by_entity('juan garcia', 't1', client=falkordb_client)
+        assert 'doc-batch-1' in doc_ids
+
+    async def test_finds_by_associated_person(self, falkordb_client):
+        from app.api.tree import _batch_documents_by_entity
+        doc_ids = await _batch_documents_by_entity('juan garcia', 't1', client=falkordb_client)
+        assert 'doc-batch-1' in doc_ids
+
+    async def test_finds_by_folder_name(self, falkordb_client):
+        from app.api.tree import _batch_documents_by_entity
+        doc_ids = await _batch_documents_by_entity('maria lopez', 't1', client=falkordb_client)
+        assert 'doc-batch-2' in doc_ids
+
+    async def test_uses_max_two_queries(self, falkordb_client):
+        """Must use 1 query (UNION) or 2 queries (fallback), not 3."""
+        from app.api.tree import _batch_documents_by_entity
+        async with QueryCounter() as counter:
+            await _batch_documents_by_entity('juan garcia', 't1', client=falkordb_client)
+            assert counter.count <= 2, f"Expected ≤2 queries, got {counter.count}"
+
+    async def test_deduplicates_results(self, falkordb_client):
+        from app.api.tree import _batch_documents_by_entity
+        doc_ids = await _batch_documents_by_entity('juan garcia', 't1', client=falkordb_client)
+        assert len(doc_ids) == len(set(doc_ids))
