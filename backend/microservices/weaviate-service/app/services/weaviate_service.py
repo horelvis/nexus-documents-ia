@@ -368,15 +368,6 @@ class WeaviateService:
                     logger.warning("⚠️ Embedding model not available, falling back to BM25 only")
                     self.embedding_model = None
 
-            # Initialize SIL structural collection with the Weaviate client
-            try:
-                from app.services.sil import structural_collection
-                structural_collection.set_client(self.client)
-                await structural_collection.initialize()
-                logger.info("✅ SIL StructuralDocument collection initialized")
-            except Exception as sil_error:
-                logger.warning(f"⚠️ SIL StructuralDocument collection init skipped: {sil_error}")
-
             self._initialized = True
 
         except Exception as e:

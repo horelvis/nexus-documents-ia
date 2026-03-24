@@ -527,16 +527,17 @@ async def documents_by_entity(
 
     try:
         # Search for documents associated with the entity via any relationship
+        sanitized_name = re.sub(r'[\\"\';]', '', request.entity_name).lower()
         rows = await falkordb_client.execute_cypher(
             """
             MATCH (d:Document)-[r]-(e:Entity)
-            WHERE e.name =~ $pattern
+            WHERE toLower(e.name) CONTAINS $name_lower
               AND d.tenant_id = $tenant_id
             RETURN DISTINCT d.document_id as doc_id
             LIMIT 50
             """,
             {
-                "pattern": f"(?i).*{re.sub(r'[\\\\\"\\';]', '', request.entity_name)}.*",
+                "name_lower": sanitized_name,
                 "tenant_id": request.tenant_id,
             },
         )
@@ -550,13 +551,13 @@ async def documents_by_entity(
             rows = await falkordb_client.execute_cypher(
                 """
                 MATCH (d:Document)
-                WHERE d.associated_person =~ $pattern
+                WHERE toLower(d.associated_person) CONTAINS $name_lower
                   AND d.tenant_id = $tenant_id
                 RETURN DISTINCT d.document_id as doc_id
                 LIMIT 50
                 """,
                 {
-                    "pattern": f"(?i).*{re.sub(r'[\\\\\"\\';]', '', request.entity_name)}.*",
+                    "name_lower": sanitized_name,
                     "tenant_id": request.tenant_id,
                 },
             )
@@ -570,13 +571,13 @@ async def documents_by_entity(
             rows = await falkordb_client.execute_cypher(
                 """
                 MATCH (d:Document)-[:CONTAINED_IN]->(f:Folder)
-                WHERE f.name =~ $pattern
+                WHERE toLower(f.name) CONTAINS $name_lower
                   AND d.tenant_id = $tenant_id
                 RETURN DISTINCT d.document_id as doc_id
                 LIMIT 50
                 """,
                 {
-                    "pattern": f"(?i).*{re.sub(r'[\\\\\"\\';]', '', request.entity_name)}.*",
+                    "name_lower": sanitized_name,
                     "tenant_id": request.tenant_id,
                 },
             )

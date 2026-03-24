@@ -5,7 +5,7 @@
 #   docker compose -f docker-compose.onpremise.yml up -d
 #
 # Services:
-#   - db: PostgreSQL with Apache AGE for knowledge graph
+#   - db: PostgreSQL (relational data, Langfuse)
 #   - redis: Cache and session storage
 #   - weaviate: Vector database for embeddings
 #   - weaviate-service: RAG pipeline (vector search and retrieval)
@@ -16,13 +16,13 @@
 
 services:
   # =============================================================================
-  # PostgreSQL with Apache AGE + pgvector
+  # PostgreSQL - Relational Data
   # =============================================================================
   db:
     build:
       context: .
       dockerfile: Dockerfile.postgres
-    image: nouxcube/postgres-age-pgvector:pg15
+    image: nouxcube/postgres:pg15
     ports:
       - "5432:5432"
     environment:
@@ -417,7 +417,7 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # Knowledge Tree Service - Structural Context (Apache AGE + FalkorDB)
+  # Knowledge Tree Service - Structural Context (FalkorDB)
   # =============================================================================
   knowledge-tree-service:
     build:
@@ -436,10 +436,9 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - AGE_DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - RAG_KNOWLEDGE_GRAPH_ENABLED=${RAG_KNOWLEDGE_GRAPH_ENABLED:-true}
       - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
-      - AGE_GRAPH_NAME=${AGE_GRAPH_NAME:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # FalkorDB Configuration
       - FALKORDB_HOST=${FALKORDB_HOST:-falkordb}
@@ -449,7 +448,6 @@ services:
     volumes:
       - ../microservices/knowledge-tree-service/app:/app/app:ro
       - ../microservices/knowledge-tree-service/config:/app/config:ro
-      - ../microservices/emma-agent-service/config/graphs:/app/config/graphs/age:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8011", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8011/health"]

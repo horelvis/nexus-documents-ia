@@ -13,6 +13,7 @@ These tests verify:
 import time
 
 import pytest
+import pytest_asyncio
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +396,7 @@ class TestTenantIsolation:
 class TestGraphRAGTraversals:
     """Test multi-hop traversals for evidence assembly."""
 
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def seed_graph(self, falkordb_client):
         """Seed a small graph for traversal tests."""
         await falkordb_client.execute_cypher("""

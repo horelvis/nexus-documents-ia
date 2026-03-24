@@ -1,15 +1,16 @@
 # =============================================================================
-# Custom PostgreSQL image
+# Custom PostgreSQL image — vanilla PG15
 # =============================================================================
-# Base: apache/age (PG15) — kept as base image for PG15 compatibility.
-# Apache AGE extension is no longer used (knowledge graph moved to FalkorDB).
+# Knowledge graph operations use FalkorDB (separate service).
+# Vector operations use Weaviate (separate service).
+# PostgreSQL stores only relational data: tenants, users, documents, prompts.
 #
-# pgvector has been removed — few-shot examples were deleted and all
-# remaining vector operations use Weaviate.
-#
-# TODO: Migrate to plain postgres:15 base once AGE init scripts are removed.
+# Init scripts (run on first startup):
+#   - 01-init-langfuse.sql: Creates the Langfuse observability database
 #
 # Build: docker compose build db
 # =============================================================================
 
-FROM apache/age:release_PG15_1.6.0
+FROM postgres:15
+
+COPY init-scripts/ /docker-entrypoint-initdb.d/
