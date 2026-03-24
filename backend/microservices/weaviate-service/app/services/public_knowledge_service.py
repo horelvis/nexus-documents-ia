@@ -748,7 +748,7 @@ class PublicKnowledgeService:
                     # Chunk metadata
                     chunk_index=props.get("chunk_index"),
                     total_chunks=props.get("total_chunks"),
-                    parent_document_id=props.get("parent_document_id"),
+                    parent_document_id=str(props["parent_document_id"]) if props.get("parent_document_id") else None,
                     section_title=props.get("section_title"),
                     # Timestamps
                     created_at=created,
