@@ -1,7 +1,8 @@
 'use client'
 
-import { IconAlertCircle, IconThumbUp, IconThumbDown, IconCopy, IconCheck, IconRotate, IconPaperclip, IconArrowRight, IconHelpCircle } from '@tabler/icons-react'
+import { IconAlertCircle, IconThumbUp, IconThumbDown, IconCopy, IconCheck, IconRotate, IconPaperclip, IconArrowRight, IconHelpCircle, IconRoute } from '@tabler/icons-react'
 import { useState } from 'react'
+import ReasoningModal from '../ReasoningModal'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/auth-context'
@@ -312,6 +313,9 @@ function EmmaMessageFlow({ children }: { children: React.ReactNode }) {
 
 function ActionBar({ message, onFeedback }: { message: EmmaMessage; onFeedback: (id: string, fb: 'positive' | 'negative') => void }) {
   const [copied, setCopied] = useState(false)
+  const [showReasoning, setShowReasoning] = useState(false)
+
+  const hasReasoningSteps = (message.metadata?.rawReasoningSteps?.length ?? 0) > 0
 
   const handleCopy = () => {
     navigator.clipboard.writeText(message.content).then(() => {
@@ -321,42 +325,64 @@ function ActionBar({ message, onFeedback }: { message: EmmaMessage; onFeedback: 
   }
 
   return (
-    <div className="flex items-center gap-1 pt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground/30 hover:text-foreground/60 transition-colors"
-        onClick={handleCopy}
-        title={copied ? 'Copiado' : 'Copiar'}
-      >
-        {copied ? <IconCheck className="h-3.5 w-3.5 text-emerald-500" /> : <IconCopy className="h-3.5 w-3.5" />}
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground/30 hover:text-emerald-500 transition-colors"
-        onClick={() => onFeedback(message.id, 'positive')}
-        title="Útil"
-      >
-        <IconThumbUp className="h-3.5 w-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="h-7 w-7 text-muted-foreground/30 hover:text-destructive transition-colors"
-        onClick={() => onFeedback(message.id, 'negative')}
-        title="No útil"
-      >
-        <IconThumbDown className="h-3.5 w-3.5" />
-      </Button>
-      {message.metadata?.execution_time_ms && (
-        <span className="text-[10px] font-mono text-muted-foreground/25 ml-auto tabular-nums">
-          {message.metadata.execution_time_ms < 1000
-            ? `${Math.round(message.metadata.execution_time_ms)}ms`
-            : `${(message.metadata.execution_time_ms / 1000).toFixed(1)}s`}
-        </span>
+    <>
+      <div className="flex items-center gap-1 pt-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground/30 hover:text-foreground/60 transition-colors"
+          onClick={handleCopy}
+          title={copied ? 'Copiado' : 'Copiar'}
+        >
+          {copied ? <IconCheck className="h-3.5 w-3.5 text-emerald-500" /> : <IconCopy className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground/30 hover:text-emerald-500 transition-colors"
+          onClick={() => onFeedback(message.id, 'positive')}
+          title="Útil"
+        >
+          <IconThumbUp className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground/30 hover:text-destructive transition-colors"
+          onClick={() => onFeedback(message.id, 'negative')}
+          title="No útil"
+        >
+          <IconThumbDown className="h-3.5 w-3.5" />
+        </Button>
+        {hasReasoningSteps && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs gap-1 text-muted-foreground/30 hover:text-foreground/60 transition-colors px-2"
+            onClick={() => setShowReasoning(true)}
+            title="Ver razonamiento"
+          >
+            <IconRoute size={14} />
+            Ver Razonamiento
+          </Button>
+        )}
+        {message.metadata?.execution_time_ms && (
+          <span className="text-[10px] font-mono text-muted-foreground/25 ml-auto tabular-nums">
+            {message.metadata.execution_time_ms < 1000
+              ? `${Math.round(message.metadata.execution_time_ms)}ms`
+              : `${(message.metadata.execution_time_ms / 1000).toFixed(1)}s`}
+          </span>
+        )}
+      </div>
+      {showReasoning && (
+        <ReasoningModal
+          reasoningSteps={message.metadata!.rawReasoningSteps!}
+          sources={message.metadata?.documents}
+          executionTimeMs={message.metadata?.execution_time_ms}
+          onClose={() => setShowReasoning(false)}
+        />
       )}
-    </div>
+    </>
   )
 }
 
