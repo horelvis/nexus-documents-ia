@@ -7,25 +7,28 @@
 
 ## Problem
 
-The current graph expansion pipeline executes ~11 sequential Cypher queries per search request against FalkorDB. Each query is a separate round-trip, adding network latency and connection pool pressure. The breakdown:
+The current graph expansion pipeline executes ~24 sequential Cypher queries (worst case) per search request against FalkorDB. Each query is a separate round-trip, adding network latency and connection pool pressure. The breakdown:
 
 | Phase | Current queries | Pattern |
 |-------|----------------|---------|
 | documents-by-entity | 3 per entity | Sequential fallback chain |
 | Seed resolution | 1 per entity (max 5) | Per-entity loop |
 | N-hop traversal | 1 per seed (max 5) | Per-seed loop |
-| Claims + contradictions | 1 per entity (max 10) + 1 | Per-entity loop + separate contradiction query |
-| **Total** | **~11** | — |
+| Claims fetch | 1 per entity (max 10) | Per-entity loop |
+| Contradiction detection | 1 per entity (max 10) | Per-entity full-tenant scan (most expensive) |
+| **Total** | **~24 worst case** | — |
+
+Note: The contradiction query at `subgraph_extractor.py:393` is a full tenant scan of all CONTRADICTS edges, repeated per entity inside the claims loop. This is the single most expensive pattern — the batched version eliminates it entirely by anchoring contradictions to specific claims.
 
 Graph expansion latency: ~70-120ms per search request.
 
 ## Goal
 
-Reduce Cypher queries from ~11 to ~4 per search request by batching related queries. Target latency: ~30-50ms (50-70% reduction).
+Reduce Cypher queries from ~24 (worst case) to ~4 per search request by batching related queries. Target latency: ~30-50ms (50-70% reduction).
 
 ## Success Criteria
 
-- Cypher queries per search: 11 → ≤ 4
+- Cypher queries per search: ~24 → ≤ 4
 - Latency of graph expansion: 50-70% reduction
 - Zero regressions in 26 sanity checks
 - All 63 existing KTS unit tests pass
@@ -39,28 +42,29 @@ Reduce Cypher queries from ~11 to ~4 per search request by batching related quer
 
 **Current**: 3 sequential queries with fallback logic (entity match → person property → folder name). Each level runs only if the previous returned 0 results.
 
-**New**: 1 UNION query covering all 3 match types simultaneously:
+**New**: 1 query using OPTIONAL MATCH chaining (avoids UNION LIMIT issues and unverified UNION support):
 
 ```cypher
-MATCH (d:Document)-[]-(e:Entity)
-WHERE toLower(e.name) CONTAINS $name_lower AND d.tenant_id = $tid
-RETURN DISTINCT d.document_id AS doc_id, 'entity' AS match_source
-UNION
-MATCH (d:Document)
+MATCH (d:Document {tenant_id: $tid})
+OPTIONAL MATCH (d)-[]-(e:Entity)
+WHERE toLower(e.name) CONTAINS $name_lower
+WITH d, CASE WHEN e IS NOT NULL THEN 'entity' ELSE NULL END AS src1
+OPTIONAL MATCH (d)
 WHERE d.associated_person IS NOT NULL
   AND toLower(d.associated_person) CONTAINS $name_lower
-  AND d.tenant_id = $tid
-RETURN DISTINCT d.document_id AS doc_id, 'person_property' AS match_source
-UNION
-MATCH (d:Document)-[:CONTAINED_IN]->(f:Folder)
-WHERE toLower(f.name) CONTAINS $name_lower AND d.tenant_id = $tid
-RETURN DISTINCT d.document_id AS doc_id, 'folder' AS match_source
+WITH d, src1, CASE WHEN d.associated_person IS NOT NULL AND toLower(d.associated_person) CONTAINS $name_lower THEN 'person_property' ELSE NULL END AS src2
+OPTIONAL MATCH (d)-[:CONTAINED_IN]->(f:Folder)
+WHERE toLower(f.name) CONTAINS $name_lower
+WITH d, src1, src2, CASE WHEN f IS NOT NULL THEN 'folder' ELSE NULL END AS src3
+WHERE src1 IS NOT NULL OR src2 IS NOT NULL OR src3 IS NOT NULL
+RETURN DISTINCT d.document_id AS doc_id,
+  COALESCE(src1, src2, src3) AS match_source
 LIMIT 50
 ```
 
-**Behavior change**: Previously returned results from the first matching level only. Now returns all matches from all 3 sources, deduplicated by `doc_id`. The `match_source` field indicates provenance. This is an improvement — previously folder matches were lost if entity already matched.
+**Alternative (if FalkorDB supports UNION)**: Use UNION with per-branch LIMIT 50 (openCypher LIMIT after UNION applies only to the last branch).
 
-**Fallback**: If FalkorDB does not support UNION, use 3 sequential OPTIONAL MATCH clauses within a single query with WITH chaining.
+**Behavior change**: Previously returned results from the first matching level only. Now returns all matches from all 3 sources, deduplicated by `doc_id`. The `match_source` field indicates provenance. This is an improvement — previously folder matches were lost if entity already matched.
 
 **Queries**: 3 → 1
 
@@ -70,22 +74,29 @@ LIMIT 50
 
 **Current**: 1 query per entity to resolve seed nodes (up to 5 entities = 5 queries).
 
-**New**: 1 query with IN operator for all entities:
+**New**: 1 query using UNWIND for all entities (FalkorDB-compatible, avoids list comprehension):
 
 ```cypher
-MATCH (e:Entity)
-WHERE (e.tenant_id = $tid OR e.shared = true)
-  AND e.normalized_name IS NOT NULL
-WITH e, [name IN $names WHERE toLower(e.name) CONTAINS name | name] AS matched
-WHERE size(matched) > 0
-RETURN e.name AS name, labels(e) AS types, e.entity_type AS entity_type,
-       matched[0] AS matched_query, elementId(e) AS eid
+UNWIND $names AS search_name
+MATCH (n)
+WHERE (n.tenant_id = $tid OR n.shared = true)
+  AND (toLower(n.name) CONTAINS search_name
+       OR toLower(n.title) CONTAINS search_name
+       OR toLower(n.associated_person) CONTAINS search_name)
+RETURN n.name AS name, labels(n) AS types,
+       n.entity_type AS entity_type,
+       search_name AS matched_query, id(n) AS nid
 LIMIT $max_seeds
 ```
 
 **Input**: `$names` = list of normalized entity names (max 10).
 
-**FalkorDB compat**: If list comprehension inside WITH is not supported, use `UNWIND $names AS name` followed by `MATCH ... WHERE toLower(e.name) CONTAINS name` and `COLLECT`.
+**Key design decisions**:
+- Uses `UNWIND` (FalkorDB-safe) instead of list comprehension in WITH.
+- Matches **any node label** (not just Entity) to preserve current behavior — `_resolve_seeds` matches Document by title and associated_person too.
+- Searches across 3 properties: `name`, `title`, `associated_person` (matching current multi-property pattern).
+
+**Data flow**: Phase 1 output includes `id(n)` values (integer node IDs). Phase 2 consumes these as `$seed_ids`.
 
 **Queries**: 5 → 1
 
@@ -99,7 +110,7 @@ LIMIT $max_seeds
 
 ```cypher
 MATCH (seed:Entity)
-WHERE elementId(seed) IN $seed_ids
+WHERE id(seed) IN $seed_ids
 MATCH (seed)-[r]-(hop1)
 WHERE hop1.tenant_id = $tid OR hop1.shared = true
 OPTIONAL MATCH (hop1)-[r2]-(hop2)
@@ -122,13 +133,13 @@ LIMIT $max_nodes
 
 **File**: `app/services/subgraph_extractor.py` (Phase 3, lines 295-417)
 
-**Current**: 1 query per entity for claims (max 10 entities) + 1 separate query for contradictions = 11 queries.
+**Current**: 1 query per entity for claims (max 10) + 1 contradiction full-tenant scan per entity (max 10) = up to 20 queries. The contradiction query is the most expensive — it scans ALL CONTRADICTS edges for the tenant, repeated inside the per-entity loop.
 
 **New**: 1 query for all claims + contradictions:
 
 ```cypher
 MATCH (e:Entity)
-WHERE elementId(e) IN $entity_ids
+WHERE id(e) IN $entity_ids
 MATCH (c:Claim)-[:ABOUT]->(e)
 WHERE c.tenant_id = $tid
 OPTIONAL MATCH (c)-[:EXTRACTED_FROM]->(d:Document)
@@ -152,11 +163,14 @@ LIMIT $max_claims
 
 | Phase | Before | After | Reduction |
 |-------|--------|-------|-----------|
-| documents-by-entity | 3 | 1 (UNION) | -2 |
-| Seed resolution | 5 | 1 (IN batch) | -4 |
+| documents-by-entity | 3 | 1 (OPTIONAL MATCH chain) | -2 |
+| Seed resolution | 5 | 1 (UNWIND batch) | -4 |
 | N-hop traversal | 5 | 1 (explicit hops) | -4 |
-| Claims + contradictions | 11 | 1 (batch + OPTIONAL) | -10 |
-| **Total** | **~11** | **~4** | **~63%** |
+| Claims fetch | 10 | 1 (batch + OPTIONAL) | -9 |
+| Contradiction detection | 10 (full tenant scan each) | 0 (merged into claims query) | -10 |
+| **Total** | **~24 worst case** | **~4** | **~83%** |
+
+Note: The contradiction detection improvement is particularly significant — the current per-entity full-tenant scan is replaced by an anchored OPTIONAL MATCH on specific claims, fundamentally improving the query plan.
 
 ## Files Modified
 
@@ -179,6 +193,7 @@ LIMIT $max_claims
 - **New tests**: Batch seed resolution, UNION fallback, batch claims
 - **Sanity checks**: 26 checks as E2E validation
 - **Performance**: Measure latency before/after with FalkorDB graph containing real data
+- **Query counter**: Add a context-scoped counter to `falkordb_client.execute_cypher()` to verify query counts in tests (assert ≤ 4 per subgraph extraction)
 
 ## Risks
 
