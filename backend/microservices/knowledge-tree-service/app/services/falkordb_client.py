@@ -7,10 +7,42 @@ as the former age_client.py (now removed) for consistency.
 """
 
 import asyncio
+import contextvars
 import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_query_counter: contextvars.ContextVar = contextvars.ContextVar("query_counter", default=None)
+
+
+class QueryCounter:
+    """Context manager that counts FalkorDB queries within a scope.
+
+    Nested counters are supported: each counter in the chain increments
+    independently, so an outer counter also counts queries made inside
+    an inner counter scope.
+    """
+
+    def __init__(self):
+        self.count = 0
+        self._token = None
+        self._parent: "QueryCounter | None" = None
+
+    async def __aenter__(self):
+        self._parent = _query_counter.get(None)
+        self._token = _query_counter.set(self)
+        return self
+
+    async def __aexit__(self, *exc):
+        _query_counter.reset(self._token)
+
+
+def _increment_query_counter():
+    counter = _query_counter.get(None)
+    while counter is not None:
+        counter.count += 1
+        counter = counter._parent
 
 from falkordb.asyncio import FalkorDB as AsyncFalkorDB
 
@@ -155,6 +187,7 @@ class FalkorDBClient:
             List of dicts mapping column names to values. Empty list if
             client is not initialized.
         """
+        _increment_query_counter()
         await self.initialize()
         if not self._graph:
             return []
