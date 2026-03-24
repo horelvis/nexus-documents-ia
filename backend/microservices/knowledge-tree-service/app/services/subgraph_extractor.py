@@ -365,47 +365,79 @@ class SubgraphExtractor:
     ) -> Tuple[List[Dict], List[Dict]]:
         """Fetch Claims connected to discovered entities via ABOUT edges.
 
-        Also retrieves CONTRADICTS/SUPPORTS edges between claims.
+        Single batch query replaces the previous per-entity loop (up to 20
+        queries → 1 query).  Retrieves claims, their document sources, and
+        any CONTRADICTS edges between claims in one round-trip.
+
+        Args:
+            tenant_id: Tenant identifier.
+            entity_ids: String node IDs of Entity nodes (from traversal results).
+            seen_nodes: Mutable set used for cross-call deduplication.
+
+        Returns:
+            (claim_nodes, claim_edges) to be appended to the traversal result.
         """
+        if not entity_ids:
+            return [], []
+
+        # Convert string node IDs (stored in traversal nodes) to int for Cypher
+        int_ids: List[int] = []
+        for eid in entity_ids[:10]:  # Cap to avoid oversized queries
+            try:
+                int_ids.append(int(eid))
+            except (ValueError, TypeError):
+                logger.debug(f"Skipping non-integer entity ID: {eid!r}")
+        if not int_ids:
+            return [], []
+
         nodes: List[Dict] = []
         edges: List[Dict] = []
 
-        # Query: Entity <- ABOUT - Claim - EXTRACTED_FROM -> Document
-        # Plus optional CONTRADICTS / SUPPORTS between claims
-        for eid in entity_ids[:10]:  # Cap to avoid huge queries
-            query = """
-                MATCH (e) WHERE id(e) = $entity_id
-                MATCH (c:Claim)-[:ABOUT]->(e)
-                WHERE c.tenant_id = $tenant_id
-                OPTIONAL MATCH (c)-[:EXTRACTED_FROM]->(d:Document)
-                RETURN id(c) AS claim_id,
-                       c.claim_id AS claim_uuid,
-                       c.statement AS statement,
-                       c.claim_type AS claim_type,
-                       c.confidence AS confidence,
-                       c.source_chunk AS source_chunk,
-                       c.verified AS verified,
-                       id(e) AS entity_id,
-                       id(d) AS doc_id
-                LIMIT 20
-            """
-            try:
-                rows = await falkordb_client.execute_cypher(
-                    query, {"tenant_id": tenant_id, "entity_id": int(eid)},
-                )
-            except Exception as e:
-                logger.debug(f"Claim fetch failed for entity {eid}: {e}")
+        # Single batch query: claims + document sources + contradictions
+        query = """
+            MATCH (e)
+            WHERE id(e) IN $entity_ids
+            MATCH (c:Claim)-[:ABOUT]->(e)
+            WHERE c.tenant_id = $tid
+            OPTIONAL MATCH (c)-[:EXTRACTED_FROM]->(d:Document)
+            OPTIONAL MATCH (c)-[:CONTRADICTS]-(contra:Claim)
+            RETURN
+              id(e)                  AS entity_nid,
+              id(c)                  AS claim_nid,
+              c.claim_id             AS claim_uuid,
+              c.statement            AS statement,
+              c.claim_type           AS claim_type,
+              c.confidence           AS confidence,
+              c.source_chunk         AS source_chunk,
+              c.verified             AS verified,
+              id(d)                  AS doc_nid,
+              id(contra)             AS contra_nid,
+              contra.claim_id        AS contra_uuid,
+              contra.statement       AS contra_statement
+            ORDER BY c.confidence DESC
+            LIMIT 200
+        """
+        try:
+            rows = await falkordb_client.execute_cypher(
+                query, {"entity_ids": int_ids, "tid": tenant_id},
+            )
+        except Exception as e:
+            logger.warning(f"Batch claim fetch failed: {e}")
+            return [], []
+
+        # Track CONTRADICTS edges seen to avoid duplicates (undirected match
+        # can produce the same pair twice: c→contra and contra→c)
+        seen_contra_pairs: Set[Tuple[str, str]] = set()
+
+        for row in rows:
+            entity_nid = str(row.get("entity_nid") or "")
+            cid = str(row.get("claim_nid") or "")
+            if not cid:
                 continue
 
-            claim_ids_in_batch: List[str] = []
-
-            for row in rows:
-                cid = str(row.get("claim_id") or "")
-                if not cid or cid in seen_nodes:
-                    continue
+            # Add claim node once (first occurrence)
+            if cid not in seen_nodes:
                 seen_nodes.add(cid)
-                claim_ids_in_batch.append(cid)
-
                 nodes.append({
                     "id": cid,
                     "label": "Claim",
@@ -420,52 +452,38 @@ class SubgraphExtractor:
                     "graph_source": "tenant",
                 })
 
-                # ABOUT edge
-                edges.append({
-                    "source_id": cid,
-                    "target_id": str(eid),
-                    "label": "ABOUT",
-                    "properties": {},
-                })
-
-                # EXTRACTED_FROM edge
-                doc_id = row.get("doc_id")
-                if doc_id is not None:
+                # ABOUT edge (claim → entity)
+                if entity_nid:
                     edges.append({
                         "source_id": cid,
-                        "target_id": str(doc_id),
+                        "target_id": entity_nid,
+                        "label": "ABOUT",
+                        "properties": {},
+                    })
+
+                # EXTRACTED_FROM edge (claim → document)
+                doc_nid = row.get("doc_nid")
+                if doc_nid is not None:
+                    edges.append({
+                        "source_id": cid,
+                        "target_id": str(doc_nid),
                         "label": "EXTRACTED_FROM",
                         "properties": {},
                     })
 
-            # Fetch CONTRADICTS edges between claims in this batch
-            if len(claim_ids_in_batch) >= 2:
-                try:
-                    contra_query = """
-                        MATCH (c1:Claim)-[r:CONTRADICTS]->(c2:Claim)
-                        WHERE c1.tenant_id = $tenant_id
-                          AND c2.tenant_id = $tenant_id
-                        RETURN id(c1) AS src, id(c2) AS tgt,
-                               r.contradiction_type AS contra_type
-                    """
-                    contra_rows = await falkordb_client.execute_cypher(
-                        contra_query, {"tenant_id": tenant_id},
-                    )
-                    batch_set = set(claim_ids_in_batch)
-                    for cr in contra_rows:
-                        src = str(cr.get("src") or "")
-                        tgt = str(cr.get("tgt") or "")
-                        if src in batch_set or tgt in batch_set:
-                            edges.append({
-                                "source_id": src,
-                                "target_id": tgt,
-                                "label": "CONTRADICTS",
-                                "properties": {
-                                    "contradiction_type": cr.get("contra_type"),
-                                },
-                            })
-                except Exception as e:
-                    logger.debug(f"Contradiction edge fetch failed: {e}")
+            # CONTRADICTS edge — deduplicate undirected pairs
+            contra_nid_raw = row.get("contra_nid")
+            if contra_nid_raw is not None:
+                contra_nid = str(contra_nid_raw)
+                pair = (min(cid, contra_nid), max(cid, contra_nid))
+                if pair not in seen_contra_pairs:
+                    seen_contra_pairs.add(pair)
+                    edges.append({
+                        "source_id": cid,
+                        "target_id": contra_nid,
+                        "label": "CONTRADICTS",
+                        "properties": {},
+                    })
 
         return nodes, edges
 

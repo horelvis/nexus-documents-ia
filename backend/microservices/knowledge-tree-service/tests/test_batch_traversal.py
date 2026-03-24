@@ -279,3 +279,114 @@ class TestBatchTraversal:
 
         node_ids = [n["id"] for n in nodes]
         assert len(node_ids) == len(set(node_ids)), "Duplicate node IDs found in traversal result"
+
+
+@pytest.mark.asyncio
+class TestBatchClaims:
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def seed_data(self, falkordb_client):
+        await falkordb_client.execute_cypher("""
+            CREATE (e1:Entity {name: 'Juan', entity_type: 'person', tenant_id: 't1'})
+            CREATE (d1:Document {document_id: 'doc-c-1', title: 'Contrato', tenant_id: 't1'})
+            CREATE (c1:Claim {claim_id: 'claim-1', statement: '45000 EUR', claim_type: 'numeric', confidence: 0.9, tenant_id: 't1'})
+            CREATE (c2:Claim {claim_id: 'claim-2', statement: '42000 EUR', claim_type: 'numeric', confidence: 0.85, tenant_id: 't1'})
+            CREATE (c1)-[:ABOUT]->(e1)
+            CREATE (c2)-[:ABOUT]->(e1)
+            CREATE (c1)-[:EXTRACTED_FROM]->(d1)
+            CREATE (c2)-[:EXTRACTED_FROM]->(d1)
+            CREATE (c1)-[:CONTRADICTS]->(c2)
+        """)
+
+    def _make_extractor(self, client):
+        import app.services.subgraph_extractor as mod
+        mod.falkordb_client = client
+        extractor = mod.SubgraphExtractor()
+        extractor._initialized = True
+        return extractor
+
+    async def test_fetches_claims_in_one_query(self, falkordb_client):
+        extractor = self._make_extractor(falkordb_client)
+
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (e:Entity {tenant_id: 't1'}) RETURN id(e) AS nid"
+        )
+        entity_ids = [str(r["nid"]) for r in rows]
+
+        async with QueryCounter() as counter:
+            claim_nodes, claim_edges = await extractor._fetch_entity_claims(
+                't1', entity_ids, set()
+            )
+            assert counter.count == 1, f"Expected 1 query, got {counter.count}"
+
+        claim_uuids = [c["properties"].get("claim_id") for c in claim_nodes]
+        assert "claim-1" in claim_uuids
+        assert "claim-2" in claim_uuids
+
+    async def test_includes_contradictions(self, falkordb_client):
+        extractor = self._make_extractor(falkordb_client)
+
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (e:Entity {tenant_id: 't1'}) RETURN id(e) AS nid"
+        )
+        entity_ids = [str(r["nid"]) for r in rows]
+
+        _nodes, edges = await extractor._fetch_entity_claims('t1', entity_ids, set())
+
+        contra_edges = [e for e in edges if e["label"] == "CONTRADICTS"]
+        assert len(contra_edges) >= 1, "Expected at least one CONTRADICTS edge"
+
+    async def test_includes_document_source(self, falkordb_client):
+        extractor = self._make_extractor(falkordb_client)
+
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (e:Entity {tenant_id: 't1'}) RETURN id(e) AS nid"
+        )
+        entity_ids = [str(r["nid"]) for r in rows]
+
+        _nodes, edges = await extractor._fetch_entity_claims('t1', entity_ids, set())
+
+        extracted_from_edges = [e for e in edges if e["label"] == "EXTRACTED_FROM"]
+        assert len(extracted_from_edges) >= 1, "Expected at least one EXTRACTED_FROM edge"
+
+    async def test_deduplicates_claim_nodes(self, falkordb_client):
+        """Running twice with the same seen_nodes set must not produce duplicate claim nodes."""
+        extractor = self._make_extractor(falkordb_client)
+
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (e:Entity {tenant_id: 't1'}) RETURN id(e) AS nid"
+        )
+        entity_ids = [str(r["nid"]) for r in rows]
+
+        seen: set = set()
+        nodes1, _ = await extractor._fetch_entity_claims('t1', entity_ids, seen)
+        nodes2, _ = await extractor._fetch_entity_claims('t1', entity_ids, seen)
+
+        # Second call should return no nodes (already in seen_nodes)
+        assert nodes2 == [], "Second call with same seen_nodes must return no new claim nodes"
+
+    async def test_empty_entity_ids_returns_empty(self, falkordb_client):
+        extractor = self._make_extractor(falkordb_client)
+
+        async with QueryCounter() as counter:
+            nodes, edges = await extractor._fetch_entity_claims('t1', [], set())
+            assert counter.count == 0, "Empty entity list must issue 0 queries"
+
+        assert nodes == []
+        assert edges == []
+
+    async def test_does_not_duplicate_contradicts_edges(self, falkordb_client):
+        """CONTRADICTS is undirected — the pair must appear only once in edges."""
+        extractor = self._make_extractor(falkordb_client)
+
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (e:Entity {tenant_id: 't1'}) RETURN id(e) AS nid"
+        )
+        entity_ids = [str(r["nid"]) for r in rows]
+
+        _nodes, edges = await extractor._fetch_entity_claims('t1', entity_ids, set())
+
+        contra_edges = [e for e in edges if e["label"] == "CONTRADICTS"]
+        # Normalise to frozenset pairs for undirected dedup check
+        pairs = [frozenset([e["source_id"], e["target_id"]]) for e in contra_edges]
+        assert len(pairs) == len(set(pairs)), "Duplicate CONTRADICTS edges found"
