@@ -92,6 +92,11 @@ export const API_CONFIG = {
     // TTS (placeholder)
     TTS_VOICES: '/tts/voices',
     TTS_SYNTHESIZE: '/tts/synthesize',
+
+    // Explainability
+    EXPLAINABILITY_GRAPH: '/emma/explainability/graph',
+    EXPLAINABILITY_TRACE: (threadId: string, messageIndex: number) =>
+      `/emma/explainability/trace/${threadId}/${messageIndex}`,
   },
 } as const
 
