@@ -402,6 +402,12 @@ services:
   # protocol with native OpenCypher support and sub-millisecond queries.
   falkordb:
     image: falkordb/falkordb:v4.2.0
+    command: >
+      redis-server
+      --appendonly yes
+      --save "60 1"
+      --save "300 100"
+      --loadmodule /FalkorDB/bin/src/falkordb.so
     ports:
       - "6380:6379"   # Redis-compatible protocol (offset to avoid clash with Redis)
       - "3003:3000"   # FalkorDB Browser UI

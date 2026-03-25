@@ -1367,6 +1367,12 @@ class IndexingPipeline:
                     "filename": metadata.get("filename", ""),
                     "chunks_count": len(result.chunks),
                     "tags": metadata.get("tags", []),
+                    # Enrichment for FalkorDB auto-index
+                    "file_path": metadata.get("external_path", ""),
+                    "domain": result.contextual_domain or "",
+                    "semantic_type": metadata.get("document_type", ""),
+                    "connector_id": metadata.get("connector_id", ""),
+                    "connector_type": metadata.get("connector_type", ""),
                 },
             )
         except Exception as e:
