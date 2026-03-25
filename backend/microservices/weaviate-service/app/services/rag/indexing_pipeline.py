@@ -72,8 +72,13 @@ from .hierarchical_indexer import (
     DocumentSummary,
     hierarchical_indexer,
 )
-from .textextract_client import TextExtractClient, TextExtractResult, textextract_client
-from .langextract_client import LangExtractClient, LangExtractResult, langextract_client
+from app.clients.intelligence_client import (
+    IntelligenceExtractClient,
+    TextExtractResult,
+    LangExtractResult,
+    intelligence_extract_client,
+)
+from app.clients import intelligence_client
 from .ocr_client import OCRClient, OCRResult, ocr_client
 from app.services.text_alignment_service import (
     TextAlignmentService,
@@ -238,13 +243,13 @@ class IndexingPipeline:
 
     def __init__(
         self,
-        extractor: Optional[TextExtractClient] = None,
+        extractor: Optional[IntelligenceExtractClient] = None,
         intelligence: Optional[DocumentIntelligence] = None,
         chunker: Optional[SemanticChunker] = None,
         knowledge_extractor: Optional[KnowledgeExtractionService] = None,
         ocr_client_instance: Optional[OCRClient] = None,
     ):
-        self.extractor = extractor or textextract_client
+        self.extractor = extractor or intelligence_extract_client
         self.intelligence = intelligence or document_intelligence
         self.chunker = chunker or semantic_chunker
         self.knowledge_extractor = knowledge_extractor or get_knowledge_service()
@@ -849,7 +854,7 @@ class IndexingPipeline:
 
             try:
                 # Call LangExtract client for entity extraction
-                langextract_result = await langextract_client.extract_entities(
+                langextract_result = await intelligence_client.extract_entities(
                     text=text_for_chunking,
                     document_type=metadata.get("document_type", "general"),
                     filename=metadata.get("filename"),

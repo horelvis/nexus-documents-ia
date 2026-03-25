@@ -383,6 +383,8 @@ services:
         condition: service_started
       langextract-service:
         condition: service_healthy
+      intelligence-docs-service:
+        condition: service_healthy
       storage-service:
         condition: service_healthy
     networks:
@@ -396,6 +398,7 @@ services:
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
       - LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
+      - INTELLIGENCE_DOCS_SERVICE_URL=http://intelligence-docs-service:8000
       - STORAGE_SERVICE_URL=http://storage-service:8010
       # OCR: disabled during bulk indexing (Tika handles text extraction)
       - ENHANCED_OCR_ENABLED=false
