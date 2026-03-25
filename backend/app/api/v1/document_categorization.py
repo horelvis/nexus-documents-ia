@@ -14,7 +14,10 @@ from app.api.async_dependencies import get_current_active_user_async
 from app.db.async_database import get_async_db
 from app.db.models import User, Document
 from app.core.config import settings
-from app.services.unified_categorization_service import get_categorization_service
+import os
+import httpx
+
+_INTELLIGENCE_URL = os.getenv("INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000")
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -127,17 +130,35 @@ async def categorize_documents(
                 )
                 document_content = document_content or "Documento sin contenido disponible"
                 
-                # Usar servicio unificado de categorización (LangExtract)
-                categorization_service = get_categorization_service()
-                categorization_result = await categorization_service.categorize_document(
-                    text=document_content,
-                    filename=doc.title or doc.filename,
-                    metadata={
-                        "document_id": str(doc.id),
-                        "original_category": doc.category
-                    },
-                    extract_entities=request.include_tags  # Extraer entidades si se piden tags
-                )
+                # Classify via intelligence-docs-service
+                categorization_result = {"success": False, "category": "general"}
+                try:
+                    async with httpx.AsyncClient(timeout=30.0) as http_client:
+                        classify_resp = await http_client.post(
+                            f"{_INTELLIGENCE_URL}/classify",
+                            json={"text": document_content[:5000], "filename": doc.title or doc.filename or ""},
+                        )
+                        classify_resp.raise_for_status()
+                        classify_data = classify_resp.json()
+                        categorization_result = {
+                            "success": True,
+                            "category": classify_data.get("document_type", "general"),
+                            "confidence": classify_data.get("confidence", 0.0),
+                            "reasoning": classify_data.get("domain", ""),
+                            "method": "intelligence-docs-service",
+                        }
+
+                    # Optionally extract entities
+                    if request.include_tags:
+                        async with httpx.AsyncClient(timeout=120.0) as http_client:
+                            ent_resp = await http_client.post(
+                                f"{_INTELLIGENCE_URL}/entities",
+                                json={"text": document_content[:50000], "language": "es", "document_type": categorization_result["category"]},
+                            )
+                            ent_resp.raise_for_status()
+                            categorization_result["extractions"] = ent_resp.json().get("entities", [])
+                except Exception as cat_err:
+                    logger.warning(f"Categorization failed for {doc.id}: {cat_err}")
 
                 if categorization_result["success"]:
                     # Actualizar documento en base de datos

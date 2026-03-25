@@ -13,10 +13,13 @@ from app.providers.extraction.tika import TikaProvider
 from app.providers.extraction.docling import DoclingProvider
 from app.providers.extraction.glm_ocr import GlmOcrProvider
 from app.providers.extraction.plaintext import PlaintextProvider, is_plaintext
-from app.providers.entities.regex_spanish import RegexSpanishProvider
-from app.providers.entities.sglang_ner import SglangNerProvider
+from app.providers.entities.langextract_provider import LangExtractProvider
+from app.providers.guardrails.spanish_id_validator import SpanishIdValidator
+
+_id_validator = SpanishIdValidator()
 from app.pipeline.processor import process_document
 from app.pipeline.classifier import classify_document
+from app.api.identity import router as identity_router
 from app.schemas.models import (
     EmbedRequest, EmbedSingleResponse, EmbedBatchResponse,
     ExtractResponse, EntitiesRequest, EntitiesResponse, EntityResponse,
@@ -71,17 +74,22 @@ async def _init_extraction_providers():
 
 async def _init_entity_providers():
     for provider_name in settings.entity_provider_list:
-        if provider_name == "regex":
-            entity_registry.register(RegexSpanishProvider())
-            logger.info("Registered entity provider: regex")
-        elif provider_name in ("sglang", "vllm"):
-            provider = SglangNerProvider(
-                base_url=settings.sglang_base_url,
-                model=settings.sglang_model,
-                timeout=settings.ner_timeout,
+        if provider_name == "langextract":
+            if not settings.langextract_enabled:
+                logger.info("LangExtract provider disabled via config")
+                continue
+            provider = LangExtractProvider(
+                sglang_base_url=settings.sglang_base_url,
+                sglang_model=settings.sglang_model,
+                extraction_passes=settings.langextract_extraction_passes,
+                max_char_buffer=settings.langextract_max_char_buffer,
+                confidence_threshold=settings.langextract_confidence_threshold,
             )
             entity_registry.register(provider)
-            logger.info(f"Registered entity provider: sglang (model={settings.sglang_model})")
+            logger.info(
+                f"Registered entity provider: langextract "
+                f"(model={settings.sglang_model}, passes={settings.langextract_extraction_passes})"
+            )
 
 
 @asynccontextmanager
@@ -101,6 +109,8 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+app.include_router(identity_router)
 
 
 # --- Health ---
@@ -230,15 +240,26 @@ async def entities(request: EntitiesRequest):
     all_entities = []
     for provider in entity_registry.all():
         try:
-            if await provider.is_available():
+            if not await provider.is_available():
+                continue
+            # LangExtractProvider accepts document_type for few-shot selection
+            if hasattr(provider, "name") and provider.name == "langextract":
+                result = await provider.extract_entities(
+                    request.text, request.language, document_type=request.document_type,
+                )
+            else:
                 result = await provider.extract_entities(request.text, request.language)
-                all_entities.extend(result)
+            all_entities.extend(result)
         except Exception as e:
             logger.warning(f"Entity provider {provider.name} failed: {e}")
 
+    # Guardrail: validate Spanish IDs and scan for missed ones
+    all_entities = _id_validator.validate_and_enrich(all_entities, request.text)
+
     return EntitiesResponse(
         entities=[EntityResponse(
-            type=e.type, value=e.value, provider=e.provider, confidence=e.confidence
+            type=e.type, value=e.value, provider=e.provider, confidence=e.confidence,
+            start_pos=e.start_pos, end_pos=e.end_pos, attributes=e.attributes,
         ) for e in all_entities]
     )
 

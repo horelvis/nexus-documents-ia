@@ -1237,16 +1237,16 @@ async def process_identity_document(
     logger.info(f"AUDIT: {audit_entry}")
 
     try:
-        # Call langextract-service for identity document extraction
-        langextract_url = os.getenv(
-            "LANGEXTRACT_SERVICE_URL",
-            "http://langextract-service:8000"
+        # Call intelligence-docs-service for identity document extraction
+        intelligence_url = os.getenv(
+            "INTELLIGENCE_DOCS_SERVICE_URL",
+            "http://intelligence-docs-service:8000"
         )
         api_key = settings.MICROSERVICES_API_KEY
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{langextract_url}/api/v1/extraction/identity/extract",
+                f"{intelligence_url}/identity/extract",
                 headers={
                     "X-API-Key": api_key,
                     "X-Tenant-ID": tenant_id,

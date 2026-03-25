@@ -14,7 +14,7 @@ Deployment modes:
 from app.api.v1 import (
     document_insights, documents, document_shares, document_categorization, tenants, auth, admin, chat,
     agents, webhooks, search, teams, users, entities,
-    assistant, migration, weaviate, lgpd, workflows, analysis_queue, channels,
+    assistant, weaviate, lgpd, workflows, analysis_queue, channels,
     internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
     document_acl, folders, classification, sharing_insights, emma,
 )
@@ -119,8 +119,6 @@ if FeatureFlags.is_enabled(Feature.DASHBOARD_ANALYTICS):
     api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
     logger.debug("Dashboard analytics routes enabled")
 
-# NEW: Migration management for Qdrant->Weaviate transition
-api_router.include_router(migration.router, prefix="/migration", tags=["migration"])
 
 # LGPD Compliance - User data deletion for Brazilian LGPD law
 api_router.include_router(lgpd.router, prefix="/lgpd", tags=["lgpd"])

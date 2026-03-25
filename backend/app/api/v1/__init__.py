@@ -18,7 +18,7 @@ from app.api.v1.emma import router as emma_router
 from app.api.v1 import (
     document_insights, documents, document_shares, document_acl, document_categorization, tenants, stripe, auth, admin, chat,
     agents, signatures, webhooks, search, teams, users, entities, dashboard,
-    assistant, migration, workflows, analysis_queue, channels, gemini_voice,
+    assistant, workflows, analysis_queue, channels, gemini_voice,
     site_guests, site_portal, emma,
 )
 # from app.api.v1.document_analyzer import router as document_analyzer_router

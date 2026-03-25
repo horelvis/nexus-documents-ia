@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Extraction: docling (structured docs) → glm-ocr (scanned/images) → tika (legacy fallback)
     extraction_providers: str = "docling,glm-ocr"
     embedding_providers: str = "sentence-transformers"
-    entity_providers: str = os.getenv("ENTITY_PROVIDERS", "regex,sglang")
+    entity_providers: str = os.getenv("ENTITY_PROVIDERS", "langextract")
 
     # Embedding
     embedding_model: str = "BAAI/bge-m3"
@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     # LLM for NER (SGLang — OpenAI-compatible)
     sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
     sglang_model: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", ""))
+
+    # LangExtract (few-shot entity extraction with source grounding)
+    langextract_enabled: bool = True
+    langextract_extraction_passes: int = 1
+    langextract_max_char_buffer: int = 10000
+    langextract_confidence_threshold: float = 0.7
+
+    # Identity document extraction (doctr OCR — lazy-loaded)
+    id_document_enabled: bool = True
 
     # Timeouts (seconds)
     extraction_timeout: int = 600

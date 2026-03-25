@@ -9,3 +9,8 @@ python-multipart>=0.0.12
 torch>=2.0
 numpy
 pdf2image>=1.17.0
+# LangExtract (few-shot entity extraction with source grounding)
+langextract[openai]==1.1.1
+# Identity document extraction (optional, lazy-loaded)
+pillow>=10.0.0
+mrz>=0.6.2

@@ -22,7 +22,6 @@ from app.schemas.enums import IndexingStatus
 from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.weaviate_client import weaviate_client
 from app.services.queue_service import queue_service
-from app.services.langextract_client import langextract_client
 from app.services.folder_classification_service import classify_document as classify_document_folder
 from .document_classifier import classify_document_type
 
@@ -1188,34 +1187,7 @@ class AsyncDocumentService:
             except Exception as e:
                 logger.warning(f"Auto-categorization failed for {doc_id}: {e}")
 
-            # Extract entities via LangExtract
-            try:
-                doc_type = category if category else "general"
-                entity_result = await langextract_client.extract_entities(
-                    text=text_preview,
-                    document_type=doc_type,
-                    filename=doc_info.get("filename"),
-                )
-
-                if entity_result.get("success"):
-                    async with AsyncSessionLocal() as db:
-                        stmt = select(Document).filter(Document.id == doc_id)
-                        result = await db.execute(stmt)
-                        doc = result.scalar_one_or_none()
-
-                        if doc:
-                            doc.extracted_entities = entity_result.get("extractions", [])
-                            updated_metadata = dict(doc.document_metadata or {})
-                            updated_metadata["categorization"] = updated_metadata.get("categorization", {})
-                            updated_metadata["categorization"]["visualization_html"] = entity_result.get("visualization_html")
-                            updated_metadata["extraction_summary"] = entity_result.get("summary", {})
-                            doc.document_metadata = updated_metadata
-                            await db.commit()
-                            logger.info(
-                                f"Document {doc_id}: extracted {len(doc.extracted_entities)} entities"
-                            )
-            except Exception as e:
-                logger.warning(f"Entity extraction failed for {doc_id}: {e}")
+            # Entity extraction handled by indexing pipeline (intelligence-docs-service → Weaviate/FalkorDB)
 
             # Auto-classify folder (Learn-First approach)
             try:
@@ -1380,39 +1352,40 @@ class AsyncDocumentService:
                 logger.warning(f"No preview available to categorize document {doc_id}")
                 return None
 
-            # Use LangExtract for intelligent categorization
-            logger.info(f"📋 Categorizando documento {doc_id} con LangExtract")
-            categorization_result = await langextract_client.categorize_document(
-                text=snippet,
-                filename=doc.filename,
-                context=f"Document ID: {doc_id}"
+            # Classify via intelligence-docs-service
+            import httpx
+            intelligence_url = os.getenv(
+                "INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000"
             )
-
-            if categorization_result.get("error"):
-                logger.warning(f"LangExtract categorization error: {categorization_result.get('error')}")
+            logger.info(f"Classifying document {doc_id} via intelligence-docs-service")
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    resp = await client.post(
+                        f"{intelligence_url}/classify",
+                        json={"text": snippet[:5000], "filename": doc.filename or ""},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+            except Exception as classify_err:
+                logger.warning(f"Classification failed for {doc_id}: {classify_err}")
                 return None
 
-            category = categorization_result.get("detected_type", "general")
-            confidence = categorization_result.get("confidence", 0.0)
-            reasoning = categorization_result.get("reasoning", "")
+            category = data.get("document_type", "general")
+            confidence = data.get("confidence", 0.0)
 
-            # Update document with categorization
             doc.category = category
-            # IMPORTANT: Copy dict to trigger SQLAlchemy change detection for JSONB
             updated_metadata = dict(doc.document_metadata or {})
             updated_metadata["auto_categorization"] = {
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "method": "langextract",
-                "model": "gemini-2.0-flash",
+                "method": "intelligence-docs-service",
                 "source": source,
                 "detected_type": category,
                 "confidence": confidence,
-                "reasoning": reasoning,
             }
-            doc.document_metadata = updated_metadata  # Reassign to trigger change
+            doc.document_metadata = updated_metadata
             await session.commit()
 
-            logger.info(f"✅ Document {doc_id} categorized as '{category}' (confidence: {confidence:.2f})")
+            logger.info(f"Document {doc_id} categorized as '{category}' (confidence: {confidence:.2f})")
             return category
 
         except Exception as e:
@@ -1977,24 +1950,3 @@ class AsyncDocumentService:
             "total_agents": len(assigned_agents)
         }
 
-    async def _extract_entities_langextract(
-        self, 
-        text: str, 
-        doc_type: str = "general", 
-        filename: str = None
-    ) -> Dict[str, Any]:
-        """Proxy to the shared LangExtract client."""
-        try:
-            return await langextract_client.extract_entities(
-                text=text,
-                document_type=doc_type,
-                filename=filename,
-            )
-        except Exception as exc:
-            logger.error("❌ LangExtract entity extraction failed: %s", exc)
-            return {
-                "success": False,
-                "error": str(exc),
-                "extractions": [],
-                "extraction_type": doc_type or "general",
-            }

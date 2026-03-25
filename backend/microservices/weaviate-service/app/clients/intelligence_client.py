@@ -166,13 +166,21 @@ async def extract_entities(
         async with httpx.AsyncClient(timeout=_TIMEOUT_ENTITY) as client:
             response = await client.post(
                 f"{_BASE_URL}/entities",
-                json={"text": text, "language": language},
+                json={"text": text, "language": language, "document_type": document_type},
             )
             response.raise_for_status()
             data = response.json()
 
         entities = [
-            {"type": e["type"], "value": e["value"], "provider": e.get("provider", "unknown")}
+            {
+                "type": e["type"],
+                "value": e["value"],
+                "provider": e.get("provider", "unknown"),
+                "confidence": e.get("confidence", 0.8),
+                "start_pos": e.get("start_pos"),
+                "end_pos": e.get("end_pos"),
+                "attributes": e.get("attributes", {}),
+            }
             for e in data.get("entities", [])
         ]
         return LangExtractResult(success=True, entities=entities)

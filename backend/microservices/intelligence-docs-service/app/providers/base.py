@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 
 @dataclass
@@ -13,10 +13,13 @@ class ExtractionResult:
 
 @dataclass
 class Entity:
-    type: str        # PERSON, DNI, NIE, CIF, DATE, ORGANIZATION, AMOUNT, LOCATION
+    type: str        # PERSON, DNI, NIE, CIF, DATE, ORGANIZATION, AMOUNT, LOCATION, IDENTIFIER
     value: str
     provider: str
     confidence: float = 1.0
+    start_pos: Optional[int] = None
+    end_pos: Optional[int] = None
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

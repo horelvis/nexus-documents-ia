@@ -3,11 +3,14 @@ import logging
 from typing import Optional
 
 from app.providers.registry import ProviderRegistry
-from app.providers.base import ExtractionProvider, EmbeddingProvider, EntityProvider
+from app.providers.base import ExtractionProvider, EmbeddingProvider, EntityProvider, Entity
 from app.providers.extraction.plaintext import PlaintextProvider, is_plaintext
+from app.providers.guardrails.spanish_id_validator import SpanishIdValidator
 from app.pipeline.quality import compute_quality_score
 from app.pipeline.language import detect_language
 from app.schemas.models import ProcessOptions, ProcessResponse, EntityResponse
+
+_id_validator = SpanishIdValidator()
 
 logger = logging.getLogger(__name__)
 
@@ -86,20 +89,28 @@ async def process_document(
             metadata["embedding_error"] = str(e)
 
     # Step 3: Extract entities
+    raw_entities: list[Entity] = []
     if options.entities and text:
         for provider in entity_registry.all():
             try:
                 if await provider.is_available():
                     result = await provider.extract_entities(text, language)
-                    entities.extend([
-                        EntityResponse(
-                            type=e.type, value=e.value,
-                            provider=e.provider, confidence=e.confidence,
-                        )
-                        for e in result
-                    ])
+                    raw_entities.extend(result)
             except Exception as e:
                 logger.warning(f"Entity provider {provider.name} failed: {e}")
+
+        # Step 3b: Guardrail — validate Spanish IDs and scan for missed ones
+        raw_entities = _id_validator.validate_and_enrich(raw_entities, text)
+
+        entities = [
+            EntityResponse(
+                type=e.type, value=e.value,
+                provider=e.provider, confidence=e.confidence,
+                start_pos=e.start_pos, end_pos=e.end_pos,
+                attributes=e.attributes,
+            )
+            for e in raw_entities
+        ]
 
     elapsed_ms = int((time.monotonic() - start) * 1000)
 

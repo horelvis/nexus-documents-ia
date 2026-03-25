@@ -39,11 +39,15 @@ class EntityResponse(BaseModel):
     value: str
     provider: str
     confidence: float = 1.0
+    start_pos: Optional[int] = None
+    end_pos: Optional[int] = None
+    attributes: dict[str, Any] = {}
 
 
 class EntitiesRequest(BaseModel):
     text: str
     language: str = "es"
+    document_type: str = "general"
 
 
 class EntitiesResponse(BaseModel):

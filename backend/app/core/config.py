@@ -201,8 +201,8 @@ class Settings(BaseSettings):
     # CAG Microservice (Contextual Augmented Generation)
     CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://weaviate-service:8000")
     
-    # LangExtract Service (Entity Extraction)
-    LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
+    # Intelligence Docs Service (entity extraction, classification, embeddings, OCR)
+    INTELLIGENCE_DOCS_SERVICE_URL: str = os.getenv("INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000")
     BACKGROUND_TASKS_URL: str = os.getenv("BACKGROUND_TASKS_URL", "http://background-worker:8100")
     MCP_ALFRESCO_URL: str = os.getenv("MCP_ALFRESCO_URL", "http://mcp-alfresco:8000")
     MCP_GOOGLE_DRIVE_URL: str = os.getenv("MCP_GOOGLE_DRIVE_URL", "http://mcp-google-drive:8000")
