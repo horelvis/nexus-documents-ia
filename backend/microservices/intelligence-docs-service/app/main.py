@@ -169,18 +169,32 @@ async def extract(
     if not file and not url:
         raise HTTPException(status_code=400, detail="Provide 'file' or 'url'")
 
-    try:
-        provider = await extraction_registry.get_available()
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
-
+    file_bytes = None
     if file:
         file_bytes = await file.read()
         fname = filename or file.filename or "unknown"
-        result = await provider.extract(file_bytes, fname)
     else:
         fname = filename or url.split("/")[-1]
-        result = await provider.extract_from_url(url, fname)
+
+    # Try each available provider with automatic fallback
+    last_error = None
+    result = None
+    for provider in extraction_registry.all():
+        try:
+            if not await provider.is_available():
+                continue
+            if file_bytes:
+                result = await provider.extract(file_bytes, fname)
+            else:
+                result = await provider.extract_from_url(url, fname)
+            break  # Success
+        except Exception as e:
+            logger.warning(f"Extraction provider {provider.name} failed for {fname}: {e}")
+            last_error = e
+
+    if result is None:
+        detail = f"All extraction providers failed. Last error: {last_error}" if last_error else "No extraction provider available"
+        raise HTTPException(status_code=503, detail=detail)
 
     return ExtractResponse(
         text=result.text,

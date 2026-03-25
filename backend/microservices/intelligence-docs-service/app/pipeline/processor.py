@@ -27,23 +27,29 @@ async def process_document(
     vector: Optional[list[float]] = None
     entities: list[EntityResponse] = []
 
-    # Step 1: Extract text
+    # Step 1: Extract text (try providers with fallback)
     if options.extract:
-        try:
-            provider = await extraction_registry.get_available()
-            if file_bytes:
-                result = await provider.extract(file_bytes, filename)
-            elif url:
-                result = await provider.extract_from_url(url, filename)
-            else:
-                raise ValueError("No file or URL provided")
+        extracted = False
+        for provider in extraction_registry.all():
+            try:
+                if not await provider.is_available():
+                    continue
+                if file_bytes:
+                    result = await provider.extract(file_bytes, filename)
+                elif url:
+                    result = await provider.extract_from_url(url, filename)
+                else:
+                    raise ValueError("No file or URL provided")
 
-            text = result.text
-            metadata = result.metadata
-            metadata["quality_score"] = compute_quality_score(text)
-        except RuntimeError as e:
-            logger.error(f"No extraction provider available: {e}")
-            metadata["extraction_error"] = str(e)
+                text = result.text
+                metadata = result.metadata
+                metadata["quality_score"] = compute_quality_score(text)
+                extracted = True
+                break
+            except Exception as e:
+                logger.warning(f"Extraction provider {provider.name} failed: {e}")
+        if not extracted:
+            metadata["extraction_error"] = "All extraction providers failed"
 
     # Detect language
     language = options.language or detect_language(text)

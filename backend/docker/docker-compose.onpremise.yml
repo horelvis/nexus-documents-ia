@@ -223,6 +223,47 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # Intelligence Docs Service — Unified extraction + embedding + NER
+  # =============================================================================
+  # Replaces textextract-service + langextract-service + embedding code in weaviate-service.
+  # Provider registry with automatic fallback. On-premise first, cloud opt-in.
+  intelligence-docs-service:
+    build:
+      context: ../microservices/intelligence-docs-service
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8012:8000"
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    environment:
+      - EXTRACTION_PROVIDERS=${EXTRACTION_PROVIDERS:-docling,tika}
+      - EMBEDDING_PROVIDERS=${EMBEDDING_PROVIDERS:-sentence-transformers}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
+      - ENTITY_PROVIDERS=${ENTITY_PROVIDERS:-regex}
+      - DOCLING_URL=http://docling:5001
+      - TIKA_URL=http://tika:9998
+      - VLLM_BASE_URL=http://vllm:8000/v1
+      - VLLM_MODEL=${VLLM_MODEL:-}
+    networks:
+      - backend-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  # =============================================================================
   # Docling - AI Document Understanding (opt-in via --profile docling)
   # =============================================================================
   # IBM Docling extracts structured Markdown from documents, preserving
