@@ -3,7 +3,8 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # Provider order (comma-separated, parsed from env string)
-    extraction_providers: str = "docling,tika"
+    # Extraction: docling (structured docs) → glm-ocr (scanned/images) → tika (legacy fallback)
+    extraction_providers: str = "docling,glm-ocr"
     embedding_providers: str = "sentence-transformers"
     entity_providers: str = "regex,vllm"
 
@@ -17,6 +18,10 @@ class Settings(BaseSettings):
     # Extraction backends
     docling_url: str = "http://docling:5001"
     tika_url: str = "http://tika:9998"
+
+    # GLM-OCR (VLM-based OCR for scanned docs and images, 0.9B params)
+    glm_ocr_url: str = "http://glm-ocr:8000/v1"
+    glm_ocr_model: str = "zai-org/GLM-OCR"
 
     # LLM for NER
     vllm_base_url: str = "http://vllm:8000/v1"

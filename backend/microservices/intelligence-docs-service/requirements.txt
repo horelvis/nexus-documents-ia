@@ -8,3 +8,4 @@ langdetect>=1.0.9
 python-multipart>=0.0.12
 torch>=2.0
 numpy
+pdf2image>=1.17.0

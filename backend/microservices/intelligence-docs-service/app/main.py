@@ -11,6 +11,7 @@ from app.providers.base import EmbeddingProvider, ExtractionProvider, EntityProv
 from app.providers.embedding.sentence_transformers import SentenceTransformersProvider
 from app.providers.extraction.tika import TikaProvider
 from app.providers.extraction.docling import DoclingProvider
+from app.providers.extraction.glm_ocr import GlmOcrProvider
 from app.providers.extraction.plaintext import PlaintextProvider, is_plaintext
 from app.providers.entities.regex_spanish import RegexSpanishProvider
 from app.providers.entities.vllm_ner import VllmNerProvider
@@ -57,6 +58,15 @@ async def _init_extraction_providers():
                 TikaProvider(url=settings.tika_url, timeout=settings.extraction_timeout)
             )
             logger.info("Registered extraction provider: tika")
+        elif provider_name == "glm-ocr":
+            extraction_registry.register(
+                GlmOcrProvider(
+                    base_url=settings.glm_ocr_url,
+                    model=settings.glm_ocr_model,
+                    timeout=settings.extraction_timeout,
+                )
+            )
+            logger.info(f"Registered extraction provider: glm-ocr (model={settings.glm_ocr_model})")
 
 
 async def _init_entity_providers():
