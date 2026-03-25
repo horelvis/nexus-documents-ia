@@ -1,54 +1,95 @@
 # Arquitectura Docker
 
-> Desde esta iteración solo la API (y las UIs públicas) exponen puertos al host. El resto de microservicios escucha en su puerto interno dentro de `backend-network` y se comunica por DNS (`http://servicio:puerto`).
+> Solo la API, frontend y servicios de proxy exponen puertos al host. El resto de microservicios escucha en su puerto interno dentro de `backend-network` y se comunica por DNS (`http://servicio:puerto`).
 
 ```mermaid
 graph TB
     subgraph "Frontend"
-        NextJS[🖥️ Next.js App<br/>Host Port: 3000]
+        NextJS[🖥️ Next.js App<br/>Host Port: 3001]
     end
 
     subgraph "Backend Services"
         API[🚀 api<br/>Host Port: 8000]
-        WeaviateSvc[🤖 weaviate-service + AutoGen<br/>Internal: 8000]
-        LangExtractSvc[🏷️ langextract-service<br/>Internal: 8000]
-        TextExtractSvc[📑 textextract-service<br/>Internal: 8000]
-        TemplateSvc[🧩 template-editor-service<br/>Internal: 8000]
-        StorageSvc[☁️ storage-service<br/>Internal: 8000]
-        ElasticSvc[🔎 elasticsearch-service<br/>Internal: 8000]
-        GotenbergSvc[📄 gotenberg<br/>Internal: 3000]
+        EmmaSvc[🤖 emma-agent-service<br/>Internal: 8009]
+        WeaviateSvc[🔎 weaviate-service<br/>Internal: 8000]
+        IntelligenceSvc[📄 intelligence-docs-service<br/>Internal: 8000, Host: 8012]
+        KnowledgeTreeSvc[🌳 knowledge-tree-service<br/>Internal: 8011]
+        BackgroundWorker[⚙️ background-worker<br/>Internal: 8100]
+        StorageSvc[☁️ storage-service<br/>Internal: 8010]
+        PresentationSvc[📊 presentation-service<br/>Internal: 8000]
+    end
+
+    subgraph "GPU Services"
+        SGLang[🧠 sglang<br/>Host Port: 8001<br/>Qwen3.5-9B FP8]
+        GLMOCR[👁️ glm-ocr<br/>Internal: 8000<br/>GLM-OCR 0.9B]
     end
 
     subgraph "Infrastructure"
-        Postgres[(📊 postgres<br/>Internal: 5432)]
-        Redis[(⚡ redis<br/>Internal: 6379)]
-        WeaviateCore[(🔍 weaviate core<br/>Internal: 8080)]
-        ElasticsearchCore[(🧭 elasticsearch core<br/>Internal: 9200)]
-        Ollama[(🦙 genai-ollama<br/>Internal: 11434)]
+        Postgres[(📊 postgres<br/>Port: 5432)]
+        Redis[(⚡ redis<br/>Port: 6379)]
+        WeaviateCore[(🔍 weaviate<br/>Port: 8080)]
+        FalkorDB[(🕸️ falkordb<br/>Port: 6380)]
+        Langfuse[(📈 langfuse<br/>Host: 3002)]
+        Keycloak[(🔐 keycloak<br/>Port: 8080)]
     end
 
     NextJS --> API
+    API --> EmmaSvc
     API --> WeaviateSvc
-    API --> LangExtractSvc
-    API --> TextExtractSvc
-    API --> TemplateSvc
     API --> StorageSvc
-    API --> ElasticSvc
-    API --> GotenbergSvc
+
+    EmmaSvc --> SGLang
+    EmmaSvc --> WeaviateSvc
+    EmmaSvc --> KnowledgeTreeSvc
+    EmmaSvc --> Langfuse
+    EmmaSvc --> Postgres
+    EmmaSvc --> Redis
 
     WeaviateSvc --> WeaviateCore
-    LangExtractSvc --> Ollama
-    TextExtractSvc --> GotenbergSvc
-    StorageSvc --> Postgres
+    WeaviateSvc --> IntelligenceSvc
+    WeaviateSvc --> KnowledgeTreeSvc
+
+    IntelligenceSvc --> SGLang
+    IntelligenceSvc --> GLMOCR
+
+    KnowledgeTreeSvc --> FalkorDB
+
     API --> Postgres
     API --> Redis
-    ElasticSvc --> ElasticsearchCore
+    API --> Keycloak
 
     classDef frontend fill:#e1f5fe,stroke:#01579b
     classDef backend fill:#f3e5f5,stroke:#4a148c
+    classDef gpu fill:#fff3e0,stroke:#e65100
     classDef infra fill:#efebe9,stroke:#3e2723
 
     class NextJS frontend
-    class API,WeaviateSvc,LangExtractSvc,TextExtractSvc,TemplateSvc,StorageSvc,ElasticSvc,GotenbergSvc backend
-    class Postgres,Redis,WeaviateCore,ElasticsearchCore,Ollama infra
+    class API,EmmaSvc,WeaviateSvc,IntelligenceSvc,KnowledgeTreeSvc,BackgroundWorker,StorageSvc,PresentationSvc backend
+    class SGLang,GLMOCR gpu
+    class Postgres,Redis,WeaviateCore,FalkorDB,Langfuse,Keycloak infra
+```
+
+## Servicios GPU (RTX 4090 24GB)
+
+| Servicio | VRAM | Modelo | Función |
+|----------|------|--------|---------|
+| `sglang` | ~14 GB | Qwen3.5-9B FP8 | LLM inference (chat + planner) |
+| `intelligence-docs-service` | ~2.7 GB | BGE-M3 | Embeddings 1024 dims |
+| `glm-ocr` | ~2 GB | GLM-OCR 0.9B | OCR para documentos escaneados |
+| **Total** | **~19 GB** | | Deja ~5 GB para KV cache |
+
+## Flujo de Datos Principal
+
+```
+Document Upload → API → weaviate-service (indexing pipeline)
+    → intelligence-docs-service (text extraction: Docling/GLM-OCR)
+    → intelligence-docs-service (embeddings: BGE-M3)
+    → intelligence-docs-service (entity extraction: LangExtract)
+    → Weaviate (vector store)
+    → FalkorDB (knowledge graph)
+
+User Query → API → emma-agent-service (LangGraph ReAct agent)
+    → SGLang (LLM inference)
+    → weaviate-service (SmartSearch: Weaviate + FalkorDB + PublicKnowledge)
+    → Response with citations
 ```
