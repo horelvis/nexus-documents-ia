@@ -311,7 +311,7 @@ class PublicKnowledgeService:
             logger.warning(f"Failed to ensure schema properties: {e}")
 
     async def _generate_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate embedding using the shared sentence-transformers model (BGE-M3)."""
+        """Generate embedding via intelligence-docs-service."""
         return await generate_embedding(text)
 
     async def _find_existing_by_boe_id(self, boe_id: str) -> List[Dict[str, Any]]:

@@ -204,49 +204,25 @@ class EmbedRequest(BaseModel):
 
 @app.post("/embed")
 async def generate_embedding_endpoint(request: EmbedRequest):
-    """Generate embeddings using the loaded model (BGE-M3 or Jina v3).
+    """Generate embeddings via intelligence-docs-service (proxy).
 
     Supports both single text and batch:
     - {"text": "..."} → {"embedding": [...]}
     - {"texts": ["...", "..."]} → {"embeddings": [[...], [...]]}
-
-    The `task` parameter selects Jina v3 LoRA adapters:
-    - "retrieval.query": for search queries
-    - "retrieval.passage": for document chunks (default)
-    - "classification": for semantic type classification
     """
-    from app.services.weaviate_service import get_embedding_model
-    import asyncio
-
-    model = await get_embedding_model()
-    if model is None or model == "tei":
-        from app.services.weaviate_service import get_tei_embedding
-        texts = request.texts if request.texts else [request.text]
-        embeddings = await get_tei_embedding(texts)
-        if embeddings is None:
-            raise HTTPException(status_code=500, detail="Embedding generation failed")
-        if request.text and not request.texts:
-            return {"embedding": embeddings[0]}
-        return {"embeddings": embeddings}
-
-    texts = request.texts if request.texts else [request.text]
-    task = request.task
-
-    loop = asyncio.get_event_loop()
-
-    def _encode():
-        kwargs = {"convert_to_numpy": True}
-        try:
-            return model.encode(texts, prompt_name=task, **kwargs).tolist()
-        except (TypeError, ValueError, KeyError):
-            # BGE-M3 only accepts prompt_name in ['query', 'document']
-            return model.encode(texts, **kwargs).tolist()
-
-    embeddings = await loop.run_in_executor(None, _encode)
+    from app.clients import intelligence_client
 
     if request.text and not request.texts:
-        return {"embedding": embeddings[0]}
-    return {"embeddings": embeddings}
+        embedding = await intelligence_client.embed(request.text, task=request.task)
+        if embedding is None:
+            raise HTTPException(status_code=500, detail="Embedding generation failed")
+        return {"embedding": embedding}
+    else:
+        texts = request.texts or [request.text]
+        embeddings = await intelligence_client.embed_batch(texts, task=request.task)
+        if embeddings is None:
+            raise HTTPException(status_code=500, detail="Embedding generation failed")
+        return {"embeddings": embeddings}
 
 
 # Service info

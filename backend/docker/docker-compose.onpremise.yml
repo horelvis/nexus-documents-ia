@@ -10,7 +10,7 @@
 #   - weaviate: Vector database for embeddings
 #   - weaviate-service: RAG pipeline (vector search and retrieval)
 #   - emma-agent-service: AI agent orchestration (Emma v2 + LangGraph)
-#   - vllm: SGLang GPU inference — Chat (Qwen3.5-9B) + Planner (Qwen3.5-4B)
+#   - sglang: SGLang GPU inference — Chat (Qwen3.5-9B) + Planner (Qwen3.5-4B)
 #   - background-worker: Async task processing (Celery) for verification
 #   - api: Main backend API (optional, for UI integration)
 
@@ -95,47 +95,44 @@ services:
   #   ─────────────   ──────────────     ──────────────────────────
   #   Qwen3.5-9B      ~8-10 GB           Chat, reasoning, synthesis
   #   Qwen3.5-4B      ~3-4  GB           Planner, tool routing, clues
-  #   BGE-M3          ~2.7  GB           Embeddings (weaviate-service)
+  #   BGE-M3          ~2.7  GB           Embeddings (intelligence-docs-service)
   #   ─────────────   ──────────────
   #   Total           ~14-17 GB          Leaves ~7-10 GB for KV cache
   #
-  # Single-model mode (VLLM_DUAL_MODEL=false):
-  #   Only 'vllm' service runs. Both PLANNER and CHAT roles use same model.
-  #   mem-fraction-static: 0.80 (full GPU minus BGE-M3 headroom).
+  # Single-model mode (SGLANG_DUAL_MODEL=false):
+  #   Only 'sglang' service runs. Both PLANNER and CHAT roles use same model.
+  #   mem-fraction-static: 0.80 (full GPU minus embedding headroom).
   #
-  # Dual-model mode (VLLM_DUAL_MODEL=true):
-  #   Both 'vllm' + 'vllm-planner' run. GPU partitioned via mem-fraction-static.
+  # Dual-model mode (SGLANG_DUAL_MODEL=true):
+  #   Both 'sglang' + 'sglang-planner' run. GPU partitioned via mem-fraction-static.
   #   Enable with: docker compose --profile dual-model up -d
-  #   mem-fraction: 0.55 (chat) + 0.18 (planner) = 0.73 total, ~6.5GB for BGE-M3 + buffer.
-  #
-  # NOTE: Service names kept as 'vllm' for backward compatibility with internal URLs.
-  #       SGLang exposes an OpenAI-compatible API at /v1 — same as vLLM.
+  #   mem-fraction: 0.55 (chat) + 0.18 (planner) = 0.73 total.
   # =============================================================================
 
   # ── Chat Model (Qwen3.5-9B) — Quality generation, final responses ──
-  vllm:
+  sglang:
     image: lmsysorg/sglang:v0.5.9
     ports:
       - "8001:8000"
     networks:
       - backend-network
     volumes:
-      - vllm_cache:/root/.cache/huggingface
+      - hf_cache:/root/.cache/huggingface
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
     command: >
       python -m sglang.launch_server
-      --model-path ${VLLM_MODEL:-Qwen/Qwen3.5-9B}
-      --served-model-name ${VLLM_MODEL:-Qwen/Qwen3.5-9B}
+      --model-path ${SGLANG_MODEL:-Qwen/Qwen3.5-9B}
+      --served-model-name ${SGLANG_MODEL:-Qwen/Qwen3.5-9B}
       --port 8000
       --host 0.0.0.0
-      --context-length ${VLLM_MAX_MODEL_LEN:-16384}
-      --mem-fraction-static ${VLLM_GPU_UTIL:-0.65}
+      --context-length ${SGLANG_MAX_MODEL_LEN:-16384}
+      --mem-fraction-static ${SGLANG_GPU_UTIL:-0.65}
       --quantization fp8
       --trust-remote-code
-      --tool-call-parser ${VLLM_TOOL_PARSER:-qwen3_coder}
+      --tool-call-parser ${SGLANG_TOOL_PARSER:-qwen3_coder}
       --reasoning-parser qwen3
     deploy:
       resources:
@@ -153,31 +150,31 @@ services:
     restart: unless-stopped
 
   # ── Planner Model (Qwen3.5-4B) — Fast tool calling, routing, clue generation ──
-  # Only used when VLLM_DUAL_MODEL=true. Enable with: --profile dual-model
-  # Shares the GPU with vllm via mem-fraction-static partitioning.
-  vllm-planner:
+  # Only used when SGLANG_DUAL_MODEL=true. Enable with: --profile dual-model
+  # Shares the GPU with sglang via mem-fraction-static partitioning.
+  sglang-planner:
     image: lmsysorg/sglang:v0.5.9
     ports:
       - "8003:8000"
     networks:
       - backend-network
     volumes:
-      - vllm_cache:/root/.cache/huggingface
+      - hf_cache:/root/.cache/huggingface
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
     command: >
       python -m sglang.launch_server
-      --model-path ${VLLM_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
-      --served-model-name ${VLLM_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
+      --model-path ${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
+      --served-model-name ${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
       --port 8000
       --host 0.0.0.0
-      --context-length ${VLLM_PLANNER_MAX_MODEL_LEN:-8192}
-      --mem-fraction-static ${VLLM_PLANNER_GPU_UTIL:-0.18}
+      --context-length ${SGLANG_PLANNER_MAX_MODEL_LEN:-8192}
+      --mem-fraction-static ${SGLANG_PLANNER_GPU_UTIL:-0.18}
       --quantization fp8
       --trust-remote-code
-      --tool-call-parser ${VLLM_PLANNER_TOOL_PARSER:-qwen3_coder}
+      --tool-call-parser ${SGLANG_PLANNER_TOOL_PARSER:-qwen3_coder}
       --reasoning-parser qwen3
     deploy:
       resources:
@@ -235,7 +232,7 @@ services:
     networks:
       - backend-network
     volumes:
-      - vllm_cache:/root/.cache/huggingface
+      - hf_cache:/root/.cache/huggingface
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - NVIDIA_DISABLE_REQUIRE=1
@@ -275,7 +272,7 @@ services:
     ports:
       - "127.0.0.1:8012:8000"
     volumes:
-      - vllm_cache:/root/.cache/huggingface
+      - hf_cache:/root/.cache/huggingface
     environment:
       - EXTRACTION_PROVIDERS=${EXTRACTION_PROVIDERS:-docling,glm-ocr}
       - EMBEDDING_PROVIDERS=${EMBEDDING_PROVIDERS:-sentence-transformers}
@@ -287,8 +284,8 @@ services:
       - TIKA_URL=http://tika:9998
       - GLM_OCR_URL=${GLM_OCR_URL:-http://glm-ocr:8000/v1}
       - GLM_OCR_MODEL=${GLM_OCR_MODEL:-zai-org/GLM-OCR}
-      - VLLM_BASE_URL=http://vllm:8000/v1
-      - VLLM_MODEL=${VLLM_MODEL:-}
+      - SGLANG_BASE_URL=http://sglang:8000/v1
+      - SGLANG_MODEL=${SGLANG_MODEL:-}
     networks:
       - backend-network
     deploy:
@@ -385,7 +382,7 @@ services:
       context: ../microservices/langextract-service
       dockerfile: Dockerfile
     depends_on:
-      vllm:
+      sglang:
         condition: service_healthy
     networks:
       - backend-network
@@ -393,10 +390,10 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      # Override LLM provider to use local vLLM (reuses Qwen3-14B already in the stack)
-      - LLM_PROVIDER=vllm
-      - LLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - LLM_API_BASE=http://vllm:8000/v1
+      # Override LLM provider to use local SGLang (reuses Qwen3.5-9B already in the stack)
+      - LLM_PROVIDER=sglang
+      - LLM_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - LLM_API_BASE=http://sglang:8000/v1
     volumes:
       - ../microservices/langextract-service/app:/app/app:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
@@ -418,7 +415,7 @@ services:
     depends_on:
       weaviate:
         condition: service_healthy
-      vllm:
+      sglang:
         condition: service_healthy
       db:
         condition: service_healthy
@@ -445,17 +442,15 @@ services:
       - STORAGE_SERVICE_URL=http://storage-service:8010
       # OCR: disabled during bulk indexing (Tika handles text extraction)
       - ENHANCED_OCR_ENABLED=false
-      # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
-      - VLLM_ENABLED=${VLLM_ENABLED:-true}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
-      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
-      # Embedding Configuration (Jina v3 local — 5 LoRA task adapters)
-      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence-transformers}
+      # SGLang Configuration
+      - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_ENABLE_THINKING=${SGLANG_ENABLE_THINKING:-false}
+      - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
+      # Embedding: delegated to intelligence-docs-service (no local GPU model)
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
       - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
-      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
       - MULTIMODAL_EMBEDDING_ENABLED=${MULTIMODAL_EMBEDDING_ENABLED:-false}
       # Parent-Child Chunking (search small, retrieve large)
       - PARENT_CHILD_CHUNKING_ENABLED=${PARENT_CHILD_CHUNKING_ENABLED:-false}
@@ -476,15 +471,8 @@ services:
       - ../microservices/weaviate-service/app:/app/app:ro
       - ../microservices/weaviate-service/config:/app/config:ro
       - ../microservices/weaviate-service/scripts:/app/scripts:ro
-      - huggingface_cache:/root/.cache/huggingface
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # No GPU needed — embeddings delegated to intelligence-docs-service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -583,7 +571,7 @@ services:
         condition: service_healthy
       knowledge-tree-service:
         condition: service_healthy
-      vllm:
+      sglang:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -605,18 +593,18 @@ services:
       - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
       # Multi-Pipeline RAG Sector
       - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
-      # vLLM Configuration — Dual-Model Architecture
-      # Set VLLM_DUAL_MODEL=true + docker compose --profile dual-model to enable
-      - VLLM_ENABLED=${VLLM_ENABLED:-true}
-      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
+      # SGLang Configuration — Dual-Model Architecture
+      # Set SGLANG_DUAL_MODEL=true + docker compose --profile dual-model to enable
+      - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
+      - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
       # Chat model (9B quality generation)
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
-      # Planner model (4B fast tool calling) — only active when VLLM_DUAL_MODEL=true
-      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
-      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
-      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_ENABLE_THINKING=${SGLANG_ENABLE_THINKING:-false}
+      # Planner model (4B fast tool calling) — only active when SGLANG_DUAL_MODEL=true
+      - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
+      - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
       # Redis for sessions
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -714,8 +702,8 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL_NAME=${VLLM_MODEL:-Qwen/Qwen3.5-9B}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL_NAME=${SGLANG_MODEL:-Qwen/Qwen3.5-9B}
       - GOTENBERG_SERVICE_URL=${GOTENBERG_SERVICE_URL:-http://gotenberg-service:8005}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - MAIN_API_URL=${MAIN_API_URL:-http://main-api:8000}
@@ -753,12 +741,12 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
       # Dual-model architecture
-      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
-      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
-      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
+      - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
+      - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Web Search (DuckDuckGo)
@@ -816,14 +804,14 @@ services:
       - EVENT_CONSUMER_GROUP=emma_reactive
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
-      - VLLM_ENABLED=${VLLM_ENABLED:-true}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
       # Dual-model architecture
-      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
-      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
-      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
-      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
+      - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
+      - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
       - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
@@ -1260,7 +1248,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      vllm:
+      sglang:
         condition: service_healthy
       storage-service:
         condition: service_healthy
@@ -1271,8 +1259,8 @@ services:
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - PRESENTATION_API_KEY=${MICROSERVICES_API_KEY}
-      - PRESENTATION_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - PRESENTATION_SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - PRESENTATION_SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
       - PRESENTATION_STORAGE_SERVICE_URL=http://storage-service:8010
       - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
       - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-https://nouxcubeai.ddns.net:8000}
@@ -1346,7 +1334,7 @@ volumes:
   postgres_data:
   redis_data:
   weaviate_data:
-  vllm_cache:
+  hf_cache:
   huggingface_cache:
   fastembed_cache:
   ollama_data:

@@ -1,4 +1,4 @@
-"""Weaviate service implementation with Sentence Transformers embeddings"""
+"""Weaviate service implementation — embeddings via intelligence-docs-service"""
 import weaviate
 import logging
 import asyncio
@@ -14,120 +14,24 @@ from app.schemas.weaviate import (
     CollectionInfo, VectorQuery
 )
 from weaviate.exceptions import UnexpectedStatusCodeException
+from app.clients import intelligence_client
 
 logger = logging.getLogger(__name__)
 
 
-# Singleton for embedding model (avoid reloading on each request)
-_embedding_model = None
-_embedding_model_lock = asyncio.Lock()
-_tei_client = None
-
-
-async def get_tei_embedding(texts: list[str]) -> list[list[float]]:
-    """Generate embeddings using TEI (Text Embeddings Inference) server"""
-    global _tei_client
-    import httpx
-
-    if _tei_client is None:
-        _tei_client = httpx.AsyncClient(timeout=30.0)
-
-    try:
-        response = await _tei_client.post(
-            f"{settings.tei_url}/embed",
-            json={"inputs": texts}
-        )
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logger.error(f"❌ TEI error: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        logger.error(f"❌ TEI request failed: {e}")
-        return None
-
-
-async def get_embedding_model():
-    """Get or initialize the embedding model based on provider (TEI or Sentence Transformers)"""
-    global _embedding_model
-
-    # For TEI, we don't need a local model
-    if settings.embedding_provider == "tei":
-        return "tei"
-
-    if _embedding_model is not None:
-        return _embedding_model
-
-    async with _embedding_model_lock:
-        # Double-check after acquiring lock
-        if _embedding_model is not None:
-            return _embedding_model
-
-        try:
-            from sentence_transformers import SentenceTransformer
-            import torch
-
-            # Determine device
-            device = settings.embedding_device
-            if device == "auto":
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            elif device == "cuda" and not torch.cuda.is_available():
-                logger.warning("⚠️ CUDA requested but not available, falling back to CPU")
-                device = "cpu"
-
-            # Load model
-            model_name = settings.embedding_model
-            logger.info(f"🔄 Loading embedding model: {model_name} on {device}")
-
-            _embedding_model = SentenceTransformer(
-                model_name, device=device, trust_remote_code=True,
-            )
-
-            # Verify dimensions match config
-            test_embedding = _embedding_model.encode("test", convert_to_numpy=True)
-            actual_dims = len(test_embedding)
-
-            if actual_dims != settings.embedding_dimensions:
-                logger.warning(
-                    f"⚠️ Embedding dimensions mismatch: config={settings.embedding_dimensions}, "
-                    f"actual={actual_dims}. Using actual dimensions."
-                )
-
-            logger.info(f"✅ Loaded embedding model: {model_name} ({actual_dims} dims) on {device}")
-            return _embedding_model
-
-        except Exception as e:
-            logger.error(f"❌ Failed to load embedding model: {e}")
-            return None
-
-
 async def generate_embedding(text: str, task: str = "") -> list[float] | None:
-    """Generate embedding for a single text using configured provider.
+    """Generate embedding via intelligence-docs-service.
 
     Args:
         text: Text to embed.
-        task: Jina v3 LoRA task adapter name (e.g., "retrieval.query", "retrieval.passage").
-              Ignored by models that don't support prompt_name (e.g., BGE-M3).
+        task: Task adapter name (e.g., "retrieval.query", "retrieval.passage").
     """
-    if settings.embedding_provider == "tei":
-        embeddings = await get_tei_embedding([text])
-        return embeddings[0] if embeddings else None
-    else:
-        model = await get_embedding_model()
-        if model is None or model == "tei":
-            return None
-        loop = asyncio.get_event_loop()
+    return await intelligence_client.embed(text, task=task)
 
-        def _encode():
-            kwargs = {"convert_to_numpy": True}
-            if task:
-                try:
-                    return model.encode(text, prompt_name=task, **kwargs).tolist()
-                except (TypeError, ValueError, KeyError):
-                    pass  # Model doesn't support this prompt_name/task adapter
-            return model.encode(text, **kwargs).tolist()
 
-        return await loop.run_in_executor(None, _encode)
+async def generate_embedding_batch(texts: list[str], task: str = "") -> list[list[float]] | None:
+    """Generate embeddings for multiple texts via intelligence-docs-service."""
+    return await intelligence_client.embed_batch(texts, task=task)
 
 
 class WeaviateService:
@@ -345,28 +249,19 @@ class WeaviateService:
             else:
                 raise Exception("Weaviate not ready")
 
-            # Initialize embedding model based on provider
-            if settings.embedding_provider == "tei":
-                # Test TEI connection
-                try:
-                    test_embedding = await generate_embedding("test connection")
-                    if test_embedding:
-                        self.embedding_model = "tei"
-                        logger.info(f"✅ Using TEI embeddings: {settings.embedding_model} ({len(test_embedding)} dims)")
-                    else:
-                        logger.warning("⚠️ TEI not responding, falling back to BM25 only")
-                        self.embedding_model = None
-                except Exception as e:
-                    logger.warning(f"⚠️ TEI connection failed: {e}, falling back to BM25 only")
-                    self.embedding_model = None
-            else:
-                model = await get_embedding_model()
-                if model is not None:
-                    self.embedding_model = "sentence-transformers"
-                    logger.info(f"✅ Using Sentence Transformers: {settings.embedding_model}")
+            # Test embedding via intelligence-docs-service
+            try:
+                test_embedding = await generate_embedding("test connection")
+                if test_embedding:
+                    self.embedding_model = "intelligence-docs-service"
+                    dims = len(test_embedding)
+                    logger.info(f"✅ Using intelligence-docs-service embeddings ({dims} dims)")
                 else:
-                    logger.warning("⚠️ Embedding model not available, falling back to BM25 only")
+                    logger.warning("⚠️ intelligence-docs-service not responding, falling back to BM25 only")
                     self.embedding_model = None
+            except Exception as e:
+                logger.warning(f"⚠️ intelligence-docs-service embedding test failed: {e}, falling back to BM25 only")
+                self.embedding_model = None
 
             self._initialized = True
 
@@ -3229,20 +3124,11 @@ class WeaviateService:
             # Check embedding model status
             embedding_info = None
             if self.embedding_model:
-                if settings.embedding_provider == "tei":
-                    embedding_info = {
-                        "provider": "tei",
-                        "model": settings.embedding_model,
-                        "dimensions": settings.embedding_dimensions,
-                        "url": settings.tei_url
-                    }
-                else:
-                    embedding_info = {
-                        "provider": "sentence-transformers",
-                        "model": settings.embedding_model,
-                        "dimensions": settings.embedding_dimensions,
-                        "device": settings.embedding_device
-                    }
+                embedding_info = {
+                    "provider": "intelligence-docs-service",
+                    "model": settings.embedding_model,
+                    "dimensions": settings.embedding_dimensions,
+                }
 
             return {
                 "status": "healthy" if is_ready and is_live else "unhealthy",

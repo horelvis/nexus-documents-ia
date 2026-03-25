@@ -205,8 +205,7 @@ class CAGService:
         texts: List[str],
         tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Generate embeddings for texts using Ollama.
+        """Generate embeddings via intelligence-docs-service.
 
         Args:
             texts: List of texts to embed
@@ -217,53 +216,17 @@ class CAGService:
         """
         await self._ensure_initialized()
 
-        provider = settings.llm_provider
-        target_model = settings.embedding_model
+        from app.clients import intelligence_client
 
-        if not target_model:
-            raise ValueError("Embedding model is not configured")
-
-        embeddings: List[List[float]] = []
-
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            for text in texts:
-                try:
-                    if provider == "openai" and settings.openai_api_key:
-                        response = await client.post(
-                            f"{settings.openai_base_url.rstrip('/')}/embeddings",
-                            json={"model": settings.openai_embedding_model, "input": text},
-                            headers={
-                                "Authorization": f"Bearer {settings.openai_api_key}",
-                                "Content-Type": "application/json",
-                            },
-                        )
-                        if response.status_code == 200:
-                            data = response.json()
-                            rows = data.get("data") or []
-                            embeddings.append(rows[0].get("embedding", []) if rows else [])
-                        else:
-                            embeddings.append([])
-                    else:
-                        # Use TEI (Text Embeddings Inference) as the default embeddings provider
-                        response = await client.post(
-                            f"{settings.tei_url}/embed",
-                            json={"inputs": text, "truncate": True},
-                        )
-                        if response.status_code == 200:
-                            data = response.json()
-                            # TEI returns list of embeddings, get the first one
-                            embeddings.append(data[0] if data and len(data) > 0 else [])
-                        else:
-                            embeddings.append([])
-                except Exception as exc:
-                    logger.warning(f"⚠️ Could not generate embedding: {exc}")
-                    embeddings.append([])
+        embeddings = await intelligence_client.embed_batch(texts)
+        if embeddings is None:
+            embeddings = [[] for _ in texts]
 
         return {
             "success": True,
             "embeddings": embeddings,
             "count": len(embeddings),
-            "model": target_model,
+            "model": settings.embedding_model,
             "tenant_id": tenant_id,
         }
 
