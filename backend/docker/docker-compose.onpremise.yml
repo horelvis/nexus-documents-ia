@@ -226,9 +226,12 @@ services:
   # GLM-OCR — VLM-based OCR for scanned documents and images (0.9B params)
   # =============================================================================
   # State-of-the-art document understanding: OCR, tables, formulas, seals.
-  # Served via SGLang with OpenAI-compatible API. ~2 GB VRAM.
+  # Served via SGLang dev (needs latest transformers for glm_ocr architecture).
+  # Concurrent requests supported via RadixAttention. ~2 GB VRAM.
   glm-ocr:
-    image: lmsysorg/sglang:v0.5.9
+    build:
+      context: .
+      dockerfile: Dockerfile.glm-ocr
     networks:
       - backend-network
     volumes:
@@ -256,8 +259,8 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 120s
+      retries: 5
+      start_period: 180s
     restart: unless-stopped
 
   # =============================================================================
@@ -1346,6 +1349,7 @@ volumes:
   vllm_cache:
   huggingface_cache:
   fastembed_cache:
+  ollama_data:
   keycloak_data:
   local_storage_data:
   minio_data:

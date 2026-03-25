@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     tika_url: str = "http://tika:9998"
 
     # GLM-OCR (VLM-based OCR for scanned docs and images, 0.9B params)
+    # Served via SGLang dev (concurrent requests, RadixAttention)
     glm_ocr_url: str = "http://glm-ocr:8000/v1"
     glm_ocr_model: str = "zai-org/GLM-OCR"
 
