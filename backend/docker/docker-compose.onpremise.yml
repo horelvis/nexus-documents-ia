@@ -227,11 +227,8 @@ services:
   # =============================================================================
   # State-of-the-art document understanding: OCR, tables, formulas, seals.
   # Served via SGLang with OpenAI-compatible API. ~2 GB VRAM.
-  # Start with: docker compose --profile glm-ocr up -d
   glm-ocr:
     image: lmsysorg/sglang:v0.5.9
-    profiles:
-      - glm-ocr
     networks:
       - backend-network
     volumes:
