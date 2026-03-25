@@ -26,9 +26,9 @@ FILENAME_PATTERNS: list[tuple[str, str, str]] = [
 async def classify_document(
     text: str,
     filename: str,
-    vllm_available: bool = False,
-    vllm_base_url: str = "",
-    vllm_model: str = "",
+    sglang_available: bool = False,
+    sglang_base_url: str = "",
+    sglang_model: str = "",
 ) -> ClassificationResult:
     """Classify document type. Uses filename heuristics, with optional LLM."""
     fname_lower = filename.lower()

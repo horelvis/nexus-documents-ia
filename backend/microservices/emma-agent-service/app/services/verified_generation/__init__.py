@@ -6,7 +6,7 @@ is validated against Weaviate before being accepted into the final document.
 
 Components:
 - VerifiedContextCache: Redis-backed storage for verified claims
-- WriterAgent: Generates claims using vLLM
+- WriterAgent: Generates claims using SGLang
 - VerifiedDocumentService: Orchestrates the stop-and-go verification loop
 
 Usage:

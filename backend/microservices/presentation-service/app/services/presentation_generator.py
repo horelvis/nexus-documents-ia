@@ -259,9 +259,9 @@ class PresentationGenerator:
 
     async def health_check(self) -> Dict[str, Any]:
         """Check health of dependencies."""
-        vllm_healthy = await self.outline_generator.health_check()
+        sglang_healthy = await self.outline_generator.health_check()
 
         return {
-            "vllm_healthy": vllm_healthy,
+            "sglang_healthy": sglang_healthy,
             "storage_healthy": True,  # Assume healthy for now
         }

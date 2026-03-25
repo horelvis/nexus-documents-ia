@@ -69,29 +69,28 @@ async def lifespan(app: FastAPI):
         if not settings.llm_api_key:
             logger.error("❌ Anthropic provider selected but LLM_API_KEY not configured")
             raise ValueError("LLM_API_KEY is required for Anthropic provider")
-    elif provider == "vllm":
-        # vLLM uses OpenAI-compatible API
-        api_base = (settings.llm_api_base or "http://vllm:8000/v1").rstrip("/")
-        logger.info(f"🚀 Using vLLM provider (OpenAI-compatible API)")
+    elif provider in ("sglang", "vllm"):
+        # SGLang uses OpenAI-compatible API
+        api_base = (settings.llm_api_base or "http://sglang:8000/v1").rstrip("/")
+        logger.info(f"🚀 Using SGLang provider (OpenAI-compatible API)")
         logger.info(f"   Endpoint: {api_base}")
         logger.info(f"   Model: {settings.llm_model}")
-        # Test vLLM connection
         try:
             import httpx
             async with httpx.AsyncClient() as client:
                 response = await client.get(f"{api_base}/models", timeout=10.0)
                 if response.status_code == 200:
                     models = response.json().get("data", [])
-                    logger.info(f"✅ vLLM connected. Available models: {len(models)}")
+                    logger.info(f"✅ SGLang connected. Available models: {len(models)}")
                     for m in models[:3]:
                         logger.info(f"  - {m.get('id', 'unknown')}")
                 else:
-                    logger.warning(f"⚠️  vLLM connection issue: {response.status_code}")
+                    logger.warning(f"⚠️  SGLang connection issue: {response.status_code}")
         except Exception as e:
-            logger.warning(f"⚠️  Could not connect to vLLM: {e}")
+            logger.warning(f"⚠️  Could not connect to SGLang: {e}")
             logger.info("Will use fallback extraction methods if needed")
     else:
-        logger.error(f"❌ Unknown provider '{provider}'. Valid providers: ollama, openai, gemini, anthropic, vllm")
+        logger.error(f"❌ Unknown provider '{provider}'. Valid providers: ollama, openai, gemini, anthropic, sglang")
         raise ValueError(f"Invalid LLM_PROVIDER: {provider}")
     
     yield

@@ -261,7 +261,7 @@ async def enqueue_verify_claim(request: VerifyClaimRequest, _: None = Depends(ve
     """
     Enqueue a claim verification task.
 
-    The task searches Weaviate for evidence and uses vLLM to evaluate
+    The task searches Weaviate for evidence and uses SGLang to evaluate
     whether the evidence supports the claim.
     """
     job = verify_claim_task.delay(

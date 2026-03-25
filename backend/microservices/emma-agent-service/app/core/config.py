@@ -45,35 +45,40 @@ class Settings(BaseSettings):
     # LLM Configuration
     # ==========================================================================
     agents_enabled: bool = os.getenv("AGENTS_ENABLED", "true").lower() == "true"
-    llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
+    llm_provider: str = os.getenv("LLM_PROVIDER", "sglang").lower()
+
+    @property
+    def llm_provider_normalized(self) -> str:
+        """Normalize 'vllm' → 'sglang' for backwards compat."""
+        return "sglang" if self.llm_provider == "vllm" else self.llm_provider
 
     # SGLang configuration — Single-Model Dual-Phase (Qwen3.5-9B)
     # One model, two behavioral phases controlled by temperature + thinking:
     # PLANNER phase: temp=0.3, no thinking → fast routing, tool calling, classification
     # CHAT phase: temp=0.6, thinking on → reasoning, synthesis, final responses
-    # Runtime: SGLang v0.5.9 | Set VLLM_DUAL_MODEL=true for separate planner model
-    vllm_enabled: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
-    vllm_dual_model: bool = os.getenv("VLLM_DUAL_MODEL", "false").lower() == "true"
+    # Runtime: SGLang v0.5.9 | Set SGLANG_DUAL_MODEL=true for separate planner model
+    sglang_enabled: bool = os.getenv("SGLANG_ENABLED", os.getenv("VLLM_ENABLED", "true")).lower() == "true"
+    sglang_dual_model: bool = os.getenv("SGLANG_DUAL_MODEL", os.getenv("VLLM_DUAL_MODEL", "false")).lower() == "true"
 
     # Chat model (Qwen3.5-9B) — quality generation
-    vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B")
-    vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "16384"))
-    vllm_temperature: float = float(os.getenv("VLLM_TEMPERATURE", "0.6"))
-    vllm_enable_thinking: bool = os.getenv("VLLM_ENABLE_THINKING", "false").lower() == "true"
-    vllm_thinking_budget: int = int(os.getenv("VLLM_THINKING_BUDGET", "4096"))
+    sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+    sglang_model: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B"))
+    sglang_max_tokens: int = int(os.getenv("SGLANG_MAX_TOKENS", os.getenv("VLLM_MAX_TOKENS", "16384")))
+    sglang_temperature: float = float(os.getenv("SGLANG_TEMPERATURE", os.getenv("VLLM_TEMPERATURE", "0.6")))
+    sglang_enable_thinking: bool = os.getenv("SGLANG_ENABLE_THINKING", os.getenv("VLLM_ENABLE_THINKING", "false")).lower() == "true"
+    sglang_thinking_budget: int = int(os.getenv("SGLANG_THINKING_BUDGET", os.getenv("VLLM_THINKING_BUDGET", "4096")))
 
     # Planner parameters — always used for ModelRole.PLANNER regardless of dual_model
-    # dual_model=true: separate SGLang instance at vllm_planner_url
+    # dual_model=true: separate SGLang instance at sglang_planner_url
     # dual_model=false: same model, these temp/max_tokens override chat defaults
-    vllm_planner_url: str = os.getenv("VLLM_PLANNER_URL", os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1"))
-    vllm_planner_model: str = os.getenv("VLLM_PLANNER_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B"))
-    vllm_planner_max_tokens: int = int(os.getenv("VLLM_PLANNER_MAX_TOKENS", "4096"))
-    vllm_planner_temperature: float = float(os.getenv("VLLM_PLANNER_TEMPERATURE", "0.3"))
+    sglang_planner_url: str = os.getenv("SGLANG_PLANNER_URL", os.getenv("VLLM_PLANNER_URL", os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))))
+    sglang_planner_model: str = os.getenv("SGLANG_PLANNER_MODEL", os.getenv("VLLM_PLANNER_MODEL", os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B"))))
+    sglang_planner_max_tokens: int = int(os.getenv("SGLANG_PLANNER_MAX_TOKENS", os.getenv("VLLM_PLANNER_MAX_TOKENS", "4096")))
+    sglang_planner_temperature: float = float(os.getenv("SGLANG_PLANNER_TEMPERATURE", os.getenv("VLLM_PLANNER_TEMPERATURE", "0.3")))
 
-    # LLM Layer (ChatOpenAI) — aliases for backwards compatibility with VLLM_* vars
-    llm_base_url: str = os.getenv("LLM_BASE_URL", os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1"))
-    llm_model: str = os.getenv("LLM_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B"))
+    # LLM Layer (ChatOpenAI) — aliases for backwards compatibility with SGLANG_*/VLLM_* vars
+    llm_base_url: str = os.getenv("LLM_BASE_URL", os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1")))
+    llm_model: str = os.getenv("LLM_MODEL", os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B")))
     llm_api_key: str = os.getenv("LLM_API_KEY", "not-needed")
     planner_temperature: float = float(os.getenv("PLANNER_TEMPERATURE", "0.3"))
     planner_max_tokens: int = int(os.getenv("PLANNER_MAX_TOKENS", "4096"))
@@ -106,7 +111,7 @@ class Settings(BaseSettings):
 
     # LLM Fallback Configuration (automatic failover between providers)
     llm_fallback_enabled: bool = os.getenv("LLM_FALLBACK_ENABLED", "false").lower() == "true"
-    llm_fallback_chain: str = os.getenv("LLM_FALLBACK_CHAIN", "vllm,openrouter,openai")
+    llm_fallback_chain: str = os.getenv("LLM_FALLBACK_CHAIN", "sglang,openrouter,openai")
 
     # ==========================================================================
     # Redis Configuration (for sessions and caching)
@@ -213,8 +218,8 @@ class Settings(BaseSettings):
     # LLM Fallback
     llm_retry_delay_seconds: float = float(os.getenv("LLM_RETRY_DELAY_SECONDS", "0.5"))
 
-    # Agent Fallback Timeouts (factor_agent, writer_agent raw vLLM calls)
-    agent_raw_vllm_timeout_seconds: float = float(os.getenv("AGENT_RAW_VLLM_TIMEOUT_SECONDS", "60"))
+    # Agent Fallback Timeouts (factor_agent, writer_agent raw SGLang calls)
+    agent_raw_sglang_timeout_seconds: float = float(os.getenv("AGENT_RAW_SGLANG_TIMEOUT_SECONDS", os.getenv("AGENT_RAW_VLLM_TIMEOUT_SECONDS", "60")))
 
     # Visualization settings
     enable_dynamic_display: bool = os.getenv("ENABLE_DYNAMIC_DISPLAY", "true").lower() == "true"

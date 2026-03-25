@@ -51,10 +51,10 @@ class ValidatedGenerator:
         self._provider = settings.llm_provider
         self._openai_api_key = settings.openai_api_key
         self._openai_base_url = settings.openai_base_url
-        # vLLM configuration (primary inference)
-        self._vllm_enabled = settings.vllm_enabled
-        self._vllm_base_url = settings.vllm_base_url
-        self._vllm_model = settings.vllm_model
+        # SGLang configuration (primary inference)
+        self._sglang_enabled = settings.sglang_enabled
+        self._sglang_base_url = settings.sglang_base_url
+        self._sglang_model = settings.sglang_model
 
     async def generate(
         self,
@@ -212,16 +212,16 @@ class ValidatedGenerator:
     ) -> str:
         """Call the LLM and return the response"""
         try:
-            # Priority: vLLM (primary) > OpenAI (fallback)
-            # Note: Ollama is DEPRECATED - use vLLM for local inference
-            if self._vllm_enabled:
-                return await self._call_vllm(system_prompt, user_prompt, temperature, max_tokens)
+            # Priority: SGLang (primary) > OpenAI (fallback)
+            # Note: Ollama is DEPRECATED - use SGLang for local inference
+            if self._sglang_enabled:
+                return await self._call_sglang(system_prompt, user_prompt, temperature, max_tokens)
             elif self._provider == "openai" and self._openai_api_key:
                 return await self._call_openai(system_prompt, user_prompt, temperature, max_tokens)
             else:
-                # Default to vLLM even if not explicitly enabled (it's the new default)
-                logger.warning("⚠️ No LLM provider configured, attempting vLLM as default")
-                return await self._call_vllm(system_prompt, user_prompt, temperature, max_tokens)
+                # Default to SGLang even if not explicitly enabled (it's the new default)
+                logger.warning("⚠️ No LLM provider configured, attempting SGLang as default")
+                return await self._call_sglang(system_prompt, user_prompt, temperature, max_tokens)
         except Exception as e:
             logger.error(f"❌ LLM call failed: {e}")
             raise
@@ -299,21 +299,21 @@ class ValidatedGenerator:
             logger.error(f"❌ OpenAI call failed: {e}")
             raise
 
-    async def _call_vllm(
+    async def _call_sglang(
         self,
         system_prompt: str,
         user_prompt: str,
         temperature: float,
         max_tokens: int,
     ) -> str:
-        """Call vLLM server (OpenAI-compatible API)"""
+        """Call SGLang server (OpenAI-compatible API)"""
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
-                    f"{self._vllm_base_url}/chat/completions",
+                    f"{self._sglang_base_url}/chat/completions",
                     headers={"Content-Type": "application/json"},
                     json={
-                        "model": self._vllm_model,
+                        "model": self._sglang_model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
@@ -327,10 +327,10 @@ class ValidatedGenerator:
                     data = response.json()
                     return data["choices"][0]["message"]["content"]
                 else:
-                    raise Exception(f"vLLM returned {response.status_code}: {response.text}")
+                    raise Exception(f"SGLang returned {response.status_code}: {response.text}")
 
         except Exception as e:
-            logger.error(f"❌ vLLM call failed: {e}")
+            logger.error(f"❌ SGLang call failed: {e}")
             raise
 
     async def _call_llm_stream(
@@ -341,9 +341,9 @@ class ValidatedGenerator:
         max_tokens: int,
     ) -> AsyncGenerator[str, None]:
         """Call LLM with streaming response"""
-        # vLLM is the primary/default streaming provider
-        # Note: Ollama is DEPRECATED - use vLLM for local inference
-        async for chunk in self._call_vllm_stream(system_prompt, user_prompt, temperature, max_tokens):
+        # SGLang is the primary/default streaming provider
+        # Note: Ollama is DEPRECATED - use SGLang for local inference
+        async for chunk in self._call_sglang_stream(system_prompt, user_prompt, temperature, max_tokens):
             yield chunk
 
     async def _call_ollama_stream(
@@ -386,22 +386,22 @@ class ValidatedGenerator:
             logger.error(f"❌ Ollama streaming call failed: {e}")
             yield f"Error: {str(e)}"
 
-    async def _call_vllm_stream(
+    async def _call_sglang_stream(
         self,
         system_prompt: str,
         user_prompt: str,
         temperature: float,
         max_tokens: int,
     ) -> AsyncGenerator[str, None]:
-        """Call vLLM with streaming response (OpenAI-compatible SSE format)"""
+        """Call SGLang with streaming response (OpenAI-compatible SSE format)"""
         try:
             async with httpx.AsyncClient(timeout=180.0) as client:
                 async with client.stream(
                     "POST",
-                    f"{self._vllm_base_url}/chat/completions",
+                    f"{self._sglang_base_url}/chat/completions",
                     headers={"Content-Type": "application/json"},
                     json={
-                        "model": self._vllm_model,
+                        "model": self._sglang_model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
@@ -426,7 +426,7 @@ class ValidatedGenerator:
                             except json.JSONDecodeError:
                                 continue
         except Exception as e:
-            logger.error(f"❌ vLLM streaming call failed: {e}")
+            logger.error(f"❌ SGLang streaming call failed: {e}")
             yield f"Error: {str(e)}"
 
     def _extract_claims(self, answer: str) -> List[str]:

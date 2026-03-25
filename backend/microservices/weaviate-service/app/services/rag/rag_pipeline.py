@@ -175,7 +175,7 @@ class RAGPipeline:
         collection_name: Optional[str] = None,
         top_k: int = 10,
         validate_claims: bool = True,
-        model_type: str = "vllm",
+        model_type: str = "sglang",
         context: Optional[Dict[str, Any]] = None,
         use_cache: bool = True,
         include_public_knowledge: Optional[bool] = None,
@@ -192,7 +192,7 @@ class RAGPipeline:
             collection_name: Optional specific collection to search
             top_k: Number of documents to retrieve
             validate_claims: Whether to validate generated claims
-            model_type: LLM provider type (vllm, openai)
+            model_type: LLM provider type (sglang, openai)
             context: Additional context (e.g., conversation history)
             use_cache: Whether to use semantic cache (default: True)
             include_public_knowledge: Whether to include public legal knowledge (defaults to config)
@@ -240,7 +240,7 @@ class RAGPipeline:
                     )
                     cache_scope = (
                         f"model_type={model_type}"
-                        f"|vllm_model={settings.vllm_model}"
+                        f"|sglang_model={settings.sglang_model}"
                         f"|public={public_flag}"
                         f"|validate={validate_claims}"
                     )
@@ -496,7 +496,7 @@ class RAGPipeline:
                         )
                         cache_scope = (
                             f"model_type={model_type}"
-                            f"|vllm_model={settings.vllm_model}"
+                            f"|sglang_model={settings.sglang_model}"
                             f"|public={public_flag}"
                             f"|validate={validate_claims}"
                         )
@@ -787,7 +787,7 @@ class RAGPipeline:
                 "monitor_stats": monitor_stats,
                 "config": {
                     "llm_provider": settings.llm_provider,
-                    "llm_model": settings.vllm_model,
+                    "llm_model": settings.sglang_model,
                     "embedding_model": settings.embedding_model,
                     "rrf_enabled": True,
                     "cache_enabled": self._cache_enabled,

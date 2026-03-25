@@ -7,11 +7,11 @@ and our internal model-agnostic format.
 
 Design Philosophy:
     The adapter pattern allows us to support multiple LLM providers without
-    changing any business logic. When switching from vLLM to OpenAI (or vice versa),
+    changing any business logic. When switching from SGLang to OpenAI (or vice versa),
     only the adapter needs to change - all tools remain exactly the same.
 
 Provider-Specific Formats:
-    - Hermes (vLLM, Qwen3): Uses <tool_call> XML tags in assistant messages
+    - Hermes (SGLang, Qwen3): Uses <tool_call> XML tags in assistant messages
     - OpenAI: Uses structured tool_calls array in API response
     - Anthropic: Uses tool_use content blocks in API response
     - Ollama: Similar to Hermes but may vary by model

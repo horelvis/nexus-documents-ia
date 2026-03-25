@@ -23,7 +23,7 @@ class CAGClient(BaseHTTPClient):
             base_url=base_url,
             timeout_type="ai",
         )
-        self.default_model = settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.VLLM_MODEL
+        self.default_model = settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.SGLANG_MODEL
 
     async def query(
         self,
@@ -84,7 +84,7 @@ class CAGClient(BaseHTTPClient):
             Agent response with reasoning, actions, and final answer
         """
         try:
-            llm_model = settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.VLLM_MODEL
+            llm_model = settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.SGLANG_MODEL
             tenant_id = context.get("tenant_id") or settings.DEFAULT_TENANT
             user_id = context.get("user_id") or "virtual_assistant"
             agent_context = {

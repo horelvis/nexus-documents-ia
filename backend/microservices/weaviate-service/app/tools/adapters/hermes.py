@@ -1,7 +1,7 @@
 """
-Hermes Tool Call Adapter for vLLM and Qwen3 models.
+Hermes Tool Call Adapter for SGLang and Qwen3 models.
 
-Hermes is the tool calling format used by vLLM's OpenAI-compatible API
+Hermes is the tool calling format used by SGLang's OpenAI-compatible API
 when configured with --tool-call-parser hermes. It's based on the
 Hermes function calling format originally from NousResearch.
 
@@ -16,14 +16,14 @@ Format Overview:
     {"name": "tool_name", "content": "result content"}
     </tool_response>
 
-When using vLLM's OpenAI-compatible API:
-    - Set --tool-call-parser hermes in vLLM startup
-    - Tools are passed in OpenAI format, vLLM handles conversion
+When using SGLang's OpenAI-compatible API:
+    - Set --tool-call-parser hermes in SGLang startup
+    - Tools are passed in OpenAI format, SGLang handles conversion
     - Response includes tool_calls array when tools are used
 
 This adapter handles both:
     1. Direct Hermes format (XML tags in text)
-    2. vLLM's OpenAI-compatible parsed format
+    2. SGLang's OpenAI-compatible parsed format
 """
 
 from __future__ import annotations
@@ -51,17 +51,18 @@ TOOL_RESPONSE_PATTERN = re.compile(
 
 
 @register_adapter("hermes")
-@register_adapter("vllm")  # Alias for convenience
+@register_adapter("sglang")  # Primary alias
+@register_adapter("vllm")  # Backward compatibility alias
 class HermesAdapter(ToolCallAdapter):
     """
     Adapter for Hermes tool calling format.
 
     Used with:
-    - vLLM with --tool-call-parser hermes
+    - SGLang with --tool-call-parser hermes
     - Qwen3 models (native Hermes support)
     - Some Ollama models
 
-    The adapter handles both raw Hermes XML format and vLLM's
+    The adapter handles both raw Hermes XML format and SGLang's
     OpenAI-compatible parsed format.
     """
 
@@ -74,9 +75,9 @@ class HermesAdapter(ToolCallAdapter):
         tools: List[ToolDefinition]
     ) -> List[Dict[str, Any]]:
         """
-        Convert tools to OpenAI-compatible format for vLLM.
+        Convert tools to OpenAI-compatible format for SGLang.
 
-        vLLM's OpenAI-compatible endpoint accepts tools in OpenAI format
+        SGLang's OpenAI-compatible endpoint accepts tools in OpenAI format
         and converts them internally to Hermes format for the model.
 
         Args:
@@ -104,21 +105,21 @@ class HermesAdapter(ToolCallAdapter):
         response: Any
     ) -> List[ToolCall]:
         """
-        Parse tool calls from vLLM response.
+        Parse tool calls from SGLang response.
 
         Handles two formats:
-        1. OpenAI-compatible format (parsed by vLLM)
+        1. OpenAI-compatible format (parsed by SGLang)
         2. Raw Hermes XML format (fallback)
 
         Args:
-            response: Response from vLLM API
+            response: Response from SGLang API
 
         Returns:
             List of ToolCall objects
         """
         tool_calls = []
 
-        # Check for OpenAI-compatible format first (vLLM parsed response)
+        # Check for OpenAI-compatible format first (SGLang parsed response)
         if isinstance(response, dict):
             # Handle ChatCompletion response format
             if "choices" in response:
@@ -216,10 +217,10 @@ class HermesAdapter(ToolCallAdapter):
         results: List[ToolResult]
     ) -> List[Dict[str, Any]]:
         """
-        Format tool results for the next vLLM request.
+        Format tool results for the next SGLang request.
 
         Returns results in OpenAI-compatible tool message format,
-        which vLLM converts internally.
+        which SGLang converts internally.
 
         Args:
             results: List of ToolResult from execution
@@ -246,7 +247,7 @@ class HermesAdapter(ToolCallAdapter):
         Format tool results in raw Hermes XML format.
 
         Use this when sending results directly to a model
-        (not through vLLM's OpenAI-compatible API).
+        (not through SGLang's OpenAI-compatible API).
 
         Args:
             results: List of ToolResult from execution
@@ -276,7 +277,7 @@ class HermesAdapter(ToolCallAdapter):
         Check if response contains tool calls.
 
         Args:
-            response: vLLM response
+            response: SGLang response
 
         Returns:
             True if tool calls are present
@@ -304,7 +305,7 @@ class HermesAdapter(ToolCallAdapter):
         Extract text content from response.
 
         Args:
-            response: vLLM response
+            response: SGLang response
 
         Returns:
             Text content if present
@@ -338,7 +339,7 @@ class HermesAdapter(ToolCallAdapter):
         Useful for getting clean text output when tools were used.
 
         Args:
-            response: vLLM response
+            response: SGLang response
 
         Returns:
             Cleaned text content
@@ -364,7 +365,7 @@ class HermesAdapter(ToolCallAdapter):
         """
         Augment system prompt with Hermes tool instructions.
 
-        While vLLM handles tool formatting, adding explicit instructions
+        While SGLang handles tool formatting, adding explicit instructions
         to the system prompt can improve tool usage reliability.
 
         Args:
@@ -417,13 +418,13 @@ Wait for the tool response before continuing.
         mode: str = "auto"
     ) -> Optional[Dict[str, Any]]:
         """
-        Get vLLM-compatible tool_choice parameter.
+        Get SGLang-compatible tool_choice parameter.
 
         Args:
             mode: "auto", "none", "required", or tool name
 
         Returns:
-            tool_choice value for vLLM API
+            tool_choice value for SGLang API
         """
         if mode == "auto":
             return "auto"

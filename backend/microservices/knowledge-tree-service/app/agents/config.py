@@ -2,7 +2,7 @@
 Agent Framework Configuration
 
 Centralized configuration for agent behavior, timeouts, and fallback settings.
-Supports multiple LLM providers with vLLM as the primary option.
+Supports multiple LLM providers with SGLang as the primary option.
 """
 
 import os
@@ -46,7 +46,7 @@ class AgentConfig:
     fallback_threshold: float = 0.3  # Confidence threshold
 
     # Model settings - Multi-provider support
-    model_provider: str = "vllm"  # vllm (primary), openai, anthropic, google, ollama (legacy)
+    model_provider: str = "sglang"  # sglang (primary), openai, anthropic, google, ollama (legacy)
     default_temperature: float = 0.2  # Default temperature for agents
 
     # Per-agent temperature configuration
@@ -91,13 +91,13 @@ class AgentConfig:
             "default": 0.2,
         }
 
-    # vLLM (PRIMARY - high-throughput GPU inference)
-    vllm_enabled: bool = True
-    vllm_base_url: str = "http://vllm:8000/v1"
-    vllm_model: str = "Qwen/Qwen3-8B"
-    vllm_enable_thinking: bool = True  # Control Qwen3 thinking mode via chat_template_kwargs
+    # SGLang (PRIMARY - high-throughput GPU inference)
+    sglang_enabled: bool = True
+    sglang_base_url: str = "http://sglang:8000/v1"
+    sglang_model: str = "Qwen/Qwen3-8B"
+    sglang_enable_thinking: bool = True  # Control Qwen3 thinking mode via chat_template_kwargs
 
-    # Ollama (LEGACY - use vLLM instead)
+    # Ollama (LEGACY - use SGLang instead)
     ollama_base_url: str = "http://genai-ollama:11434"
     ollama_model: str = "llama3.2:latest"
 
@@ -156,15 +156,15 @@ class AgentConfig:
                 os.getenv("AUTOGEN_FALLBACK_THRESHOLD", "0.3")
             ),
 
-            # Model - Multi-provider (vLLM is default)
-            model_provider=os.getenv("LLM_PROVIDER", "vllm"),
+            # Model - Multi-provider (SGLang is default)
+            model_provider=os.getenv("LLM_PROVIDER", "sglang"),
             default_temperature=float(os.getenv("LLM_TEMPERATURE", "0.2")),
 
-            # vLLM (PRIMARY)
-            vllm_enabled=os.getenv("VLLM_ENABLED", "true").lower() == "true",
-            vllm_base_url=os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1"),
-            vllm_model=os.getenv("VLLM_MODEL", "Qwen/Qwen3-8B"),
-            vllm_enable_thinking=os.getenv("VLLM_ENABLE_THINKING", "true").lower() == "true",
+            # SGLang (PRIMARY)
+            sglang_enabled=os.getenv("SGLANG_ENABLED", os.getenv("VLLM_ENABLED", "true")).lower() == "true",
+            sglang_base_url=os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1")),
+            sglang_model=os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3-8B")),
+            sglang_enable_thinking=os.getenv("SGLANG_ENABLE_THINKING", os.getenv("VLLM_ENABLE_THINKING", "true")).lower() == "true",
 
             # Ollama (LEGACY)
             ollama_base_url=os.getenv(

@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings
 
 
@@ -6,7 +8,7 @@ class Settings(BaseSettings):
     # Extraction: docling (structured docs) → glm-ocr (scanned/images) → tika (legacy fallback)
     extraction_providers: str = "docling,glm-ocr"
     embedding_providers: str = "sentence-transformers"
-    entity_providers: str = "regex,vllm"
+    entity_providers: str = os.getenv("ENTITY_PROVIDERS", "regex,sglang")
 
     # Embedding
     embedding_model: str = "BAAI/bge-m3"
@@ -24,9 +26,9 @@ class Settings(BaseSettings):
     glm_ocr_url: str = "http://glm-ocr:8000/v1"
     glm_ocr_model: str = "zai-org/GLM-OCR"
 
-    # LLM for NER
-    vllm_base_url: str = "http://vllm:8000/v1"
-    vllm_model: str = ""
+    # LLM for NER (SGLang — OpenAI-compatible)
+    sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+    sglang_model: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", ""))
 
     # Timeouts (seconds)
     extraction_timeout: int = 600

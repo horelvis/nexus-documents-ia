@@ -6,11 +6,11 @@ using the LLM. Instead of the same domain-level prefix for all chunks, each chun
 gets a unique 1-2 sentence context that situates it within the document.
 
 This is the "full" Anthropic Contextual Retrieval pattern:
-1. Send full document as system context (vLLM prefix caching)
+1. Send full document as system context (SGLang prefix caching)
 2. For each chunk, ask the LLM: "Sitúa este fragmento en 1-2 frases"
 3. Prepend the per-chunk context before embedding
 
-Cost: ~50ms/chunk with local vLLM (Qwen3-14B). A 50-chunk document = ~2.5s extra.
+Cost: ~50ms/chunk with local SGLang (Qwen3-14B). A 50-chunk document = ~2.5s extra.
 Acceptable for offline indexing.
 
 The per-chunk context is stored in the `chunk_context` Weaviate property for
@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 # Regex to strip <think>...</think> tags from Qwen3 output
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
-# Reusable async HTTP client for vLLM calls
+# Reusable async HTTP client for SGLang calls
 _http_client: Optional[httpx.AsyncClient] = None
 
 
@@ -53,17 +53,17 @@ async def _get_http_client() -> httpx.AsyncClient:
     return _http_client
 
 
-async def _call_vllm_chat(
+async def _call_sglang_chat(
     messages: List[Dict[str, str]],
     temperature: float = 0.3,
     max_tokens: int = 150,
 ) -> Optional[str]:
-    """Call vLLM's OpenAI-compatible chat/completions endpoint.
+    """Call SGLang's OpenAI-compatible chat/completions endpoint.
 
     Returns the assistant message content, or None on failure.
     """
-    base_url = settings.vllm_base_url.rstrip("/")
-    model = settings.vllm_model
+    base_url = settings.sglang_base_url.rstrip("/")
+    model = settings.sglang_model
     url = f"{base_url}/chat/completions"
 
     payload = {
@@ -84,7 +84,7 @@ async def _call_vllm_chat(
             content = _THINK_RE.sub("", content).strip()
         return content if content else None
     except Exception as e:
-        logger.debug(f"vLLM chat call failed: {e}")
+        logger.debug(f"SGLang chat call failed: {e}")
         return None
 
 # System prompt for per-chunk context generation
@@ -141,8 +141,8 @@ class ContextEnricher:
         doc_excerpt = full_text[:3000]
         system_msg = f"{_SYSTEM_PROMPT}\n\nDOCUMENTO COMPLETO (extracto):\n{doc_excerpt}"
 
-        if not settings.vllm_enabled:
-            logger.info("vLLM disabled — skipping per-chunk enrichment")
+        if not settings.sglang_enabled:
+            logger.info("SGLang disabled — skipping per-chunk enrichment")
             return chunks
 
         enriched_count = 0
@@ -160,7 +160,7 @@ class ContextEnricher:
             )
 
             try:
-                context_text = await _call_vllm_chat(
+                context_text = await _call_sglang_chat(
                     messages=[
                         {"role": "system", "content": system_msg},
                         {"role": "user", "content": user_msg},

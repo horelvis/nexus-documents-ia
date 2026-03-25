@@ -92,7 +92,7 @@ class ToolIntegration:
             self._executor = ToolExecutor(self._registry, config)
 
             # Select adapter based on configured LLM provider
-            provider = getattr(settings, 'llm_provider', 'vllm')
+            provider = getattr(settings, 'llm_provider', 'sglang')
             self._adapter = get_tool_adapter(provider)
             logger.info(f"✅ Using {self._adapter.provider_name} adapter for tool calls")
 

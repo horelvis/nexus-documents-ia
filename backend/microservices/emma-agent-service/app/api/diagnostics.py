@@ -5,7 +5,7 @@ Three tiers of verification, each progressively deeper:
 
 Tier 1 — Infrastructure (~3s):
     Verifies all dependencies are reachable and functional.
-    PostgreSQL, Redis, Weaviate, Knowledge-Tree, vLLM/SGLang, Langfuse.
+    PostgreSQL, Redis, Weaviate, Knowledge-Tree, SGLang, Langfuse.
 
 Tier 2 — Integration (~15s):
     Verifies cross-service operations work end-to-end.
@@ -73,7 +73,7 @@ def _overall_status(checks: Dict[str, Any]) -> str:
     if any(s == "error" for s in statuses):
         errors = [k for k, v in checks.items() if v.get("status") == "error"]
         # Critical deps that make service non-functional
-        critical = {"redis", "vllm", "weaviate_service"}
+        critical = {"redis", "sglang", "weaviate_service"}
         if any(e in critical for e in errors):
             return "critical"
         return "degraded"
@@ -157,15 +157,15 @@ async def _check_knowledge_tree() -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_vllm() -> Dict[str, Any]:
-    """Verify vLLM/SGLang is loaded and serving."""
+async def _check_sglang() -> Dict[str, Any]:
+    """Verify SGLang is loaded and serving."""
     t0 = time.time()
-    if not settings.vllm_enabled:
-        return _skip("vLLM disabled")
+    if not settings.sglang_enabled:
+        return _skip("SGLang disabled")
     try:
         import httpx
-        # vllm_base_url already ends with /v1
-        base = settings.vllm_base_url.rstrip("/")
+        # sglang_base_url already ends with /v1
+        base = settings.sglang_base_url.rstrip("/")
         models_url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(models_url)
@@ -206,12 +206,12 @@ async def run_infra_checks() -> Dict[str, Any]:
         _check_postgresql(),
         _check_weaviate_service(),
         _check_knowledge_tree(),
-        _check_vllm(),
+        _check_sglang(),
         _check_langfuse(),
         return_exceptions=True,
     )
 
-    names = ["redis", "postgresql", "weaviate_service", "knowledge_tree", "vllm", "langfuse"]
+    names = ["redis", "postgresql", "weaviate_service", "knowledge_tree", "sglang", "langfuse"]
     checks = {}
     for name, result in zip(names, results):
         if isinstance(result, Exception):

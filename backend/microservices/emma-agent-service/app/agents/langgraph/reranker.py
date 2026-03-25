@@ -7,7 +7,7 @@ pairs jointly with full cross-attention, achieving much higher precision than
 bi-encoders or heuristic scoring.
 
 Architecture decision: FlashRank on CPU (~5ms/passage) because GPU memory is
-fully allocated to vLLM (18.5GB) + BGE-M3/Jina embeddings (2.7GB) = 21.2GB
+fully allocated to SGLang (18.5GB) + BGE-M3/Jina embeddings (2.7GB) = 21.2GB
 of 24GB RTX 4090. FlashRank uses ONNX quantized models that run efficiently
 on CPU without competing for GPU resources.
 

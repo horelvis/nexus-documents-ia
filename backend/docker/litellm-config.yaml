@@ -1,9 +1,9 @@
 # LiteLLM Proxy Configuration
-# Gateway for routing between SLM (TGI) and Main LLM (vLLM)
+# Gateway for routing between SLM (TGI) and Main LLM (SGLang)
 #
 # Models:
 #   - slm/qwen2-0.5b: TGI server (CPU) - Fast routing (~50-100ms)
-#   - main/qwen3-4b: vLLM server (GPU) - Response generation (~1-5s)
+#   - main/qwen3-4b: SGLang server (GPU) - Response generation (~1-5s)
 #
 # Usage:
 #   curl http://localhost:4000/v1/chat/completions \
@@ -27,13 +27,13 @@ model_list:
       mode: chat
 
   # =============================================================================
-  # Main LLM - Primary model for response generation (vLLM on GPU)
+  # Main LLM - Primary model for response generation (SGLang on GPU)
   # =============================================================================
   - model_name: main/qwen3-4b
     litellm_params:
       model: openai/Qwen/Qwen3-4B
-      api_base: http://vllm:8000/v1
-      api_key: "not-needed"  # vLLM local doesn't require key
+      api_base: http://sglang:8000/v1
+      api_key: "not-needed"  # SGLang local doesn't require key
       max_tokens: 4096
       temperature: 0.7
       timeout: 60
@@ -47,7 +47,7 @@ model_list:
   - model_name: qwen3-4b
     litellm_params:
       model: openai/Qwen/Qwen3-4B
-      api_base: http://vllm:8000/v1
+      api_base: http://sglang:8000/v1
       api_key: "not-needed"
       max_tokens: 4096
       temperature: 0.7

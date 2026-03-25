@@ -101,23 +101,23 @@ async def health():
     except Exception as e:
         checks["redis"] = f"unhealthy: {e}"
 
-    # vLLM/SGLang
+    # SGLang
     try:
         import httpx
 
         settings = get_settings()
         async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{settings.vllm_base_url}/models")
-            checks["vllm"] = "healthy" if resp.status_code == 200 else f"status={resp.status_code}"
+            resp = await client.get(f"{settings.sglang_base_url}/models")
+            checks["sglang"] = "healthy" if resp.status_code == 200 else f"status={resp.status_code}"
     except Exception as e:
-        checks["vllm"] = f"unhealthy: {e}"
+        checks["sglang"] = f"unhealthy: {e}"
 
     # Gotenberg
     gotenberg = get_gotenberg_client()
     checks["gotenberg"] = "healthy" if await gotenberg.health() else "unhealthy"
 
     all_healthy = all(v == "healthy" for v in checks.values())
-    # Degrade gracefully — vLLM and gotenberg are optional at startup
+    # Degrade gracefully — SGLang and gotenberg are optional at startup
     critical = checks.get("redis", "").startswith("healthy")
 
     return {

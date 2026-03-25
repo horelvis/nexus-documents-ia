@@ -1,14 +1,14 @@
 """
 Async LLM Client for Emma v2
 
-Native async client using httpx for direct communication with vLLM/OpenAI APIs.
+Native async client using httpx for direct communication with SGLang/OpenAI APIs.
 Eliminates the sync/async mismatch from Qwen-Agent by being fully async.
 
 Key Features:
 - Native async streaming via SSE
 - OpenAI-compatible tool calling
 - Thinking mode support (Qwen3)
-- Multi-provider support (vLLM, OpenAI, Anthropic)
+- Multi-provider support (SGLang, OpenAI, Anthropic)
 
 Architecture:
     ┌─────────────────────────────────────────────────────────────┐
@@ -27,13 +27,13 @@ Architecture:
     │                              │                              │
     │                              ▼                              │
     │                    ┌──────────────────┐                    │
-    │                    │  vLLM / OpenAI   │                    │
+    │                    │  SGLang / OpenAI  │                    │
     │                    │  /v1/chat/completions                  │
     │                    └──────────────────┘                    │
     └─────────────────────────────────────────────────────────────┘
 
 References:
-- https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html
+- https://docs.sglang.ai/backend/openai_api_completions.html
 - https://platform.openai.com/docs/api-reference/chat
 """
 
@@ -62,7 +62,8 @@ logger = logging.getLogger(__name__)
 
 class LLMProvider(str, Enum):
     """Supported LLM providers."""
-    VLLM = "vllm"
+    SGLANG = "sglang"
+    VLLM = "vllm"  # backward compat alias — resolves to SGLang
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
 
@@ -209,8 +210,8 @@ class StreamEvent:
 @dataclass
 class LLMConfig:
     """Configuration for LLM client."""
-    provider: LLMProvider = LLMProvider.VLLM
-    base_url: str = "http://vllm:8000/v1"
+    provider: LLMProvider = LLMProvider.SGLANG
+    base_url: str = "http://sglang:8000/v1"
     model: str = "Qwen/Qwen3-4B"
     api_key: str = ""
     max_tokens: int = 4096
@@ -240,7 +241,7 @@ def _parse_thinking(text: str) -> tuple[Optional[str], str]:
 
 class LLMClient:
     """
-    Async LLM Client for vLLM/OpenAI-compatible APIs.
+    Async LLM Client for SGLang/OpenAI-compatible APIs.
 
     Features:
     - Fully async (no thread pools)
@@ -314,8 +315,8 @@ class LLMClient:
             ]
             body["tool_choice"] = kwargs.get("tool_choice", "auto")
 
-        # Add thinking mode for vLLM with Qwen3
-        if self.config.provider == LLMProvider.VLLM and self.config.enable_thinking:
+        # Add thinking mode for SGLang with Qwen3
+        if self.config.provider in (LLMProvider.SGLANG, LLMProvider.VLLM) and self.config.enable_thinking:
             body["extra_body"] = {
                 "chat_template_kwargs": {
                     "enable_thinking": True,
@@ -652,17 +653,17 @@ def create_llm_client_from_settings() -> LLMClient:
 
     # Determine provider
     provider_str = settings.llm_provider.lower()
-    provider = LLMProvider(provider_str) if provider_str in [p.value for p in LLMProvider] else LLMProvider.VLLM
+    provider = LLMProvider(provider_str) if provider_str in [p.value for p in LLMProvider] else LLMProvider.SGLANG
 
-    if provider == LLMProvider.VLLM:
+    if provider in (LLMProvider.SGLANG, LLMProvider.VLLM):
         config = LLMConfig(
-            provider=LLMProvider.VLLM,
-            base_url=settings.vllm_base_url,
-            model=settings.vllm_model,
-            max_tokens=settings.vllm_max_tokens,
-            temperature=settings.vllm_temperature,
-            enable_thinking=settings.vllm_enable_thinking,
-            thinking_budget=settings.vllm_thinking_budget,
+            provider=LLMProvider.SGLANG,
+            base_url=settings.sglang_base_url,
+            model=settings.sglang_model,
+            max_tokens=settings.sglang_max_tokens,
+            temperature=settings.sglang_temperature,
+            enable_thinking=settings.sglang_enable_thinking,
+            thinking_budget=settings.sglang_thinking_budget,
             timeout=settings.agent_timeout_seconds,
         )
     elif provider == LLMProvider.OPENAI:
@@ -683,11 +684,11 @@ def create_llm_client_from_settings() -> LLMClient:
             timeout=settings.agent_timeout_seconds,
         )
     else:
-        # Default to vLLM
+        # Default to SGLang
         config = LLMConfig(
-            provider=LLMProvider.VLLM,
-            base_url=settings.vllm_base_url,
-            model=settings.vllm_model,
+            provider=LLMProvider.SGLANG,
+            base_url=settings.sglang_base_url,
+            model=settings.sglang_model,
         )
 
     return LLMClient(config)

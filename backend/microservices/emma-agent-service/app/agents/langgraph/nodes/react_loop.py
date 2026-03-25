@@ -389,7 +389,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     # This replaces the old message-count window, which could still overflow
     # when tool observations (e.g., get_document_content) are large.
     # Reserve tokens for: system prompt overhead, completion, and safety margin.
-    MODEL_CONTEXT_BUDGET = int(os.getenv("VLLM_MAX_MODEL_LEN", "32768"))
+    MODEL_CONTEXT_BUDGET = int(os.getenv("SGLANG_MAX_MODEL_LEN", os.getenv("VLLM_MAX_MODEL_LEN", "32768")))
     # Leave room for completion tokens + safety margin
     input_token_budget = MODEL_CONTEXT_BUDGET - settings.react_max_completion_tokens - 512
     llm_messages = trim_messages_to_token_budget(
@@ -404,7 +404,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     #
     # Dynamic max_tokens: estimate input tokens and cap completion to avoid
     # exceeding the 16K context. PLANNER needs ~500 tokens max for tool calls.
-    MODEL_CONTEXT_LIMIT = int(os.getenv("VLLM_MAX_MODEL_LEN", "32768"))
+    MODEL_CONTEXT_LIMIT = int(os.getenv("SGLANG_MAX_MODEL_LEN", os.getenv("VLLM_MAX_MODEL_LEN", "32768")))
     # Count ALL content: message content + tool_calls JSON structures + overhead
     _est_chars = 0
     for m in llm_messages:

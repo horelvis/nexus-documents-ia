@@ -144,7 +144,7 @@ async def health_check():
     health = await generator.health_check()
 
     return {
-        "status": "healthy" if health["vllm_healthy"] else "degraded",
+        "status": "healthy" if health["sglang_healthy"] else "degraded",
         "service": "presentation-service",
         "version": "1.0.0",
         "dependencies": health,

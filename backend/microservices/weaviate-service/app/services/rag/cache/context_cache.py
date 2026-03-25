@@ -133,7 +133,7 @@ class ContextAssemblyCache:
         tenant_id: str,
         chunk_version: str,
         index_version: str,
-        model_type: str = "vllm",
+        model_type: str = "sglang",
     ) -> str:
         """
         Build deterministic cache key from document set + versions.
@@ -167,7 +167,7 @@ class ContextAssemblyCache:
         tenant_id: str,
         chunk_version: str,
         index_version: str,
-        model_type: str = "vllm",
+        model_type: str = "sglang",
     ) -> Optional[CachedContext]:
         """
         Get cached context if available.
@@ -241,7 +241,7 @@ class ContextAssemblyCache:
         metadata: Dict[str, Any],
         chunk_version: str,
         index_version: str,
-        model_type: str = "vllm",
+        model_type: str = "sglang",
     ) -> bool:
         """
         Store assembled context in cache.

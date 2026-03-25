@@ -77,7 +77,7 @@ def create_react_graph() -> StateGraph:
     workers, each running a focused mini-ReAct loop.
 
     Retry policy: Nodes that make LLM calls get RetryPolicy(max_attempts=2)
-    to handle transient failures (network timeouts, vLLM cold starts).
+    to handle transient failures (network timeouts, SGLang cold starts).
     Non-LLM nodes (synthesize) don't need retries.
 
     Returns:
@@ -98,7 +98,7 @@ def create_react_graph() -> StateGraph:
     workflow = StateGraph(ReActState)
 
     # Retry policy for nodes that call LLMs — handles transient failures
-    # (network timeouts, vLLM/SGLang cold starts, OpenRouter rate limits).
+    # (network timeouts, SGLang cold starts, OpenRouter rate limits).
     # 2 attempts with 1s backoff is enough for transient issues without
     # adding excessive latency on permanent failures.
     llm_retry = RetryPolicy(max_attempts=2, initial_interval=1.0, backoff_factor=2.0)

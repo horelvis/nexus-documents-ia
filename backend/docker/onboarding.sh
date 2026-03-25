@@ -56,8 +56,8 @@ cmd_start() {
     $DC_NORMAL up -d --no-recreate 2>/dev/null || true
     sleep 5
 
-    step "2/5 Stopping vLLM to free GPU (~22GB VRAM)..."
-    $DC_NORMAL stop vllm 2>/dev/null || true
+    step "2/5 Stopping SGLang to free GPU (~22GB VRAM)..."
+    $DC_NORMAL stop sglang 2>/dev/null || true
     sleep 3
 
     step "3/5 Stopping Docling CPU (if running)..."
@@ -239,13 +239,13 @@ cmd_finish() {
     $DC --profile docling-gpu stop docling-gpu 2>/dev/null || true
     docker rm -f docker-docling-gpu-1 2>/dev/null || true
 
-    step "2/3 Starting normal stack (vLLM + Docling CPU)..."
+    step "2/3 Starting normal stack (SGLang + Docling CPU)..."
     $DC_NORMAL --profile docling up -d
 
-    step "3/3 Waiting for vLLM to load model (~2-3 min)..."
+    step "3/3 Waiting for SGLang to load model (~2-3 min)..."
     local retries=0
     while [ $retries -lt 90 ]; do
-        if docker exec docker-vllm-1 curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+        if docker exec docker-sglang-1 curl -sf http://localhost:8000/health > /dev/null 2>&1; then
             break
         fi
         retries=$((retries + 1))

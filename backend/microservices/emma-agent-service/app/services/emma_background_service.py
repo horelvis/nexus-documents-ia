@@ -258,9 +258,9 @@ Respuesta a reescribir:
 
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(
-                    f"{agent_config.vllm_base_url}/chat/completions",
+                    f"{agent_config.sglang_base_url}/chat/completions",
                     json={
-                        "model": agent_config.vllm_model,
+                        "model": agent_config.sglang_model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}

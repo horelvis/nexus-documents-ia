@@ -271,7 +271,7 @@ async def service_info():
             "Domain-specific routing",
             "Conversation memory",
             "Session management",
-            "Multi-provider LLM support (vLLM, OpenAI, Anthropic)",
+            "Multi-provider LLM support (SGLang, OpenAI, Anthropic)",
         ],
         "agents": [
             "Emma (main orchestrator)",
@@ -285,7 +285,7 @@ async def service_info():
         },
         "dependencies": {
             "weaviate_service": settings.weaviate_service_url,
-            "vllm": settings.vllm_base_url if settings.vllm_enabled else None,
+            "sglang": settings.sglang_base_url if settings.sglang_enabled else None,
         },
         "note": "Query planning handled by LLM reasoning (SIL/SLM Router removed)"
     }
@@ -302,7 +302,7 @@ async def agents_status():
             "orchestration": "LangGraph",
             "config": {
                 "enabled": settings.agents_enabled,
-                "model": settings.vllm_model,
+                "model": settings.sglang_model,
             }
         }
     except Exception as e:

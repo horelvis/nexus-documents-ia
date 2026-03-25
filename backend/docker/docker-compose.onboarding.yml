@@ -6,14 +6,14 @@
 #   - docling-gpu: GPU-accelerated Docling (5-10x faster PDF processing)
 #   - weaviate-service: RAG_HIERARCHICAL_ENABLED=false (skip LLM summaries)
 #
-# vLLM is stopped/started by the onboarding.sh script, not via compose override,
-# because 4 services have depends_on: vllm: condition: service_healthy.
+# SGLang is stopped/started by the onboarding.sh script, not via compose override,
+# because 4 services have depends_on: sglang: condition: service_healthy.
 #
 # Usage: ./onboarding.sh start | status | sync-all | finish
 # =============================================================================
 
 services:
-  # Docling GPU variant — uses GPU when vLLM is stopped
+  # Docling GPU variant — uses GPU when SGLang is stopped
   # Network alias "docling" ensures textextract-service connects seamlessly
   docling-gpu:
     image: ghcr.io/docling-project/docling-serve:latest

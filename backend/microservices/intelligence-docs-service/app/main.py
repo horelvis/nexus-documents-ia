@@ -14,7 +14,7 @@ from app.providers.extraction.docling import DoclingProvider
 from app.providers.extraction.glm_ocr import GlmOcrProvider
 from app.providers.extraction.plaintext import PlaintextProvider, is_plaintext
 from app.providers.entities.regex_spanish import RegexSpanishProvider
-from app.providers.entities.vllm_ner import VllmNerProvider
+from app.providers.entities.sglang_ner import SglangNerProvider
 from app.pipeline.processor import process_document
 from app.pipeline.classifier import classify_document
 from app.schemas.models import (
@@ -74,14 +74,14 @@ async def _init_entity_providers():
         if provider_name == "regex":
             entity_registry.register(RegexSpanishProvider())
             logger.info("Registered entity provider: regex")
-        elif provider_name == "vllm":
-            provider = VllmNerProvider(
-                base_url=settings.vllm_base_url,
-                model=settings.vllm_model,
+        elif provider_name in ("sglang", "vllm"):
+            provider = SglangNerProvider(
+                base_url=settings.sglang_base_url,
+                model=settings.sglang_model,
                 timeout=settings.ner_timeout,
             )
             entity_registry.register(provider)
-            logger.info(f"Registered entity provider: vllm (model={settings.vllm_model})")
+            logger.info(f"Registered entity provider: sglang (model={settings.sglang_model})")
 
 
 @asynccontextmanager

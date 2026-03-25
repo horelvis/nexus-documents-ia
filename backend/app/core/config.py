@@ -224,10 +224,10 @@ class Settings(BaseSettings):
     DOCUMENT_FORGE_ENABLED: bool = os.getenv("DOCUMENT_FORGE_ENABLED", "true").lower() == "true"
 
     # LLM / AI providers
-    # NOTE: Ollama was removed; vLLM is the default local provider.
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "vllm").lower()
-    VLLM_BASE_URL: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1").rstrip("/")
-    VLLM_MODEL: str = os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b")
+    # NOTE: Ollama was removed; SGLang is the default local provider.
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "sglang").lower()
+    SGLANG_BASE_URL: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1")).rstrip("/")
+    SGLANG_MODEL: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b"))
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")

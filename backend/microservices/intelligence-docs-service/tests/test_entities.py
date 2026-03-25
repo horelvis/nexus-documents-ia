@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from app.providers.entities.regex_spanish import RegexSpanishProvider
-from app.providers.entities.vllm_ner import VllmNerProvider
+from app.providers.entities.sglang_ner import SglangNerProvider
 
 
 # --- Regex provider tests ---
@@ -40,11 +40,11 @@ async def test_no_entities_in_clean_text():
     assert len(entities) == 0
 
 
-# --- vLLM NER provider tests ---
+# --- SGLang NER provider tests ---
 
 @pytest.mark.asyncio
-async def test_vllm_ner_extracts_entities():
-    provider = VllmNerProvider(base_url="http://vllm:8000/v1", model="test-model", timeout=30)
+async def test_sglang_ner_extracts_entities():
+    provider = SglangNerProvider(base_url="http://sglang:8000/v1", model="test-model", timeout=30)
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.raise_for_status = MagicMock()
@@ -60,8 +60,8 @@ async def test_vllm_ner_extracts_entities():
 
 
 @pytest.mark.asyncio
-async def test_vllm_ner_handles_invalid_json():
-    provider = VllmNerProvider(base_url="http://vllm:8000/v1", model="test-model", timeout=30)
+async def test_sglang_ner_handles_invalid_json():
+    provider = SglangNerProvider(base_url="http://sglang:8000/v1", model="test-model", timeout=30)
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.raise_for_status = MagicMock()
@@ -75,6 +75,6 @@ async def test_vllm_ner_handles_invalid_json():
 
 
 @pytest.mark.asyncio
-async def test_vllm_ner_unavailable_when_no_model():
-    provider = VllmNerProvider(base_url="http://vllm:8000/v1", model="", timeout=30)
+async def test_sglang_ner_unavailable_when_no_model():
+    provider = SglangNerProvider(base_url="http://sglang:8000/v1", model="", timeout=30)
     assert await provider.is_available() is False

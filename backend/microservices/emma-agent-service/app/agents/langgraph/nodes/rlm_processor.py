@@ -15,7 +15,7 @@ Flow:
 
 Design Decisions:
 1. Token estimation via len/4 — sufficient for PoC, avoids tokenizer dependency
-2. Parallel chunk processing via asyncio.gather — vLLM continuous batching handles concurrency
+2. Parallel chunk processing via asyncio.gather — SGLang continuous batching handles concurrency
 3. Result stored in agent_results["rlm_agent"] — reuses synthesize_node as-is
 4. Feature-flagged off by default — zero impact on existing flows
 """

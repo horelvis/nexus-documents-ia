@@ -244,7 +244,7 @@ class FactorAgent:
         )
 
     async def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
-        """Call LLM via shared client with fallback to raw vLLM."""
+        """Call LLM via shared client with fallback to raw SGLang."""
         try:
             from langchain_core.messages import SystemMessage, HumanMessage
             from app.agents.llm_models import get_chat_model
@@ -260,13 +260,13 @@ class FactorAgent:
             if response and response.content:
                 return response.content.strip()
         except Exception as e:
-            logger.warning(f"⚠️ LLM router failed ({e}), falling back to raw vLLM")
+            logger.warning(f"⚠️ LLM router failed ({e}), falling back to raw SGLang")
 
-        # Fallback: direct vLLM
+        # Fallback: direct SGLang
         try:
-            async with httpx.AsyncClient(timeout=settings.agent_raw_vllm_timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=settings.agent_raw_sglang_timeout_seconds) as client:
                 payload = {
-                    "model": settings.vllm_model,
+                    "model": settings.sglang_model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
@@ -276,16 +276,16 @@ class FactorAgent:
                     "chat_template_kwargs": {"enable_thinking": False},
                 }
                 response = await client.post(
-                    f"{settings.vllm_base_url}/chat/completions",
+                    f"{settings.sglang_base_url}/chat/completions",
                     headers={"Content-Type": "application/json"},
                     json=payload,
                 )
                 if response.status_code == 200:
                     data = response.json()
                     return data["choices"][0]["message"]["content"].strip()
-                raise Exception(f"vLLM error: {response.status_code}")
+                raise Exception(f"SGLang error: {response.status_code}")
         except Exception as e:
-            logger.error(f"❌ vLLM call failed: {e}")
+            logger.error(f"❌ SGLang call failed: {e}")
             raise
 
 

@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
     logger.info(f"Starting {settings.service_name} v{settings.service_version}")
-    logger.info(f"vLLM URL: {settings.vllm_base_url}")
+    logger.info(f"SGLang URL: {settings.sglang_base_url}")
     logger.info(f"Storage Service URL: {settings.storage_service_url}")
     logger.info(f"Default language: {settings.default_language}")
     logger.info(f"Templates directory: {settings.templates_dir}")

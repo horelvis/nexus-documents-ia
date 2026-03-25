@@ -20,10 +20,10 @@ class OutlineGenerator:
     """Generates presentation outlines using LLM."""
 
     def __init__(self):
-        self.vllm_base_url = settings.vllm_base_url
-        self.model = settings.vllm_model
-        self.max_tokens = settings.vllm_max_tokens
-        self.temperature = settings.vllm_temperature
+        self.sglang_base_url = settings.sglang_base_url
+        self.model = settings.sglang_model
+        self.max_tokens = settings.sglang_max_tokens
+        self.temperature = settings.sglang_temperature
 
     async def generate_outline(
         self,
@@ -128,7 +128,7 @@ RESPUESTA (solo JSON):"""
         """Call the vLLM API."""
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{self.vllm_base_url}/chat/completions",
+                f"{self.sglang_base_url}/chat/completions",
                 json={
                     "model": self.model,
                     "messages": [
@@ -197,7 +197,7 @@ RESPUESTA (solo JSON):"""
         """Check if vLLM is available."""
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(f"{self.vllm_base_url}/models")
+                response = await client.get(f"{self.sglang_base_url}/models")
                 return response.status_code == 200
         except Exception:
             return False

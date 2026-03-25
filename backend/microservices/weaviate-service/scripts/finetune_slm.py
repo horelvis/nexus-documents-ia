@@ -3,15 +3,15 @@
 SLM Router Fine-Tuning Script
 
 Fine-tunes Qwen2-0.5B for TOON route classification using LoRA.
-Requires ~2-4GB VRAM, can run on same GPU as vLLM if done offline.
+Requires ~2-4GB VRAM, can run on same GPU as SGLang if done offline.
 
 Usage:
     # 1. Export training data from running system:
     curl -X GET "http://localhost:8007/slm/training/my-tenant" \
         -H "X-API-Key: YOUR_KEY" > training_data.json
 
-    # 2. Run fine-tuning (stop vLLM first to free GPU memory):
-    docker compose stop vllm tgi-slm
+    # 2. Run fine-tuning (stop SGLang first to free GPU memory):
+    docker compose stop sglang tgi-slm
     python scripts/finetune_slm.py --data training_data.json --output ./slm-finetuned
 
     # 3. Deploy finetuned model:

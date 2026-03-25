@@ -18,9 +18,9 @@ class Settings(BaseSettings):
     redis_port: int = int(os.getenv("REDIS_PORT", "6379"))
     redis_db: int = int(os.getenv("REDIS_DB", "0"))
 
-    # LLM (direct vLLM/SGLang — OpenAI-compatible)
-    vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model_name: str = os.getenv("VLLM_MODEL_NAME", "Qwen/Qwen3.5-9B")
+    # LLM (direct SGLang — OpenAI-compatible)
+    sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+    sglang_model_name: str = os.getenv("SGLANG_MODEL_NAME", os.getenv("VLLM_MODEL_NAME", "Qwen/Qwen3.5-9B"))
     llm_temperature: float = float(os.getenv("FORGE_LLM_TEMPERATURE", "0.3"))
     llm_max_tokens: int = int(os.getenv("FORGE_LLM_MAX_TOKENS", "4096"))
 

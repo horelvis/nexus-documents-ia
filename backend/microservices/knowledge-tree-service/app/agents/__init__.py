@@ -45,7 +45,7 @@ Set LANGGRAPH_RAG_ENABLED=true to enable LangGraph routing.
 ## LLM Provider Support
 
 Supports multiple providers via LLM_PROVIDER environment variable:
-- vLLM (PRIMARY): High-throughput GPU inference
+- SGLang (PRIMARY): High-throughput GPU inference
 - OpenAI (fallback): GPT-4o, GPT-4o-mini
 - Anthropic (fallback): Claude models
 """
