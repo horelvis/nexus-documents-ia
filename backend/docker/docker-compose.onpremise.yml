@@ -213,6 +213,16 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # Gotenberg - Document Conversion (DOCX/XLSX/PPTX → PDF)
+  # =============================================================================
+  # LibreOffice-based converter for document preview. Used by /converted-pdf endpoint.
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    networks:
+      - backend-network
+    restart: unless-stopped
+
+  # =============================================================================
   # Docling - AI Document Understanding (opt-in via --profile docling)
   # =============================================================================
   # IBM Docling extracts structured Markdown from documents, preserving

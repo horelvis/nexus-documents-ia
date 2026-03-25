@@ -1,13 +1,15 @@
 """Explainability API — Knowledge graph + reasoning trace for the UI.
 
 GET /emma/explainability/graph       → Full tenant graph from FalkorDB (via KTS)
-GET /emma/explainability/trace/{tid}/{idx} → Per-response reasoning trace
+GET /emma/explainability/trace/{tid}/{idx} → Per-response reasoning trace (from Redis)
 """
+import json
 import logging
 import os
 from typing import Optional
 
 import httpx
+import redis.asyncio as aioredis
 from fastapi import APIRouter, Query, HTTPException
 
 from app.core.config import settings
@@ -120,14 +122,39 @@ async def get_reasoning_trace(
     """Per-response reasoning trace for the ReasoningModal.
 
     Returns timeline steps + evidence sub-graph for a specific message
-    in a conversation thread.
-
-    NOTE: This is a stub that returns data from the LangGraph checkpointer.
-    Full implementation requires reading ReasoningTracker data from the
-    checkpoint store.
+    in a conversation thread. Data is stored in Redis with 24h TTL
+    during SSE streaming.
     """
-    # TODO: Read from LangGraph AsyncPostgresSaver checkpointer
-    # For now, return empty structure so the UI doesn't break
+    try:
+        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+
+        # Try exact key first
+        trace_key = f"reasoning_trace:{thread_id}:{message_index}"
+        raw = await r.get(trace_key)
+
+        # If not found and message_index == 0, try latest
+        if not raw and message_index == 0:
+            latest = await r.get(f"reasoning_trace:{thread_id}:latest")
+            if latest:
+                raw = await r.get(f"reasoning_trace:{thread_id}:{latest}")
+
+        await r.close()
+
+        if raw:
+            trace = json.loads(raw)
+            return {
+                "message_id": f"{thread_id}:{message_index}",
+                "thread_id": thread_id,
+                "timeline": trace.get("timeline", []),
+                "evidence_graph": {"nodes": [], "edges": []},
+                "total_execution_ms": trace.get("total_execution_ms", 0),
+                "tools_used": trace.get("tools_used", []),
+                "sources_cited": trace.get("sources_cited", 0),
+            }
+    except Exception as e:
+        logger.warning(f"Failed to read reasoning trace from Redis: {e}")
+
+    # Fallback: empty structure
     return {
         "message_id": f"{thread_id}:{message_index}",
         "thread_id": thread_id,
