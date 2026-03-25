@@ -4,6 +4,7 @@ from typing import Optional
 
 from app.providers.registry import ProviderRegistry
 from app.providers.base import ExtractionProvider, EmbeddingProvider, EntityProvider
+from app.providers.extraction.plaintext import PlaintextProvider, is_plaintext
 from app.pipeline.quality import compute_quality_score
 from app.pipeline.language import detect_language
 from app.schemas.models import ProcessOptions, ProcessResponse, EntityResponse
@@ -27,29 +28,47 @@ async def process_document(
     vector: Optional[list[float]] = None
     entities: list[EntityResponse] = []
 
-    # Step 1: Extract text (try providers with fallback)
+    # Step 1: Extract text
     if options.extract:
         extracted = False
-        for provider in extraction_registry.all():
-            try:
-                if not await provider.is_available():
-                    continue
-                if file_bytes:
-                    result = await provider.extract(file_bytes, filename)
-                elif url:
-                    result = await provider.extract_from_url(url, filename)
-                else:
-                    raise ValueError("No file or URL provided")
 
+        # Plaintext files: read directly, skip Docling/Tika
+        if is_plaintext(filename):
+            pt = PlaintextProvider()
+            try:
+                if file_bytes:
+                    result = await pt.extract(file_bytes, filename)
+                elif url:
+                    result = await pt.extract_from_url(url, filename)
                 text = result.text
                 metadata = result.metadata
                 metadata["quality_score"] = compute_quality_score(text)
                 extracted = True
-                break
             except Exception as e:
-                logger.warning(f"Extraction provider {provider.name} failed: {e}")
+                logger.warning(f"Plaintext extraction failed: {e}")
+
+        # Binary files: try providers with fallback
         if not extracted:
-            metadata["extraction_error"] = "All extraction providers failed"
+            for provider in extraction_registry.all():
+                try:
+                    if not await provider.is_available():
+                        continue
+                    if file_bytes:
+                        result = await provider.extract(file_bytes, filename)
+                    elif url:
+                        result = await provider.extract_from_url(url, filename)
+                    else:
+                        raise ValueError("No file or URL provided")
+
+                    text = result.text
+                    metadata = result.metadata
+                    metadata["quality_score"] = compute_quality_score(text)
+                    extracted = True
+                    break
+                except Exception as e:
+                    logger.warning(f"Extraction provider {provider.name} failed: {e}")
+            if not extracted:
+                metadata["extraction_error"] = "All extraction providers failed"
 
     # Detect language
     language = options.language or detect_language(text)

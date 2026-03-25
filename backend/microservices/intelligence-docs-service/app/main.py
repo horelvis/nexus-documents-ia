@@ -11,6 +11,7 @@ from app.providers.base import EmbeddingProvider, ExtractionProvider, EntityProv
 from app.providers.embedding.sentence_transformers import SentenceTransformersProvider
 from app.providers.extraction.tika import TikaProvider
 from app.providers.extraction.docling import DoclingProvider
+from app.providers.extraction.plaintext import PlaintextProvider, is_plaintext
 from app.providers.entities.regex_spanish import RegexSpanishProvider
 from app.providers.entities.vllm_ner import VllmNerProvider
 from app.pipeline.processor import process_document
@@ -175,6 +176,15 @@ async def extract(
         fname = filename or file.filename or "unknown"
     else:
         fname = filename or url.split("/")[-1]
+
+    # Plaintext files: read directly, skip Docling/Tika
+    if is_plaintext(fname):
+        pt = PlaintextProvider()
+        if file_bytes:
+            result = await pt.extract(file_bytes, fname)
+        else:
+            result = await pt.extract_from_url(url, fname)
+        return ExtractResponse(text=result.text, language=result.language, metadata=result.metadata)
 
     # Try each available provider with automatic fallback
     last_error = None
