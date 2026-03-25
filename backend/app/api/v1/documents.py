@@ -468,29 +468,22 @@ async def stream_document(
             detail="Document not available (no cache and source connector unavailable)"
         )
 
-        # Preparar respuesta
-        content_type = indexed_doc.mime_type or "application/octet-stream"
-        filename = indexed_doc.title or "document"
+    # Preparar respuesta
+    content_type = indexed_doc.mime_type or "application/octet-stream"
+    filename = indexed_doc.title or "document"
 
-        content_headers = {
-            "Content-Type": content_type,
-            "Content-Disposition": f'inline; filename="{filename}"',
-            "Content-Length": str(len(content)),
-            "X-Source": "connector"
-        }
+    content_headers = {
+        "Content-Type": content_type,
+        "Content-Disposition": f'inline; filename="{filename}"',
+        "Content-Length": str(len(content)),
+        "X-Source": "connector"
+    }
 
-        return StreamingResponse(
-            io.BytesIO(content),
-            headers=content_headers,
-            media_type=content_type
-        )
-
-    except FileNotFoundError as e:
-        logger.error(f"Document not found in connector: {e}")
-        raise HTTPException(status_code=404, detail="Document not found in external system")
-    except Exception as e:
-        logger.error(f"Error downloading from connector {indexed_doc.connector_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error downloading from connector: {str(e)}")
+    return StreamingResponse(
+        io.BytesIO(content),
+        headers=content_headers,
+        media_type=content_type
+    )
 
 
 @router.get("/{doc_id}/pdf")

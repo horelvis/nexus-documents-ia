@@ -30,7 +30,7 @@ export default function InlinePdfPage({ url, pageNumber = 1 }: InlinePdfPageProp
     const el = containerRef.current
     if (!el) return
 
-    const measure = () => setContainerWidth(el.clientWidth)
+    const measure = () => setContainerWidth(Math.min(el.clientWidth, 500))
     measure()
 
     const observer = new ResizeObserver(measure)

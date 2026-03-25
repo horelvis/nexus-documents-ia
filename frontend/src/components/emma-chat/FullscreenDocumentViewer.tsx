@@ -31,6 +31,13 @@ function isImage(doc: DocumentInfo): boolean {
   return ft.includes('image') || /\.(jpe?g|png|webp|gif|bmp|svg)$/.test(name)
 }
 
+function isDoc(doc: DocumentInfo): boolean {
+  const ft = (doc.fileType || '').toLowerCase()
+  const name = (doc.name || '').toLowerCase()
+  return ft.includes('word') || ft.includes('officedocument') || ft.includes('msword') ||
+    /\.(docx?|odt|rtf)$/.test(name)
+}
+
 // ── Badge config ──
 
 function getBadge(doc: DocumentInfo): { label: string; className: string } {
@@ -38,7 +45,8 @@ function getBadge(doc: DocumentInfo): { label: string; className: string } {
   if (st === 'public_knowledge' || st === 'legislation') return { label: 'BOE', className: 'bg-purple-600' }
   if (isPdf(doc)) return { label: 'PDF', className: 'bg-red-600' }
   if (isImage(doc)) return { label: 'IMG', className: 'bg-green-600' }
-  return { label: 'DOC', className: 'bg-blue-600' }
+  if (isDoc(doc)) return { label: 'DOC', className: 'bg-blue-600' }
+  return { label: 'TXT', className: 'bg-slate-600' }
 }
 
 // ── Component ──
@@ -58,6 +66,9 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
   const badge = getBadge(doc)
   const docIsPdf = isPdf(doc)
   const docIsImage = isImage(doc)
+  const docIsDoc = isDoc(doc)
+  // DOCX files are converted to PDF server-side for preview
+  const [convertedToPdf, setConvertedToPdf] = useState(false)
 
   // Fetch blob
   useEffect(() => {
@@ -69,6 +80,7 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
     const fetchBlob = async () => {
       setIsLoading(true)
       setError(null)
+      setConvertedToPdf(false)
       try {
         let documentId = doc.id || null
 
@@ -85,6 +97,19 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
         if (!documentId) {
           setError('Documento no encontrado')
           return
+        }
+
+        // For DOCX/Word files, try the converted-pdf endpoint first
+        if (docIsDoc) {
+          const converted = await documentService.downloadConvertedPdf(documentId)
+          if (!('error' in converted)) {
+            const url = URL.createObjectURL(converted.blob)
+            blobUrlRef.current = url
+            setBlobUrl(url)
+            setConvertedToPdf(true)
+            return
+          }
+          // Fallback to raw stream if conversion not available
         }
 
         const result = await documentService.downloadDocument(documentId)
@@ -186,7 +211,7 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
 
         {!isLoading && !error && blobUrl && (
           <>
-            {docIsPdf && (
+            {(docIsPdf || convertedToPdf) && (
               <PDFViewer
                 url={blobUrl}
                 fileName={doc.name}
@@ -204,7 +229,7 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
                 />
               </div>
             )}
-            {!docIsPdf && !docIsImage && (
+            {!docIsPdf && !convertedToPdf && !docIsImage && (
               <div className="flex items-center justify-center h-full p-6">
                 <div className="text-center">
                   <p className="text-sm text-muted-foreground mb-4">

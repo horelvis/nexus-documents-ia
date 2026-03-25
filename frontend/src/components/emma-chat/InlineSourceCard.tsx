@@ -20,7 +20,7 @@ const InlinePdfPage = dynamic(() => import('./InlinePdfPage'), {
 
 // ── Source type detection ──
 
-type SourceType = 'pdf' | 'image' | 'boe' | 'text'
+type SourceType = 'pdf' | 'image' | 'boe' | 'doc' | 'text'
 
 function detectSourceType(doc: DocumentInfo): SourceType {
   const ft = (doc.fileType || '').toLowerCase()
@@ -33,6 +33,10 @@ function detectSourceType(doc: DocumentInfo): SourceType {
     ft.includes('image') ||
     /\.(jpe?g|png|webp|gif|bmp|svg)$/.test(name)
   ) return 'image'
+  if (
+    ft.includes('word') || ft.includes('officedocument') || ft.includes('msword') ||
+    /\.(docx?|odt|rtf)$/.test(name)
+  ) return 'doc'
   return 'text'
 }
 
@@ -40,7 +44,8 @@ const TYPE_CONFIG: Record<SourceType, { badge: string; color: string; bgColor: s
   pdf:   { badge: 'PDF', color: 'text-white', bgColor: 'bg-red-600',    borderColor: 'border-red-600' },
   image: { badge: 'IMG', color: 'text-white', bgColor: 'bg-green-600',  borderColor: 'border-green-600' },
   boe:   { badge: 'BOE', color: 'text-white', bgColor: 'bg-purple-600', borderColor: 'border-purple-600' },
-  text:  { badge: 'DOC', color: 'text-white', bgColor: 'bg-blue-600',   borderColor: 'border-blue-600' },
+  doc:   { badge: 'DOC', color: 'text-white', bgColor: 'bg-blue-600',   borderColor: 'border-blue-600' },
+  text:  { badge: 'TXT', color: 'text-white', bgColor: 'bg-slate-600',  borderColor: 'border-slate-600' },
 }
 
 // ── Blob fetching hook ──
@@ -126,6 +131,7 @@ export function InlineSourceCard({ document: doc, onOpenFullscreen, className }:
   const actionLabel = sourceType === 'pdf' ? 'Abrir PDF'
     : sourceType === 'image' ? 'Abrir imagen'
     : sourceType === 'boe' ? 'Ver en BOE'
+    : sourceType === 'doc' ? 'Abrir documento'
     : 'Descargar'
 
   const handleAction = () => {
@@ -207,7 +213,7 @@ export function InlineSourceCard({ document: doc, onOpenFullscreen, className }:
         </div>
       )}
 
-      {(sourceType === 'text' || sourceType === 'boe') && doc.excerpt && (
+      {(sourceType === 'doc' || sourceType === 'text' || sourceType === 'boe') && doc.excerpt && (
         <div className="px-4 py-3">
           <div className={cn('border-l-[3px] pl-3 text-sm text-muted-foreground italic leading-relaxed', config.borderColor)}>
             &ldquo;{doc.excerpt}&rdquo;
