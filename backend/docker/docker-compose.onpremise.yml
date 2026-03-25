@@ -243,7 +243,7 @@ services:
       --served-model-name ${GLM_OCR_MODEL:-zai-org/GLM-OCR}
       --port 8000
       --host 0.0.0.0
-      --mem-fraction-static 0.08
+      --mem-fraction-static ${GLM_OCR_GPU_UTIL:-0.18}
       --trust-remote-code
     deploy:
       resources:
@@ -372,37 +372,9 @@ services:
 
   # =============================================================================
   # LangExtract Service - Entity Extraction (LLM-powered NER)
-  # =============================================================================
-  # Extracts named entities from documents during indexing:
-  #   - PERSON, ORGANIZATION, DATE, AMOUNT, LOCATION (via LLM)
-  #   - DNI, NIE, CIF (via regex, always local)
-  # Used by weaviate-service indexing pipeline to populate Knowledge Graph.
-  langextract-service:
-    build:
-      context: ../microservices/langextract-service
-      dockerfile: Dockerfile
-    depends_on:
-      sglang:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      # Override LLM provider to use local SGLang (reuses Qwen3.5-9B already in the stack)
-      - LLM_PROVIDER=sglang
-      - LLM_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - LLM_API_BASE=http://sglang:8000/v1
-    volumes:
-      - ../microservices/langextract-service/app:/app/app:ro
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+  # langextract-service: REMOVED — consolidated into intelligence-docs-service
+  # Entity extraction (LangExtract few-shot + regex guardrail) now runs inside
+  # intelligence-docs-service via LangExtractProvider + SpanishIdValidator.
 
   # =============================================================================
   # Weaviate Service - RAG Pipeline
@@ -421,8 +393,6 @@ services:
         condition: service_healthy
       textextract-service:
         condition: service_started
-      langextract-service:
-        condition: service_healthy
       intelligence-docs-service:
         condition: service_healthy
       storage-service:
@@ -437,7 +407,6 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
-      - LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
       - INTELLIGENCE_DOCS_SERVICE_URL=http://intelligence-docs-service:8000
       - STORAGE_SERVICE_URL=http://storage-service:8010
       # OCR: disabled during bulk indexing (Tika handles text extraction)
@@ -1238,48 +1207,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # =============================================================================
-  # NouxCube Presentation Service - PowerPoint Generation
-  # =============================================================================
-  presentation-service:
-    build:
-      context: ../microservices/presentation-service
-      dockerfile: Dockerfile
-    depends_on:
-      redis:
-        condition: service_healthy
-      sglang:
-        condition: service_healthy
-      storage-service:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - PRESENTATION_API_KEY=${MICROSERVICES_API_KEY}
-      - PRESENTATION_SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
-      - PRESENTATION_SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - PRESENTATION_STORAGE_SERVICE_URL=http://storage-service:8010
-      - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
-      - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-https://nouxcubeai.ddns.net:8000}
-      - PRESENTATION_LOCAL_STORAGE_PATH=/app/storage
-      - DEFAULT_LANGUAGE=${PRESENTATION_DEFAULT_LANGUAGE:-es-ES}
-      - DEFAULT_TEMPLATE=${PRESENTATION_DEFAULT_TEMPLATE:-corporate}
-      - DEFAULT_MAX_SLIDES=${PRESENTATION_DEFAULT_MAX_SLIDES:-10}
-    volumes:
-      - ../microservices/presentation-service/app:/app/app:ro
-      - ../microservices/presentation-service/templates:/app/templates:ro
-      - local_storage_data:/app/storage
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/ping').raise_for_status()"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
+  # presentation-service: REMOVED — directory no longer exists
 
   # =============================================================================
   # Langfuse - LLM Observability & Prompt Management
