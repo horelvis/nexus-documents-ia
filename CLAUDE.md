@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Docker Compose (IMPORTANT)
 - The **active compose** for on-premise is `docker-compose.onpremise.yml`, which **overrides** `docker-compose.yml`
 - Both files are loaded together: `docker compose` auto-detects them via `docker-compose.yml` + `docker-compose.onpremise.yml`
-- **Always edit `docker-compose.onpremise.yml`** for on-premise changes (vLLM config, services, etc.)
+- **Always edit `docker-compose.onpremise.yml`** for on-premise changes (SGLang config, services, etc.)
 - `docker-compose.yml` is the base; `docker-compose.onpremise.yml` overrides/extends it
-- vLLM config (model, quantization, GPU settings) lives in `docker-compose.onpremise.yml`
+- SGLang config (model, quantization, GPU settings) lives in `docker-compose.onpremise.yml`
 
 ### Backend
 - **Start dev (RECOMMENDED)**: `cd backend/docker && ./start-dev.sh`
@@ -30,10 +30,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Onboarding (New Tenant)
 - **Full docs**: [`docs/on-premise/ONBOARDING.md`](docs/on-premise/ONBOARDING.md)
-- **Onboarding mode**: `cd backend/docker && ./onboarding.sh start` (GPU → Docling, vLLM off)
+- **Onboarding mode**: `cd backend/docker && ./onboarding.sh start` (GPU → Docling, SGLang off)
 - **Index all**: `./onboarding.sh sync-all` then `./onboarding.sh status` to monitor
 - **Download BOE**: `./onboarding.sh boe` (13 presets, ~47 Spanish laws)
-- **Go live**: `./onboarding.sh finish` (GPU → vLLM, Emma operational)
+- **Go live**: `./onboarding.sh finish` (GPU → SGLang, Emma operational)
 - **Compose override**: `docker-compose.onboarding.yml` (Docling GPU + disable RAG hierarchical)
 
 ### Full Stack
@@ -47,26 +47,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Backend**: FastAPI (Python 3.9+), async/await throughout
 - **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
-- **Database**: PostgreSQL 15 (Apache AGE + pgvector) + Weaviate (vectors) + Elasticsearch (full-text)
+- **Database**: PostgreSQL 15 + Weaviate (vectors) + FalkorDB (graph) + Elasticsearch (full-text)
 - **Storage**: Google Cloud Storage
-- **AI/ML**: vLLM (dual-model: Qwen3.5-4B planner + Qwen3.5-9B chat) + LangGraph multi-agent orchestration
+- **AI/ML**: SGLang (dual-model: Qwen3.5-4B planner + Qwen3.5-9B chat) + LangGraph multi-agent orchestration
 
-### PostgreSQL Extensions
+### PostgreSQL
 
-The `db` service uses a custom Docker image (`Dockerfile.postgres`) based on `apache/age:release_PG15_1.6.0` with two extensions:
-
-| Extension | Version | Purpose | Init Script |
-|-----------|---------|---------|-------------|
-| **Apache AGE** | 1.6.0 | Cypher graph queries for knowledge graph (entity expansion, structural queries) | `init-scripts/01-init-age.sql` |
-| **pgvector** | 0.8.0 | Vector similarity search for MemoRAG embeddings and few-shot retrieval | `init-scripts/00-init-pgvector.sql` |
-
-**Key files**:
-- `backend/docker/Dockerfile.postgres` — Custom image build (AGE base + pgvector compiled from source)
-- `backend/docker/init-scripts/00-init-pgvector.sql` — Creates pgvector extension on first startup
-- `backend/docker/init-scripts/01-init-age.sql` — Apache AGE + knowledge graph schema
-- `backend/docker/init-scripts/02-init-langfuse.sql` — Langfuse observability database
-
-**Rebuild after changes**: `cd backend/docker && docker compose build db`
+The `db` service uses vanilla `postgres:15`. Knowledge graph operations use **FalkorDB** (Redis-based, port 6380). Langfuse database is initialized via `init-scripts/02-init-langfuse.sql`.
 
 ### Microservices
 
@@ -74,13 +61,14 @@ The `db` service uses a custom Docker image (`Dockerfile.postgres`) based on `ap
 |---------|------|---------|
 | Main API | 8000 | Core business logic, auth, document management |
 | Emma Agent Service | 8009 | LangGraph multi-agent RAG, Verified Generation |
-| Weaviate Service | 8007 | Vector search, RAG pipeline, embedding (BGE-M3) |
-| Knowledge Tree Service | 8011 | Apache AGE graph queries for entity expansion |
+| Weaviate Service | 8007 | Vector search, RAG pipeline (embeddings via intelligence-docs) |
+| Intelligence Docs Service | 8012 | Text extraction (Docling/GLM-OCR), embedding (BGE-M3), entity extraction |
+| Knowledge Tree Service | 8011 | FalkorDB graph queries for entity expansion |
 | Elasticsearch Service | 8008 | Full-text search, hybrid search |
 | Background Worker | 8100 | Celery async task processing |
 | Emma Reactive Worker | — | Event listener + trigger engine (Redis Streams consumer) |
-| vLLM Chat | internal | GPU inference — quality generation (Qwen3.5-9B) |
-| vLLM Planner | internal | GPU inference — fast tool calling (Qwen3.5-4B, dual-model only) |
+| SGLang Chat | internal | GPU inference — quality generation (Qwen3.5-9B) |
+| SGLang Planner | internal | GPU inference — fast tool calling (Qwen3.5-4B, dual-model only) |
 
 ### Deployment Mode (On-Premise Only)
 
@@ -145,14 +133,14 @@ MemoRAG-inspired dual-model routing where a fast planner model handles tool call
 
 **Architecture**:
 ```
-                    ┌─────────────────────────────────────┐
-                    │            LLMRouter                │
-                    │                                     │
-User Query ──────►  │  role=PLANNER → vLLM (4B, fast)    │
-                    │  role=CHAT    → vLLM (9B, quality)  │
-                    │                                     │
-                    │  Fallback chain per role+provider    │
-                    └─────────────────────────────────────┘
+                    ┌──────────────────────────────────────────┐
+                    │            LLMRouter                     │
+                    │                                          │
+User Query ──────►  │  role=PLANNER → SGLang (4B, fast)       │
+                    │  role=CHAT    → SGLang (9B, quality)     │
+                    │                                          │
+                    │  Fallback chain per role+provider         │
+                    └──────────────────────────────────────────┘
 ```
 
 **Role Assignment**:
@@ -173,27 +161,27 @@ response = await router.chat(messages, tools=tools, role=ModelRole.PLANNER)
 response = await router.chat(messages, role=ModelRole.CHAT)
 ```
 
-**Backwards Compatible**: `VLLM_DUAL_MODEL=false` (default) — both roles use the same model/endpoint. All existing callers default to `ModelRole.CHAT`.
+**Backwards Compatible**: `SGLANG_DUAL_MODEL=false` (default) — both roles use the same model/endpoint. All existing callers default to `ModelRole.CHAT`. Legacy `VLLM_*` env vars are accepted as fallback.
 
-**Activation**: Set `VLLM_DUAL_MODEL=true` in `.env` and start with `docker compose --profile dual-model up -d`.
+**Activation**: Set `SGLANG_DUAL_MODEL=true` in `.env` and start with `docker compose --profile dual-model up -d`.
 
 **Environment Variables**:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VLLM_DUAL_MODEL` | `false` | Enable dual-model routing |
-| `VLLM_PLANNER_URL` | `VLLM_BASE_URL` | Planner vLLM endpoint |
-| `VLLM_PLANNER_MODEL` | `Qwen/Qwen3.5-4B-AWQ` | Planner model name |
-| `VLLM_PLANNER_MAX_TOKENS` | `4096` | Planner max output tokens |
-| `VLLM_PLANNER_TEMPERATURE` | `0.3` | Planner temperature |
-| `VLLM_PLANNER_GPU_UTIL` | `0.20` | Planner GPU memory fraction |
-| `VLLM_PLANNER_TOOL_PARSER` | `qwen3_coder` | Planner tool call parser (Qwen3.5 uses XML) |
+| `SGLANG_DUAL_MODEL` | `false` | Enable dual-model routing |
+| `SGLANG_PLANNER_URL` | `SGLANG_BASE_URL` | Planner SGLang endpoint |
+| `SGLANG_PLANNER_MODEL` | `Qwen/Qwen3.5-4B` | Planner model name |
+| `SGLANG_PLANNER_MAX_TOKENS` | `4096` | Planner max output tokens |
+| `SGLANG_PLANNER_TEMPERATURE` | `0.3` | Planner temperature |
+| `SGLANG_PLANNER_GPU_UTIL` | `0.18` | Planner GPU memory fraction |
+| `SGLANG_TOOL_PARSER` | `qwen3_coder` | Tool call parser (Qwen3.5 uses XML) |
 
 **Key files**:
 - `emma-agent-service/app/agents/llm_router.py` — LLMRouter with `(provider, role)` client pool
 - `emma-agent-service/app/agents/llm_client.py` — `ModelRole` enum, `create_llm_config_for_provider(role=)`
-- `emma-agent-service/app/core/config.py` — Dual-model settings
-- `docker-compose.onpremise.yml` — `vllm-planner` service (profiles: [dual-model])
+- `emma-agent-service/app/core/config.py` — Dual-model settings (`sglang_*` attrs, `VLLM_*` fallback)
+- `docker-compose.onpremise.yml` — `sglang-planner` service (profiles: [dual-model])
 
 ### SmartSearch — Unified Multi-Store Search
 
