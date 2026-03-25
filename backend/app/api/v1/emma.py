@@ -1201,3 +1201,53 @@ async def emma_generated_info(
     except Exception as e:
         logger.error(f"❌ Generated doc info error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Explainability Endpoints (proxy to emma-agent-service /emma/explainability/*)
+# =============================================================================
+
+@router.get("/explainability/graph")
+async def explainability_graph(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """Full tenant knowledge graph for 3D visualization."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/explainability/graph",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Explainability graph error: {e}")
+        raise HTTPException(status_code=502, detail="Explainability service unavailable")
+
+
+@router.get("/explainability/trace/{thread_id}/{message_index}")
+async def explainability_trace(
+    thread_id: str,
+    message_index: int,
+    current_user: User = Depends(get_current_user_async),
+):
+    """Per-response reasoning trace for the ReasoningModal."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/explainability/trace/{thread_id}/{message_index}",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Explainability trace error: {e}")
+        raise HTTPException(status_code=502, detail="Explainability service unavailable")
