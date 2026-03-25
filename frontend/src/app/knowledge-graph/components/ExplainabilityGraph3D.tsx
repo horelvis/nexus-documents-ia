@@ -12,7 +12,7 @@ import {
 } from './explainability-theme'
 
 const ForceGraph3D = dynamic(
-  () => import('react-force-graph').then((m) => m.ForceGraph3D),
+  () => import('react-force-graph-3d'),
   {
     ssr: false,
     loading: () => (
@@ -226,8 +226,8 @@ export default function ExplainabilityGraph3D({
         linkThreeObject={linkThreeObject}
         linkThreeObjectExtend={linkThreeObjectExtend}
         linkPositionUpdate={linkPositionUpdate}
-        linkOpacity={0.7}
-        linkWidth={1}
+        linkOpacity={0.4}
+        linkWidth={0.3}
       />
     </div>
   )
