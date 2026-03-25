@@ -48,7 +48,7 @@ Estado:
 - Migrados a `BaseHTTPClient`:
   - `backend/app/services/template_editor_client.py`
   - `backend/app/services/cag_client.py`
-  - `backend/app/services/langextract_client.py`
+  - `backend/app/services/langextract_client.py` (deprecated — consolidated into intelligence-docs-service)
   - `backend/app/services/weaviate_client.py`
   - `backend/app/services/text_extraction_client.py`
   - `backend/app/services/signature_microservice_client.py`
@@ -112,10 +112,12 @@ Recomendación:
   - `SettingsDatabase`, `SettingsAuth`, `SettingsServices`, `SettingsAI`, etc.
 - Mantener un “facade” `settings` que compone para no cambiar todo el codebase en una sola PR.
 
-### 8) Alineación de servicios (Temporalio/Ollama retirados; vLLM)
+### 8) Alineación de servicios (Temporalio/Ollama retirados; SGLang)
 Estado:
-- Se retiraron referencias a `TEMPORALIO_SERVICE_URL` y `OLLAMA_BASE_URL` en despliegue y ejemplos (`backend/cloud-run-backend.yaml`, `backend/.env.example`, `backend/docker/docker-compose.yml`).
-- `LLM_PROVIDER` por defecto pasa a `vllm` en `backend/app/core/config.py`.
+- Se retiraron referencias a `TEMPORALIO_SERVICE_URL` y `OLLAMA_BASE_URL` en despliegue y ejemplos.
+- `LLM_PROVIDER` por defecto es `sglang` (acepta `vllm` como alias). Runtime: SGLang v0.5.9.
+- `langextract-service` consolidado dentro de `intelligence-docs-service` (Mar 2026).
+- Embeddings delegados de weaviate-service a intelligence-docs-service (Mar 2026).
 
 ## Recomendaciones priorizadas (próximas 1–3 iteraciones)
 

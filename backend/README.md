@@ -131,16 +131,16 @@ Nexus Document Management System is an enterprise-grade solution for intelligent
 └──────────┴──────────────┘  └───────────┴────────────────┘
 
 MICROSERVICES ARCHITECTURE:
-╔══════════════════════════════════════════════════════════════════════╗
-║ • Weaviate Service + CAG (8007): Vector proxy y agentes contextuales ║
-║ • LangExtract Service (8009): Extracción automática de entidades     ║
-║ • TextExtract Service (8000): Extracción determinística/OCR          ║
-║ • Template Editor Service (8011): Gestión de plantillas colaborativa ║
-║ • Storage Service (8003): Operaciones GCS y signed URLs              ║
-║ • Elasticsearch Service (8005): Búsqueda híbrida y analytics         ║
-║ • Background Worker (8100): Previews, emails y procesamiento async   ║
-║ • Main API (8000): Lógica de negocio, auth y orquestación            ║
-╚══════════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════════╗
+║ • Emma Agent Service (8009): LangGraph multi-agent RAG + Verified Gen  ║
+║ • Weaviate Service (8007): Vector search, RAG pipeline                 ║
+║ • Intelligence Docs Service (8012): Extraction, embeddings, entities   ║
+║ • Knowledge Tree Service (8011): FalkorDB graph queries                ║
+║ • Storage Service (8010): Operaciones MinIO/GCS y signed URLs          ║
+║ • Background Worker (8100): Verificación, emails, procesamiento async  ║
+║ • SGLang (8001): GPU LLM inference — Qwen3.5-9B FP8                   ║
+║ • Main API (8000): Lógica de negocio, auth y orquestación              ║
+╚══════════════════════════════════════════════════════════════════════════╝
 
 KEY ARCHITECTURAL PATTERNS:
 ╔══════════════════════════════════════════════════════════════════════╗
