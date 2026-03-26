@@ -14,7 +14,7 @@ handled by LLM-based reasoning via Multi-Pipeline RAG sectors.
 """
 import warnings
 
-# Suppress httpx deprecation warning from litellm (uses data= instead of content=)
+# Suppress httpx deprecation warning from litellm (transitive dep via semantic-router, not used directly)
 warnings.filterwarnings(
     "ignore",
     message="Use 'content=<...>' to upload raw bytes/text content.",

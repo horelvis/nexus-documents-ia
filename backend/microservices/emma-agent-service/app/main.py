@@ -16,7 +16,7 @@ Separated from weaviate-service to enable:
 """
 import warnings
 
-# Suppress httpx deprecation warning from litellm
+# Suppress httpx deprecation warning from litellm (transitive dep via semantic-router, not used directly)
 warnings.filterwarnings(
     "ignore",
     message="Use 'content=<...>' to upload raw bytes/text content.",
