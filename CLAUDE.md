@@ -12,14 +12,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - SGLang config (model, quantization, GPU settings) lives in `docker-compose.onpremise.yml`
 
 ### Backend
-- **Start dev (RECOMMENDED)**: `cd backend/docker && ./start-dev.sh`
-- **Start prod**: `cd backend/docker && ./start-prod.sh`
+- **Start dev**: `cd backend/docker && docker compose up -d`
+- **Start dev (build first)**: `cd backend/docker && docker compose up -d --build`
 - **Local API (no Docker)**: `cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 - **Init database**: `cd backend && python -m scripts.init_db`
 - **Migrations**: `cd backend && alembic upgrade head`
 - **Run tests**: `cd backend/tests && ./run_tests.sh`
 - **Tests (real GCS)**: `cd backend/docker && docker compose -f docker-compose.test.yml up`
-- **Clean rebuild**: `./clean_and_rebuild.sh`
+- **Stop**: `cd backend/docker && docker compose down`
 
 ### Frontend
 - **Requires**: Node.js 18+ (`nvm use 18` or `nvm use 20`)
@@ -37,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Compose override**: `docker-compose.onboarding.yml` (Docling GPU + disable RAG hierarchical)
 
 ### Full Stack
-- Backend services: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
+- Backend services: `cd backend/docker && docker compose up -d` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
 - Frontend: `cd frontend && npm run dev:on-premise` (on-premise only, port 3001)
 - API docs: `http://localhost:8000/docs`
 

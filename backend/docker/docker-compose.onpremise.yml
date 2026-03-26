@@ -310,9 +310,8 @@ services:
   # =============================================================================
   # IBM Docling extracts structured Markdown from documents, preserving
   # headers, tables, lists, and reading order with 97.9% table accuracy.
-  # CPU-only image (GPU reserved for vLLM). ~4.4GB image, ~8GB RAM.
+  # CPU-only image (GPU reserved for SGLang). ~4.4GB image, ~8GB RAM.
   # Start with: docker compose --profile docling up -d
-  # Then set EXTRACTION_BACKEND=docling in .env and restart textextract-service
   docling:
     image: ghcr.io/docling-project/docling-serve-cpu:latest
     environment:
@@ -336,45 +335,9 @@ services:
     profiles:
       - docling
 
-  # =============================================================================
-  # TextExtract Service - Text Extraction API
-  # =============================================================================
-  textextract-service:
-    build:
-      context: ../microservices/textextract-service
-      dockerfile: Dockerfile
-    deploy:
-      resources:
-        limits:
-          memory: 10g
-    depends_on:
-      - tika
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - TIKA_URL=http://tika:9998
-      # Extraction backend: "tika" (default) or "docling" (AI document understanding)
-      # Docling requires: docker compose --profile docling up -d
-      - EXTRACTION_BACKEND=${EXTRACTION_BACKEND:-tika}
-      - DOCLING_URL=${DOCLING_URL:-http://docling:5001}
-      - EXTRACTION_FALLBACK_ENABLED=${EXTRACTION_FALLBACK_ENABLED:-true}
-    volumes:
-      - ../microservices/textextract-service/app:/app/app:ro
-      - easyocr_models:/root/.EasyOCR
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
-  # =============================================================================
-  # LangExtract Service - Entity Extraction (LLM-powered NER)
-  # langextract-service: REMOVED — consolidated into intelligence-docs-service
+  # textextract-service: REMOVED — replaced by intelligence-docs-service.
+  # Text extraction now uses Docling/GLM-OCR providers inside intelligence-docs-service.
+  # langextract-service: REMOVED — consolidated into intelligence-docs-service.
   # Entity extraction (LangExtract few-shot + regex guardrail) now runs inside
   # intelligence-docs-service via LangExtractProvider + SpanishIdValidator.
 
@@ -393,8 +356,6 @@ services:
         condition: service_healthy
       db:
         condition: service_healthy
-      textextract-service:
-        condition: service_started
       intelligence-docs-service:
         condition: service_healthy
       storage-service:
@@ -408,11 +369,8 @@ services:
       - WEAVIATE_URL=http://weaviate:8080
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
-      - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
       - INTELLIGENCE_DOCS_SERVICE_URL=http://intelligence-docs-service:8000
       - STORAGE_SERVICE_URL=http://storage-service:8010
-      # OCR: disabled during bulk indexing (Tika handles text extraction)
-      - ENHANCED_OCR_ENABLED=false
       # SGLang Configuration
       - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
       - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
@@ -1270,7 +1228,6 @@ volumes:
   keycloak_data:
   local_storage_data:
   minio_data:
-  easyocr_models:
   falkordb_data:
   certbot_conf:
   certbot_webroot:
