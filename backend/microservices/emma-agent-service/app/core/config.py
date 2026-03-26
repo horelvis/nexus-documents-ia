@@ -176,7 +176,7 @@ class Settings(BaseSettings):
 
     # SmartSearch — Cross-Encoder Reranking (neural, FlashRank CPU)
     smart_search_cross_encoder_enabled: bool = os.getenv("SMART_SEARCH_CROSS_ENCODER_ENABLED", "true").lower() == "true"
-    smart_search_cross_encoder_model: str = os.getenv("SMART_SEARCH_CROSS_ENCODER_MODEL", "ms-marco-MiniLM-L-12-v2")
+    smart_search_cross_encoder_model: str = os.getenv("SMART_SEARCH_CROSS_ENCODER_MODEL", "ms-marco-MultiBERT-L-12")
     smart_search_cross_encoder_weight: float = float(os.getenv("SMART_SEARCH_CROSS_ENCODER_WEIGHT", "0.6"))
 
     # CRAG Quality Gates — prevent hallucination and premature termination

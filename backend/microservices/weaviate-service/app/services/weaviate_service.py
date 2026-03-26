@@ -2,7 +2,8 @@
 import weaviate
 import logging
 import asyncio
-from typing import List, Dict, Any, Optional
+import time
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import uuid
 from functools import lru_cache
@@ -18,15 +19,48 @@ from app.clients import intelligence_client
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Embedding with short-lived TTL cache (deduplicates parallel queries)
+# ---------------------------------------------------------------------------
+# SmartSearch sends the same query to documents + legislation in parallel.
+# Both generate the same embedding independently. This cache (~5s TTL)
+# ensures the second call returns instantly from cache.
+
+_EMBED_CACHE_TTL = 5.0  # seconds
+_embed_cache: Dict[Tuple[str, str], Tuple[float, list[float]]] = {}
+_EMBED_CACHE_MAX = 64
+
+
+def _prune_embed_cache() -> None:
+    """Remove expired entries when cache grows beyond max."""
+    if len(_embed_cache) <= _EMBED_CACHE_MAX:
+        return
+    now = time.monotonic()
+    expired = [k for k, (ts, _) in _embed_cache.items() if now - ts > _EMBED_CACHE_TTL]
+    for k in expired:
+        del _embed_cache[k]
+
 
 async def generate_embedding(text: str, task: str = "") -> list[float] | None:
-    """Generate embedding via intelligence-docs-service.
+    """Generate embedding via intelligence-docs-service (with TTL dedup cache).
 
     Args:
         text: Text to embed.
         task: Task adapter name (e.g., "retrieval.query", "retrieval.passage").
     """
-    return await intelligence_client.embed(text, task=task)
+    key = (text, task)
+    cached = _embed_cache.get(key)
+    if cached is not None:
+        ts, vec = cached
+        if time.monotonic() - ts < _EMBED_CACHE_TTL:
+            return vec
+        del _embed_cache[key]
+
+    result = await intelligence_client.embed(text, task=task)
+    if result is not None:
+        _prune_embed_cache()
+        _embed_cache[key] = (time.monotonic(), result)
+    return result
 
 
 async def generate_embedding_batch(texts: list[str], task: str = "") -> list[list[float]] | None:

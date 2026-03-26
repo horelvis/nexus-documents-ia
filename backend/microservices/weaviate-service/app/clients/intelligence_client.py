@@ -5,6 +5,7 @@ via the unified intelligence-docs-service. Returns dataclasses compatible
 with the old textextract_client and langextract_client interfaces to
 minimize changes in the indexing pipeline.
 """
+import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
@@ -18,6 +19,42 @@ _BASE_URL = os.getenv("INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs
 _TIMEOUT_EXTRACT = float(os.getenv("INTELLIGENCE_EXTRACT_TIMEOUT", "600"))
 _TIMEOUT_EMBED = float(os.getenv("INTELLIGENCE_EMBED_TIMEOUT", "30"))
 _TIMEOUT_ENTITY = float(os.getenv("INTELLIGENCE_ENTITY_TIMEOUT", "60"))
+
+# ---------------------------------------------------------------------------
+# Pooled HTTP client singleton — reuses TCP connections across calls
+# ---------------------------------------------------------------------------
+
+_http_client: Optional[httpx.AsyncClient] = None
+_http_lock = asyncio.Lock()
+
+
+async def _get_client() -> httpx.AsyncClient:
+    """Get or create the shared httpx client with connection pooling."""
+    global _http_client
+    if _http_client is not None and not _http_client.is_closed:
+        return _http_client
+    async with _http_lock:
+        if _http_client is not None and not _http_client.is_closed:
+            return _http_client
+        _http_client = httpx.AsyncClient(
+            base_url=_BASE_URL,
+            limits=httpx.Limits(
+                max_connections=50,
+                max_keepalive_connections=10,
+                keepalive_expiry=30.0,
+            ),
+            follow_redirects=True,
+        )
+        logger.info(f"🔌 Intelligence client pool created → {_BASE_URL}")
+        return _http_client
+
+
+async def close_client() -> None:
+    """Close the shared client (call on app shutdown)."""
+    global _http_client
+    if _http_client is not None:
+        await _http_client.aclose()
+        _http_client = None
 
 
 # ---------------------------------------------------------------------------
@@ -66,14 +103,15 @@ async def extract_from_bytes(
 ) -> TextExtractResult:
     """Extract text from file bytes via intelligence-docs-service."""
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_EXTRACT) as client:
-            response = await client.post(
-                f"{_BASE_URL}/extract",
-                files={"file": (filename, file_bytes)},
-                data={"filename": filename},
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = await _get_client()
+        response = await client.post(
+            "/extract",
+            files={"file": (filename, file_bytes)},
+            data={"filename": filename},
+            timeout=_TIMEOUT_EXTRACT,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         return TextExtractResult(
             success=True,
@@ -96,13 +134,14 @@ async def extract_from_url(
 ) -> TextExtractResult:
     """Extract text from URL via intelligence-docs-service."""
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_EXTRACT) as client:
-            response = await client.post(
-                f"{_BASE_URL}/extract",
-                data={"url": file_url, "filename": filename},
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = await _get_client()
+        response = await client.post(
+            "/extract",
+            data={"url": file_url, "filename": filename},
+            timeout=_TIMEOUT_EXTRACT,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         return TextExtractResult(
             success=True,
@@ -123,13 +162,14 @@ async def extract_from_url(
 async def embed(text: str, task: str = "") -> Optional[List[float]]:
     """Generate embedding for a single text."""
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_EMBED) as client:
-            response = await client.post(
-                f"{_BASE_URL}/embed",
-                json={"text": text, "task": task},
-            )
-            response.raise_for_status()
-            return response.json()["embedding"]
+        client = await _get_client()
+        response = await client.post(
+            "/embed",
+            json={"text": text, "task": task},
+            timeout=_TIMEOUT_EMBED,
+        )
+        response.raise_for_status()
+        return response.json()["embedding"]
     except Exception as e:
         logger.warning(f"Intelligence embedding failed: {e}")
         return None
@@ -138,13 +178,14 @@ async def embed(text: str, task: str = "") -> Optional[List[float]]:
 async def embed_batch(texts: List[str], task: str = "") -> Optional[List[List[float]]]:
     """Generate embeddings for multiple texts."""
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_EMBED) as client:
-            response = await client.post(
-                f"{_BASE_URL}/embed",
-                json={"texts": texts, "task": task},
-            )
-            response.raise_for_status()
-            return response.json()["embeddings"]
+        client = await _get_client()
+        response = await client.post(
+            "/embed",
+            json={"texts": texts, "task": task},
+            timeout=_TIMEOUT_EMBED,
+        )
+        response.raise_for_status()
+        return response.json()["embeddings"]
     except Exception as e:
         logger.warning(f"Intelligence batch embedding failed: {e}")
         return None
@@ -163,13 +204,14 @@ async def extract_entities(
 ) -> LangExtractResult:
     """Extract entities via intelligence-docs-service."""
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT_ENTITY) as client:
-            response = await client.post(
-                f"{_BASE_URL}/entities",
-                json={"text": text, "language": language, "document_type": document_type},
-            )
-            response.raise_for_status()
-            data = response.json()
+        client = await _get_client()
+        response = await client.post(
+            "/entities",
+            json={"text": text, "language": language, "document_type": document_type},
+            timeout=_TIMEOUT_ENTITY,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         entities = [
             {
@@ -196,13 +238,14 @@ async def extract_entities(
 async def classify(text: str, filename: str) -> Optional[Dict[str, Any]]:
     """Classify document type."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{_BASE_URL}/classify",
-                json={"text": text[:2000], "filename": filename},
-            )
-            response.raise_for_status()
-            return response.json()
+        client = await _get_client()
+        response = await client.post(
+            "/classify",
+            json={"text": text[:2000], "filename": filename},
+            timeout=30.0,
+        )
+        response.raise_for_status()
+        return response.json()
     except Exception as e:
         logger.warning(f"Intelligence classification failed: {e}")
         return None
@@ -221,14 +264,14 @@ async def get_embedding_dimensions() -> Optional[int]:
     if _cached_dimensions is not None:
         return _cached_dimensions
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(f"{_BASE_URL}/health")
-            response.raise_for_status()
-            data = response.json()
-            for p in data.get("providers", {}).get("embedding", []):
-                if p.get("available") and p.get("dimensions"):
-                    _cached_dimensions = p["dimensions"]
-                    return _cached_dimensions
+        client = await _get_client()
+        response = await client.get("/health", timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        for p in data.get("providers", {}).get("embedding", []):
+            if p.get("available") and p.get("dimensions"):
+                _cached_dimensions = p["dimensions"]
+                return _cached_dimensions
     except Exception as e:
         logger.warning(f"Failed to get embedding dimensions: {e}")
     return None
@@ -249,9 +292,9 @@ class IntelligenceExtractClient:
 
     async def health_check(self):
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(f"{_BASE_URL}/health")
-                return resp.status_code == 200
+            client = await _get_client()
+            resp = await client.get("/health", timeout=5.0)
+            return resp.status_code == 200
         except Exception:
             return False
 

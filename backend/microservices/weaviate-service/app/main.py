@@ -121,6 +121,12 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down Weaviate Service...")
 
     try:
+        from app.clients.intelligence_client import close_client
+        await close_client()
+    except Exception:
+        pass
+
+    try:
         from app.services.weaviate_service import weaviate_service
         await weaviate_service.cleanup()
         logger.info("Weaviate connections closed")
