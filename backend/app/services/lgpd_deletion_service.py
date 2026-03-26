@@ -8,15 +8,11 @@ LGPD Article 18 - Right to Data Deletion:
 - Removal from all systems and backups
 - Documentation of deletion process
 """
-import asyncio
 import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 from uuid import UUID
 
-import httpx
-import stripe
-from clerk_backend_api import Clerk
 from sqlalchemy import delete, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -46,9 +42,6 @@ class LGPDDeletionService:
     
     def __init__(self):
         self.deletion_log = []
-        self.clerk_client: Optional[Clerk] = None
-        if settings.STRIPE_SECRET_KEY:
-            stripe.api_key = settings.STRIPE_SECRET_KEY
         
     async def request_user_deletion(
         self,
@@ -528,108 +521,9 @@ class LGPDDeletionService:
         
         return deletion_results
     
-    async def _ensure_clerk_client(self) -> Optional[Clerk]:
-        """Lazily instantiate Clerk client"""
-        if self.clerk_client is None and settings.CLERK_SECRET_KEY:
-            try:
-                self.clerk_client = Clerk(bearer_auth=settings.CLERK_SECRET_KEY)
-            except Exception as e:
-                logger.error(f"❌ Failed to initialize Clerk client: {e}")
-                self.clerk_client = None
-        return self.clerk_client
-
-    async def _delete_clerk_account(self, clerk_user_id: str) -> Dict[str, Any]:
-        """Delete user account from Clerk"""
-        if not settings.CLERK_SECRET_KEY:
-            return {
-                "status": "skipped",
-                "user_id": clerk_user_id,
-                "note": "CLERK_SECRET_KEY not configured; delete manually via Clerk dashboard"
-            }
-
-        # Primary path: call Clerk REST API directly to ensure consistent deletion
-        base_url = (getattr(settings, "CLERK_API_URL", None) or "https://api.clerk.com/v1").rstrip("/")
-        delete_url = f"{base_url}/users/{clerk_user_id}"
-        headers = {
-            "Authorization": f"Bearer {settings.CLERK_SECRET_KEY}",
-            "Content-Type": "application/json"
-        }
-        http_error: Optional[str] = None
-
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                response = await client.delete(delete_url, headers=headers)
-
-            if response.status_code in (200, 201, 202, 204):
-                logger.info(f"✅ Deleted Clerk user {clerk_user_id} via REST API")
-                return {"status": "deleted", "user_id": clerk_user_id}
-
-            if response.status_code == 404:
-                logger.info(f"ℹ️ Clerk user {clerk_user_id} already deleted (404)")
-                return {"status": "already_deleted", "user_id": clerk_user_id}
-
-            http_error = f"{response.status_code} - {response.text}"
-            logger.error(f"❌ Clerk REST deletion failed for {clerk_user_id}: {http_error}")
-        except httpx.RequestError as exc:
-            http_error = f"HTTP error contacting Clerk: {exc}"
-            logger.warning(f"⚠️ {http_error}")
-
-        # Fallback to Clerk SDK if REST call failed (e.g., network issues)
-        try:
-            clerk_client = await self._ensure_clerk_client()
-            if not clerk_client:
-                raise RuntimeError("Clerk client not initialized")
-
-            await asyncio.to_thread(clerk_client.users.delete, user_id=clerk_user_id)
-            logger.info(f"✅ Deleted Clerk user {clerk_user_id} via SDK fallback")
-            return {"status": "deleted", "user_id": clerk_user_id, "method": "sdk_fallback"}
-        except Exception as e:
-            logger.exception(f"❌ Failed to delete Clerk user {clerk_user_id}: {e}")
-            return {
-                "status": "failed",
-                "user_id": clerk_user_id,
-                "error": str(e),
-                "previous_http_error": http_error
-            }
-
-    async def _delete_stripe_customer(self, customer_id: str) -> Dict[str, Any]:
-        """Delete Stripe customer and revoke subscriptions"""
-        if not settings.STRIPE_SECRET_KEY:
-            return {
-                "status": "skipped",
-                "customer_id": customer_id,
-                "note": "STRIPE_SECRET_KEY not configured; delete manually in Stripe"
-            }
-        
-        try:
-            deletion = await asyncio.to_thread(stripe.Customer.delete, customer_id)
-            logger.info(f"✅ Deleted Stripe customer {customer_id}")
-            return {
-                "status": "deleted",
-                "customer_id": customer_id,
-                "stripe_response": deletion
-            }
-        except Exception as e:
-            logger.warning(f"⚠️ Stripe customer {customer_id} could not be deleted ({e}); skipping")
-            return {
-                "status": "skipped",
-                "customer_id": customer_id,
-                "note": f"Skipped Stripe deletion: {e}"
-            }
-
     async def _delete_from_external_services(self, user: User) -> Dict[str, Any]:
-        """Delete user from external services"""
-        external_results = {}
-        
-        # Clerk deletion
-        if user.clerk_user_id:
-            external_results["clerk"] = await self._delete_clerk_account(user.clerk_user_id)
-        
-        # Stripe customer deletion  
-        if user.stripe_customer_id:
-            external_results["stripe"] = await self._delete_stripe_customer(user.stripe_customer_id)
-        
-        return external_results
+        """Delete user from external services (Clerk and Stripe removed — on-premise only)"""
+        return {}
     
     async def _delete_user_record(self, db: AsyncSession, user: User):
         """Delete the actual user record (final step)"""

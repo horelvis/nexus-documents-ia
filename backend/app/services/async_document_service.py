@@ -23,7 +23,6 @@ from app.services.async_storage_factory import AsyncStorageServiceFactory
 from app.services.weaviate_client import weaviate_client
 from app.services.queue_service import queue_service
 from app.services.folder_classification_service import classify_document as classify_document_folder
-from .document_classifier import classify_document_type
 
 logger = logging.getLogger(__name__)
 

@@ -56,12 +56,6 @@ class Feature(Enum):
     # Document library UI (list view, folders, etc.)
     DOCUMENT_LIBRARY_UI = "document_library_ui"
 
-    # Stripe payment integration
-    STRIPE_BILLING = "stripe_billing"
-
-    # Clerk authentication (SaaS)
-    CLERK_AUTH = "clerk_auth"
-
     # === Modules to ENABLE for on-premise Emma-centric deployment ===
 
     # Emma fullscreen mode (main UI)
@@ -106,8 +100,6 @@ _MODE_DEFAULTS: Dict[DeploymentMode, Dict[Feature, bool]] = {
         Feature.ELASTICSEARCH_SEARCH: False,  # Disabled - replaced by Weaviate + FalkorDB
         Feature.DOCUMENT_EDITING: True,
         Feature.DOCUMENT_LIBRARY_UI: True,
-        Feature.STRIPE_BILLING: True,
-        Feature.CLERK_AUTH: True,
         Feature.EMMA_FULLSCREEN_MODE: False,
         Feature.SSO_MULTI_PROTOCOL: False,
         Feature.SHAREPOINT_CONNECTOR: False,
@@ -123,8 +115,6 @@ _MODE_DEFAULTS: Dict[DeploymentMode, Dict[Feature, bool]] = {
         Feature.ELASTICSEARCH_SEARCH: False,
         Feature.DOCUMENT_EDITING: False,
         Feature.DOCUMENT_LIBRARY_UI: False,
-        Feature.STRIPE_BILLING: False,
-        Feature.CLERK_AUTH: False,
         Feature.EMMA_FULLSCREEN_MODE: True,
         Feature.SSO_MULTI_PROTOCOL: True,
         Feature.SHAREPOINT_CONNECTOR: True,
@@ -140,8 +130,6 @@ _MODE_DEFAULTS: Dict[DeploymentMode, Dict[Feature, bool]] = {
         Feature.ELASTICSEARCH_SEARCH: False,  # Disabled - replaced by Weaviate + FalkorDB
         Feature.DOCUMENT_EDITING: True,
         Feature.DOCUMENT_LIBRARY_UI: True,
-        Feature.STRIPE_BILLING: True,
-        Feature.CLERK_AUTH: True,
         Feature.EMMA_FULLSCREEN_MODE: False,
         Feature.SSO_MULTI_PROTOCOL: False,
         Feature.SHAREPOINT_CONNECTOR: False,
