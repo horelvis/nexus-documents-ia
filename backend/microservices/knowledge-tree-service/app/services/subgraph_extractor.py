@@ -10,10 +10,10 @@ Architecture:
     3. Pruning & Scoring: Rank paths, cap at max_nodes
 
 Node labels (FalkorDB schema):
-    Document, Folder, Entity, Law, Memory
+    Tenant, Connector, Document, Folder, Entity, Law, Memory
 
 Edge labels (FalkorDB schema):
-    MENTIONED_IN, RELATED_TO, CONTAINED_IN, REFERENCES_LAW, HAS_MEMORY, INSTANCE_OF
+    BELONGS_TO, MENTIONED_IN, RELATED_TO, CONTAINED_IN, REFERENCES_LAW, HAS_MEMORY, INSTANCE_OF
 """
 
 import logging
@@ -29,6 +29,7 @@ _EDGE_WEIGHTS: Dict[str, float] = {
     "MENTIONED_IN": 1.0,
     "RELATED_TO": 0.5,
     "CONTAINED_IN": 0.6,
+    "BELONGS_TO": 0.3,
     "REFERENCES_LAW": 0.85,
     "HAS_MEMORY": 0.2,
     "INSTANCE_OF": 0.3,

@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     langextract_max_char_buffer: int = 10000
     langextract_confidence_threshold: float = 0.7
 
+    # Langfuse (prompt management for NER prompts)
+    langfuse_host: str = os.getenv("LANGFUSE_HOST", "http://langfuse:3000")
+    langfuse_public_key: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    langfuse_secret_key: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+
     # Identity document extraction (doctr OCR — lazy-loaded)
     id_document_enabled: bool = True
 

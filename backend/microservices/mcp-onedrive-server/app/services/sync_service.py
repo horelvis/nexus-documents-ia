@@ -142,6 +142,7 @@ async def run_sync_job(
                         connector_id=UUID(connector_id),
                         owner_id=owner_id,
                         stats=stats,
+                        full_sync=full_sync,
                     )
                 except Exception as e:
                     stats["items_failed"] += 1
@@ -202,6 +203,7 @@ async def _process_onedrive_item(
     connector_id: UUID,
     owner_id: UUID,
     stats: Dict[str, Any],
+    full_sync: bool = False,
 ) -> None:
     """Process a single item from OneDrive into IndexedDocument."""
     title = item.name
@@ -234,25 +236,48 @@ async def _process_onedrive_item(
     )
 
     if existing:
-        await conn.execute(
-            """
-            UPDATE indexed_documents SET
-                title = $1,
-                external_url = $2,
-                external_path = $3,
-                mime_type = $4,
-                size_bytes = $5,
-                file_extension = $6,
-                source_modified_at = $7,
-                updated_at = $8
-            WHERE connector_id = $9 AND external_id = $10
-            """,
-            title, external_url, external_path,
-            mime_type, size_bytes, file_extension,
-            item.modified_at,
-            datetime.now(timezone.utc),
-            connector_id, item.id,
-        )
+        if full_sync:
+            await conn.execute(
+                """
+                UPDATE indexed_documents SET
+                    title = $1,
+                    external_url = $2,
+                    external_path = $3,
+                    mime_type = $4,
+                    size_bytes = $5,
+                    file_extension = $6,
+                    source_modified_at = $7,
+                    updated_at = $8,
+                    indexing_status = 'pending',
+                    indexing_error = NULL
+                WHERE connector_id = $9 AND external_id = $10
+                """,
+                title, external_url, external_path,
+                mime_type, size_bytes, file_extension,
+                item.modified_at,
+                datetime.now(timezone.utc),
+                connector_id, item.id,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE indexed_documents SET
+                    title = $1,
+                    external_url = $2,
+                    external_path = $3,
+                    mime_type = $4,
+                    size_bytes = $5,
+                    file_extension = $6,
+                    source_modified_at = $7,
+                    updated_at = $8
+                WHERE connector_id = $9 AND external_id = $10
+                """,
+                title, external_url, external_path,
+                mime_type, size_bytes, file_extension,
+                item.modified_at,
+                datetime.now(timezone.utc),
+                connector_id, item.id,
+            )
         stats["items_updated"] += 1
     else:
         import uuid as uuid_mod

@@ -313,7 +313,7 @@ class TenantKnowledgeService:
         return []
 
     async def clear_tenant_graph(self, tenant_id: str) -> bool:
-        """Clear structural nodes for a tenant."""
+        """Clear structural nodes for a tenant (Documents, Folders, Connectors, Tenant root)."""
         try:
             await self.initialize()
             await falkordb_client.execute_cypher(
@@ -327,6 +327,27 @@ class TenantKnowledgeService:
                 """
                 MATCH (f:Folder {tenant_id: $tenant_id})
                 DETACH DELETE f
+                """,
+                {"tenant_id": tenant_id},
+            )
+            await falkordb_client.execute_cypher(
+                """
+                MATCH (e:Entity {tenant_id: $tenant_id})
+                DETACH DELETE e
+                """,
+                {"tenant_id": tenant_id},
+            )
+            await falkordb_client.execute_cypher(
+                """
+                MATCH (c:Connector {tenant_id: $tenant_id})
+                DETACH DELETE c
+                """,
+                {"tenant_id": tenant_id},
+            )
+            await falkordb_client.execute_cypher(
+                """
+                MATCH (t:Tenant {tenant_id: $tenant_id})
+                DETACH DELETE t
                 """,
                 {"tenant_id": tenant_id},
             )

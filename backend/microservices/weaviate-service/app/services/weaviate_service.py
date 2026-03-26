@@ -2051,6 +2051,9 @@ class WeaviateService:
                     folder_path=item.properties.get("folder_path", ""),
                     folder_hierarchy=item.properties.get("folder_hierarchy", []),
                     connector_id=item.properties.get("connector_id", ""),
+                    # Chunk-level source attribution (page_start is 1-indexed from chunker)
+                    chunk_index=item.properties.get("chunk_index"),
+                    page_number=item.properties.get("page_start"),
                     # Enrichment properties for multi-signal retrieval
                     domain=item.properties.get("domain", ""),
                     semantic_type=item.properties.get("semantic_type", ""),
@@ -2519,7 +2522,7 @@ class WeaviateService:
             config = collection.config.get()
             schema = {
                 "description": config.description or "",
-                "properties": [prop.name for prop in config.properties] if config.properties else [],
+                "properties": [{"name": prop.name, "data_type": str(prop.data_type)} for prop in config.properties] if config.properties else [],
                 "vectorizer": str(config.vectorizer) if config.vectorizer else None
             }
             

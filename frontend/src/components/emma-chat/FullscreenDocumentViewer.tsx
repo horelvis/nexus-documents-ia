@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { useDocumentService } from '@/lib/services/document.service'
 import type { DocumentInfo } from '@/lib/types/emma'
 import { cn } from '@/lib/utils'
+import { EmmaMarkdown } from './EmmaMarkdown'
 
 const PDFViewer = dynamic(() => import('./PDFViewer'), {
   ssr: false,
@@ -31,6 +32,12 @@ function isImage(doc: DocumentInfo): boolean {
   return ft.includes('image') || /\.(jpe?g|png|webp|gif|bmp|svg)$/.test(name)
 }
 
+function isMarkdown(doc: DocumentInfo): boolean {
+  const ft = (doc.fileType || '').toLowerCase()
+  const name = (doc.name || '').toLowerCase()
+  return ft === 'md' || ft.includes('markdown') || /\.(md|mdx|markdown)$/.test(name)
+}
+
 function isDoc(doc: DocumentInfo): boolean {
   const ft = (doc.fileType || '').toLowerCase()
   const name = (doc.name || '').toLowerCase()
@@ -45,6 +52,7 @@ function getBadge(doc: DocumentInfo): { label: string; className: string } {
   if (st === 'public_knowledge' || st === 'legislation') return { label: 'BOE', className: 'bg-purple-600' }
   if (isPdf(doc)) return { label: 'PDF', className: 'bg-red-600' }
   if (isImage(doc)) return { label: 'IMG', className: 'bg-green-600' }
+  if (isMarkdown(doc)) return { label: 'MD', className: 'bg-amber-600' }
   if (isDoc(doc)) return { label: 'DOC', className: 'bg-blue-600' }
   return { label: 'TXT', className: 'bg-slate-600' }
 }
@@ -66,9 +74,12 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
   const badge = getBadge(doc)
   const docIsPdf = isPdf(doc)
   const docIsImage = isImage(doc)
+  const docIsMarkdown = isMarkdown(doc)
   const docIsDoc = isDoc(doc)
   // DOCX files are converted to PDF server-side for preview
   const [convertedToPdf, setConvertedToPdf] = useState(false)
+  // Markdown files are read as text for rendering
+  const [markdownText, setMarkdownText] = useState<string | null>(null)
 
   // Fetch blob
   useEffect(() => {
@@ -81,6 +92,7 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
       setIsLoading(true)
       setError(null)
       setConvertedToPdf(false)
+      setMarkdownText(null)
       try {
         let documentId = doc.id || null
 
@@ -114,6 +126,13 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
 
         const result = await documentService.downloadDocument(documentId)
         if ('error' in result) throw new Error(result.error)
+
+        // For markdown files, read the blob as text for rendering
+        if (docIsMarkdown) {
+          const text = await result.blob.text()
+          setMarkdownText(text)
+          return
+        }
 
         const url = URL.createObjectURL(result.blob)
         blobUrlRef.current = url
@@ -209,12 +228,19 @@ export function FullscreenDocumentViewer({ document: doc, onClose }: FullscreenD
           </div>
         )}
 
+        {!isLoading && !error && markdownText != null && (
+          <div className="max-w-4xl mx-auto px-8 py-6 h-full overflow-auto">
+            <EmmaMarkdown content={markdownText} className="text-base leading-7" />
+          </div>
+        )}
+
         {!isLoading && !error && blobUrl && (
           <>
             {(docIsPdf || convertedToPdf) && (
               <PDFViewer
                 url={blobUrl}
                 fileName={doc.name}
+                pageNumber={doc.page || 1}
                 showToolbar={true}
                 height="100%"
                 className="h-full"

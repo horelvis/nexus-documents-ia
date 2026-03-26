@@ -4,15 +4,133 @@ LangExtract entity provider — few-shot extraction with source grounding.
 Uses the langextract library directly (no HTTP) with SGLang as the LLM
 backend via its OpenAI-compatible API. Replaces both sglang_ner (basic NER)
 and the standalone langextract-service microservice.
+
+Includes a monkey-patch for langextract's JSON parser to handle malformed
+output from small LLMs (e.g., Qwen3.5-9B generating trailing tokens after
+valid JSON).
 """
 import asyncio
+import json
 import logging
+import re
 from typing import Optional
 
 import langextract as lx
+from langextract.core import format_handler as _fh
 
 from app.providers.base import EntityProvider, Entity
 from app.providers.entities.few_shot_configs import EXTRACTION_CONFIGS
+
+
+# ── Monkey-patch: tolerant JSON parser for langextract ──
+# Small LLMs often generate valid JSON followed by trailing tokens,
+# which causes json.loads to fail with "Extra data". This patch
+# truncates to the first valid JSON object/array.
+
+_original_parse_output = _fh.FormatHandler.parse_output
+
+
+def _tolerant_parse_output(self, text, *, strict=None):
+    """Wrapper that retries with truncated JSON on parse failure."""
+    try:
+        return _original_parse_output(self, text, strict=strict)
+    except Exception as first_error:
+        # Only attempt repair for JSON format
+        if self.format_type != _fh.data.FormatType.JSON:
+            raise
+
+        # Try to extract valid JSON from the response
+        content = self._extract_content(text)
+        repaired = _repair_json(content)
+        if repaired and repaired != content:
+            try:
+                # Temporarily replace the text and retry
+                # We re-wrap in fences if needed so _extract_content works
+                patched_text = f"```json\n{repaired}\n```" if self.use_fences else repaired
+                return _original_parse_output(self, patched_text, strict=strict)
+            except Exception:
+                pass  # repair didn't help, raise original
+
+        raise first_error
+
+
+def _repair_json(text: str) -> Optional[str]:
+    """Attempt to extract valid JSON from text with trailing garbage.
+
+    Handles common LLM failure modes:
+    - Valid JSON followed by extra tokens
+    - Multiple JSON objects concatenated
+    - Trailing commas before closing brackets
+    - Text/preamble before the JSON starts
+    - Completely empty or non-JSON responses
+    """
+    text = text.strip()
+    if not text:
+        return None
+
+    # Find the first JSON start character (LLM may emit preamble text)
+    first_brace = text.find('{')
+    first_bracket = text.find('[')
+    if first_brace == -1 and first_bracket == -1:
+        return None
+    if first_brace == -1:
+        start = first_bracket
+    elif first_bracket == -1:
+        start = first_brace
+    else:
+        start = min(first_brace, first_bracket)
+
+    text = text[start:]
+
+    open_char = text[0]
+    if open_char == '{':
+        close_char = '}'
+    elif open_char == '[':
+        close_char = ']'
+    else:
+        return None
+
+    # Find the last matching close bracket by counting nesting
+    depth = 0
+    in_string = False
+    escape_next = False
+    last_valid_close = -1
+
+    for i, ch in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+
+        if ch == open_char:
+            depth += 1
+        elif ch == close_char:
+            depth -= 1
+            if depth == 0:
+                last_valid_close = i
+                break  # First complete JSON — use it
+
+    if last_valid_close > 0:
+        candidate = text[:last_valid_close + 1]
+        # Fix trailing commas before close brackets
+        candidate = re.sub(r',\s*([}\]])', r'\1', candidate)
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+_fh.FormatHandler.parse_output = _tolerant_parse_output
 
 logger = logging.getLogger(__name__)
 
@@ -91,9 +209,13 @@ class LangExtractProvider(EntityProvider):
 
         config = EXTRACTION_CONFIGS.get(document_type, EXTRACTION_CONFIGS["general"])
 
+        # Append /nothink to disable Qwen3.5 thinking mode — without it,
+        # the model puts output in reasoning_content and returns empty content.
+        prompt_text = config["prompt"] + "\n/nothink"
+
         extract_params = {
             "text_or_documents": text[: self._max_char_buffer],
-            "prompt_description": config["prompt"],
+            "prompt_description": prompt_text,
             "examples": config["examples"],
             "extraction_passes": self._extraction_passes,
             "max_char_buffer": self._max_char_buffer,

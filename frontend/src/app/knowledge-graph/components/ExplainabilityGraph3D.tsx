@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
+import { IconLoader2 } from '@tabler/icons-react'
 import dynamic from 'next/dynamic'
 import SpriteText from 'three-spritetext'
 import {
@@ -47,18 +48,24 @@ export default function ExplainabilityGraph3D({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const graphRef = useRef<any>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const dimensionsRef = useRef({ width: width ?? 800, height: height ?? 600 })
+  const [dimensions, setDimensions] = useState({ width: width ?? 0, height: height ?? 0 })
+  const [isSimulating, setIsSimulating] = useState(true)
 
-  // ResizeObserver for responsive sizing
+  // ResizeObserver for responsive sizing — updates state to trigger re-render
   useEffect(() => {
     if (!containerRef.current) return
+
+    // Set initial dimensions from container (avoids 800x600 flash)
+    const rect = containerRef.current.getBoundingClientRect()
+    if (rect.width > 0 && rect.height > 0) {
+      setDimensions({ width: rect.width, height: rect.height })
+    }
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width: w, height: h } = entry.contentRect
-        dimensionsRef.current = { width: w, height: h }
-        if (graphRef.current) {
-          graphRef.current.width(w)
-          graphRef.current.height(h)
+        if (w > 0 && h > 0) {
+          setDimensions({ width: w, height: h })
         }
       }
     })
@@ -197,6 +204,16 @@ export default function ExplainabilityGraph3D({
     []
   )
 
+  // Hide loader after engine stabilizes or after timeout
+  useEffect(() => {
+    setIsSimulating(true)
+    const timeout = setTimeout(() => setIsSimulating(false), 3000)
+    return () => clearTimeout(timeout)
+  }, [nodes, links])
+
+  // Also hide when engine stabilizes
+  const handleEngineStop = useCallback(() => setIsSimulating(false), [])
+
   const graphData = { nodes, links }
 
   return (
@@ -205,11 +222,24 @@ export default function ExplainabilityGraph3D({
       className={className}
       style={{ width: '100%', height: '100%', background: '#07090f' }}
     >
+      {/* Simulation loader */}
+      {isSimulating && nodes.length > 0 && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#07090f]/80 z-10">
+          <div className="flex flex-col items-center gap-3">
+            <IconLoader2 className="h-6 w-6 animate-spin text-cyan-500/60" />
+            <span className="text-[11px] text-slate-600 tracking-widest uppercase">
+              Calculando layout 3D ({nodes.length} nodos)
+            </span>
+          </div>
+        </div>
+      )}
+
+      {dimensions.width > 0 && dimensions.height > 0 && (
       <ForceGraph3D
         ref={graphRef}
         graphData={graphData}
-        width={dimensionsRef.current.width}
-        height={dimensionsRef.current.height}
+        width={dimensions.width}
+        height={dimensions.height}
         backgroundColor="#07090f"
         nodeLabel="label"
         nodeVal={nodeVal}
@@ -228,7 +258,9 @@ export default function ExplainabilityGraph3D({
         linkPositionUpdate={linkPositionUpdate}
         linkOpacity={0.4}
         linkWidth={0.3}
+        onEngineStop={handleEngineStop}
       />
+      )}
     </div>
   )
 }

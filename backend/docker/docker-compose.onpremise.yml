@@ -288,6 +288,10 @@ services:
       - GLM_OCR_MODEL=${GLM_OCR_MODEL:-zai-org/GLM-OCR}
       - SGLANG_BASE_URL=http://sglang:8000/v1
       - SGLANG_MODEL=${SGLANG_MODEL:-}
+      # Langfuse (NER prompts — versioned externally)
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3000}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     networks:
       - backend-network
     deploy:

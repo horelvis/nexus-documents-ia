@@ -18,6 +18,7 @@ import {
   IconZoomIn,
   IconZoomOut,
   IconFocusCentered,
+  IconLoader2,
 } from "@tabler/icons-react"
 import type { SimNode, SimLink } from "./graph-theme"
 import { getNodeColor, getNodeGlow, getNodeRadius, getEdgeStyle } from "./graph-theme"
@@ -34,6 +35,11 @@ export function ForceGraph({ nodes, links, highlightedIds, onNodeClick }: ForceG
   const containerRef = useRef<HTMLDivElement>(null)
   const [hoveredNode, setHoveredNode] = useState<SimNode | null>(null)
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 })
+  const [isSimulating, setIsSimulating] = useState(true)
+
+  useEffect(() => {
+    setIsSimulating(true)
+  }, [nodes, links])
 
   useEffect(() => {
     if (!svgRef.current || !containerRef.current || nodes.length === 0) return
@@ -236,8 +242,12 @@ export function ForceGraph({ nodes, links, highlightedIds, onNodeClick }: ForceG
           .attr("x", (d: any) => d.x)
           .attr("y", (d: any) => d.y + getNodeRadius(d) + 10)
       })
+      .on("end", () => setIsSimulating(false))
 
-    return () => { simulation.stop() }
+    // Hide loader after first few ticks even if simulation hasn't fully settled
+    const earlyReveal = setTimeout(() => setIsSimulating(false), 1500)
+
+    return () => { simulation.stop(); clearTimeout(earlyReveal) }
   }, [nodes, links, highlightedIds, onNodeClick])
 
   // Zoom controls
@@ -264,6 +274,18 @@ export function ForceGraph({ nodes, links, highlightedIds, onNodeClick }: ForceG
   return (
     <div ref={containerRef} className="relative w-full h-full overflow-hidden bg-[#07090f]">
       <svg ref={svgRef} className="w-full h-full" />
+
+      {/* Simulation loader */}
+      {isSimulating && nodes.length > 0 && (
+        <div className="absolute inset-0 flex items-center justify-center bg-[#07090f]/80 z-10 transition-opacity duration-500">
+          <div className="flex flex-col items-center gap-3">
+            <IconLoader2 className="h-6 w-6 animate-spin text-cyan-500/60" />
+            <span className="text-[11px] text-slate-600 tracking-widest uppercase">
+              Calculando layout ({nodes.length} nodos)
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Zoom controls — bottom right */}
       <div className="absolute bottom-4 right-4 flex flex-col gap-1.5">

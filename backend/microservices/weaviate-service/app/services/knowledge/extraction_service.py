@@ -163,6 +163,22 @@ class KnowledgeExtractionService:
         Returns:
             KnowledgeExtractionResult with extracted entities and relationships
         """
+        # Ensure ACL fields are lists (callers may pass JSON strings from metadata)
+        if isinstance(acl_user_ids, str):
+            try:
+                acl_user_ids = json.loads(acl_user_ids) if acl_user_ids else []
+            except (json.JSONDecodeError, TypeError):
+                acl_user_ids = []
+        if isinstance(acl_role_ids, str):
+            try:
+                acl_role_ids = json.loads(acl_role_ids) if acl_role_ids else []
+            except (json.JSONDecodeError, TypeError):
+                acl_role_ids = []
+        if not isinstance(acl_user_ids, list):
+            acl_user_ids = []
+        if not isinstance(acl_role_ids, list):
+            acl_role_ids = []
+
         if not self._initialized:
             await self.initialize()
 
@@ -542,25 +558,38 @@ class KnowledgeExtractionService:
                 continue
 
         # Store in knowledge-tree-service sector graph
-        # This creates typed nodes (Persona, Organizacion) with INSTANCE_OF
-        # edges to the ontology — replacing the old NetworkX graph_service
+        # Only named entities (persons, organizations) go to the graph.
+        # Other types (dates, amounts, identifiers) stay in Weaviate knowledge
+        # collection for semantic search but don't pollute the graph visualization.
+        _GRAPH_ENTITY_TYPES = {"person", "persona", "organization", "empresa", "organisation"}
+
         if entity_map:
             try:
                 from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
-                kt_entities = [
-                    {
-                        "type": (e.entity_type.value if hasattr(e.entity_type, 'value') else str(e.entity_type)),
+                # Debug: log entity types before filtering
+                for e in entities[:3]:
+                    etype = e.entity_type
+                    etype_str = etype.value if hasattr(etype, 'value') else str(etype)
+                    logger.info(f"🔎 Entity type debug: {e.entity_value[:30]} → type={etype!r} str={etype_str!r} in_filter={etype_str.lower() in _GRAPH_ENTITY_TYPES}")
+
+                kt_entities = []
+                for e in entities:
+                    if e.entity_value not in entity_map:
+                        continue
+                    etype = e.entity_type
+                    etype_str = etype.value if hasattr(etype, 'value') else str(etype)
+                    if etype_str.lower() not in _GRAPH_ENTITY_TYPES:
+                        continue
+                    kt_entities.append({
+                        "type": etype_str,
                         "value": e.entity_value,
                         "confidence": e.extraction_confidence,
                         "attributes": {
                             "domain": e.domain.value if hasattr(e.domain, 'value') else str(e.domain),
                             "label": e.entity_label or e.entity_value,
                         },
-                    }
-                    for e in entities
-                    if e.entity_value in entity_map
-                ]
+                    })
 
                 kt_result = await knowledge_tree_legal_client.store_entities(
                     tenant_id=tenant_id,

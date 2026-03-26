@@ -13,6 +13,7 @@ from app.api.tree import tree_router
 from app.api.entities import router as entities_router
 from app.api.memory_bank import router as memory_bank_router
 from app.api.claims import router as claims_router
+from app.api.legal_links import router as legal_links_router
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper()),
@@ -71,3 +72,4 @@ app.include_router(tree_router, prefix="/tree", tags=["tree"])
 app.include_router(entities_router, tags=["entity-graph"])
 app.include_router(memory_bank_router, tags=["memory-bank"])
 app.include_router(claims_router, tags=["claims"])
+app.include_router(legal_links_router, prefix="/tree/legal-links", tags=["legal-links"])

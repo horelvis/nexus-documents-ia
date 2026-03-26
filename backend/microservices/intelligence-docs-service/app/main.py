@@ -14,6 +14,8 @@ from app.providers.extraction.docling import DoclingProvider
 from app.providers.extraction.glm_ocr import GlmOcrProvider
 from app.providers.extraction.plaintext import PlaintextProvider, is_plaintext
 from app.providers.entities.langextract_provider import LangExtractProvider
+from app.providers.entities.regex_provider import RegexEntityProvider
+from app.providers.entities.openai_ner_provider import OpenAINerProvider
 from app.providers.guardrails.spanish_id_validator import SpanishIdValidator
 
 _id_validator = SpanishIdValidator()
@@ -73,22 +75,26 @@ async def _init_extraction_providers():
 
 
 async def _init_entity_providers():
+    # Regex provider always runs first (fast, reliable, no LLM dependency)
+    entity_registry.register(RegexEntityProvider())
+    logger.info("Registered entity provider: regex (Spanish NER patterns)")
+
     for provider_name in settings.entity_provider_list:
         if provider_name == "langextract":
             if not settings.langextract_enabled:
                 logger.info("LangExtract provider disabled via config")
                 continue
-            provider = LangExtractProvider(
-                sglang_base_url=settings.sglang_base_url,
-                sglang_model=settings.sglang_model,
-                extraction_passes=settings.langextract_extraction_passes,
-                max_char_buffer=settings.langextract_max_char_buffer,
-                confidence_threshold=settings.langextract_confidence_threshold,
+            # Use OpenAI-compatible API instead of langextract's Ollama API.
+            # This gives us control over chat_template_kwargs (disable thinking).
+            base_url = settings.sglang_base_url.rstrip("/").removesuffix("/v1")
+            provider = OpenAINerProvider(
+                base_url=base_url,
+                model=settings.sglang_model,
             )
             entity_registry.register(provider)
             logger.info(
-                f"Registered entity provider: langextract "
-                f"(model={settings.sglang_model}, passes={settings.langextract_extraction_passes})"
+                f"Registered entity provider: openai_ner "
+                f"(model={settings.sglang_model}, via /v1/chat/completions)"
             )
 
 

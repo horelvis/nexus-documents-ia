@@ -1773,7 +1773,7 @@ async def get_collection_stats(
         return {
             "tenant_id": tenant_id,
             "collection": collection,
-            "document_count": info.object_count if info else 0,
+            "document_count": info.objects_count if info else 0,
             "status": "active" if info else "not_found",
         }
 

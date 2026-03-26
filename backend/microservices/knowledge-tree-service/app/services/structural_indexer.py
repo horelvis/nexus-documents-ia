@@ -199,6 +199,61 @@ def _split_path(file_path: Optional[str]) -> list:
 
 
 class StructuralIndexer:
+    async def _ensure_root_nodes(
+        self,
+        tenant_id: str,
+        connector_id: Optional[str],
+        connector_type: Optional[str],
+        connector_metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Ensure Tenant and Connector root nodes exist in the graph.
+
+        Creates the hierarchy:
+            (Tenant) <-[:BELONGS_TO]- (Connector)
+
+        Both are idempotent MERGE operations. The Connector node stores
+        the connector name from metadata so the graph is self-descriptive.
+        """
+        # MERGE Tenant root node
+        try:
+            await falkordb_client.execute_cypher(
+                "MERGE (:Tenant {tenant_id: $tenant_id})",
+                {"tenant_id": tenant_id},
+            )
+        except Exception as e:
+            logger.warning(f"Failed to upsert Tenant root: {e}")
+
+        # MERGE Connector node + BELONGS_TO edge to Tenant
+        if connector_id:
+            conn_props: Dict[str, Any] = {
+                "tenant_id": tenant_id,
+                "connector_id": str(connector_id),
+            }
+            set_parts = []
+            if connector_type:
+                conn_props["connector_type"] = connector_type
+                set_parts.append("c.connector_type = $connector_type")
+            # Extract connector name from metadata if available
+            conn_name = (connector_metadata or {}).get("connector_name")
+            if conn_name:
+                conn_props["name"] = conn_name
+                set_parts.append("c.name = $name")
+            set_stmt = "SET " + ", ".join(set_parts) if set_parts else ""
+
+            try:
+                await falkordb_client.execute_cypher(
+                    f"""
+                    MATCH (t:Tenant {{tenant_id: $tenant_id}})
+                    MERGE (c:Connector {{tenant_id: $tenant_id, connector_id: $connector_id}})
+                    {set_stmt}
+                    MERGE (c)-[:BELONGS_TO]->(t)
+                    """,
+                    conn_props,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to upsert Connector root: {e}")
+
     async def index(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not settings.rag_knowledge_graph_enabled:
             return {"success": False, "error": "Knowledge graph disabled"}
@@ -216,6 +271,9 @@ class StructuralIndexer:
         connector_id = payload.get("connector_id")
         connector_type = payload.get("connector_type") or connector_metadata.get("connector_type")
         weaviate_document_id = payload.get("weaviate_document_id")
+
+        # Ensure Tenant → Connector root hierarchy exists
+        await self._ensure_root_nodes(tenant_id, connector_id, connector_type, connector_metadata)
 
         is_folder = _is_folder(connector_metadata, learned_context)
         path_parts = _split_path(file_path)
@@ -351,15 +409,31 @@ class StructuralIndexer:
         """
         try:
             await falkordb_client.execute_cypher(cypher, props)
-            return {
-                "success": True,
-                "indexed_to_graph": True,
-                "node_type": "Folder",
-                "folder_type": folder_type,
-            }
         except Exception as e:
             logger.warning(f"Failed to upsert folder: {e}")
             return {"success": False, "error": str(e)}
+
+        # Link Folder → Connector via BELONGS_TO
+        if connector_id:
+            try:
+                link_key = "path: $path_key" if path else "folder_id: $folder_id_key"
+                await falkordb_client.execute_cypher(
+                    f"""
+                    MATCH (f:Folder {{tenant_id: $tenant_id, {link_key}}})
+                    MATCH (c:Connector {{tenant_id: $tenant_id, connector_id: $connector_id}})
+                    MERGE (f)-[:BELONGS_TO]->(c)
+                    """,
+                    {"tenant_id": tenant_id, "path_key": path, "folder_id_key": folder_id, "connector_id": str(connector_id)},
+                )
+            except Exception as e:
+                logger.warning(f"Failed to link folder to connector: {e}")
+
+        return {
+            "success": True,
+            "indexed_to_graph": True,
+            "node_type": "Folder",
+            "folder_type": folder_type,
+        }
 
     async def _upsert_document(
         self,
@@ -461,6 +535,21 @@ class StructuralIndexer:
                 await falkordb_client.execute_cypher(folder_cypher, folder_props)
             except Exception as e:
                 logger.warning(f"Failed to link document to folder: {e}")
+
+            # Link Folder → Connector via BELONGS_TO
+            if connector_id:
+                try:
+                    folder_props["connector_id"] = str(connector_id)
+                    await falkordb_client.execute_cypher(
+                        """
+                        MATCH (f:Folder {tenant_id: $tenant_id, path: $folder_path})
+                        MATCH (c:Connector {tenant_id: $tenant_id, connector_id: $connector_id})
+                        MERGE (f)-[:BELONGS_TO]->(c)
+                        """,
+                        folder_props,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to link folder to connector: {e}")
 
         # --- Query 3: MERGE Person Entity + MENTIONED_IN edge ---
         if associated_person:

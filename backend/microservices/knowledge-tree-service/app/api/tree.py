@@ -439,6 +439,74 @@ async def graph_structure(
                 "label": "CONTAINED_IN",
             })
 
+        # Get Entity nodes (persons, orgs, concepts, etc.)
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (e:Entity {tenant_id: $tenant_id})
+            OPTIONAL MATCH (e)-[:MENTIONED_IN]->(d:Document)
+            RETURN e.name as name, e.entity_type as entity_type,
+                   e.normalized_name as normalized_name,
+                   count(d) as doc_count
+            """,
+            {"tenant_id": tenant_id},
+        )
+        for r in rows:
+            ename = r.get("name") or r.get("normalized_name") or ""
+            etype = r.get("entity_type") or "unknown"
+            doc_count = int(r.get("doc_count", 0))
+            node_id = f"e:{ename}"
+            # Map entity_type to frontend node_type
+            if etype in ("person", "persona"):
+                node_type = "person"
+            elif etype in ("law", "legal_law"):
+                node_type = "law"
+            else:
+                node_type = "entity_type"
+            nodes.append({
+                "id": node_id,
+                "label": ename,
+                "node_type": node_type,
+                "semantic_type": etype,
+                "doc_count": doc_count,
+            })
+
+        # Get MENTIONED_IN edges (Entity → Document)
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (e:Entity {tenant_id: $tenant_id})-[:MENTIONED_IN]->(d:Document)
+            RETURN e.name as entity_name, d.document_id as document_id
+            """,
+            {"tenant_id": tenant_id},
+        )
+        for r in rows:
+            ename = r.get("entity_name") or ""
+            did = r.get("document_id") or ""
+            edges.append({
+                "id": f"e:mi:{ename}->{did}",
+                "source": f"e:{ename}",
+                "target": f"d:{did}",
+                "label": "MENTIONED_IN",
+            })
+
+        # Get RELATED_TO edges (Entity ↔ Entity)
+        rows = await falkordb_client.execute_cypher(
+            """
+            MATCH (e1:Entity {tenant_id: $tenant_id})-[:RELATED_TO]->(e2:Entity)
+            RETURN e1.name as source_name, e2.name as target_name
+            LIMIT 200
+            """,
+            {"tenant_id": tenant_id},
+        )
+        for r in rows:
+            src = r.get("source_name") or ""
+            tgt = r.get("target_name") or ""
+            edges.append({
+                "id": f"e:rt:{src}->{tgt}",
+                "source": f"e:{src}",
+                "target": f"e:{tgt}",
+                "label": "RELATED_TO",
+            })
+
         # Deduplicate edges
         seen_edge_keys: set[str] = set()
         unique_edges = []

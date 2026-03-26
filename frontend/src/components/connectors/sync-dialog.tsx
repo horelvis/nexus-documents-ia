@@ -37,6 +37,24 @@ import {
   connectorNames,
 } from '@/lib/services/connector.service'
 
+/** Map verbose MIME subtypes to short display labels. */
+function shortMimeLabel(mime?: string | null): string {
+  if (!mime) return 'file'
+  const sub = mime.split('/')[1] || 'file'
+  // Common long MIME types → short labels
+  if (sub.includes('spreadsheetml') || sub.includes('excel')) return 'xlsx'
+  if (sub.includes('wordprocessingml') || sub.includes('msword')) return 'docx'
+  if (sub.includes('presentationml') || sub.includes('powerpoint')) return 'pptx'
+  if (sub.includes('opendocument.text')) return 'odt'
+  if (sub.includes('opendocument.spreadsheet')) return 'ods'
+  if (sub.includes('opendocument.presentation')) return 'odp'
+  if (sub.includes('zip') || sub.includes('compressed')) return 'zip'
+  if (sub.includes('json')) return 'json'
+  if (sub.includes('xml')) return 'xml'
+  // If still too long, truncate
+  return sub.length > 10 ? sub.slice(0, 8) + '…' : sub
+}
+
 interface SyncDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -85,6 +103,9 @@ export function SyncDialog({
   // Historical average indexing time per document (from backend stats)
   const [avgIndexingSeconds, setAvgIndexingSeconds] = useState<number | null>(null)
 
+  // Detect if background indexing is in progress (pending or processing docs)
+  const isBackgroundWorking = ((currentConnector || connector)?.documents_pending || 0) > 0
+
   useEffect(() => {
     if (open && connector) {
       setCurrentConnector(connector)
@@ -95,16 +116,16 @@ export function SyncDialog({
     }
   }, [open, connector])
 
-  // Auto-refresh every 10 seconds while dialog is open (silent - no loaders)
+  // Auto-refresh while dialog is open: 5s during active indexing, 15s otherwise
   useEffect(() => {
     if (!open || !connector) return
 
     const interval = setInterval(() => {
       silentRefresh()
-    }, 10000) // 10 seconds
+    }, isBackgroundWorking ? 5000 : 15000)
 
     return () => clearInterval(interval)
-  }, [open, connector])
+  }, [open, connector, isBackgroundWorking])
 
   useEffect(() => {
     if (successMessage) {
@@ -188,24 +209,34 @@ export function SyncDialog({
     setSuccessMessage(null)
 
     try {
+      // Step 1: Sync with source
+      setSuccessMessage('Sincronizando con el origen...')
       const result = await connectorService.syncConnector(connector.id, fullSync)
       if (result.error) {
         setError(result.error)
-      } else if (result.data) {
-        setSuccessMessage(result.data.message + ' Iniciando indexación...')
-        // Auto-index after sync
+        return
+      }
+
+      // Step 2: Auto-index if full sync (implicit — user expects one-click)
+      if (fullSync) {
+        setSuccessMessage('Sincronización completada. Iniciando indexación...')
         const indexResult = await connectorService.indexPending(connector.id, 10)
         if (indexResult.error) {
           setError(indexResult.error)
-        } else if (indexResult.data) {
-          setSuccessMessage(`Sincronización e indexación iniciadas (${indexResult.data.pending_count} docs en cola)`)
+          return
         }
-        setTimeout(() => {
-          refreshConnectorData()
-          loadPendingDocuments()
-          onSyncComplete?.()
-        }, 3000)
+        const count = indexResult.data?.pending_count || result.data?.pending_count || 0
+        setSuccessMessage(`Indexando ${count} documentos...`)
+      } else {
+        setSuccessMessage(result.data?.message || 'Sincronización parcial completada')
       }
+
+      // Refresh data after a short delay
+      setTimeout(() => {
+        refreshConnectorData()
+        loadPendingDocuments()
+        onSyncComplete?.()
+      }, 2000)
     } catch (err: any) {
       setError(err.message || 'Error al sincronizar')
     } finally {
@@ -224,12 +255,12 @@ export function SyncDialog({
       if (result.error) {
         setError(result.error)
       } else if (result.data) {
-        setSuccessMessage(`Indexación iniciada (${result.data.pending_count} docs en cola). Los totales se actualizan automáticamente.`)
+        setSuccessMessage(`Indexando ${result.data.pending_count} documentos...`)
         setTimeout(() => {
           refreshConnectorData()
           loadPendingDocuments()
           onSyncComplete?.()
-        }, 3000)
+        }, 2000)
       }
     } catch (err: any) {
       setError(err.message || 'Error al indexar')
@@ -297,40 +328,41 @@ export function SyncDialog({
 
           {/* Progress / Active operation indicator */}
           {isSyncing || isIndexing ? (
-            // Show loader during active operations with time estimate
+            // Show loader during active API calls
             <div className="flex flex-col items-center justify-center gap-2 py-3 rounded border bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
               <div className="flex items-center gap-3">
                 <IconLoader2 className="h-5 w-5 animate-spin text-blue-500" />
                 <span className="text-sm text-blue-600 dark:text-blue-400">
-                  {isSyncing ? 'Sincronizando con el origen...' : 'Indexando documentos...'}
+                  {isSyncing ? 'Sincronizando con el origen...' : 'Enviando a indexar...'}
                 </span>
               </div>
-              {isIndexing && pendingCount > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  Tiempo estimado: ~{formatEstimatedTime(pendingCount, avgIndexingSeconds)}
-                </span>
-              )}
             </div>
           ) : (
-            // Show progress when idle (auto-refreshes every 10s)
+            // Show progress bar (auto-refreshes every 10s)
             <div className="space-y-1">
               <div className="flex justify-between text-xs">
                 <span className="text-muted-foreground flex items-center gap-1">
                   Documentos indexados
-                  {pendingCount > 0 && (
+                  {isBackgroundWorking && (
                     <span className="inline-flex items-center gap-1 text-[10px] text-blue-500">
                       <IconLoader2 className="h-2.5 w-2.5 animate-spin" />
-                      auto
+                      procesando
                     </span>
                   )}
                 </span>
                 <span>{indexedCount} / {totalDocs}</span>
               </div>
               <Progress value={progressPercent} className="h-1.5" />
-              {pendingCount > 0 && (
+              {isBackgroundWorking && (
                 <div className="text-xs text-muted-foreground text-right">
                   Pendientes: {pendingCount} (~{formatEstimatedTime(pendingCount, avgIndexingSeconds)})
                   {avgIndexingSeconds && <span className="ml-1 text-[10px] opacity-70">({avgIndexingSeconds.toFixed(1)}s/doc)</span>}
+                </div>
+              )}
+              {!isBackgroundWorking && totalDocs > 0 && indexedCount === totalDocs && (
+                <div className="flex items-center gap-1 text-xs text-green-600">
+                  <IconCheck className="h-3 w-3" />
+                  Todos los documentos indexados
                 </div>
               )}
             </div>
@@ -360,9 +392,9 @@ export function SyncDialog({
                   size="sm"
                   className="h-7 px-2 text-xs"
                   onClick={() => handleSync(true)}
-                  disabled={isSyncing || isIndexing || !connector.sync_enabled}
+                  disabled={isSyncing || isIndexing || isBackgroundWorking || !connector.sync_enabled}
                 >
-                  {isSyncing ? <IconLoader2 className="h-3 w-3 animate-spin" /> : 'Completa'}
+                  {isSyncing ? <IconLoader2 className="h-3 w-3 animate-spin" /> : 'Completa + Indexar'}
                 </Button>
               </div>
             </div>
@@ -398,9 +430,9 @@ export function SyncDialog({
                 {pendingDocs.map((doc) => (
                   <div key={doc.id} className="flex items-center gap-2 text-xs">
                     <IconFileText className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                    <span className="truncate flex-1">{doc.title}</span>
-                    <Badge variant="outline" className="text-[10px] px-1 flex-shrink-0">
-                      {doc.mime_type?.split('/')[1] || 'file'}
+                    <span className="truncate flex-1 min-w-0">{doc.title}</span>
+                    <Badge variant="outline" className="text-[10px] px-1 flex-shrink-0 max-w-[80px] truncate">
+                      {shortMimeLabel(doc.mime_type)}
                     </Badge>
                   </div>
                 ))}
@@ -436,7 +468,7 @@ export function SyncDialog({
             <IconRefresh className={`h-4 w-4 ${isLoadingPending ? 'animate-spin' : ''}`} />
           </Button>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>
-            Cerrar
+            {isBackgroundWorking ? 'Cerrar (indexando en background)' : 'Cerrar'}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -95,6 +95,12 @@ export function getNodeRadius(node: SimNode): number {
 // ── Edge styling ──
 
 const EDGE_STYLES: Record<string, { dash: string; opacity: number }> = {
+  CONTAINED_IN: { dash: "none", opacity: 0.3 },
+  CONTAINS: { dash: "none", opacity: 0.25 },
+  MENTIONED_IN: { dash: "none", opacity: 0.4 },
+  RELATED_TO: { dash: "2 2", opacity: 0.2 },
+  BELONGS_TO: { dash: "4 2", opacity: 0.2 },
+  REFERENCES_LAW: { dash: "4 2", opacity: 0.35 },
   ASOCIADO_A: { dash: "none", opacity: 0.35 },
   APLICA: { dash: "4 2", opacity: 0.3 },
   INSTANCE_OF: { dash: "2 2", opacity: 0.2 },
@@ -157,11 +163,16 @@ function getNodeKindFromLabel(label: string): NodeKind {
     case "structural_document":
     case "document":
       return "document"
-    case "Persona": return "person"
+    case "Persona":
+    case "person":
+      return "person"
     case "LegalLaw":
     case "law":
       return "law"
-    case "EntityType": return "entity_type"
+    case "EntityType":
+    case "Entity":
+    case "entity_type":
+      return "entity_type"
     case "DocumentMemory": return "memory"
     case "Folder":
     case "folder":
