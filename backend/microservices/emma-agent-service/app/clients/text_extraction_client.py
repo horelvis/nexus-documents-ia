@@ -1,4 +1,4 @@
-"""HTTP client for textextract-service."""
+"""HTTP client for intelligence-docs-service (text extraction)."""
 from __future__ import annotations
 
 import logging
@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class TextExtractionClient(BaseHTTPClient):
-    """Client for the text extraction microservice."""
+    """Client for intelligence-docs-service (POST /extract)."""
 
     async def extract_text(
         self,
@@ -34,7 +34,7 @@ class TextExtractionClient(BaseHTTPClient):
         }
 
         response = await self.post(
-            "/api/v1/text-extraction/extract",
+            "/extract",
             headers=headers,
             files=files,
         )

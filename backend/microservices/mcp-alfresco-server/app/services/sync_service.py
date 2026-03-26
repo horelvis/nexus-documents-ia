@@ -640,7 +640,7 @@ async def run_index_pending_job(
         await pool.release(conn)
 
 
-# Extensions that textextract-service can process (whitelist)
+# Extensions that intelligence-docs-service can process (whitelist)
 _INDEXABLE_EXTENSIONS = {
     ".pdf", ".doc", ".docx", ".txt", ".md", ".csv", ".ppt", ".pptx",
     ".xlsx", ".xls", ".html", ".odt", ".rtf", ".epub", ".xml", ".json",
@@ -661,7 +661,7 @@ async def _index_single_document(
     doc_id = doc["id"]
     processing_start = time.time()
 
-    # Early skip: avoid downloading files that textextract cannot process
+    # Early skip: avoid downloading files that intelligence-docs-service cannot process
     ext = (doc.get("file_extension") or "").lower()
     if ext and not ext.startswith("."):
         ext = f".{ext}"
@@ -677,7 +677,7 @@ async def _index_single_document(
         )
         return False
 
-    # Early skip: files larger than textextract max (50MB)
+    # Early skip: files larger than 50MB limit
     _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
     size_bytes = doc.get("size_bytes") or 0
     if size_bytes > _MAX_FILE_SIZE:

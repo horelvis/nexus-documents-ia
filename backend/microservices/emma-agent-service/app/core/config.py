@@ -262,8 +262,8 @@ class Settings(BaseSettings):
     knowledge_tree_service_url: str = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree-service:8011")
     knowledge_tree_service_timeout: int = int(os.getenv("KNOWLEDGE_TREE_SERVICE_TIMEOUT", "30"))
 
-    # Text Extraction Service (for uploaded files)
-    text_extraction_service_url: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://textextract-service:8000")
+    # Intelligence Docs Service (text extraction for uploaded files)
+    text_extraction_service_url: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://intelligence-docs-service:8000")
     text_extraction_service_timeout: int = int(os.getenv("TEXT_EXTRACTION_SERVICE_TIMEOUT", "60"))
 
     # Database (for session persistence)

@@ -26,7 +26,7 @@ class Settings(BaseSettings):
 
     # Dependent services
     gotenberg_service_url: str = os.getenv(
-        "GOTENBERG_SERVICE_URL", "http://gotenberg-service:8005"
+        "GOTENBERG_SERVICE_URL", "http://gotenberg:3000"
     )
     weaviate_service_url: str = os.getenv(
         "WEAVIATE_SERVICE_URL", "http://weaviate-service:8000"

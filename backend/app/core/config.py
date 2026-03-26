@@ -180,8 +180,8 @@ class Settings(BaseSettings):
     # Emma Agent Service (AI orchestration)
     EMMA_SERVICE_URL: str = os.getenv("EMMA_SERVICE_URL", "http://emma-agent-service:8009")
 
-    # Text extraction microservice
-    TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://textextract-service:8000")
+    # Intelligence Docs Service (text extraction)
+    TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://intelligence-docs-service:8000")
     TEXT_EXTRACTION_DEFAULT_STRATEGY: str = os.getenv("TEXT_EXTRACTION_DEFAULT_STRATEGY", "auto")
 
     # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)

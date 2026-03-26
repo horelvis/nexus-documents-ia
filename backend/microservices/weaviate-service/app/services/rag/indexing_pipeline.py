@@ -2,13 +2,13 @@
 Document Indexing Pipeline
 
 Complete RAG preprocessing pipeline:
-- Text Extraction: Call textextract-service for PDF/DOCX/etc.
+- Text Extraction: Call intelligence-docs-service for PDF/DOCX/etc.
 - Layer 0: DocumentIntelligence (quality assessment, cleaning)
 - Layer 1: SemanticChunker (structure-aware chunking)
 - Layer 2: VisualExtractor (multimodal content for images/tables/diagrams)
 
 This pipeline prepares documents for vector indexing with:
-1. Text extraction from binary files via textextract-service
+1. Text extraction from binary files via intelligence-docs-service
 2. Quality analysis of extracted text
 3. Automatic cleaning if needed
 4. Intelligent chunking based on document structure
@@ -231,7 +231,7 @@ class IndexingPipeline:
     Complete document indexing pipeline.
 
     Pipeline stages:
-    1. Extract text (textextract-service) - for binary files
+    1. Extract text (intelligence-docs-service) - for binary files
     2. Analyze quality (DocumentIntelligence)
     2.5. Enhanced OCR fallback (if quality < threshold)
     3. Clean text if needed
@@ -292,7 +292,7 @@ class IndexingPipeline:
             IndexingResult with chunks ready for embedding
 
         Note: MIME type is automatically detected from file content (magic bytes)
-        by the textextract-service, NOT from the filename extension.
+        by the intelligence-docs-service, NOT from the filename extension.
         """
         start_time = time.time()
         errors = []

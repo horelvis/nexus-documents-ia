@@ -2,7 +2,7 @@
 
 Provides extraction, embedding, entity extraction, and classification
 via the unified intelligence-docs-service. Returns dataclasses compatible
-with the old textextract_client and langextract_client interfaces to
+with the previous extraction client interfaces to
 minimize changes in the indexing pipeline.
 """
 import asyncio
@@ -63,7 +63,7 @@ async def close_client() -> None:
 
 @dataclass
 class TextExtractResult:
-    """Drop-in replacement for textextract_client.TextExtractResult."""
+    """Result dataclass for intelligence-docs-service text extraction."""
     success: bool
     text: str
     characters: int
@@ -342,8 +342,7 @@ class IntelligenceExtractClient:
     ) -> "OCRResult":
         """OCR fallback via intelligence-docs-service /extract endpoint.
 
-        Replaces the old ocr_client which pointed at the now-deleted
-        textextract-service. Intelligence-docs already auto-routes to GLM-OCR
+        Intelligence-docs-service auto-routes to GLM-OCR
         when available; otherwise falls through to Docling / Tika.
         """
         import time as _time

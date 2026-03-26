@@ -567,7 +567,7 @@ MIME_TO_EXTENSION = {
     "text/xml": ".xml",
 }
 
-# Valid file extensions that textextract-service supports
+# Valid file extensions that intelligence-docs-service supports
 VALID_EXTENSIONS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
     ".txt", ".html", ".htm", ".csv", ".rtf", ".xml",
