@@ -76,10 +76,10 @@ from app.clients.intelligence_client import (
     IntelligenceExtractClient,
     TextExtractResult,
     LangExtractResult,
+    OCRResult,
     intelligence_extract_client,
 )
 from app.clients import intelligence_client
-from .ocr_client import OCRClient, OCRResult, ocr_client
 from app.services.text_alignment_service import (
     TextAlignmentService,
     AlignedBlock,
@@ -247,15 +247,12 @@ class IndexingPipeline:
         intelligence: Optional[DocumentIntelligence] = None,
         chunker: Optional[SemanticChunker] = None,
         knowledge_extractor: Optional[KnowledgeExtractionService] = None,
-        ocr_client_instance: Optional[OCRClient] = None,
     ):
         self.extractor = extractor or intelligence_extract_client
         self.intelligence = intelligence or document_intelligence
         self.chunker = chunker or semantic_chunker
         self.knowledge_extractor = knowledge_extractor or get_knowledge_service()
         self._knowledge_extraction_enabled = True
-        # OCR client for enhanced OCR fallback
-        self._ocr_client = ocr_client_instance or ocr_client
         # Visual extractor for multimodal support
         self._visual_extractor = visual_extractor if MULTIMODAL_AVAILABLE else None
         self._embedding_service = multimodal_embedding_service if MULTIMODAL_AVAILABLE else None
@@ -403,7 +400,7 @@ class IndexingPipeline:
                     # Parse languages from config
                     ocr_languages = settings.enhanced_ocr_languages.split(",")
 
-                    ocr_result = await self._ocr_client.extract_with_ocr(
+                    ocr_result = await self.extractor.extract_with_ocr(
                         file_bytes=file_bytes,
                         languages=ocr_languages,
                         use_hybrid=settings.enhanced_ocr_use_hybrid or ocr_config.get("use_hybrid", False),

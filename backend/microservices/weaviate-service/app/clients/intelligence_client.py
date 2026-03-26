@@ -281,6 +281,47 @@ async def get_embedding_dimensions() -> Optional[int]:
 # Adapter class (drop-in for TextExtractClient usage in indexing pipeline)
 # ---------------------------------------------------------------------------
 
+@dataclass
+class OCRResult:
+    """Result from OCR extraction — compatible with the old ocr_client.OCRResult interface."""
+    success: bool
+    text: str
+    confidence: float  # 0.0 – 1.0
+    engine: str        # glm_ocr, docling, tika, unknown
+    languages: List[str]
+    page_count: int
+    processing_time_ms: float
+    warnings: List[str] = field(default_factory=list)
+    error: Optional[str] = None
+
+    @classmethod
+    def from_text_extract(cls, result: "TextExtractResult", elapsed_ms: float) -> "OCRResult":
+        """Build an OCRResult from a TextExtractResult (intelligence-docs /extract response)."""
+        engine = result.metadata.get("provider", result.metadata.get("extractor", "unknown"))
+        confidence = result.metadata.get("confidence", 0.8 if result.success else 0.0)
+        page_count = result.metadata.get("page_count", 0)
+        languages = [result.language] if result.language else []
+        return cls(
+            success=result.success and bool(result.text.strip()),
+            text=result.text,
+            confidence=float(confidence),
+            engine=str(engine),
+            languages=languages,
+            page_count=int(page_count),
+            processing_time_ms=elapsed_ms,
+            warnings=[],
+            error=result.error,
+        )
+
+    @classmethod
+    def error_result(cls, error: str) -> "OCRResult":
+        return cls(
+            success=False, text="", confidence=0.0, engine="none",
+            languages=[], page_count=0, processing_time_ms=0.0,
+            warnings=[], error=error,
+        )
+
+
 class IntelligenceExtractClient:
     """Drop-in replacement for TextExtractClient in the indexing pipeline."""
 
@@ -289,6 +330,36 @@ class IntelligenceExtractClient:
 
     async def extract_from_url(self, file_url, filename, tenant_id="", user_id="", strategy="auto"):
         return await extract_from_url(file_url, filename, tenant_id, user_id, strategy)
+
+    async def extract_with_ocr(
+        self,
+        file_bytes: bytes,
+        languages: Optional[List[str]] = None,
+        use_hybrid: bool = False,
+        preprocess: bool = True,
+        dpi: int = 300,
+        tenant_id: str = "",
+    ) -> "OCRResult":
+        """OCR fallback via intelligence-docs-service /extract endpoint.
+
+        Replaces the old ocr_client which pointed at the now-deleted
+        textextract-service. Intelligence-docs already auto-routes to GLM-OCR
+        when available; otherwise falls through to Docling / Tika.
+        """
+        import time as _time
+        start = _time.time()
+        try:
+            result = await extract_from_bytes(
+                file_bytes=file_bytes,
+                filename="document.pdf",
+                tenant_id=tenant_id,
+                strategy="auto",
+            )
+            elapsed = (_time.time() - start) * 1000
+            return OCRResult.from_text_extract(result, elapsed)
+        except Exception as e:
+            logger.error(f"OCR via intelligence-docs failed: {e}")
+            return OCRResult.error_result(str(e))
 
     async def health_check(self):
         try:
