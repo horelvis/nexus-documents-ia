@@ -1382,6 +1382,133 @@ async def backfill_semantic_types(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/collections/{collection_name}/backfill-embeddings")
+async def backfill_embeddings(
+    collection_name: str,
+    batch_size: int = Query(default=32, ge=1, le=128, description="Batch size for embedding generation"),
+    dry_run: bool = Query(default=False, description="Only count objects missing vectors, don't fix"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Backfill vector embeddings for objects that were indexed without vectors.
+
+    This happens when intelligence-docs-service was unavailable during indexing.
+    Iterates all objects, detects those missing vectors, generates embeddings
+    via intelligence-docs-service, and updates them in-place.
+    """
+    from app.services.weaviate_service import generate_embedding_batch, generate_embedding
+
+    try:
+        await weaviate_service.initialize()
+
+        if not weaviate_service.client.collections.exists(collection_name):
+            raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
+
+        collection = weaviate_service.client.collections.get(collection_name)
+
+        missing = 0
+        fixed = 0
+        already_has_vector = 0
+        errors = 0
+
+        # Collect objects missing vectors in batches
+        pending_batch: list[dict] = []  # [{uuid, text}]
+
+        async def flush_batch():
+            nonlocal fixed, errors
+            if not pending_batch:
+                return
+            texts = [item["text"] for item in pending_batch]
+            try:
+                embeddings = await generate_embedding_batch(texts)
+                if embeddings and len(embeddings) == len(pending_batch):
+                    for item, vector in zip(pending_batch, embeddings):
+                        try:
+                            collection.data.update(
+                                uuid=item["uuid"],
+                                vector=vector,
+                            )
+                            fixed += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to update vector for {item['uuid']}: {e}")
+                            errors += 1
+                else:
+                    # Batch failed — try one by one
+                    for item in pending_batch:
+                        try:
+                            vector = await generate_embedding(item["text"])
+                            if vector:
+                                collection.data.update(
+                                    uuid=item["uuid"],
+                                    vector=vector,
+                                )
+                                fixed += 1
+                            else:
+                                errors += 1
+                        except Exception as e:
+                            logger.warning(f"Single embed failed for {item['uuid']}: {e}")
+                            errors += 1
+            except Exception as e:
+                logger.error(f"Batch embedding failed: {e}")
+                errors += len(pending_batch)
+            pending_batch.clear()
+
+        for item in collection.iterator(
+            include_vector=True,
+            return_properties=["title", "content"],
+        ):
+            # Check if object has a vector
+            has_vector = (
+                item.vector
+                and isinstance(item.vector, dict)
+                and "default" in item.vector
+                and len(item.vector["default"]) > 0
+            ) if isinstance(item.vector, dict) else bool(item.vector)
+
+            if has_vector:
+                already_has_vector += 1
+                continue
+
+            missing += 1
+
+            if dry_run:
+                continue
+
+            title = item.properties.get("title", "") or ""
+            content = item.properties.get("content", "") or ""
+            text_to_embed = f"{title} {content}".strip()
+
+            if not text_to_embed:
+                errors += 1
+                continue
+
+            pending_batch.append({"uuid": item.uuid, "text": text_to_embed})
+
+            if len(pending_batch) >= batch_size:
+                await flush_batch()
+
+        # Flush remaining
+        await flush_batch()
+
+        result = {
+            "collection": collection_name,
+            "total_scanned": already_has_vector + missing,
+            "already_has_vector": already_has_vector,
+            "missing_vectors": missing,
+            "fixed": fixed,
+            "errors": errors,
+            "dry_run": dry_run,
+        }
+        logger.info(f"Embedding backfill complete: {result}")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Embedding backfill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ========================================
 # Emma Agent Service Endpoints
 # ========================================

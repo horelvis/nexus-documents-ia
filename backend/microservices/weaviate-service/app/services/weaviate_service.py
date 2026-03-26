@@ -40,6 +40,7 @@ class WeaviateService:
     def __init__(self):
         self.client = None
         self.embedding_model = None
+        self._embedding_checked = False  # True after first successful embed check
         self._initialized = False
 
     def _build_property_filter(self, key: str, value: Any):
@@ -249,19 +250,8 @@ class WeaviateService:
             else:
                 raise Exception("Weaviate not ready")
 
-            # Test embedding via intelligence-docs-service
-            try:
-                test_embedding = await generate_embedding("test connection")
-                if test_embedding:
-                    self.embedding_model = "intelligence-docs-service"
-                    dims = len(test_embedding)
-                    logger.info(f"✅ Using intelligence-docs-service embeddings ({dims} dims)")
-                else:
-                    logger.warning("⚠️ intelligence-docs-service not responding, falling back to BM25 only")
-                    self.embedding_model = None
-            except Exception as e:
-                logger.warning(f"⚠️ intelligence-docs-service embedding test failed: {e}, falling back to BM25 only")
-                self.embedding_model = None
+            # Test embedding via intelligence-docs-service (non-blocking)
+            await self._check_embedding_service()
 
             self._initialized = True
 
@@ -270,6 +260,29 @@ class WeaviateService:
             self._initialized = False
             raise
     
+    async def _check_embedding_service(self) -> bool:
+        """Check if intelligence-docs-service is available for embeddings.
+
+        Called at init (non-fatal) and lazily before each embedding attempt
+        if not yet confirmed. Once confirmed, skips further checks.
+        """
+        if self._embedding_checked:
+            return True
+        try:
+            test_embedding = await generate_embedding("test connection")
+            if test_embedding:
+                self.embedding_model = "intelligence-docs-service"
+                self._embedding_checked = True
+                dims = len(test_embedding)
+                logger.info(f"✅ Using intelligence-docs-service embeddings ({dims} dims)")
+                return True
+            else:
+                logger.warning("⚠️ intelligence-docs-service returned empty embedding")
+                return False
+        except Exception as e:
+            logger.warning(f"⚠️ intelligence-docs-service not available: {e}")
+            return False
+
     async def cleanup(self):
         """Cleanup connections"""
         if self.client:
@@ -281,60 +294,12 @@ class WeaviateService:
     async def create_collection(self, collection_name: str, schema: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a new Weaviate collection"""
         try:
-            # Default schema for document collections
-            if not schema:
-                schema = {
-                    "class": collection_name,
-                    "description": f"Collection for documents: {collection_name}",
-                    "properties": [
-                        {
-                            "name": "title",
-                            "dataType": ["text"],
-                            "description": "Document title"
-                        },
-                        {
-                            "name": "content", 
-                            "dataType": ["text"],
-                            "description": "Document content"
-                        },
-                        {
-                            "name": "metadata",
-                            "dataType": ["object"],
-                            "description": "Document metadata"
-                        },
-                        {
-                            "name": "tenant_id",
-                            "dataType": ["text"],
-                            "description": "Tenant identifier"
-                        },
-                        {
-                            "name": "document_type",
-                            "dataType": ["text"],
-                            "description": "Type of document"
-                        },
-                        {
-                            "name": "tags",
-                            "dataType": ["text[]"],
-                            "description": "Document tags"
-                        },
-                        {
-                            "name": "created_at",
-                            "dataType": ["date"],
-                            "description": "Creation timestamp"
-                        },
-                        {
-                            "name": "updated_at",
-                            "dataType": ["date"],
-                            "description": "Last update timestamp"
-                        }
-                    ],
-                    "vectorizer": "text2vec-transformers" if not self.embedding_model else "none"
-                }
-            
+            description = (schema or {}).get("description", f"Collection for documents: {collection_name}")
+
             # Create the collection using v4 API with explicit vector index
             collection = self.client.collections.create(
                 name=collection_name,
-                description=schema.get("description", f"Collection for documents: {collection_name}"),
+                description=description,
                 vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
                 vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
                     distance_metric=weaviate.classes.config.VectorDistances.COSINE,
@@ -1569,14 +1534,14 @@ class WeaviateService:
                         "chunk_context": chunk_metadata.get("chunk_context", ""),
                     }
 
-                    # Generate embedding for chunk
+                    # Generate embedding for chunk (lazy-check embedding service)
                     embedding_vector = None
-                    if self.embedding_model:
-                        try:
-                            text_to_embed = f"{document.title} {chunk_content}"
-                            embedding_vector = await generate_embedding(text_to_embed)
-                        except Exception as e:
-                            logger.warning(f"⚠️ Could not generate chunk embedding: {e}")
+                    await self._check_embedding_service()
+                    try:
+                        text_to_embed = f"{document.title} {chunk_content}"
+                        embedding_vector = await generate_embedding(text_to_embed)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not generate chunk embedding: {e}")
 
                     if embedding_vector:
                         batch_objects.append(weaviate.classes.data.DataObject(
@@ -1626,16 +1591,16 @@ class WeaviateService:
                     "content": document.content,
                 }
 
-                # Generate embedding for document
+                # Generate embedding for document (lazy-check embedding service)
                 embedding_vector = None
-                if self.embedding_model:
-                    try:
-                        text_to_embed = f"{document.title} {document.content}"
-                        embedding_vector = await generate_embedding(text_to_embed)
-                        if embedding_vector:
-                            logger.info(f"🧮 Generated embedding vector of size {len(embedding_vector)}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not generate embedding: {e}")
+                await self._check_embedding_service()
+                try:
+                    text_to_embed = f"{document.title} {document.content}"
+                    embedding_vector = await generate_embedding(text_to_embed)
+                    if embedding_vector:
+                        logger.info(f"🧮 Generated embedding vector of size {len(embedding_vector)}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not generate embedding: {e}")
 
                 # Insert document; if it exists already, replace it
                 try:
@@ -1927,13 +1892,13 @@ class WeaviateService:
 
             # Execute search based on type using v4 API
             if search_request.search_type == "vector":
-                # Generate embedding for query using configured provider
+                # Generate embedding for query (lazy-check embedding service)
                 query_embedding = None
-                if self.embedding_model:
-                    try:
-                        query_embedding = await generate_embedding(search_request.query)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not generate query embedding: {e}")
+                await self._check_embedding_service()
+                try:
+                    query_embedding = await generate_embedding(search_request.query)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not generate query embedding: {e}")
                 
                 if query_embedding:
                     # Vector search with near_vector using generated embedding
@@ -1967,7 +1932,8 @@ class WeaviateService:
 
                 # Hybrid search requires both vector and keyword
                 query_embedding = None
-                if _has_vectors and self.embedding_model:
+                if _has_vectors:
+                    await self._check_embedding_service()
                     try:
                         query_embedding = await generate_embedding(search_request.query)
                     except Exception as e:
@@ -2855,14 +2821,14 @@ class WeaviateService:
                     "acl_everyone": getattr(document, 'acl_everyone', True),
                 }
                 
-                # Generate embeddings using configured provider (TEI or Sentence Transformers)
+                # Generate embeddings (lazy-check embedding service)
                 embedding_vector = None
-                if self.embedding_model:
-                    try:
-                        text_to_embed = f"{document.title} {document.content}"
-                        embedding_vector = await generate_embedding(text_to_embed)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not generate batch embedding: {e}")
+                await self._check_embedding_service()
+                try:
+                    text_to_embed = f"{document.title} {document.content}"
+                    embedding_vector = await generate_embedding(text_to_embed)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not generate batch embedding: {e}")
                 
                 if embedding_vector:
                     batch_objects.append(weaviate.classes.data.DataObject(
@@ -3122,13 +3088,12 @@ class WeaviateService:
             is_live = self.client.is_live()
 
             # Check embedding model status
-            embedding_info = None
-            if self.embedding_model:
-                embedding_info = {
-                    "provider": "intelligence-docs-service",
-                    "model": settings.embedding_model,
-                    "dimensions": settings.embedding_dimensions,
-                }
+            embedding_info = {
+                "provider": "intelligence-docs-service",
+                "model": settings.embedding_model,
+                "dimensions": settings.embedding_dimensions,
+                "confirmed": self._embedding_checked,
+            }
 
             return {
                 "status": "healthy" if is_ready and is_live else "unhealthy",
