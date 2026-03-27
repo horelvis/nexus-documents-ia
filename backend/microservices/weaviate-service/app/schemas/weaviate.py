@@ -100,6 +100,7 @@ class SearchRequest(BaseModel):
     """Schema for search requests with ACL support"""
     query: str
     limit: int = Field(default=10, ge=1, le=100)
+    offset: int = Field(default=0, ge=0, description="Number of results to skip (for pagination)")
     tenant_id: str
     # ACL fields for document-level access control
     user_id: Optional[str] = Field(default=None, description="User ID for channel and ACL access filtering")

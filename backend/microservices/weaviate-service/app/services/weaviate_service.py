@@ -1728,6 +1728,47 @@ class WeaviateService:
             logger.warning(f"⚠️ Could not delete existing chunks for {document_id}: {e}")
             return 0
 
+    async def get_document_chunks(
+        self,
+        collection_name: str,
+        document_id: str,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all chunks for a document, ordered by chunk_index.
+
+        Returns list of dicts with content, chunk_index, title, document_id.
+        """
+        await self.initialize()
+
+        if not self.client.collections.exists(collection_name):
+            return []
+
+        collection = self.client.collections.get(collection_name)
+        Filter = weaviate.classes.query.Filter
+        doc_filter = Filter.by_property("document_id").equal(document_id)
+
+        response = collection.query.fetch_objects(
+            filters=doc_filter,
+            offset=offset,
+            limit=limit,
+            return_properties=["content", "chunk_index", "document_id", "title"],
+        )
+
+        chunks = []
+        for obj in response.objects:
+            chunks.append({
+                "content": obj.properties.get("content", ""),
+                "chunk_index": obj.properties.get("chunk_index", 0),
+                "document_id": obj.properties.get("document_id", ""),
+                "title": obj.properties.get("title", ""),
+            })
+
+        # Sort by chunk_index for ordered text
+        chunks.sort(key=lambda c: c.get("chunk_index", 0))
+        return chunks
+
     async def delete_document(self, collection_name: str, document_id: str) -> bool:
         """
         Delete a document from Weaviate collection by its document_id property.
@@ -1924,8 +1965,22 @@ class WeaviateService:
                 except ValueError:
                     logger.warning(f"⚠️ Invalid date_to format: {date_to}")
 
+            # Pagination offset (Weaviate v4 supports offset on all query types)
+            _offset = getattr(search_request, 'offset', 0) or 0
+
             # Execute search based on type using v4 API
-            if search_request.search_type == "vector":
+            # Empty-query shortcut: BM25 requires terms to match — use fetch_objects instead
+            _query_is_empty = not search_request.query or not search_request.query.strip()
+
+            if _query_is_empty and search_request.search_type in ("keyword", "hybrid"):
+                # No query text — skip BM25/hybrid and use filter-only fetch
+                response = collection.query.fetch_objects(
+                    limit=search_request.limit,
+                    offset=_offset,
+                    filters=combined_filters,
+                    return_metadata=weaviate.classes.query.MetadataQuery(creation_time=True),
+                )
+            elif search_request.search_type == "vector":
                 # Generate embedding for query (lazy-check embedding service)
                 query_embedding = None
                 await self._check_embedding_service()
@@ -1933,12 +1988,13 @@ class WeaviateService:
                     query_embedding = await generate_embedding(search_request.query)
                 except Exception as e:
                     logger.warning(f"⚠️ Could not generate query embedding: {e}")
-                
+
                 if query_embedding:
                     # Vector search with near_vector using generated embedding
                     response = collection.query.near_vector(
                         near_vector=query_embedding,
                         limit=search_request.limit,
+                        offset=_offset,
                         return_metadata=weaviate.classes.query.MetadataQuery(certainty=True, score=True),
                         filters=combined_filters
                     )
@@ -1947,6 +2003,7 @@ class WeaviateService:
                     response = collection.query.bm25(
                         query=search_request.query,
                         limit=search_request.limit,
+                        offset=_offset,
                         return_metadata=weaviate.classes.query.MetadataQuery(score=True),
                         filters=combined_filters
                     )
@@ -1955,6 +2012,7 @@ class WeaviateService:
                 response = collection.query.bm25(
                     query=search_request.query,
                     limit=search_request.limit,
+                    offset=_offset,
                     return_metadata=weaviate.classes.query.MetadataQuery(score=True),
                     filters=combined_filters
                 )
@@ -1979,6 +2037,7 @@ class WeaviateService:
                         query=search_request.query,
                         vector=query_embedding,
                         limit=search_request.limit,
+                        offset=_offset,
                         alpha=effective_alpha,
                         return_metadata=weaviate.classes.query.MetadataQuery(score=True, explain_score=True),
                         filters=combined_filters
@@ -1988,6 +2047,7 @@ class WeaviateService:
                     response = collection.query.bm25(
                         query=search_request.query,
                         limit=search_request.limit,
+                        offset=_offset,
                         return_metadata=weaviate.classes.query.MetadataQuery(score=True),
                         filters=combined_filters
                     )
@@ -2007,6 +2067,7 @@ class WeaviateService:
                 logger.info("🔄 BM25 returned 0 with enrichment filters — retrying with filter-only fetch")
                 response = collection.query.fetch_objects(
                     limit=search_request.limit,
+                    offset=_offset,
                     filters=combined_filters,
                     return_metadata=weaviate.classes.query.MetadataQuery(creation_time=True),
                 )

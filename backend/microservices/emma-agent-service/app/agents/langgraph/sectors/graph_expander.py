@@ -7,6 +7,10 @@ and calls /triples/query on knowledge-tree-service to find linked documents.
 
 No raw Cypher is constructed here — all graph logic lives in
 knowledge-tree-service.
+
+IMPORTANT: Entity URIs MUST match URIBuilder.entity(collection, name) format:
+    nouxcube://entity/{collection}/{normalized-name}
+The collection is typically "default" for the reindex pipeline.
 """
 
 import asyncio
@@ -24,20 +28,25 @@ _MAX_ENTITIES_PER_TYPE = 5
 _MENTIONED_IN = "nouxcube://predicate/core/mentioned-in"
 _DOCUMENT_URI_PREFIX = "nouxcube://document/"
 
-
-def _slugify(text: str) -> str:
-    """Normalize an entity name into a URI-safe slug."""
-    normalized = unicodedata.normalize("NFKD", text)
-    ascii_text = "".join(ch for ch in normalized if not unicodedata.combining(ch))
-    slug = re.sub(r"[^\w\s-]", "", ascii_text).strip().lower()
-    return re.sub(r"[\s_-]+", "-", slug)
+# Default collection used by reindex pipeline (must match coordinator.py)
+_DEFAULT_COLLECTION = "default"
 
 
-def _entity_uri(entity_type: str, value: str) -> str:
-    """Build a TrustGraph URI for a named entity."""
-    slug = _slugify(value)
-    type_slug = _slugify(entity_type)
-    return f"nouxcube://entity/{type_slug}/{slug}"
+def _normalize_name(name: str) -> str:
+    """Normalize a name to URI slug — mirrors URIBuilder.normalize_name()."""
+    nfd = unicodedata.normalize("NFD", name)
+    ascii_approx = "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
+    lowered = ascii_approx.lower()
+    hyphenated = re.sub(r"[^a-z0-9]+", "-", lowered)
+    return hyphenated.strip("-")
+
+
+def _entity_uri(entity_type: str, value: str, collection: str = _DEFAULT_COLLECTION) -> str:
+    """Build a TrustGraph URI matching URIBuilder.entity(collection, name)."""
+    slug = _normalize_name(value)
+    if not slug:
+        return ""
+    return f"nouxcube://entity/{collection}/{slug}"
 
 
 async def expand_with_sector_graph(
@@ -98,11 +107,12 @@ async def expand_with_sector_graph(
                 if not value or not value.strip():
                     continue
                 uri = _entity_uri(entity_type, value.strip())
+                if not uri:
+                    continue
                 lookup_tasks.append(
                     client.query_triples(
                         tenant_id=tenant_id,
                         subject_uri=uri,
-                        predicate_uri=_MENTIONED_IN,
                         limit=50,
                     )
                 )
@@ -118,10 +128,18 @@ async def expand_with_sector_graph(
                 if triples:
                     related_entities.append(euri)
                 for triple in triples:
-                    obj = triple.get("object_value") or triple.get("object_uri", "")
-                    pred = triple.get("predicate_uri", _MENTIONED_IN)
+                    obj = triple.get("object", "")
+                    pred = triple.get("predicate", "")
                     paths.append(f"{euri} -[{pred}]-> {obj}")
-                    # Extract document ID from URI: nouxcube://document/<id>
+                    # Extract document IDs from source_chunk provenance
+                    # format: nouxcube://document/{collection}/{doc_id}#offset=N
+                    source = triple.get("source_chunk", "")
+                    if source and _DOCUMENT_URI_PREFIX in source:
+                        doc_part = source.split("#")[0]  # strip #offset=N
+                        doc_id = doc_part.split("/")[-1]  # last segment = UUID
+                        if doc_id:
+                            expanded_doc_ids.append(doc_id)
+                    # Also check if object itself is a document URI
                     if obj.startswith(_DOCUMENT_URI_PREFIX):
                         doc_id = obj[len(_DOCUMENT_URI_PREFIX):]
                         if doc_id:

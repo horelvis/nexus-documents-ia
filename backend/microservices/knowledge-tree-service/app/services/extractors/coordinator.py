@@ -104,14 +104,17 @@ class ExtractionCoordinator:
 
         triples_total = len(all_triples)
 
-        # Deduplicate by (subject, predicate_name, object) key
+        # Deduplicate by normalized key to catch case/accent variations
+        # e.g. "Juan García" and "juan garcia" produce the same URI slug
         seen: Set[Tuple[str, str, str]] = set()
         deduped_triples: List[Dict[str, Any]] = []
         for triple in all_triples:
+            raw_subj = triple.get("subject", "")
+            raw_obj = triple.get("object", "")
             key = (
-                triple.get("subject", ""),
+                URIBuilder.normalize_name(raw_subj) if raw_subj else "",
                 triple.get("predicate_name", ""),
-                triple.get("object", ""),
+                URIBuilder.normalize_name(raw_obj) if raw_obj else "",
             )
             if key not in seen:
                 seen.add(key)

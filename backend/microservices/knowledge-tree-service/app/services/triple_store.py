@@ -52,15 +52,19 @@ class TripleStore:
     async def merge_literal(self, value: str, user: str, collection: str) -> None:
         """MERGE a :Literal deduped by (value, user, collection).
 
+        Values are stripped of leading/trailing whitespace before storage
+        to prevent "Madrid" vs "Madrid " creating separate nodes.
+
         Idempotent — multiple calls with the same arguments produce a
         single node in the graph.
         """
+        normalized_value = value.strip() if value else value
         query = (
             "MERGE (:Literal {value: $value, user: $user, collection: $collection})"
         )
         await self._client.execute_cypher(
             query,
-            params={"value": value, "user": user, "collection": collection},
+            params={"value": normalized_value, "user": user, "collection": collection},
         )
 
     # ------------------------------------------------------------------
@@ -194,8 +198,9 @@ class TripleStore:
             await self.merge_node(object_uri, user, collection)
             rel_object_value = object_uri
         else:
-            await self.merge_literal(object_value, user, collection)
-            rel_object_value = object_value
+            stripped_value = object_value.strip() if object_value else object_value
+            await self.merge_literal(stripped_value, user, collection)
+            rel_object_value = stripped_value
 
         # Create relationship
         await self.create_rel(

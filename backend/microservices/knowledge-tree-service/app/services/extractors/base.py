@@ -86,6 +86,10 @@ class BaseExtractor(ABC):
             "temperature": 0.1,
             "max_tokens": 4096,
             "response_format": {"type": "json_object"},
+            # Disable Qwen3.5 thinking mode — extraction tasks don't need
+            # chain-of-thought and thinking consumes the token budget,
+            # leaving content=null.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
@@ -94,7 +98,12 @@ class BaseExtractor(ABC):
             )
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            msg = data["choices"][0]["message"]
+            content = msg.get("content")
+            # Fallback: some Qwen3.5 builds put output in reasoning_content
+            if content is None:
+                content = msg.get("reasoning_content", "")
+            return content or ""
 
     # ------------------------------------------------------------------
     # Shared helpers

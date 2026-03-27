@@ -85,23 +85,24 @@ def _collection_name(tenant_id: str) -> str:
 async def _fetch_documents(
     client: httpx.AsyncClient,
     tenant_id: str,
-    limit: int = 10000,
 ) -> List[Dict[str, Any]]:
     """Fetch all indexed documents for a tenant from weaviate-service.
 
     Tries the canonical list endpoint first:
-        GET /weaviate/documents?tenant_id=TENANT_ID&limit=LIMIT
+        GET /weaviate/documents?tenant_id=TENANT_ID&limit=100
 
-    If that returns 404 (endpoint not yet added), falls back to a broad
+    If that returns 404 (endpoint not yet added), falls back to paginated
     search on the tenant's Weaviate collection:
         POST /weaviate/collections/{collection}/search
 
     Returns a list of document dicts with at least "id" and optional
     "title", "file_path", "semantic_type", "domain" keys.
     """
+    PAGE_SIZE = 100  # weaviate-service max limit
+
     # ── Primary: list endpoint ─────────────────────────────────────────────────
     url = f"{WEAVIATE_SERVICE_URL}/weaviate/documents"
-    params = {"tenant_id": tenant_id, "limit": limit}
+    params = {"tenant_id": tenant_id, "limit": PAGE_SIZE}
     resp = await client.get(url, params=params, headers=WEAVIATE_HEADERS)
 
     if resp.status_code == 200:
@@ -116,47 +117,65 @@ async def _fetch_documents(
             resp.status_code,
         )
 
-    # ── Fallback: broad search on tenant collection ────────────────────────────
+    # ── Fallback: paginated search on tenant collection ────────────────────────
     collection = _collection_name(tenant_id)
     search_url = f"{WEAVIATE_SERVICE_URL}/weaviate/collections/{collection}/search"
-    payload = {
-        "query": "",
-        "limit": limit,
-        "offset": 0,
-        "search_type": "keyword",
-        "filters": {},
-    }
-    search_resp = await client.post(search_url, json=payload, headers=WEAVIATE_HEADERS)
 
-    if search_resp.status_code != 200:
-        raise RuntimeError(
-            f"Could not list documents for tenant {tenant_id!r}: "
-            f"search returned HTTP {search_resp.status_code} — {search_resp.text[:300]}"
-        )
-
-    search_data = search_resp.json()
-    raw_results = search_data.get("results", [])
-
-    # Deduplicate by document_id — search returns chunks, not docs
     seen_doc_ids: set = set()
     docs: List[Dict[str, Any]] = []
-    for item in raw_results:
-        doc_id = item.get("document_id") or item.get("id")
-        if doc_id and doc_id not in seen_doc_ids:
-            seen_doc_ids.add(doc_id)
-            docs.append({
-                "id": doc_id,
-                "title": item.get("title", ""),
-                "file_path": item.get("file_path", ""),
-                "semantic_type": item.get("semantic_type", ""),
-                "domain": item.get("domain", ""),
-            })
+    offset = 0
+    total_chunks = 0
+
+    while True:
+        payload = {
+            "query": "",
+            "tenant_id": tenant_id,
+            "limit": PAGE_SIZE,
+            "offset": offset,
+            "search_type": "keyword",
+            "filters": {},
+        }
+        search_resp = await client.post(search_url, json=payload, headers=WEAVIATE_HEADERS)
+
+        if search_resp.status_code != 200:
+            if offset == 0:
+                raise RuntimeError(
+                    f"Could not list documents for tenant {tenant_id!r}: "
+                    f"search returned HTTP {search_resp.status_code} — {search_resp.text[:300]}"
+                )
+            # Non-first page error — stop pagination gracefully
+            logger.warning("  Pagination stopped at offset %d: HTTP %d", offset, search_resp.status_code)
+            break
+
+        search_data = search_resp.json()
+        raw_results = search_data.get("results", [])
+        total_chunks += len(raw_results)
+
+        if not raw_results:
+            break  # No more results
+
+        # Deduplicate by document_id — search returns chunks, not docs
+        for item in raw_results:
+            doc_id = item.get("document_id") or item.get("id")
+            if doc_id and doc_id not in seen_doc_ids:
+                seen_doc_ids.add(doc_id)
+                docs.append({
+                    "id": doc_id,
+                    "title": item.get("title", ""),
+                    "file_path": item.get("file_path", ""),
+                    "semantic_type": item.get("semantic_type", ""),
+                    "domain": item.get("domain", ""),
+                })
+
+        offset += PAGE_SIZE
+        if len(raw_results) < PAGE_SIZE:
+            break  # Last page
 
     logger.info(
-        "  Fetched %d unique documents via collection search fallback "
+        "  Fetched %d unique documents via paginated collection search "
         "(%d raw chunks from %r)",
         len(docs),
-        len(raw_results),
+        total_chunks,
         collection,
     )
     return docs
@@ -284,7 +303,7 @@ async def reindex(
         # ── Step 5: Fetch document list from weaviate-service ──────────────────
         logger.info("Fetching document list from weaviate-service...")
         async with httpx.AsyncClient(timeout=60) as http:
-            documents = await _fetch_documents(http, tenant_id, limit=10000)
+            documents = await _fetch_documents(http, tenant_id)
 
         if not documents:
             print(f"  {YELLOW}WARN{RESET}  No documents found for tenant={tenant_id} — nothing to reindex")
