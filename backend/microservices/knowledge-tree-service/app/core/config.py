@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     falkordb_graph_name: str = os.getenv("FALKORDB_GRAPH_NAME", "knowledge_graph")
     falkordb_password: str = os.getenv("FALKORDB_PASSWORD", "")
 
+    # SGLang
+    SGLANG_BASE_URL: str = os.getenv("SGLANG_BASE_URL", "http://sglang:8000/v1")
+    SGLANG_MODEL: str = os.getenv("SGLANG_MODEL", "Qwen/Qwen3-8B")
+
+    # Langfuse
+    LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "pk-lf-local")
+    LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "sk-lf-local")
+    LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "http://langfuse:3002")
+
+    # Weaviate (for reindexation)
+    WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
+
     # Microservice auth
     MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "")
 
