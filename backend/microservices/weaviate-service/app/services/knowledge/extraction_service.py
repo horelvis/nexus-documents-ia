@@ -557,52 +557,36 @@ class KnowledgeExtractionService:
                 logger.warning(f"⚠️ Failed to store entity {entity.entity_value}: {e}")
                 continue
 
-        # Store in knowledge-tree-service sector graph
-        # Only named entities (persons, organizations) go to the graph.
-        # Other types (dates, amounts, identifiers) stay in Weaviate knowledge
-        # collection for semantic search but don't pollute the graph visualization.
-        _GRAPH_ENTITY_TYPES = {"person", "persona", "organization", "empresa", "organisation"}
-
+        # Store in knowledge-tree-service via TrustGraph triple extraction.
+        # Send raw chunk texts to KTS and let the 4 LLM extractors build the graph.
+        # This replaces the old entity-by-entity store_entities() approach.
         if entity_map:
             try:
                 from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
-                # Debug: log entity types before filtering
-                for e in entities[:3]:
-                    etype = e.entity_type
-                    etype_str = etype.value if hasattr(etype, 'value') else str(etype)
-                    logger.info(f"🔎 Entity type debug: {e.entity_value[:30]} → type={etype!r} str={etype_str!r} in_filter={etype_str.lower() in _GRAPH_ENTITY_TYPES}")
+                # Build chunk list from entity context texts as a proxy for chunks
+                # (the full chunk list is not available here — use context windows)
+                chunk_texts = list({
+                    e.context_text for e in entities if e.context_text
+                })
+                # Fall back to a single content window if no context texts
+                if not chunk_texts:
+                    chunk_texts = [content[:4000]] if content else []
 
-                kt_entities = []
-                for e in entities:
-                    if e.entity_value not in entity_map:
-                        continue
-                    etype = e.entity_type
-                    etype_str = etype.value if hasattr(etype, 'value') else str(etype)
-                    if etype_str.lower() not in _GRAPH_ENTITY_TYPES:
-                        continue
-                    kt_entities.append({
-                        "type": etype_str,
-                        "value": e.entity_value,
-                        "confidence": e.extraction_confidence,
-                        "attributes": {
-                            "domain": e.domain.value if hasattr(e.domain, 'value') else str(e.domain),
-                            "label": e.entity_label or e.entity_value,
-                        },
-                    })
-
-                kt_result = await knowledge_tree_legal_client.store_entities(
-                    tenant_id=tenant_id,
-                    document_id=document_id,
-                    entities=kt_entities,
-                )
-
-                kt_stored = kt_result.get("entities_stored", 0)
-                if kt_stored > 0:
-                    logger.info(f"📊 Stored {kt_stored} entities in sector graph")
+                if chunk_texts:
+                    kt_result = await knowledge_tree_legal_client.extract_triples(
+                        tenant_id=tenant_id,
+                        document_id=document_id,
+                        chunks=chunk_texts,
+                    )
+                    triples_extracted = kt_result.get("triples_extracted", 0)
+                    logger.info(
+                        f"📊 TrustGraph extraction queued: "
+                        f"{triples_extracted} triples for document {document_id}"
+                    )
 
             except Exception as e:
-                logger.warning(f"⚠️ Failed to store entities in knowledge-tree: {e}")
+                logger.warning(f"⚠️ Failed to trigger TrustGraph extraction: {e}")
 
         logger.info(f"📦 Stored {len(entity_map)} entities in Weaviate")
         return entity_map
