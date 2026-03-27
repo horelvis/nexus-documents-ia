@@ -87,29 +87,25 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # SGLang — Dual-Model Architecture (Qwen3.5)
+  # SGLang — Qwen3.5-27B AWQ Q4 (Single-Model Architecture)
   # =============================================================================
-  # Two SGLang instances sharing one GPU (RTX 4090 24GB):
+  # One SGLang instance on GPU (RTX 4090 24GB):
   #
-  #   Modelo          VRAM (AWQ INT4)    Funcion
-  #   ─────────────   ──────────────     ──────────────────────────
-  #   Qwen3.5-9B      ~8-10 GB           Chat, reasoning, synthesis
-  #   Qwen3.5-4B      ~3-4  GB           Planner, tool routing, clues
-  #   BGE-M3          ~2.7  GB           Embeddings (intelligence-docs-service)
-  #   ─────────────   ──────────────
-  #   Total           ~14-17 GB          Leaves ~7-10 GB for KV cache
+  #   Modelo                    VRAM (AWQ Q4)      Funcion
+  #   ─────────────────────     ──────────────     ──────────────────────────
+  #   Qwen3.5-27B-AWQ           ~16 GB             Chat + Planner (single model)
+  #   BGE-M3                    CPU                Embeddings (EMBEDDING_DEVICE=cpu)
+  #   ─────────────────────     ──────────────
+  #   Total GPU                 ~16 GB             Leaves ~5 GB for KV cache
   #
   # Single-model mode (SGLANG_DUAL_MODEL=false):
-  #   Only 'sglang' service runs. Both PLANNER and CHAT roles use same model.
-  #   mem-fraction-static: 0.80 (full GPU minus embedding headroom).
+  #   Only 'sglang' service runs. Both PLANNER and CHAT phases use same 27B model.
+  #   mem-fraction-static: 0.88 (full GPU, embeddings on CPU).
   #
-  # Dual-model mode (SGLANG_DUAL_MODEL=true):
-  #   Both 'sglang' + 'sglang-planner' run. GPU partitioned via mem-fraction-static.
-  #   Enable with: docker compose --profile dual-model up -d
-  #   mem-fraction: 0.55 (chat) + 0.18 (planner) = 0.73 total.
+  # Dual-model mode: NOT SUPPORTED with 27B (insufficient VRAM for two models).
   # =============================================================================
 
-  # ── Chat Model (Qwen3.5-9B) — Quality generation, final responses ──
+  # ── Qwen3.5-27B AWQ Q4 — Quality generation + tool calling ──
   sglang:
     image: lmsysorg/sglang:v0.5.9
     ports:
@@ -124,13 +120,13 @@ services:
       - CUDA_VISIBLE_DEVICES=0
     command: >
       python -m sglang.launch_server
-      --model-path ${SGLANG_MODEL:-Qwen/Qwen3.5-9B}
-      --served-model-name ${SGLANG_MODEL:-Qwen/Qwen3.5-9B}
+      --model-path ${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
+      --served-model-name ${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       --port 8000
       --host 0.0.0.0
       --context-length ${SGLANG_MAX_MODEL_LEN:-16384}
-      --mem-fraction-static ${SGLANG_GPU_UTIL:-0.65}
-      --quantization fp8
+      --mem-fraction-static ${SGLANG_GPU_UTIL:-0.88}
+      --quantization ${SGLANG_QUANTIZATION:-awq}
       --trust-remote-code
       --tool-call-parser ${SGLANG_TOOL_PARSER:-qwen3_coder}
       --reasoning-parser qwen3
@@ -145,8 +141,8 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 180s
+      retries: 10
+      start_period: 600s
     restart: unless-stopped
 
   # ── Planner Model (Qwen3.5-4B) — Fast tool calling, routing, clue generation ──
@@ -280,7 +276,7 @@ services:
       - EMBEDDING_PROVIDERS=${EMBEDDING_PROVIDERS:-sentence-transformers}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
       - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
-      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cpu}
       - ENTITY_PROVIDERS=${ENTITY_PROVIDERS:-langextract}
       - DOCLING_URL=http://docling:5001
       - TIKA_URL=http://tika:9998
@@ -294,13 +290,15 @@ services:
       - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
     networks:
       - backend-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # GPU reservation removed: embeddings on CPU (EMBEDDING_DEVICE=cpu)
+    # to free VRAM for Qwen3.5-27B. Re-enable if reverting to EMBEDDING_DEVICE=cuda:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -378,7 +376,7 @@ services:
       # SGLang Configuration
       - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
       - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
-      - SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_MODEL=${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       - SGLANG_ENABLE_THINKING=${SGLANG_ENABLE_THINKING:-false}
       - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
       # Embedding: delegated to intelligence-docs-service (no local GPU model)
@@ -469,6 +467,15 @@ services:
       - FALKORDB_PORT=${FALKORDB_PORT:-6379}
       - FALKORDB_GRAPH_NAME=${FALKORDB_GRAPH_NAME:-knowledge_graph}
       - FALKORDB_PASSWORD=${FALKORDB_PASSWORD:-}
+      # SGLang (LLM extraction)
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-Qwen/Qwen3-8B}
+      # Langfuse (prompt management)
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-pk-lf-local}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-lf-local}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3002}
+      # Weaviate (reindexation pipeline)
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
     volumes:
       - ../microservices/knowledge-tree-service/app:/app/app:ro
       - ../microservices/knowledge-tree-service/config:/app/config:ro
@@ -532,11 +539,11 @@ services:
       - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
       # Chat model (9B quality generation)
       - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
-      - SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_MODEL=${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       - SGLANG_ENABLE_THINKING=${SGLANG_ENABLE_THINKING:-false}
       # Planner model (4B fast tool calling) — only active when SGLANG_DUAL_MODEL=true
       - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
-      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
       - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
       # Redis for sessions
       - REDIS_HOST=redis
@@ -675,11 +682,11 @@ services:
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
       - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
-      - SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_MODEL=${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       # Dual-model architecture
       - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
       - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
-      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Web Search (DuckDuckGo)
@@ -739,11 +746,11 @@ services:
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
       - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
       - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
-      - SGLANG_MODEL=${SGLANG_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_MODEL=${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       # Dual-model architecture
       - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
       - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
-      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
       - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
