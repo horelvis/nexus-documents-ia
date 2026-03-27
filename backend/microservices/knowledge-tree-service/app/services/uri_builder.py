@@ -76,18 +76,55 @@ class URIBuilder:
     # Name normalization
     # ---------------------------------------------------------------------------
 
+    # ---------------------------------------------------------------------------
+    # Spanish name particles (prepositions kept but not reordered)
+    # ---------------------------------------------------------------------------
+
+    _COMMA_NAME_RE = re.compile(
+        r"^([^,]+),\s*(.+)$"
+    )
+
     @classmethod
     def normalize_name(cls, name: str) -> str:
         """Normalize a human-readable name to a URI-safe slug.
 
         Steps:
+        0. Reorder "Last, First" → "First Last" (comma-separated names).
         1. NFD decompose and strip combining marks (removes accents, ñ → n, etc.)
         2. Lowercase.
         3. Replace runs of non-alphanumeric characters with a single hyphen.
         4. Strip leading/trailing hyphens.
+
+        Examples:
+            "García, Juan"       → "juan-garcia"
+            "Juan García"        → "juan-garcia"
+            "De la Cruz, José"   → "jose-de-la-cruz"
+            "Empresa ABC, S.L."  → "empresa-abc-s-l"  (comma in company name, no reorder)
         """
+        stripped = name.strip()
+
+        # 0. Detect and reorder "Last, First" patterns
+        # Heuristic: if the part after the comma starts with a capitalized
+        # word that looks like a first name (no digits, short enough), reorder.
+        m = cls._COMMA_NAME_RE.match(stripped)
+        if m:
+            before_comma = m.group(1).strip()
+            after_comma = m.group(2).strip()
+            # Reorder if after-comma looks like a first name:
+            # - no digits
+            # - at most 4 words (e.g., "José María de la")
+            # - not typical company suffixes
+            _company_suffixes = {"s.l.", "s.a.", "s.l.u.", "inc", "ltd", "gmbh", "corp"}
+            after_lower = after_comma.lower()
+            if (
+                not any(ch.isdigit() for ch in after_comma)
+                and len(after_comma.split()) <= 4
+                and after_lower not in _company_suffixes
+            ):
+                stripped = f"{after_comma} {before_comma}"
+
         # 1. NFD + strip combining marks
-        nfd = unicodedata.normalize("NFD", name)
+        nfd = unicodedata.normalize("NFD", stripped)
         ascii_approx = "".join(
             ch for ch in nfd if unicodedata.category(ch) != "Mn"
         )

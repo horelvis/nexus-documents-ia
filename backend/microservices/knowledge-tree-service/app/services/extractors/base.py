@@ -131,8 +131,11 @@ class BaseExtractor(ABC):
             for key in ("results", "entities", "items", "relationships", "topics", "definitions", "objects"):
                 if key in parsed and isinstance(parsed[key], list):
                     return parsed[key]
-            # If dict but no known wrapper key, return empty
-            return []
+            # Single item dict (not a wrapper) — treat as a one-element array.
+            # This handles Qwen3.5 returning {"entity": "...", "definition": "..."}
+            # instead of [{"entity": "...", "definition": "..."}] when using
+            # response_format: json_object.
+            return [parsed]
 
         if isinstance(parsed, list):
             return parsed

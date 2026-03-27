@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 from app.services.extractors.definitions import DefinitionsExtractor
-from app.services.extractors.relationships import RelationshipsExtractor, MINI_ONTOLOGY
+from app.services.extractors.relationships import RelationshipsExtractor
 from app.services.extractors.objects import ObjectsExtractor
 from app.services.extractors.topics import TopicsExtractor
 
@@ -133,7 +133,7 @@ class TestRelationshipsExtractor:
 
     @pytest.mark.asyncio
     async def test_uses_mini_ontology_predicates(self):
-        """Prompt must contain known predicates from the mini-ontology."""
+        """Prompt must contain known extractable predicates (prov excluded)."""
         extractor = RelationshipsExtractor()
         prompt = extractor._build_prompt(SAMPLE_CHUNK)
 
@@ -141,11 +141,13 @@ class TestRelationshipsExtractor:
         assert "firmante-de" in prompt
         assert "regulado-por" in prompt
         assert "modifica" in prompt
-        assert "derived-from" in prompt
+        # prov predicates are system-only — NOT shown to LLM
+        assert "timestamp" not in prompt
+        assert "chunk-text" not in prompt
 
     @pytest.mark.asyncio
-    async def test_prov_predicate_gets_prov_ontology(self):
-        """'derived-from' predicate → ontology='prov'."""
+    async def test_prov_predicate_rejected_from_extraction(self):
+        """'derived-from' (prov) is system-only — rejected from LLM extraction."""
         mock_json = json.dumps([
             {
                 "subject": "Doc A",
@@ -158,12 +160,12 @@ class TestRelationshipsExtractor:
         with patch.object(extractor, "_call_llm", new=AsyncMock(return_value=mock_json)):
             triples = await extractor.extract(SAMPLE_CHUNK)
 
-        assert len(triples) == 1
-        assert triples[0]["predicate_ontology"] == "prov"
+        # prov predicates are system-only — not extractable by LLM
+        assert len(triples) == 0
 
     @pytest.mark.asyncio
-    async def test_unknown_predicate_gets_core_ontology(self):
-        """Unknown predicate → ontology='core'."""
+    async def test_unknown_predicate_rejected(self):
+        """Unknown predicate → rejected (not stored)."""
         mock_json = json.dumps([
             {
                 "subject": "A",
@@ -176,8 +178,7 @@ class TestRelationshipsExtractor:
         with patch.object(extractor, "_call_llm", new=AsyncMock(return_value=mock_json)):
             triples = await extractor.extract(SAMPLE_CHUNK)
 
-        assert len(triples) == 1
-        assert triples[0]["predicate_ontology"] == "core"
+        assert len(triples) == 0
 
     @pytest.mark.asyncio
     async def test_handles_empty_response(self):

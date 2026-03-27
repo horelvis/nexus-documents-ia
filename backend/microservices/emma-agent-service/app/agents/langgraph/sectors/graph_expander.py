@@ -32,9 +32,23 @@ _DOCUMENT_URI_PREFIX = "nouxcube://document/"
 _DEFAULT_COLLECTION = "default"
 
 
+_COMMA_NAME_RE = re.compile(r"^([^,]+),\s*(.+)$")
+
+
 def _normalize_name(name: str) -> str:
-    """Normalize a name to URI slug — mirrors URIBuilder.normalize_name()."""
-    nfd = unicodedata.normalize("NFD", name)
+    """Normalize a name to URI slug — mirrors URIBuilder.normalize_name().
+
+    Includes "Last, First" → "First Last" reordering for person names.
+    """
+    stripped = name.strip()
+    # Reorder "Last, First" if after-comma looks like a first name
+    m = _COMMA_NAME_RE.match(stripped)
+    if m:
+        before, after = m.group(1).strip(), m.group(2).strip()
+        _co = {"s.l.", "s.a.", "s.l.u.", "inc", "ltd", "gmbh", "corp"}
+        if not any(ch.isdigit() for ch in after) and len(after.split()) <= 4 and after.lower() not in _co:
+            stripped = f"{after} {before}"
+    nfd = unicodedata.normalize("NFD", stripped)
     ascii_approx = "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
     lowered = ascii_approx.lower()
     hyphenated = re.sub(r"[^a-z0-9]+", "-", lowered)

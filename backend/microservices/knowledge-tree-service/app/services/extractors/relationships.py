@@ -1,62 +1,41 @@
 """
 Relationships extractor — extracts subject-predicate-object triples.
 
-Uses a mini-ontology to guide the LLM toward known predicates.
+Uses the OntologyRegistry to dynamically load valid predicates.
 Each relationship yields 1 triple with the correct ontology namespace.
+
+To add new predicates: update scripts/seed_ontology.py PREDICATES list
+and re-run seed_ontology.py — no code changes needed here.
 """
 
+import logging
 from typing import Any, Dict, List
 
 from app.services.extractors.base import BaseExtractor
+from app.services.ontology_registry import (
+    get_extractable_predicates,
+    get_mini_ontology_text,
+    get_namespace,
+    is_valid_predicate,
+)
+
+logger = logging.getLogger(__name__)
 
 EXTRACTOR_NAME = "relationships"
 
-# Core mini-ontology — guides the LLM to use controlled predicates
-MINI_ONTOLOGY = """
-PREFERRED PREDICATES (use these whenever possible):
-  core:        type, label, definition, has-topic, part-of, related-to, derived-from,
-               references, contains, created-by, belongs-to
-  legal:       empleado-de, firmante-de, representante-de, regulado-por, salario-bruto,
-               tipo-contrato, vigente-desde, vigente-hasta, clausula, obligacion, derecho,
-               modifica, derogado-por, references-law
-  prov:        derived-from
-"""
-
-# Predicates that belong to the "legal" ontology namespace
-_LEGAL_PREDICATES = frozenset(
-    [
-        "empleado-de",
-        "firmante-de",
-        "representante-de",
-        "regulado-por",
-        "salario-bruto",
-        "tipo-contrato",
-        "vigente-desde",
-        "vigente-hasta",
-        "clausula",
-        "obligacion",
-        "derecho",
-        "modifica",
-        "derogado-por",
-        "references-law",
-    ]
-)
-
-# Predicates that belong to the "prov" namespace
-_PROV_PREDICATES = frozenset(["derived-from"])
-
 _PROMPT_TEMPLATE = """Extract all relationships between entities from the following text.
 
-Use the mini-ontology below to choose predicates:
+You MUST use ONLY predicates from this ontology:
 {mini_ontology}
 
 Return a JSON array where each element has:
 - "subject": the subject entity name (string)
-- "predicate": the relationship predicate (use preferred predicates when possible)
+- "predicate": one of the predicates listed above (MUST be exact match)
 - "object": the object value or entity name (string)
 - "object-entity": true if the object is a named entity, false if it is a literal value
 
 Return an empty array [] if no relationships are found.
+Do NOT invent predicates outside the ontology.
 
 Respond ONLY with a valid JSON array. Example:
 [{{"subject": "Juan García", "predicate": "empleado-de", "object": "Empresa ABC S.L.", "object-entity": true}},
@@ -73,7 +52,7 @@ class RelationshipsExtractor(BaseExtractor):
 
     def _build_prompt(self, chunk_text: str) -> str:
         return _PROMPT_TEMPLATE.format(
-            mini_ontology=MINI_ONTOLOGY,
+            mini_ontology=get_mini_ontology_text(),
             chunk_text=chunk_text,
         )
 
@@ -82,6 +61,7 @@ class RelationshipsExtractor(BaseExtractor):
     ) -> List[Dict[str, Any]]:
         items = self._safe_parse_json(llm_output)
         triples: List[Dict[str, Any]] = []
+        extractable = get_extractable_predicates()
 
         for item in items:
             if not isinstance(item, dict):
@@ -94,13 +74,16 @@ class RelationshipsExtractor(BaseExtractor):
             if not subject or not predicate or not obj:
                 continue
 
-            # Determine ontology namespace
-            if predicate in _LEGAL_PREDICATES:
-                ontology = "legal"
-            elif predicate in _PROV_PREDICATES:
-                ontology = "prov"
-            else:
-                ontology = "core"
+            # Validate predicate against ontology — reject unknown predicates
+            if predicate not in extractable:
+                logger.debug(
+                    "Rejected unknown predicate %r (subject=%r, object=%r)",
+                    predicate, subject, obj,
+                )
+                continue
+
+            # Namespace lookup from ontology registry
+            ontology = get_namespace(predicate) or "core"
 
             triples.append(
                 self._make_triple(

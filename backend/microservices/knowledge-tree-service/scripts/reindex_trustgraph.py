@@ -221,6 +221,100 @@ async def _fetch_chunks(
     return []
 
 
+# ── Entity resolution ─────────────────────────────────────────────────────────
+
+async def _resolve_duplicate_entities(
+    client: FalkorDBClient,
+    tenant_id: str,
+    collection: str,
+) -> int:
+    """Merge near-duplicate entity :Nodes after extraction.
+
+    Strategy: group entity nodes by their URI slug (last segment). If two nodes
+    have the same slug but different URIs (shouldn't happen with normalize_name,
+    but can if older data exists), merge their relationships into one node and
+    delete the duplicate.
+
+    Also detects nodes that differ only by word order in the slug
+    (e.g., "juan-garcia" vs "garcia-juan" from "García, Juan" vs "Juan García")
+    by comparing sorted token sets.
+    """
+    # Fetch all entity node URIs for this tenant+collection
+    rows = await client.execute_cypher(
+        "MATCH (n:Node {user: $user, collection: $collection}) "
+        "WHERE n.uri STARTS WITH 'nouxcube://entity/' "
+        "RETURN n.uri AS uri",
+        {"user": tenant_id, "collection": collection},
+    )
+
+    if not rows:
+        return 0
+
+    # Group by sorted token set → detect word-order duplicates
+    # "nouxcube://entity/default/juan-garcia" → tokens = {"garcia", "juan"}
+    from collections import defaultdict
+
+    groups: Dict[str, List[str]] = defaultdict(list)
+    for row in rows:
+        uri = row["uri"]
+        # Extract the slug (last segment after collection/)
+        slug = uri.rsplit("/", 1)[-1]
+        tokens = frozenset(slug.split("-"))
+        group_key = "-".join(sorted(tokens))
+        groups[group_key].append(uri)
+
+    merged_count = 0
+    for group_key, uris in groups.items():
+        if len(uris) <= 1:
+            continue
+
+        # Keep the first URI as canonical, merge others into it
+        canonical = sorted(uris)[0]  # deterministic: alphabetically first
+        duplicates = [u for u in uris if u != canonical]
+
+        for dup_uri in duplicates:
+            try:
+                # Move all outgoing rels from duplicate → canonical
+                await client.execute_cypher(
+                    "MATCH (dup:Node {uri: $dup_uri, user: $user, collection: $col})-[r:Rel]->(o) "
+                    "MATCH (canon:Node {uri: $canon_uri, user: $user, collection: $col}) "
+                    "MERGE (canon)-[r2:Rel {uri: r.uri, user: r.user, collection: r.collection}]->(o) "
+                    "ON CREATE SET r2.extraction_method = r.extraction_method, "
+                    "r2.source_chunk = r.source_chunk "
+                    "DELETE r",
+                    {"dup_uri": dup_uri, "canon_uri": canonical,
+                     "user": tenant_id, "col": collection},
+                )
+                # Move all incoming rels to duplicate → canonical
+                await client.execute_cypher(
+                    "MATCH (s)-[r:Rel]->(dup:Node {uri: $dup_uri, user: $user, collection: $col}) "
+                    "MATCH (canon:Node {uri: $canon_uri, user: $user, collection: $col}) "
+                    "MERGE (s)-[r2:Rel {uri: r.uri, user: r.user, collection: r.collection}]->(canon) "
+                    "ON CREATE SET r2.extraction_method = r.extraction_method, "
+                    "r2.source_chunk = r.source_chunk "
+                    "DELETE r",
+                    {"dup_uri": dup_uri, "canon_uri": canonical,
+                     "user": tenant_id, "col": collection},
+                )
+                # Delete the orphaned duplicate node
+                await client.execute_cypher(
+                    "MATCH (n:Node {uri: $uri, user: $user, collection: $col}) "
+                    "WHERE NOT (n)-[:Rel]-() AND NOT ()-[:Rel]->(n) "
+                    "DELETE n",
+                    {"uri": dup_uri, "user": tenant_id, "col": collection},
+                )
+                merged_count += 1
+                logger.info(
+                    "  Merged duplicate: %s → %s", dup_uri, canonical
+                )
+            except Exception as exc:
+                logger.warning(
+                    "  Failed to merge %s → %s: %s", dup_uri, canonical, exc
+                )
+
+    return merged_count
+
+
 # ── Schema bootstrap ───────────────────────────────────────────────────────────
 
 async def _bootstrap_schema(client: FalkorDBClient) -> None:
@@ -408,6 +502,15 @@ async def reindex(
                     )
                     logger.exception("    Exception for document %s", doc_id)
 
+        # ── Step 7: Cross-document entity resolution ─────────────────────────
+        if not dry_run:
+            logger.info("Running cross-document entity resolution...")
+            merged_count = await _resolve_duplicate_entities(falkordb, tenant_id, collection)
+            if merged_count:
+                print(f"  {GREEN}OK{RESET}    Entity resolution — merged {merged_count} duplicate node(s)")
+            else:
+                print(f"  {GREEN}OK{RESET}    Entity resolution — no duplicates found")
+
         # ── Summary ────────────────────────────────────────────────────────────
         elapsed_total = time.monotonic() - t_total
         print()
@@ -417,6 +520,7 @@ async def reindex(
         print(f"  Errors              : {RED if error_count else ''}{error_count}{RESET}")
         print(f"  Triples created     : {total_triples}")
         print(f"  Contradictions      : {total_contradictions}")
+        print(f"  Merged duplicates   : {merged_count if not dry_run else 'N/A'}")
         print(f"  Total time          : {elapsed_total:.1f}s")
         print()
 

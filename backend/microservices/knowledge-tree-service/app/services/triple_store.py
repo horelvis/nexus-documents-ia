@@ -84,7 +84,11 @@ class TripleStore:
         valid_from: Optional[str] = None,
         valid_until: Optional[str] = None,
     ) -> None:
-        """CREATE a :Rel edge from subject :Node to object :Node or :Literal.
+        """MERGE a :Rel edge from subject :Node to object :Node or :Literal.
+
+        Uses MERGE on (subject, predicate_uri, object, user, collection) to
+        prevent duplicate edges for the same fact. Additional metadata
+        (extraction_method, source_chunk, timestamps) is set on first creation.
 
         Args:
             subject_uri:       URI of the subject :Node.
@@ -99,23 +103,14 @@ class TripleStore:
             valid_from:        ISO date string — temporal validity start.
             valid_until:       ISO date string — temporal validity end.
         """
-        rel_props = {
-            "uri": predicate_uri,
-            "user": user,
-            "collection": collection,
-            "extraction_method": extraction_method,
-            "source_chunk": source_chunk,
-            "valid_from": valid_from,
-            "valid_until": valid_until,
-        }
-
         if object_is_node:
             query = (
                 "MATCH (s:Node {uri: $s_uri, user: $user, collection: $collection}) "
                 "MATCH (o:Node {uri: $o_uri, user: $user, collection: $collection}) "
-                "CREATE (s)-[:Rel {uri: $p_uri, user: $user, collection: $collection, "
-                "extraction_method: $extraction_method, source_chunk: $source_chunk, "
-                "valid_from: $valid_from, valid_until: $valid_until}]->(o)"
+                "MERGE (s)-[r:Rel {uri: $p_uri, user: $user, collection: $collection}]->(o) "
+                "ON CREATE SET r.extraction_method = $extraction_method, "
+                "r.source_chunk = $source_chunk, "
+                "r.valid_from = $valid_from, r.valid_until = $valid_until"
             )
             params = {
                 "s_uri": subject_uri,
@@ -132,9 +127,10 @@ class TripleStore:
             query = (
                 "MATCH (s:Node {uri: $s_uri, user: $user, collection: $collection}) "
                 "MATCH (o:Literal {value: $o_val, user: $user, collection: $collection}) "
-                "CREATE (s)-[:Rel {uri: $p_uri, user: $user, collection: $collection, "
-                "extraction_method: $extraction_method, source_chunk: $source_chunk, "
-                "valid_from: $valid_from, valid_until: $valid_until}]->(o)"
+                "MERGE (s)-[r:Rel {uri: $p_uri, user: $user, collection: $collection}]->(o) "
+                "ON CREATE SET r.extraction_method = $extraction_method, "
+                "r.source_chunk = $source_chunk, "
+                "r.valid_from = $valid_from, r.valid_until = $valid_until"
             )
             params = {
                 "s_uri": subject_uri,
