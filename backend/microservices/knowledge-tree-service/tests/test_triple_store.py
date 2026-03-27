@@ -9,6 +9,7 @@ import pytest_asyncio
 
 from app.services.triple_store import TripleStore
 from app.services.uri_builder import URIBuilder
+from app.services.provenance import ProvenanceService
 
 # ---------------------------------------------------------------------------
 # Helper
@@ -374,3 +375,39 @@ class TestClearOperations:
             params={"user": "u2"},
         )
         assert rows[0]["cnt"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TestProvenance
+# ---------------------------------------------------------------------------
+
+class TestProvenance:
+    @pytest.mark.asyncio
+    async def test_creates_extraction_node(self, falkordb_client):
+        """record_extraction creates an extraction :Node with 6 provenance triples."""
+        store = _make_store(falkordb_client)
+        prov = ProvenanceService(store)
+        doc_uri = URIBuilder.document("default", "doc-1")
+        await store.merge_node(uri=doc_uri, user="t1", collection="default")
+        ext_uri = await prov.record_extraction(
+            document_uri=doc_uri,
+            extraction_method="llm_relationships",
+            model_name="Qwen3.5-9B",
+            chunk_text="Juan García trabaja en ACME Corp desde 2020.",
+            chunk_offset=1500,
+            user="t1",
+            collection="default",
+        )
+        assert ext_uri.startswith("nouxcube://extraction/")
+        # Verify provenance triples
+        result = await falkordb_client.execute_cypher(
+            "MATCH (e:Node {uri: $uri})-[r:Rel]->(o) WHERE r.user = 't1' "
+            "RETURN r.uri AS pred, CASE WHEN o:Node THEN o.uri ELSE o.value END AS obj",
+            {"uri": ext_uri},
+        )
+        preds = {r["pred"]: r["obj"] for r in result}
+        assert preds["nouxcube://predicate/prov/derived-from"] == doc_uri
+        assert preds["nouxcube://predicate/prov/method"] == "llm_relationships"
+        assert preds["nouxcube://predicate/prov/model"] == "Qwen3.5-9B"
+        assert "Juan García" in preds["nouxcube://predicate/prov/chunk-text"]
+        assert preds["nouxcube://predicate/prov/chunk-offset"] == "1500"
