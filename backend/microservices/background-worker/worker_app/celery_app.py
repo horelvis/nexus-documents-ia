@@ -16,6 +16,7 @@ celery_app = Celery(
         "worker_app.tasks.connector_tasks",
         "worker_app.tasks.verification_tasks",
         "worker_app.tasks.emma_tasks",
+        "worker_app.tasks.trustgraph_tasks",
     ],
 )
 
@@ -29,6 +30,7 @@ celery_app.conf.update(
         "connectors.*": {"queue": "connectors"},
         "verification.*": {"queue": "verification"},
         "emma.*": {"queue": "emma_reactive"},
+        "trustgraph.*": {"queue": "trustgraph_extraction"},
     },
     task_acks_late=True,
     worker_prefetch_multiplier=1,
