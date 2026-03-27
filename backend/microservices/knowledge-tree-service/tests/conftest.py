@@ -36,6 +36,9 @@ async def falkordb_client():
         except Exception:
             pass
 
+    # Bootstrap schema so indexes are available for all tests
+    await client.bootstrap_schema()
+
     yield client
 
     # Cleanup after test

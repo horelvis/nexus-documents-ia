@@ -125,7 +125,7 @@ class FalkorDBClient:
                     raise
 
     async def bootstrap_schema(self) -> None:
-        """Read and execute schema from knowledge_graph_schema.cypher.
+        """Read and execute schema from trustgraph_schema.cypher.
 
         Idempotent — FalkorDB ignores duplicate index creation.
         """
@@ -137,7 +137,7 @@ class FalkorDBClient:
             Path(__file__).resolve().parents[2]
             / "config"
             / "graphs"
-            / "knowledge_graph_schema.cypher"
+            / "trustgraph_schema.cypher"
         )
 
         if not schema_path.exists():
