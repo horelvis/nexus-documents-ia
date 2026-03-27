@@ -5,7 +5,7 @@ Defines the structure of a sector configuration, which controls
 how the RAG pipeline behaves for a specific domain deployment.
 
 A sector is set once via ACTIVE_SECTOR env var before data ingestion.
-Changing sectors requires clearing all data (Weaviate + AGE graph).
+Changing sectors requires clearing all data (Weaviate + FalkorDB graph).
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ class SectorConfig:
     Configuration for a specific deployment sector.
 
     Controls RAG pipeline parameters, agent selection, entity extraction,
-    and graph schema for the active sector.
+    and graph configuration for the active sector.
 
     Attributes:
         name: Human-readable sector name
@@ -50,12 +50,10 @@ class SectorConfig:
         chunk_size: Target chunk size in characters
         chunk_overlap: Overlap between chunks in characters
         entity_patterns: Regex patterns for entity extraction by type
-        graph_name: Deprecated — unified FalkorDB graph (kept for backward compat)
-        graph_schema: Deprecated — schema lives in knowledge-tree-service
         system_prompt_key: Langfuse prompt name for sector system prompt
         collection_suffix: Optional suffix for Weaviate collection names
         men_domain: MEN service domain mapping
-        graph_search_properties: Node properties to search in graph queries
+        graph_search_properties: Node properties to search in FalkorDB graph queries
     """
     name: str
     sector: Sector
@@ -68,8 +66,6 @@ class SectorConfig:
     chunk_size: int
     chunk_overlap: int
     entity_patterns: Dict[str, List[str]]
-    graph_name: str = ""
-    graph_schema: str = ""
     system_prompt_key: str = ""
     collection_suffix: Optional[str] = None
     men_domain: str = "general"

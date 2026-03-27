@@ -269,6 +269,7 @@ class RAGState(TypedDict, total=False):
     metadata: Annotated[Dict[str, Any], merge_dicts]
 
 
+# DEPRECATED: Only used by rlm_processor. Will be removed when rlm_processor migrates to ReActState.
 def create_initial_state(
     query: str,
     tenant_id: str,
@@ -331,8 +332,6 @@ def create_initial_state(
                 "chunk_size": sc.chunk_size,
                 "chunk_overlap": sc.chunk_overlap,
                 "entity_patterns": sc.entity_patterns,
-                "graph_name": sc.graph_name,
-                "graph_schema": sc.graph_schema,
                 "system_prompt_key": sc.system_prompt_key,
                 "men_domain": sc.men_domain,
             }
