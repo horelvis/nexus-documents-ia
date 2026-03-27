@@ -182,6 +182,51 @@ class KnowledgeTreeClient(BaseHTTPClient):
             return {"nodes": [], "edges": [], "root_entities": [], "pruned_count": 0}
 
 
+    async def query_triples(
+        self,
+        tenant_id: str,
+        subject_uri: Optional[str] = None,
+        predicate_uri: Optional[str] = None,
+        object_value: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Query triples from TrustGraph."""
+        payload = {
+            "tenant_id": tenant_id,
+            "limit": limit,
+        }
+        if subject_uri is not None:
+            payload["subject_uri"] = subject_uri
+        if predicate_uri is not None:
+            payload["predicate_uri"] = predicate_uri
+        if object_value is not None:
+            payload["object_value"] = object_value
+        try:
+            return await self.post_json("/triples/query", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Triple query failed: {e}")
+            return {"success": False, "triples": [], "error": str(e)}
+
+    async def get_triple_context(self, tenant_id: str, limit: int = 20) -> Dict[str, Any]:
+        """Get LLM context from triple store."""
+        payload = {"tenant_id": tenant_id, "limit": limit}
+        try:
+            return await self.post_json("/triples/context", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Triple context failed: {e}")
+            return {"success": False, "context_for_llm": "", "error": str(e)}
+
+    async def get_triple_stats(self, tenant_id: str) -> Dict[str, Any]:
+        """Get graph statistics."""
+        try:
+            return await self.get_json(
+                f"/triples/stats?tenant_id={tenant_id}", headers=self._headers()
+            )
+        except Exception as e:
+            logger.warning(f"Triple stats failed: {e}")
+            return {"success": False, "error": str(e)}
+
+
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None
 
 
