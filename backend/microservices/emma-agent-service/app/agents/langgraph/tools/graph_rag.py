@@ -1,0 +1,646 @@
+"""
+Emma ReAct Agent — Graph RAG Tool
+
+6-stage pipeline that retrieves knowledge-graph context for the ReAct agent:
+
+  Stage 1: Entity retrieval
+           Concept embeddings → Weaviate TrustGraphEntities vector search
+           → Deduplicate by entity_uri, sort by score
+
+  Stage 2: BFS subgraph
+           Seed URIs → KTS /triples/neighbors
+           → Edge list
+
+  Stage 3: Label resolution
+           Collect unique URIs from edges → TTL-cache lookup or
+           KTS query_triples(predicate=core/label) → humanize fallback
+
+  Stage 4: Semantic pre-filter
+           Build edge descriptions → batch embed via intelligence-docs-service
+           → cosine similarity against concept embeddings
+           → keep top graph_rag_prefilter_limit edges
+
+  Stage 5: LLM edge scoring
+           Format edges → planner model + Langfuse prompt trustgraph_edge_scoring
+           → parse JSON [{"id": ..., "score": N}]
+           → keep top graph_rag_edge_limit by score
+
+  Stage 6: Context formatting
+           Render as markdown with Entities + Relationships sections
+           → ToolResult(output=text, data={entities, expanded_doc_ids, avg_score})
+"""
+
+import json
+import logging
+import re
+import time
+from typing import Any, Dict, List, Optional, Tuple, Type
+
+import httpx
+from pydantic import BaseModel, Field
+
+from .base import EmmaTool, ToolResult
+from app.agents.langgraph.tools.concept_extractor import extract_concepts, ConceptResult
+from app.core.config import settings
+from app.clients.weaviate_client import get_weaviate_client
+from app.clients.knowledge_tree_client import get_knowledge_tree_client
+from app.agents.llm_models import get_planner_model
+from app.services.langfuse_prompt_client import get_langfuse_prompt_client
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Label resolution TTL cache (module-level singleton, initialized lazily)
+# ---------------------------------------------------------------------------
+
+_label_cache: Optional[Any] = None  # cachetools.TTLCache or dict fallback
+
+
+def _get_label_cache(ttl: int) -> Any:
+    """Return (or lazily create) the label TTL cache."""
+    global _label_cache
+    if _label_cache is None:
+        try:
+            from cachetools import TTLCache
+            _label_cache = TTLCache(maxsize=2000, ttl=ttl)
+        except ImportError:
+            logger.warning("cachetools not available — using dict fallback for label cache")
+            _label_cache = _DictTTLCache(maxsize=2000, ttl=ttl)
+    return _label_cache
+
+
+class _DictTTLCache:
+    """Minimal TTL cache fallback when cachetools is absent."""
+
+    def __init__(self, maxsize: int, ttl: int):
+        self._store: Dict[str, Tuple[Any, float]] = {}
+        self._maxsize = maxsize
+        self._ttl = ttl
+
+    def get(self, key: str, default=None):
+        entry = self._store.get(key)
+        if entry is None:
+            return default
+        value, ts = entry
+        if time.time() - ts > self._ttl:
+            del self._store[key]
+            return default
+        return value
+
+    def __setitem__(self, key: str, value: Any):
+        if len(self._store) >= self._maxsize:
+            # Evict oldest entry
+            oldest = min(self._store, key=lambda k: self._store[k][1])
+            del self._store[oldest]
+        self._store[key] = (value, time.time())
+
+    def __contains__(self, key: str):
+        return self.get(key) is not None
+
+    def __getitem__(self, key: str):
+        result = self.get(key)
+        if result is None:
+            raise KeyError(key)
+        return result
+
+
+# ---------------------------------------------------------------------------
+# Input schema
+# ---------------------------------------------------------------------------
+
+
+class GraphRAGInput(BaseModel):
+    query: str = Field(
+        description="Consulta en lenguaje natural para buscar relaciones entre entidades en el grafo de conocimiento"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pure helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_edge_description(subject_label: str, predicate_name: str, object_label: str) -> str:
+    """Build a human-readable edge description for embedding / LLM scoring.
+
+    Returns: '{subject_label}, {predicate_name}, {object_label}'
+    """
+    return f"{subject_label}, {predicate_name}, {object_label}"
+
+
+def _humanize_uri(uri: str) -> str:
+    """Extract readable label from a URI by taking its last path segment.
+
+    E.g. 'nouxcube://entity/lgt' → 'lgt'
+         'nouxcube://predicate/legal/regula' → 'regula'
+    """
+    if not uri:
+        return uri
+    # Handle both 'nouxcube://...' and 'http://...' URIs
+    segment = uri.rstrip("/").split("/")[-1]
+    # Replace hyphens/underscores with spaces and capitalize
+    return segment.replace("-", " ").replace("_", " ").title()
+
+
+def _extract_predicate_name(predicate_uri: str) -> str:
+    """Extract human name from predicate URI.
+
+    'nouxcube://predicate/legal/empleado-de' → 'empleado de'
+    """
+    return _humanize_uri(predicate_uri).lower()
+
+
+def _cosine_similarity(v1: List[float], v2: List[float]) -> float:
+    """Compute cosine similarity between two vectors (pure Python, no numpy)."""
+    dot = sum(a * b for a, b in zip(v1, v2))
+    norm1 = sum(a * a for a in v1) ** 0.5
+    norm2 = sum(b * b for b in v2) ** 0.5
+    if norm1 == 0.0 or norm2 == 0.0:
+        return 0.0
+    return dot / (norm1 * norm2)
+
+
+def _parse_scoring_json(content: str) -> List[Dict[str, Any]]:
+    """Parse LLM JSON response for edge scoring.
+
+    Handles markdown code blocks and thinking tags.
+    Returns list of {"id": str, "score": float}.
+    """
+    if not content:
+        return []
+
+    # Strip thinking tags
+    content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
+    # Strip markdown code blocks
+    md_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", content)
+    if md_match:
+        content = md_match.group(1).strip()
+
+    # Find first JSON array
+    arr_match = re.search(r"\[[\s\S]*\]", content)
+    if not arr_match:
+        logger.warning(f"graph_rag: no JSON array in scoring response: {content[:200]}")
+        return []
+
+    try:
+        data = json.loads(arr_match.group(0))
+        if not isinstance(data, list):
+            return []
+        result = []
+        for item in data:
+            if isinstance(item, dict) and "id" in item and "score" in item:
+                try:
+                    result.append({"id": str(item["id"]), "score": float(item["score"])})
+                except (TypeError, ValueError):
+                    pass
+        return result
+    except json.JSONDecodeError as e:
+        logger.warning(f"graph_rag: JSON decode error in scoring: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 helper: batch embed edge descriptions
+# ---------------------------------------------------------------------------
+
+
+async def _batch_embed_edges(descriptions: List[str], tenant_id: str) -> List[List[float]]:
+    """Batch embed edge descriptions via intelligence-docs-service.
+
+    Returns list of embedding vectors (same order as input).
+    Returns empty list on failure.
+    """
+    if not descriptions:
+        return []
+
+    url = f"{settings.text_extraction_service_url}/embed"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                url,
+                json={"texts": descriptions, "task": "retrieval.passage"},
+                headers={
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
+                    "X-Tenant-ID": tenant_id,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+            vectors: List[List[float]] = data.get("embeddings", [])
+
+        if len(vectors) != len(descriptions):
+            logger.warning(
+                f"graph_rag: embed returned {len(vectors)} vectors for {len(descriptions)} descriptions"
+            )
+            return []
+
+        return vectors
+
+    except Exception as e:
+        logger.warning(f"graph_rag: edge embedding failed: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Main tool
+# ---------------------------------------------------------------------------
+
+
+class GraphRAGTool(EmmaTool):
+    """Busca relaciones entre entidades en el grafo de conocimiento.
+
+    6-stage pipeline:
+      1. Entity retrieval via Weaviate TrustGraphEntities
+      2. BFS subgraph expansion via KTS /triples/neighbors
+      3. Label resolution with TTL cache
+      4. Semantic pre-filter (embedding similarity)
+      5. LLM edge scoring
+      6. Markdown context formatting
+    """
+
+    @property
+    def name(self) -> str:
+        return "graph_rag"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Busca relaciones entre entidades en el grafo de conocimiento. "
+            "Útil cuando necesitas entender cómo se relacionan leyes, personas, "
+            "conceptos o documentos entre sí. Devuelve entidades y relaciones relevantes."
+        )
+
+    @property
+    def parameters_schema(self) -> Type[BaseModel]:
+        return GraphRAGInput
+
+    async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
+        if not settings.graph_rag_enabled:
+            return ToolResult(output="", data={}, success=True)
+
+        query: str = arguments["query"]
+        tenant_id: str = context.get("tenant_id", "")
+
+        # ── Stage 1: Entity retrieval ────────────────────────────────────────
+
+        # Re-use concepts computed earlier in the pipeline if available
+        cached_concepts: Optional[ConceptResult] = context.get("_concepts")
+        if cached_concepts is not None:
+            concepts = cached_concepts
+        else:
+            concepts = await extract_concepts(query, tenant_id)
+
+        if not concepts.embeddings:
+            # No embeddings available — cannot do vector entity search
+            return ToolResult(
+                output="No se encontraron entidades en el grafo de conocimiento para esta consulta.",
+                data={},
+                success=True,
+            )
+
+        weaviate_client = get_weaviate_client()
+        kts_client = get_knowledge_tree_client()
+
+        # Search entities by each concept embedding, then deduplicate
+        all_entity_hits: Dict[str, Dict[str, Any]] = {}  # entity_uri → best hit
+
+        for concept, embedding in concepts.embeddings.items():
+            try:
+                hits = await weaviate_client.search_entities_by_embedding(
+                    embedding=embedding,
+                    tenant_id=tenant_id,
+                    limit=settings.graph_rag_entity_limit,
+                )
+                for hit in hits:
+                    uri = hit.get("entity_uri", "")
+                    if not uri:
+                        continue
+                    existing = all_entity_hits.get(uri)
+                    if existing is None or hit.get("score", 0.0) > existing.get("score", 0.0):
+                        all_entity_hits[uri] = hit
+            except Exception as e:
+                logger.warning(f"graph_rag: entity search failed for concept '{concept}': {e}")
+
+        if not all_entity_hits:
+            return ToolResult(
+                output="No se encontraron entidades en el grafo de conocimiento para esta consulta.",
+                data={},
+                success=True,
+            )
+
+        # Sort by score, limit to entity_limit
+        top_entities = sorted(
+            all_entity_hits.values(),
+            key=lambda e: e.get("score", 0.0),
+            reverse=True,
+        )[: settings.graph_rag_entity_limit]
+
+        # ── Stage 2: BFS subgraph ────────────────────────────────────────────
+
+        seed_uris = [e["entity_uri"] for e in top_entities if e.get("entity_uri")]
+
+        try:
+            neighbors_result = await kts_client.batch_neighbors(
+                tenant_id=tenant_id,
+                seed_uris=seed_uris,
+                max_hops=settings.graph_rag_max_hops,
+                max_edges=settings.graph_rag_max_edges,
+            )
+            edges: List[Dict[str, Any]] = neighbors_result.get("edges", [])
+        except Exception as e:
+            logger.warning(f"graph_rag: BFS subgraph failed: {e}")
+            edges = []
+
+        if not edges:
+            # Return just entities even without relationships
+            return _format_entities_only(top_entities)
+
+        # ── Stage 3: Label resolution ────────────────────────────────────────
+
+        cache = _get_label_cache(settings.graph_rag_label_cache_ttl)
+
+        # Collect all unique URIs appearing in edges
+        unique_uris: set = set()
+        for edge in edges:
+            for key in ("subject_uri", "object_uri"):
+                uri = edge.get(key, "")
+                if uri:
+                    unique_uris.add(uri)
+        for e in top_entities:
+            uri = e.get("entity_uri", "")
+            if uri:
+                unique_uris.add(uri)
+
+        labels: Dict[str, str] = {}
+        label_predicate = "nouxcube://predicate/core/label"
+
+        for uri in unique_uris:
+            # 1. Check TTL cache
+            cached_label = cache.get(uri) if hasattr(cache, "get") else None
+            if cached_label is None and uri in cache:
+                cached_label = cache[uri]
+
+            if cached_label is not None:
+                labels[uri] = cached_label
+                continue
+
+            # 2. Try known entity data from Weaviate hits
+            hit = all_entity_hits.get(uri)
+            if hit and hit.get("label"):
+                lbl = hit["label"]
+                cache[uri] = lbl
+                labels[uri] = lbl
+                continue
+
+            # 3. Query KTS for core/label triple
+            try:
+                triple_result = await kts_client.query_triples(
+                    tenant_id=tenant_id,
+                    subject_uri=uri,
+                    predicate_uri=label_predicate,
+                    limit=1,
+                )
+                triples = triple_result.get("triples", [])
+                if triples:
+                    lbl = triples[0].get("object_value", "") or _humanize_uri(uri)
+                else:
+                    lbl = _humanize_uri(uri)
+            except Exception:
+                lbl = _humanize_uri(uri)
+
+            cache[uri] = lbl
+            labels[uri] = lbl
+
+        # ── Stage 4: Semantic pre-filter ─────────────────────────────────────
+
+        # Build edge descriptions
+        edge_descriptions: List[str] = []
+        for edge in edges:
+            s_uri = edge.get("subject_uri", "")
+            p_uri = edge.get("predicate_uri", "")
+            o_uri = edge.get("object_uri", "")
+            s_label = labels.get(s_uri, _humanize_uri(s_uri))
+            p_name = _extract_predicate_name(p_uri)
+            o_label = labels.get(o_uri, _humanize_uri(o_uri))
+            edge_descriptions.append(_build_edge_description(s_label, p_name, o_label))
+
+        # Batch embed descriptions
+        desc_embeddings = await _batch_embed_edges(edge_descriptions, tenant_id)
+
+        if desc_embeddings and concepts.embeddings:
+            # Concept embeddings as list of vectors
+            concept_vectors = list(concepts.embeddings.values())
+
+            # Score each edge by max cosine similarity against any concept embedding
+            scored_edges: List[Tuple[int, float]] = []
+            for idx, desc_vec in enumerate(desc_embeddings):
+                max_sim = max(
+                    _cosine_similarity(desc_vec, cv) for cv in concept_vectors
+                )
+                scored_edges.append((idx, max_sim))
+
+            # Sort by similarity and keep top prefilter_limit
+            scored_edges.sort(key=lambda x: x[1], reverse=True)
+            prefilter_indices = [idx for idx, _ in scored_edges[: settings.graph_rag_prefilter_limit]]
+            filtered_edges = [edges[i] for i in prefilter_indices]
+            filtered_descriptions = [edge_descriptions[i] for i in prefilter_indices]
+        else:
+            # No embeddings available — keep all (up to prefilter_limit)
+            filtered_edges = edges[: settings.graph_rag_prefilter_limit]
+            filtered_descriptions = edge_descriptions[: settings.graph_rag_prefilter_limit]
+
+        if not filtered_edges:
+            return _format_entities_only(top_entities)
+
+        # ── Stage 5: LLM edge scoring ────────────────────────────────────────
+
+        scored_final_edges = await _llm_score_edges(
+            query=query,
+            edges=filtered_edges,
+            descriptions=filtered_descriptions,
+            edge_limit=settings.graph_rag_edge_limit,
+        )
+
+        # ── Stage 6: Context formatting ──────────────────────────────────────
+
+        return _format_context(
+            query=query,
+            top_entities=top_entities,
+            scored_edges=scored_final_edges,
+            labels=labels,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Stage 5: LLM edge scoring
+# ---------------------------------------------------------------------------
+
+
+async def _llm_score_edges(
+    query: str,
+    edges: List[Dict[str, Any]],
+    descriptions: List[str],
+    edge_limit: int,
+) -> List[Dict[str, Any]]:
+    """Call planner LLM with Langfuse prompt to score edges.
+
+    Returns edges sorted by LLM score (top edge_limit).
+    Falls back to returning all edges in original order on any failure.
+    """
+    from langchain_core.messages import SystemMessage, HumanMessage
+
+    # Build edge ID map for scoring
+    edge_id_map: Dict[str, Dict[str, Any]] = {}
+    edge_lines: List[str] = []
+    for edge, desc in zip(edges, descriptions):
+        s = edge.get("subject_uri", "")
+        p = edge.get("predicate_uri", "")
+        o = edge.get("object_uri", "")
+        edge_id = f"{s}@@{p}@@{o}"
+        edge_id_map[edge_id] = edge
+        edge_lines.append(f"{edge_id} | {desc}")
+
+    edges_text = "\n".join(edge_lines)
+    user_content = f"Query: {query}\n\nEdges:\n{edges_text}"
+
+    try:
+        langfuse_client = get_langfuse_prompt_client()
+        prompt_cached = await langfuse_client.get_prompt("trustgraph_edge_scoring")
+        system_content = prompt_cached.content if prompt_cached else (
+            "You are a knowledge graph assistant. "
+            "Score each edge by relevance to the query (0-1). "
+            "Return JSON array: [{\"id\": \"<edge_id>\", \"score\": <float>}]. "
+            "Only return JSON, no other text."
+        )
+
+        model = get_planner_model()
+        response = await model.ainvoke([
+            SystemMessage(content=system_content),
+            HumanMessage(content=user_content),
+        ])
+
+        content = (response.content or "").strip()
+        scored_items = _parse_scoring_json(content)
+
+        if scored_items:
+            # Sort by LLM score descending
+            scored_items.sort(key=lambda x: x["score"], reverse=True)
+            # Reconstruct edge list from IDs
+            result_edges = []
+            for item in scored_items[:edge_limit]:
+                edge = edge_id_map.get(item["id"])
+                if edge is not None:
+                    edge_with_score = dict(edge)
+                    edge_with_score["_llm_score"] = item["score"]
+                    result_edges.append(edge_with_score)
+            if result_edges:
+                return result_edges
+
+    except Exception as e:
+        logger.warning(f"graph_rag: LLM edge scoring failed: {e}")
+
+    # Fallback: return edges as-is (up to edge_limit)
+    for edge in edges[:edge_limit]:
+        if "_llm_score" not in edge:
+            edge["_llm_score"] = 0.5  # neutral fallback score
+    return edges[:edge_limit]
+
+
+# ---------------------------------------------------------------------------
+# Stage 6: Context formatting helpers
+# ---------------------------------------------------------------------------
+
+
+def _format_entities_only(entities: List[Dict[str, Any]]) -> ToolResult:
+    """Format result when we have entities but no edges."""
+    if not entities:
+        return ToolResult(output="", data={}, success=True)
+
+    entity_list = []
+    for e in entities[:10]:
+        entity_list.append({
+            "name": e.get("label", _humanize_uri(e.get("entity_uri", ""))),
+            "type": e.get("entity_type", "entity"),
+            "definition": e.get("definition", ""),
+        })
+
+    output = "## Knowledge Graph Context\n\n### Entities\n"
+    output += json.dumps(entity_list, ensure_ascii=False, indent=2)
+    output += "\n\n### Relationships\nNo se encontraron relaciones relevantes.\n"
+
+    return ToolResult(
+        output=output,
+        data={
+            "entities": entity_list,
+            "expanded_doc_ids": [],
+            "avg_score": 0.0,
+        },
+        success=True,
+    )
+
+
+def _format_context(
+    query: str,
+    top_entities: List[Dict[str, Any]],
+    scored_edges: List[Dict[str, Any]],
+    labels: Dict[str, str],
+) -> ToolResult:
+    """Format final markdown context from entities and scored edges."""
+
+    # Build entity list
+    entity_list = []
+    for e in top_entities[:10]:
+        entity_list.append({
+            "name": e.get("label", _humanize_uri(e.get("entity_uri", ""))),
+            "type": e.get("entity_type", "entity"),
+            "definition": e.get("definition", ""),
+        })
+
+    # Build relationship list
+    relationship_list = []
+    scores = []
+    for edge in scored_edges:
+        s_uri = edge.get("subject_uri", "")
+        p_uri = edge.get("predicate_uri", "")
+        o_uri = edge.get("object_uri", "")
+        score = edge.get("_llm_score", 0.5)
+
+        s_label = labels.get(s_uri, _humanize_uri(s_uri))
+        p_name = _extract_predicate_name(p_uri)
+        o_label = labels.get(o_uri, _humanize_uri(o_uri))
+
+        relationship_list.append({
+            "subject": s_label,
+            "predicate": p_name,
+            "object": o_label,
+            "score": round(score, 4),
+        })
+        scores.append(score)
+
+    avg_score = sum(scores) / len(scores) if scores else 0.0
+
+    # Collect expanded document IDs from edge metadata
+    expanded_doc_ids: List[str] = []
+    for edge in scored_edges:
+        doc_id = edge.get("source_document_id") or edge.get("document_id")
+        if doc_id and doc_id not in expanded_doc_ids:
+            expanded_doc_ids.append(doc_id)
+
+    # Render markdown
+    output = "## Knowledge Graph Context\n\n"
+    output += "### Entities\n"
+    output += json.dumps(entity_list, ensure_ascii=False, indent=2)
+    output += "\n\n### Relationships\n"
+    output += json.dumps(relationship_list, ensure_ascii=False, indent=2)
+    output += "\n"
+
+    return ToolResult(
+        output=output,
+        data={
+            "entities": entity_list,
+            "expanded_doc_ids": expanded_doc_ids,
+            "avg_score": round(avg_score, 4),
+        },
+        success=True,
+    )
