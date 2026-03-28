@@ -7,190 +7,161 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { NODE_COLORS, type ExplainNode, type ExplainLink } from './explainability-theme'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  ENTITY_TYPE_COLORS,
+} from './explainability-theme'
+import type {
+  TrustGraphNode,
+  TrustGraphEdge,
+  EntityProperty,
+  Contradiction,
+} from '@/lib/services/knowledge-tree.service'
 
 interface NodeDetailsDrawerProps {
-  node: ExplainNode | null
-  edges: ExplainLink[]
-  allNodes: ExplainNode[]
+  node: TrustGraphNode | null
+  edges: TrustGraphEdge[]
+  allNodes: TrustGraphNode[]
+  properties: EntityProperty[]
+  contradictions: Contradiction[]
   onClose: () => void
-  onNavigate?: (nodeId: string) => void
-}
-
-const NODE_TYPE_LABELS: Record<string, string> = {
-  entity: 'Entity',
-  document: 'Document',
-  claim: 'Claim',
-  law: 'Law',
-  contradiction: 'Contradiction',
-}
-
-function resolveNodeId(ref: string | ExplainNode): string {
-  return typeof ref === 'string' ? ref : ref.id
+  onNavigate?: (nodeUri: string) => void
 }
 
 export function NodeDetailsDrawer({
   node,
   edges,
   allNodes,
+  properties,
+  contradictions,
   onClose,
   onNavigate,
 }: NodeDetailsDrawerProps) {
   if (!node) return null
 
-  const nodeColor = NODE_COLORS[node.type] ?? '#94a3b8'
-
-  const relatedEdges = edges.filter(
-    (e) => resolveNodeId(e.source) === node.id || resolveNodeId(e.target) === node.id,
-  )
-
+  const nodeColor = ENTITY_TYPE_COLORS[node.type] ?? '#6b7280'
   const nodeMap = new Map(allNodes.map((n) => [n.id, n]))
 
-  const confidence =
-    node.type === 'claim' && typeof node.properties.confidence === 'number'
-      ? (node.properties.confidence as number)
-      : null
-
-  const excerpt =
-    node.type === 'claim' && typeof node.properties.excerpt === 'string'
-      ? (node.properties.excerpt as string)
-      : null
-
-  const properties = Object.entries(node.properties).filter(
-    ([k]) => k !== 'confidence' && k !== 'excerpt',
+  // Edges connected to this node
+  const relatedEdges = edges.filter(
+    (e) => {
+      const sourceId = typeof e.source === 'string' ? e.source : (e.source as any)?.id
+      const targetId = typeof e.target === 'string' ? e.target : (e.target as any)?.id
+      return sourceId === node.id || targetId === node.id
+    },
   )
 
+  // Node contradictions
+  const nodeContradictions = contradictions.filter((c) => c.subject === node.id)
+
   return (
-    <Sheet open={!!node} onOpenChange={(open) => { if (!open) onClose() }}>
-      <SheetContent side="right" className="w-80 sm:max-w-sm overflow-y-auto">
-        <SheetHeader className="pb-2">
+    <Sheet open={!!node} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent side="right" className="w-[400px] sm:w-[480px] overflow-y-auto">
+        <SheetHeader className="pb-4">
           <div className="flex items-center gap-2">
-            <Badge
-              className="border-0 text-white text-xs"
+            <span
+              className="h-3 w-3 rounded-full"
               style={{ backgroundColor: nodeColor }}
-            >
-              {NODE_TYPE_LABELS[node.type] ?? node.type}
+            />
+            <SheetTitle className="text-lg">{node.label}</SheetTitle>
+            <Badge variant="outline" className="text-xs">
+              {node.type}
             </Badge>
           </div>
-          <SheetTitle className="text-base leading-snug break-words mt-1">
-            {node.label}
-          </SheetTitle>
+          {node.definition && (
+            <p className="text-sm text-muted-foreground mt-1">{node.definition}</p>
+          )}
         </SheetHeader>
 
-        <div className="px-4 pb-4 space-y-5">
-          {/* Claim-specific: excerpt + confidence */}
-          {node.type === 'claim' && (excerpt || confidence !== null) && (
-            <div className="space-y-2">
-              {excerpt && (
-                <blockquote className="border-l-2 pl-3 text-sm text-muted-foreground italic leading-relaxed" style={{ borderColor: nodeColor }}>
-                  {excerpt}
-                </blockquote>
-              )}
-              {confidence !== null && (
-                <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Confidence</span>
-                    <span>{Math.round(confidence * 100)}%</span>
-                  </div>
-                  <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all"
-                      style={{ width: `${confidence * 100}%`, backgroundColor: nodeColor }}
+        <Tabs defaultValue="relationships" className="mt-2">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="relationships">
+              Relaciones ({relatedEdges.length})
+            </TabsTrigger>
+            <TabsTrigger value="properties">
+              Propiedades ({properties.length})
+            </TabsTrigger>
+            <TabsTrigger value="contradictions">
+              Conflictos ({nodeContradictions.length})
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Relationships Tab */}
+          <TabsContent value="relationships" className="mt-3 space-y-1">
+            {relatedEdges.length === 0 && (
+              <p className="text-sm text-muted-foreground">Sin relaciones</p>
+            )}
+            {relatedEdges.map((edge) => {
+              const sourceId = typeof edge.source === 'string' ? edge.source : (edge.source as any)?.id
+              const targetId = typeof edge.target === 'string' ? edge.target : (edge.target as any)?.id
+              const isOutgoing = sourceId === node.id
+              const otherUri = isOutgoing ? targetId : sourceId
+              const otherNode = nodeMap.get(otherUri)
+              const otherLabel = otherNode?.label ?? otherUri?.split('/').pop()?.replace(/-/g, ' ') ?? '?'
+
+              return (
+                <div
+                  key={edge.id}
+                  className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-white/5 cursor-pointer"
+                  onClick={() => onNavigate?.(otherUri)}
+                >
+                  <span className="text-xs text-muted-foreground w-4">
+                    {isOutgoing ? '→' : '←'}
+                  </span>
+                  <Badge variant="outline" className="text-[10px] font-mono">
+                    {edge.predicate}
+                  </Badge>
+                  <span className="flex-1 text-sm truncate">{otherLabel}</span>
+                  {otherNode && (
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: ENTITY_TYPE_COLORS[otherNode.type] ?? '#6b7280' }}
                     />
+                  )}
+                </div>
+              )
+            })}
+          </TabsContent>
+
+          {/* Properties Tab */}
+          <TabsContent value="properties" className="mt-3 space-y-1">
+            {properties.length === 0 && (
+              <p className="text-sm text-muted-foreground">Sin propiedades</p>
+            )}
+            {properties.map((prop, i) => (
+              <div key={`${prop.predicate}-${i}`} className="flex items-start gap-2 py-1.5 px-2">
+                <Badge variant="outline" className="text-[10px] font-mono flex-shrink-0 mt-0.5">
+                  {prop.namespace}/{prop.predicate}
+                </Badge>
+                <span className="text-sm flex-1 break-words">{prop.value}</span>
+              </div>
+            ))}
+          </TabsContent>
+
+          {/* Contradictions Tab */}
+          <TabsContent value="contradictions" className="mt-3 space-y-2">
+            {nodeContradictions.length === 0 && (
+              <p className="text-sm text-muted-foreground">Sin conflictos detectados</p>
+            )}
+            {nodeContradictions.map((c, i) => (
+              <div key={`contradiction-${i}`} className="border border-rose-500/30 rounded-md p-3 bg-rose-500/5">
+                <div className="text-xs font-mono text-rose-400 mb-2">{c.predicate}</div>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div>
+                    <div className="text-muted-foreground text-xs mb-1">Valor A</div>
+                    <div>{c.valueA}</div>
+                    {c.sourceA && <div className="text-xs text-muted-foreground mt-1">{c.sourceA}</div>}
+                  </div>
+                  <div>
+                    <div className="text-muted-foreground text-xs mb-1">Valor B</div>
+                    <div>{c.valueB}</div>
+                    {c.sourceB && <div className="text-xs text-muted-foreground mt-1">{c.sourceB}</div>}
                   </div>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Properties table */}
-          {properties.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                Properties
-              </p>
-              <div className="rounded-md border overflow-hidden">
-                <table className="w-full text-xs">
-                  <tbody>
-                    {properties.map(([key, value], i) => (
-                      <tr key={key} className={i % 2 === 0 ? 'bg-muted/40' : ''}>
-                        <td className="px-2 py-1.5 font-medium text-muted-foreground capitalize w-1/3 break-words">
-                          {key.replace(/_/g, ' ')}
-                        </td>
-                        <td className="px-2 py-1.5 text-foreground break-words">
-                          {value === null || value === undefined
-                            ? '—'
-                            : typeof value === 'object'
-                            ? JSON.stringify(value)
-                            : String(value)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
               </div>
-            </div>
-          )}
-
-          {/* Relationships */}
-          {relatedEdges.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
-                Relationships ({relatedEdges.length})
-              </p>
-              <div className="space-y-1">
-                {relatedEdges.map((edge) => {
-                  const isSource = resolveNodeId(edge.source) === node.id
-                  const otherId = isSource
-                    ? resolveNodeId(edge.target)
-                    : resolveNodeId(edge.source)
-                  const otherNode = nodeMap.get(otherId)
-                  const otherColor = otherNode ? NODE_COLORS[otherNode.type] ?? '#94a3b8' : '#94a3b8'
-
-                  return (
-                    <button
-                      key={edge.id}
-                      onClick={() => onNavigate?.(otherId)}
-                      className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent transition-colors group"
-                    >
-                      <span className="shrink-0 text-muted-foreground">
-                        {isSource ? '→' : '←'}
-                      </span>
-                      <Badge
-                        variant="outline"
-                        className="shrink-0 text-[10px] px-1 py-0 h-4"
-                      >
-                        {edge.type}
-                      </Badge>
-                      <span className="truncate flex-1 text-foreground group-hover:text-accent-foreground">
-                        {otherNode?.label ?? otherId}
-                      </span>
-                      {otherNode && (
-                        <span
-                          className="ml-auto shrink-0 h-2 w-2 rounded-full"
-                          style={{ backgroundColor: otherColor }}
-                        />
-                      )}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Node ID */}
-          <div>
-            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
-              ID
-            </p>
-            <p className="text-xs font-mono text-muted-foreground break-all">{node.id}</p>
-          </div>
-
-          <Button variant="outline" size="sm" className="w-full" onClick={onClose}>
-            Close
-          </Button>
-        </div>
+            ))}
+          </TabsContent>
+        </Tabs>
       </SheetContent>
     </Sheet>
   )

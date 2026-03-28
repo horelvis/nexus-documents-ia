@@ -4,12 +4,15 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { IconLoader2 } from '@tabler/icons-react'
 import dynamic from 'next/dynamic'
 import SpriteText from 'three-spritetext'
+import type {
+  TrustGraphNode,
+  TrustGraphEdge,
+} from '@/lib/services/knowledge-tree.service'
 import {
-  ExplainNode,
-  ExplainLink,
-  getNodeColor,
-  getEdgeColor,
-  getNodeSize,
+  getEntityColor,
+  getEntityGlow,
+  getEntityNodeSize,
+  getEdgeStyle,
 } from './explainability-theme'
 
 const ForceGraph3D = dynamic(
@@ -25,10 +28,10 @@ const ForceGraph3D = dynamic(
 )
 
 interface ExplainabilityGraph3DProps {
-  nodes: ExplainNode[]
-  links: ExplainLink[]
+  nodes: TrustGraphNode[]
+  links: TrustGraphEdge[]
   highlightedIds?: Set<string> | null
-  onNodeClick?: (node: ExplainNode) => void
+  onNodeClick?: (node: TrustGraphNode) => void
   focusNodeId?: string | null
   className?: string
   width?: number
@@ -94,13 +97,13 @@ export default function ExplainabilityGraph3D({
   const handleNodeClick = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (node: any) => {
-      if (onNodeClick) onNodeClick(node as ExplainNode)
+      if (onNodeClick) onNodeClick(node as TrustGraphNode)
     },
     [onNodeClick]
   )
 
   const handleBackgroundClick = useCallback(() => {
-    if (onNodeClick) onNodeClick(null as unknown as ExplainNode)
+    if (onNodeClick) onNodeClick(null as unknown as TrustGraphNode)
   }, [onNodeClick])
 
   // Pin node on drag end
@@ -118,11 +121,11 @@ export default function ExplainabilityGraph3D({
   const nodeThreeObject = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (node: any) => {
-      const explainNode = node as ExplainNode
-      const sprite = new SpriteText(explainNode.label)
-      const baseColor = getNodeColor(explainNode)
+      const tgNode = node as TrustGraphNode
+      const sprite = new SpriteText(tgNode.label)
+      const baseColor = getEntityColor(tgNode.type)
       const dimmed =
-        highlightedIds != null && !highlightedIds.has(explainNode.id)
+        highlightedIds != null && !highlightedIds.has(tgNode.id)
 
       sprite.color = dimmed ? '#334155' : baseColor
       sprite.textHeight = dimmed ? 3 : 4
@@ -136,9 +139,9 @@ export default function ExplainabilityGraph3D({
   const nodeColor = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (node: any) => {
-      const explainNode = node as ExplainNode
-      const base = getNodeColor(explainNode)
-      if (highlightedIds != null && !highlightedIds.has(explainNode.id)) {
+      const tgNode = node as TrustGraphNode
+      const base = getEntityColor(tgNode.type)
+      if (highlightedIds != null && !highlightedIds.has(tgNode.id)) {
         return '#1e293b'
       }
       return base
@@ -148,28 +151,28 @@ export default function ExplainabilityGraph3D({
 
   const nodeVal = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (node: any) => getNodeSize(node as ExplainNode),
+    (node: any) => getEntityNodeSize((node as TrustGraphNode).connectionCount),
     []
   )
 
   const linkColor = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any) => {
-      const explainLink = link as ExplainLink
+      const tgLink = link as TrustGraphEdge
       if (highlightedIds != null) {
         const srcId =
-          typeof explainLink.source === 'string'
-            ? explainLink.source
-            : (explainLink.source as ExplainNode).id
+          typeof tgLink.source === 'string'
+            ? tgLink.source
+            : (tgLink.source as any)?.id
         const tgtId =
-          typeof explainLink.target === 'string'
-            ? explainLink.target
-            : (explainLink.target as ExplainNode).id
+          typeof tgLink.target === 'string'
+            ? tgLink.target
+            : (tgLink.target as any)?.id
         if (!highlightedIds.has(srcId) || !highlightedIds.has(tgtId)) {
           return '#1e293b'
         }
       }
-      return getEdgeColor(explainLink)
+      return getEdgeStyle(tgLink.namespace).color
     },
     [highlightedIds]
   )
@@ -180,8 +183,8 @@ export default function ExplainabilityGraph3D({
   const linkThreeObject = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any) => {
-      const explainLink = link as ExplainLink
-      const sprite = new SpriteText(explainLink.type)
+      const tgLink = link as TrustGraphEdge
+      const sprite = new SpriteText(tgLink.predicate.replace(/-/g, ' '))
       sprite.color = '#94a3b8'
       sprite.textHeight = 2.5
       sprite.backgroundColor = 'rgba(7,9,15,0.6)'
@@ -241,7 +244,9 @@ export default function ExplainabilityGraph3D({
         width={dimensions.width}
         height={dimensions.height}
         backgroundColor="#07090f"
-        nodeLabel="label"
+        nodeLabel={(node: any) =>
+          `${(node as TrustGraphNode).label} (${(node as TrustGraphNode).type})${(node as TrustGraphNode).definition ? '\n' + (node as TrustGraphNode).definition : ''}`
+        }
         nodeVal={nodeVal}
         nodeColor={nodeColor}
         nodeThreeObject={nodeThreeObject}
@@ -256,8 +261,9 @@ export default function ExplainabilityGraph3D({
         linkThreeObject={linkThreeObject}
         linkThreeObjectExtend={linkThreeObjectExtend}
         linkPositionUpdate={linkPositionUpdate}
-        linkOpacity={0.4}
-        linkWidth={0.3}
+        linkOpacity={0.7}
+        linkWidth={(link: any) => getEdgeStyle((link as TrustGraphEdge).namespace).width * 0.3}
+        linkLabel={(link: any) => (link as TrustGraphEdge).predicate.replace(/-/g, ' ')}
         onEngineStop={handleEngineStop}
       />
       )}

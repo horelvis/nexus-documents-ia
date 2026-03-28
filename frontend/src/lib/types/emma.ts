@@ -385,6 +385,8 @@ export interface EmmaMessage {
     explanation?: string
     // Raw reasoning steps for ActivityTimeline
     rawReasoningSteps?: Array<{ type: string; content: string; source?: string }>
+    // Entity tags extracted from graph_rag tool results
+    entityTags?: Array<{ uri: string; label: string; type: string }>
   }
   suggestions?: string[]
   isStreaming?: boolean

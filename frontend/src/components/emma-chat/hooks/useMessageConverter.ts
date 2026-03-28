@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { Message as SDKMessage } from '@langchain/langgraph-sdk'
 import type { EmmaMessage, DocumentInfo } from '@/lib/types/emma'
+import type { EntityTag } from '../EntityTags'
 import type { EmmaStateType } from '../EmmaStreamProvider'
 import { isHITLReview, isClarification } from '../types/interrupts'
 
@@ -101,6 +102,46 @@ function formatResumeMessage(content: string): string | null {
   }
 
   return null
+}
+
+/**
+ * Extract entity tags from reasoning_steps that contain graph_rag results.
+ * The graph_rag tool output includes a JSON entity list in markdown format:
+ *   ### Entities
+ *   [{"name": "...", "type": "...", "definition": "..."}]
+ *
+ * We parse these to create clickable entity tags.
+ */
+function extractEntityTags(reasoningSteps: Array<{ type: string; content: string; source?: string }>): EntityTag[] {
+  const entities: EntityTag[] = []
+  const seen = new Set<string>()
+
+  for (const step of reasoningSteps) {
+    // Look for graph_rag tool results that contain entity JSON
+    if (step.content && step.content.includes('Knowledge Graph Context')) {
+      const entityMatch = step.content.match(/### Entities\s*\n(\[[\s\S]*?\])\s*\n/)
+      if (entityMatch) {
+        try {
+          const parsed = JSON.parse(entityMatch[1]) as Array<{ name: string; type: string; definition?: string }>
+          for (const entity of parsed.slice(0, 8)) {
+            const uri = entity.name.toLowerCase().replace(/\s+/g, '-')
+            if (!seen.has(uri)) {
+              seen.add(uri)
+              entities.push({
+                uri: `nouxcube://entity/${uri}`,
+                label: entity.name,
+                type: entity.type || 'other',
+              })
+            }
+          }
+        } catch {
+          // JSON parse failed — skip
+        }
+      }
+    }
+  }
+
+  return entities
 }
 
 export function useMessageConverter(
@@ -217,12 +258,16 @@ export function useMessageConverter(
       }
     }
 
+    // Extract entity tags from graph_rag tool results in reasoning steps
+    const entityTags = extractEntityTags(reasoningSteps as Array<{ type: string; content: string; source?: string }>)
+
     const hasMetadata = reasoningSteps.length > 0 || sources.length > 0 || explanation
 
     if (hasMetadata) {
       const stepsMetadata: EmmaMessage['metadata'] = {
         slmIsThinking: !success && reasoningSteps.length > 0,
         rawReasoningSteps: reasoningSteps,
+        entityTags: entityTags.length > 0 ? entityTags : undefined,
       }
 
       if (explanation) {

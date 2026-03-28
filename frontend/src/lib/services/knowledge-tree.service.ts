@@ -88,6 +88,60 @@ export interface OntologyHierarchy {
 
 export type GraphViewMode = "unified" | "legal"
 
+// ── TrustGraph Phase 2 Types ──
+
+export interface Triple {
+  subject: string
+  predicate: string
+  object: string
+  object_type: 'node' | 'literal'
+  extraction_method?: string
+  source_chunk?: string
+}
+
+export interface TripleNeighborsResponse {
+  edges: Triple[]
+  entities_visited: number
+  hops_used: number
+}
+
+export interface TrustGraphNode {
+  id: string              // entity URI
+  label: string           // from core/label triple
+  type: string            // from core/type: "law", "person", "organization"
+  definition?: string     // from core/definition
+  connectionCount: number // degree centrality
+  // ForceGraph3D adds these at runtime during simulation
+  x?: number; y?: number; z?: number
+  fx?: number; fy?: number; fz?: number
+}
+
+export interface TrustGraphEdge {
+  id: string              // hash: s@@p@@o
+  source: string          // subject URI
+  target: string          // object URI
+  predicate: string       // last segment: "regulado-por"
+  namespace: string       // "core", "legal"
+  weight: number          // 1.0 default or edge score
+}
+
+export interface EntityProperty {
+  predicate: string
+  namespace: string
+  value: string
+  extractionMethod?: string
+  sourceDocument?: string
+}
+
+export interface Contradiction {
+  subject: string
+  predicate: string
+  valueA: string
+  valueB: string
+  sourceA?: string
+  sourceB?: string
+}
+
 // ── Node type helpers ──
 
 export type NodeKind = "document" | "person" | "law" | "entity_type" | "memory" | "folder" | "unknown"
@@ -170,4 +224,181 @@ export const knowledgeTreeApi = {
   async getDocumentContext(documentId: string) {
     return apiClient.get<unknown>(`${BASE}/ontology/document-context/${documentId}`)
   },
+
+  // ── TrustGraph Phase 2 ──
+
+  /** POST /triples/neighbors — BFS subgraph via triple store */
+  async getTripleNeighbors(
+    tenantId: string,
+    seedUris: string[],
+    maxHops: number = 2,
+    maxEdges: number = 150,
+  ): Promise<TripleNeighborsResponse> {
+    try {
+      const response = await apiClient.post<TripleNeighborsResponse>(
+        `${BASE}/triples/neighbors`,
+        {
+          tenant_id: tenantId,
+          seed_uris: seedUris,
+          max_hops: maxHops,
+          max_edges: maxEdges,
+          exclude_predicates: ['prov/.*'],
+        },
+      )
+      return response.data ?? { edges: [], entities_visited: 0, hops_used: 0 }
+    } catch (error) {
+      console.error('Triple neighbors failed:', error)
+      return { edges: [], entities_visited: 0, hops_used: 0 }
+    }
+  },
+
+  /** POST /triples/query — Get all triples for a specific entity */
+  async getEntityTriples(
+    tenantId: string,
+    entityUri: string,
+  ): Promise<Triple[]> {
+    try {
+      const response = await apiClient.post<{ triples: Triple[] }>(
+        `${BASE}/triples/query`,
+        { tenant_id: tenantId, subject_uri: entityUri, limit: 100 },
+      )
+      return response.data?.triples ?? []
+    } catch (error) {
+      console.error('Entity triples failed:', error)
+      return []
+    }
+  },
+}
+
+// ── TrustGraph data transformation ──
+
+/**
+ * Transform raw triples into force graph data.
+ * Node→Node edges go into the graph; Node→Literal become properties.
+ */
+export function buildTrustGraphData(triples: Triple[]): {
+  nodes: TrustGraphNode[]
+  edges: TrustGraphEdge[]
+  properties: Map<string, EntityProperty[]>
+  contradictions: Contradiction[]
+} {
+  const nodeMap = new Map<string, TrustGraphNode>()
+  const edges: TrustGraphEdge[] = []
+  const properties = new Map<string, EntityProperty[]>()
+
+  for (const triple of triples) {
+    const predicateSegments = triple.predicate.split('/')
+    const predicateName = predicateSegments.pop() ?? triple.predicate
+    const namespace = predicateSegments.pop() ?? 'core'
+
+    // Skip prov/*
+    if (namespace === 'prov') continue
+
+    if (triple.object_type === 'literal') {
+      // Node→Literal: store as property
+      const props = properties.get(triple.subject) ?? []
+      props.push({
+        predicate: predicateName,
+        namespace,
+        value: triple.object,
+        extractionMethod: triple.extraction_method,
+        sourceDocument: triple.source_chunk,
+      })
+      properties.set(triple.subject, props)
+
+      // Ensure subject node exists
+      if (!nodeMap.has(triple.subject)) {
+        nodeMap.set(triple.subject, {
+          id: triple.subject,
+          label: '',
+          type: 'other',
+          connectionCount: 0,
+        })
+      }
+      continue
+    }
+
+    // Node→Node: force graph edge
+    if (!nodeMap.has(triple.subject)) {
+      nodeMap.set(triple.subject, {
+        id: triple.subject,
+        label: '',
+        type: 'other',
+        connectionCount: 0,
+      })
+    }
+    if (!nodeMap.has(triple.object)) {
+      nodeMap.set(triple.object, {
+        id: triple.object,
+        label: '',
+        type: 'other',
+        connectionCount: 0,
+      })
+    }
+
+    nodeMap.get(triple.subject)!.connectionCount++
+    nodeMap.get(triple.object)!.connectionCount++
+
+    const edgeId = `${triple.subject}@@${triple.predicate}@@${triple.object}`
+    edges.push({
+      id: edgeId,
+      source: triple.subject,
+      target: triple.object,
+      predicate: predicateName,
+      namespace,
+      weight: 1.0,
+    })
+  }
+
+  // Resolve labels and types from properties
+  for (const [uri, node] of nodeMap) {
+    const props = properties.get(uri) ?? []
+    const labelProp = props.find(p => p.predicate === 'label')
+    const typeProp = props.find(p => p.predicate === 'type')
+    const defProp = props.find(p => p.predicate === 'definition')
+
+    if (labelProp) node.label = labelProp.value
+    if (typeProp) node.type = typeProp.value
+    if (defProp) node.definition = defProp.value
+
+    // Fallback: humanize URI
+    if (!node.label) {
+      node.label = uri.split('/').pop()?.replace(/-/g, ' ') ?? uri
+      node.label = node.label.replace(/\b\w/g, c => c.toUpperCase())
+    }
+  }
+
+  // Detect contradictions: same subject+predicate with different literal values
+  const contradictions: Contradiction[] = []
+  for (const [uri, props] of properties) {
+    const grouped = new Map<string, EntityProperty[]>()
+    for (const prop of props) {
+      const key = prop.predicate
+      const group = grouped.get(key) ?? []
+      group.push(prop)
+      grouped.set(key, group)
+    }
+    for (const [predicate, group] of grouped) {
+      if (group.length >= 2) {
+        const uniqueValues = [...new Set(group.map(p => p.value))]
+        if (uniqueValues.length >= 2) {
+          contradictions.push({
+            subject: uri,
+            predicate,
+            valueA: uniqueValues[0],
+            valueB: uniqueValues[1],
+            sourceA: group[0].sourceDocument,
+            sourceB: group[1].sourceDocument,
+          })
+        }
+      }
+    }
+  }
+
+  return {
+    nodes: Array.from(nodeMap.values()),
+    edges,
+    properties,
+    contradictions,
+  }
 }

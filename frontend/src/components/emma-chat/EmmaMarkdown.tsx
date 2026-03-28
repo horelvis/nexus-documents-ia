@@ -4,6 +4,66 @@ import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
+import {
+  IconBrain,
+  IconEye,
+  IconCircleCheck,
+  IconShield,
+} from '@tabler/icons-react'
+
+// ── Message type badge config ──
+
+const MESSAGE_TYPE_BADGES: Record<string, {
+  label: string
+  icon: typeof IconBrain
+  color: string
+  bgColor: string
+}> = {
+  agent_reasoning: {
+    label: 'Pensando',
+    icon: IconBrain,
+    color: 'text-blue-400',
+    bgColor: 'bg-blue-500/10 border-blue-500/20',
+  },
+  tool_call: {
+    label: 'Observando',
+    icon: IconEye,
+    color: 'text-amber-400',
+    bgColor: 'bg-amber-500/10 border-amber-500/20',
+  },
+  tool_result: {
+    label: 'Observando',
+    icon: IconEye,
+    color: 'text-amber-400',
+    bgColor: 'bg-amber-500/10 border-amber-500/20',
+  },
+  final_answer: {
+    label: 'Respuesta',
+    icon: IconCircleCheck,
+    color: 'text-emerald-400',
+    bgColor: 'bg-emerald-500/10 border-emerald-500/20',
+  },
+  claim_verification: {
+    label: 'Verificando',
+    icon: IconShield,
+    color: 'text-violet-400',
+    bgColor: 'bg-violet-500/10 border-violet-500/20',
+  },
+}
+
+function MessageTypeBadge({ type }: { type?: string }) {
+  if (!type) return null
+  const config = MESSAGE_TYPE_BADGES[type]
+  if (!config) return null
+
+  const Icon = config.icon
+  return (
+    <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs border ${config.bgColor} ${config.color} mb-2`}>
+      <Icon size={12} />
+      <span>{config.label}</span>
+    </div>
+  )
+}
 
 interface EmmaMarkdownProps {
   content: string
@@ -11,6 +71,8 @@ interface EmmaMarkdownProps {
   /** Force light-mode colors (dark text on white background) regardless of theme.
    *  Uses @tailwindcss/typography prose classes for clean document rendering. */
   forceLight?: boolean
+  /** SSE event type to display as a badge (agent_reasoning, tool_call, etc.) */
+  messageType?: string
 }
 
 /**
@@ -20,7 +82,7 @@ interface EmmaMarkdownProps {
  * - Document preview (forceLight): full @tailwindcss/typography prose for
  *   a clean, print-like rendering on a white background.
  */
-export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className, forceLight }: EmmaMarkdownProps) {
+export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className, forceLight, messageType }: EmmaMarkdownProps) {
   if (!content) return null
 
   // ── Document preview mode: use prose for clean typography ──
@@ -37,6 +99,7 @@ export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className, for
   // ── Chat mode: custom styles that inherit theme tokens ──
   return (
     <div className={cn('max-w-none text-sm leading-relaxed text-foreground/90', className)}>
+      <MessageTypeBadge type={messageType} />
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
