@@ -111,6 +111,27 @@ class StructuralIndexResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Batch neighbors (BFS subgraph traversal)
+# ---------------------------------------------------------------------------
+
+
+class BatchNeighborsRequest(BaseModel):
+    tenant_id: str
+    seed_uris: List[str] = Field(..., min_length=1)
+    collection: Optional[str] = None
+    max_hops: int = Field(default=2, ge=1, le=5)
+    max_edges: int = Field(default=150, ge=1, le=500)
+    exclude_predicates: List[str] = Field(default_factory=list)
+
+
+class BatchNeighborsResponse(BaseModel):
+    edges: List[TripleResult]
+    entities_visited: int
+    hops_used: int
+    count: int
+
+
+# ---------------------------------------------------------------------------
 # Reindex
 # ---------------------------------------------------------------------------
 

@@ -14,6 +14,8 @@ from app.services.falkordb_client import falkordb_client
 from app.services.triple_query import TripleQuery
 from app.services.triple_store import TripleStore
 from app.schemas.triples import (
+    BatchNeighborsRequest,
+    BatchNeighborsResponse,
     ContextRequest,
     ContextResponse,
     StatsResponse,
@@ -89,6 +91,37 @@ async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
 
     triples = [TripleResult(**row) for row in rows]
     return TripleQueryResponse(triples=triples, count=len(triples))
+
+
+@router.post("/neighbors", response_model=BatchNeighborsResponse)
+async def batch_neighbors(request: BatchNeighborsRequest) -> BatchNeighborsResponse:
+    """BFS subgraph traversal from one or more seed entity URIs.
+
+    Expands outgoing Node→Node edges hop by hop, up to max_hops rounds,
+    collecting at most max_edges triples total.  Predicates matching any
+    pattern in exclude_predicates (regex) are omitted from the result.
+
+    Useful for Graph RAG — replaces N individual /triples/query calls with
+    a single batched operation.
+    """
+    tq = TripleQuery(falkordb_client)
+
+    result = await tq.batch_neighbors(
+        seed_uris=request.seed_uris,
+        user=request.tenant_id,
+        collection=request.collection,
+        max_hops=request.max_hops,
+        max_edges=request.max_edges,
+        exclude_predicates=request.exclude_predicates,
+    )
+
+    edges = [TripleResult(**e) for e in result["edges"]]
+    return BatchNeighborsResponse(
+        edges=edges,
+        entities_visited=result["entities_visited"],
+        hops_used=result["hops_used"],
+        count=len(edges),
+    )
 
 
 @router.post("/context", response_model=ContextResponse)

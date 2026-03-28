@@ -9,6 +9,7 @@ and optional `collection` scope.
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from app.services.falkordb_client import FalkorDBClient
@@ -283,6 +284,110 @@ class TripleQuery:
         }
         rows = await self._client.execute_cypher(query, params=params)
         return [{"uri": r.get("uri")} for r in rows if r.get("uri")]
+
+    # ------------------------------------------------------------------
+    # batch_neighbors  (BFS subgraph traversal)
+    # ------------------------------------------------------------------
+
+    async def batch_neighbors(
+        self,
+        seed_uris: List[str],
+        user: str,
+        collection: Optional[str] = None,
+        max_hops: int = 2,
+        max_edges: int = 150,
+        exclude_predicates: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """BFS subgraph traversal starting from seed_uris.
+
+        At each hop, queries all frontier nodes in a single UNWIND query.
+        Only Node→Node edges are traversed (Literal leaves are excluded).
+        Predicates matching any pattern in exclude_predicates (regex) are
+        dropped.  ``core/label`` predicates are always skipped as they are
+        resolved separately.
+
+        Returns a dict with:
+          - edges: list of canonical triple dicts (subject, predicate,
+                   object, object_type, extraction_method, source_chunk)
+          - entities_visited: number of unique node URIs expanded
+          - hops_used: number of BFS rounds actually executed
+        """
+        if not seed_uris:
+            return {"edges": [], "entities_visited": 0, "hops_used": 0}
+
+        # Compile exclude patterns once
+        _exclude_compiled: List[re.Pattern] = []
+        for pat in (exclude_predicates or []):
+            try:
+                _exclude_compiled.append(re.compile(pat))
+            except re.error:
+                logger.warning("batch_neighbors: invalid exclude pattern %r", pat)
+
+        # Always skip core/label — resolved separately
+        _LABEL_SUFFIX = "/core/label"
+
+        def _is_excluded(predicate_uri: str) -> bool:
+            if predicate_uri and predicate_uri.endswith(_LABEL_SUFFIX):
+                return True
+            for pat in _exclude_compiled:
+                if pat.search(predicate_uri or ""):
+                    return True
+            return False
+
+        col_filter = _col_where("s", collection)
+
+        all_edges: List[Dict[str, Any]] = []
+        visited: set = set(seed_uris)
+        frontier: List[str] = list(seed_uris)
+        hops_used = 0
+
+        for _hop in range(max_hops):
+            if not frontier:
+                break
+            if len(all_edges) >= max_edges:
+                break
+
+            # Single UNWIND query for the entire frontier
+            query = (
+                "UNWIND $frontier AS seed_uri "
+                "MATCH (s:Node {uri: seed_uri, user: $user})"
+                "-[r:Rel]->(o:Node) "
+                f"WHERE o.user = $user{col_filter} "
+                "RETURN s.uri AS subject, r.uri AS predicate, "
+                "o.uri AS object, 'node' AS object_type, "
+                "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk"
+            )
+            params = self._base_params(user, collection, frontier=frontier)
+            rows = await self._client.execute_cypher(query, params=params)
+
+            new_frontier: List[str] = []
+            hop_had_results = False
+
+            for row in rows:
+                if len(all_edges) >= max_edges:
+                    break
+                predicate = row.get("predicate") or ""
+                if _is_excluded(predicate):
+                    continue
+                triple = self._row_to_triple(row)
+                all_edges.append(triple)
+                hop_had_results = True
+
+                obj_uri = row.get("object")
+                if obj_uri and obj_uri not in visited:
+                    visited.add(obj_uri)
+                    new_frontier.append(obj_uri)
+
+            if hop_had_results:
+                hops_used += 1
+
+            frontier = new_frontier
+
+        return {
+            "edges": all_edges,
+            "entities_visited": len(visited) - len(seed_uris),
+            "hops_used": hops_used,
+        }
 
     # ------------------------------------------------------------------
     # get_stats
