@@ -1000,6 +1000,44 @@ async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
+async def _check_graph_rag_entity_retrieval(tenant_id: str) -> Dict[str, Any]:
+    """Verify Weaviate TrustGraphEntities returns results."""
+    t0 = time.time()
+    try:
+        from app.clients.weaviate_client import get_weaviate_client
+        client = get_weaviate_client()
+        results = await client.search_entities(
+            query="test", tenant_id=tenant_id, limit=1,
+        )
+        ms = (time.time() - t0) * 1000
+        if isinstance(results, list):
+            return _ok(ms, f"entity_count={len(results)}")
+        return _fail(ms, f"unexpected result type: {type(results).__name__}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_graph_rag_subgraph_traversal(tenant_id: str) -> Dict[str, Any]:
+    """Verify KTS /triples/neighbors returns valid response."""
+    t0 = time.time()
+    try:
+        from app.clients.knowledge_tree_client import get_knowledge_tree_client
+        client = get_knowledge_tree_client()
+        result = await client.batch_neighbors(
+            tenant_id=tenant_id,
+            seed_uris=["nouxcube://entity/default/test"],
+            max_hops=1,
+            max_edges=5,
+        )
+        ms = (time.time() - t0) * 1000
+        has_keys = "edges" in result and "entities_visited" in result
+        if has_keys:
+            return _ok(ms, "subgraph traversal OK")
+        return _fail(ms, f"missing keys in response: {list(result.keys())}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
 async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
     """Run all Tier 3 E2E pipeline checks (sequential — they use LLM)."""
     t0 = time.time()
@@ -1026,6 +1064,8 @@ async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
         ("multi_turn_step_reset", _check_multi_turn_step_reset(tenant_id)),
         ("knowledge_tree_integrity", _check_knowledge_tree_integrity(tenant_id)),
         ("multi_turn_pipeline", _check_multi_turn_pipeline(tenant_id)),
+        ("graph_rag_entity_retrieval", _check_graph_rag_entity_retrieval(tenant_id)),
+        ("graph_rag_subgraph_traversal", _check_graph_rag_subgraph_traversal(tenant_id)),
     ]:
         try:
             checks[name] = await asyncio.wait_for(coro, timeout=30)
