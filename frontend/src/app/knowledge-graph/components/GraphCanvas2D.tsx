@@ -341,6 +341,7 @@ export function GraphCanvas2D({
 
           {/* Edges — gradient Bézier curves */}
           {links.map((link, i) => {
+            const edgeKey = `edge-${i}`
             const srcId = typeof link.source === 'string' ? link.source : (link.source as any)?.id
             const tgtId = typeof link.target === 'string' ? link.target : (link.target as any)?.id
             const from = nodeMap.get(srcId)
@@ -364,7 +365,7 @@ export function GraphCanvas2D({
             const gradId = `grad-${i}`
 
             return (
-              <g key={link.id}>
+              <g key={edgeKey}>
                 <defs>
                   <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
                     <stop offset="0%" stopColor={from.color} stopOpacity={alpha} />
