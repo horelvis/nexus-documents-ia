@@ -3176,6 +3176,222 @@ class WeaviateService:
 
         return await self.search_documents(collection_name, search_request)
 
+    # =========================================================================
+    # TrustGraph Entities Collection — entity embeddings for Graph RAG
+    # =========================================================================
+
+    TRUSTGRAPH_ENTITIES_COLLECTION = "TrustGraphEntities"
+
+    async def ensure_trustgraph_entities_collection(self) -> bool:
+        """Create TrustGraphEntities collection if it does not already exist.
+
+        Returns True if the collection is available (created or pre-existing).
+        """
+        collection_name = self.TRUSTGRAPH_ENTITIES_COLLECTION
+        try:
+            existing = self.client.collections.list_all()
+            if collection_name in existing:
+                logger.info(f"Collection {collection_name} already exists")
+                return True
+
+            dims = getattr(settings, "embedding_dimensions", 1024)
+
+            self.client.collections.create(
+                name=collection_name,
+                description="Entity embeddings for TrustGraph Graph RAG (Phase 2)",
+                vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
+                vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
+                    distance_metric=weaviate.classes.config.VectorDistances.COSINE,
+                ),
+                properties=[
+                    weaviate.classes.config.Property(
+                        name="entity_uri",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="FalkorDB URI (e.g. nouxcube://entity/…)",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="label",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Human-readable entity label",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="definition",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Definition or description of the entity",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="entity_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Entity type / class (Person, Organization, …)",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="tenant_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Tenant that owns this entity embedding",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="collection",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Source Weaviate collection the entity was extracted from",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="embed_text",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Raw text that was embedded (label + definition)",
+                    ),
+                ],
+            )
+            logger.info(f"Created collection {collection_name} ({dims} dims, cosine HNSW)")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to ensure {collection_name} collection: {e}")
+            return False
+
+    async def search_trustgraph_entities(
+        self,
+        query_embedding: List[float],
+        tenant_id: str,
+        collection: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Vector similarity search over TrustGraphEntities.
+
+        Args:
+            query_embedding: Pre-computed query vector.
+            tenant_id: Tenant scope for the search.
+            collection: Optional Weaviate collection filter.
+            limit: Maximum number of results.
+
+        Returns:
+            List of entity dicts with score = 1.0 - cosine_distance.
+        """
+        try:
+            col = self.client.collections.get(self.TRUSTGRAPH_ENTITIES_COLLECTION)
+
+            # Build filter
+            tenant_filter = weaviate.classes.query.Filter.by_property("tenant_id").equal(tenant_id)
+            combined_filter = tenant_filter
+            if collection:
+                col_filter = weaviate.classes.query.Filter.by_property("collection").equal(collection)
+                combined_filter = tenant_filter & col_filter
+
+            response = col.query.near_vector(
+                near_vector=query_embedding,
+                limit=limit,
+                filters=combined_filter,
+                return_metadata=weaviate.classes.query.MetadataQuery(distance=True),
+            )
+
+            results = []
+            for obj in response.objects:
+                distance = obj.metadata.distance if obj.metadata else None
+                score = (1.0 - distance) if distance is not None else None
+                results.append(
+                    {
+                        "entity_uri": obj.properties.get("entity_uri"),
+                        "label": obj.properties.get("label"),
+                        "definition": obj.properties.get("definition"),
+                        "entity_type": obj.properties.get("entity_type"),
+                        "score": score,
+                    }
+                )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to search TrustGraphEntities: {e}")
+            return []
+
+    async def upsert_trustgraph_entities_batch(
+        self,
+        entities: List[Dict[str, Any]],
+        embeddings: List[List[float]],
+        tenant_id: str,
+    ) -> int:
+        """Batch upsert entity embeddings into TrustGraphEntities.
+
+        Args:
+            entities: List of entity dicts (entity_uri, label, definition,
+                      entity_type, collection).
+            embeddings: Parallel list of embedding vectors.
+            tenant_id: Tenant identifier.
+
+        Returns:
+            Number of objects successfully inserted.
+        """
+        try:
+            await self.ensure_trustgraph_entities_collection()
+            col = self.client.collections.get(self.TRUSTGRAPH_ENTITIES_COLLECTION)
+
+            batch_objects = []
+            for entity, vector in zip(entities, embeddings):
+                embed_text = f"{entity.get('label', '')} {entity.get('definition', '')}".strip()
+                props = {
+                    "entity_uri": entity.get("entity_uri", ""),
+                    "label": entity.get("label", ""),
+                    "definition": entity.get("definition", ""),
+                    "entity_type": entity.get("entity_type", ""),
+                    "tenant_id": tenant_id,
+                    "collection": entity.get("collection", ""),
+                    "embed_text": embed_text,
+                }
+                obj_uuid = str(uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"{tenant_id}:{entity.get('entity_uri', embed_text)}",
+                ))
+                batch_objects.append(
+                    weaviate.classes.data.DataObject(
+                        properties=props,
+                        uuid=obj_uuid,
+                        vector=vector,
+                    )
+                )
+
+            if not batch_objects:
+                return 0
+
+            col.data.insert_many(batch_objects)
+            logger.info(
+                f"Upserted {len(batch_objects)} TrustGraphEntities for tenant {tenant_id}"
+            )
+            return len(batch_objects)
+
+        except Exception as e:
+            logger.error(f"Failed to batch-upsert TrustGraphEntities: {e}")
+            raise
+
+    async def delete_trustgraph_entities(self, tenant_id: str) -> int:
+        """Delete all TrustGraphEntities for a given tenant.
+
+        Args:
+            tenant_id: Tenant whose entities should be removed.
+
+        Returns:
+            Number of deleted objects.
+        """
+        try:
+            col = self.client.collections.get(self.TRUSTGRAPH_ENTITIES_COLLECTION)
+
+            response = col.query.fetch_objects(
+                filters=weaviate.classes.query.Filter.by_property("tenant_id").equal(tenant_id),
+                limit=10_000,
+            )
+
+            deleted = 0
+            for obj in response.objects:
+                col.data.delete_by_id(obj.uuid)
+                deleted += 1
+
+            logger.info(
+                f"Deleted {deleted} TrustGraphEntities for tenant {tenant_id}"
+            )
+            return deleted
+
+        except Exception as e:
+            logger.error(f"Failed to delete TrustGraphEntities for tenant {tenant_id}: {e}")
+            raise
+
     async def health_check(self) -> Dict[str, Any]:
         """Check Weaviate service health"""
         try:

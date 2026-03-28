@@ -1784,3 +1784,136 @@ async def get_collection_stats(
             "error": str(e),
             "status": "error",
         }
+
+
+# ============================================================================
+# TrustGraph Entity Embeddings — Graph RAG Phase 2
+# ============================================================================
+
+class EntitySearchRequest(BaseModel):
+    """Search TrustGraphEntities by text query (embedding generated server-side)."""
+    query: str
+    tenant_id: str
+    collection: Optional[str] = None
+    limit: int = 50
+
+
+class EntitySearchByEmbeddingRequest(BaseModel):
+    """Search TrustGraphEntities by pre-computed embedding."""
+    query_embedding: List[float]
+    tenant_id: str
+    collection: Optional[str] = None
+    limit: int = 50
+
+
+class EntityBatchUpsertRequest(BaseModel):
+    """Batch upsert entities with their embeddings."""
+    entities: List[Dict[str, Any]]
+    embeddings: List[List[float]]
+    tenant_id: str
+
+
+@router.post("/entities/search")
+async def search_entities(
+    request: EntitySearchRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Search TrustGraphEntities by text query.
+
+    Embeds the query using intelligence-docs-service (BGE-M3) and performs
+    cosine similarity search over the TrustGraphEntities collection.
+    """
+    try:
+        from app.services.weaviate_service import generate_embedding
+
+        query_embedding = await generate_embedding(request.query, task="retrieval.query")
+        if not query_embedding:
+            raise HTTPException(status_code=503, detail="Embedding service unavailable")
+
+        entities = await weaviate_service.search_trustgraph_entities(
+            query_embedding=query_embedding,
+            tenant_id=request.tenant_id,
+            collection=request.collection,
+            limit=request.limit,
+        )
+        return {"entities": entities, "count": len(entities)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Entity search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/entities/search-by-embedding")
+async def search_entities_by_embedding(
+    request: EntitySearchByEmbeddingRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Search TrustGraphEntities by pre-computed embedding.
+
+    Skips the embedding step — caller supplies the vector directly.
+    Useful when the query has already been embedded upstream.
+    """
+    try:
+        entities = await weaviate_service.search_trustgraph_entities(
+            query_embedding=request.query_embedding,
+            tenant_id=request.tenant_id,
+            collection=request.collection,
+            limit=request.limit,
+        )
+        return {"entities": entities, "count": len(entities)}
+
+    except Exception as e:
+        logger.error(f"Entity search-by-embedding failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/entities/batch-upsert")
+async def batch_upsert_entities(
+    request: EntityBatchUpsertRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Batch upsert TrustGraph entity embeddings.
+
+    Inserts or replaces entity vectors in the TrustGraphEntities collection.
+    Each entity in the list must have a parallel embedding vector at the same
+    index.
+    """
+    try:
+        if len(request.entities) != len(request.embeddings):
+            raise HTTPException(
+                status_code=422,
+                detail="entities and embeddings must have the same length",
+            )
+
+        count = await weaviate_service.upsert_trustgraph_entities_batch(
+            entities=request.entities,
+            embeddings=request.embeddings,
+            tenant_id=request.tenant_id,
+        )
+        return {"count": count}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Entity batch-upsert failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/entities/delete")
+async def delete_entities(
+    tenant_id: str = Query(..., description="Tenant whose entities should be deleted"),
+    _: bool = Depends(verify_api_key),
+):
+    """Delete all TrustGraphEntities for a tenant.
+
+    Used by the reindex pipeline before re-embedding all entities from scratch.
+    """
+    try:
+        deleted = await weaviate_service.delete_trustgraph_entities(tenant_id=tenant_id)
+        return {"deleted": deleted}
+
+    except Exception as e:
+        logger.error(f"Entity delete failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
