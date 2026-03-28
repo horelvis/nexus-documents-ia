@@ -13,6 +13,7 @@ import {
   getEntityGlow,
   getEntityNodeSize,
   getEdgeStyle,
+  ENTITY_TYPE_COLORS,
 } from './explainability-theme'
 
 const ForceGraph3D = dynamic(
@@ -117,18 +118,22 @@ export default function ExplainabilityGraph3D({
     []
   )
 
-  // Node three-object: sphere + label
+  // Node three-object: sphere + label (truncated for readability)
   const nodeThreeObject = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (node: any) => {
       const tgNode = node as TrustGraphNode
-      const sprite = new SpriteText(tgNode.label)
+      // Truncate long labels for readability
+      const displayLabel = tgNode.label.length > 28
+        ? tgNode.label.slice(0, 26) + '…'
+        : tgNode.label
+      const sprite = new SpriteText(displayLabel)
       const baseColor = getEntityColor(tgNode.type)
       const dimmed =
         highlightedIds != null && !highlightedIds.has(tgNode.id)
 
-      sprite.color = dimmed ? '#334155' : baseColor
-      sprite.textHeight = dimmed ? 3 : 4
+      sprite.color = dimmed ? '#1e293b44' : baseColor
+      sprite.textHeight = dimmed ? 2.5 : 4
       sprite.backgroundColor = 'transparent'
       sprite.padding = 1
       return sprite
@@ -142,7 +147,7 @@ export default function ExplainabilityGraph3D({
       const tgNode = node as TrustGraphNode
       const base = getEntityColor(tgNode.type)
       if (highlightedIds != null && !highlightedIds.has(tgNode.id)) {
-        return '#1e293b'
+        return '#0f172a' // slate-900: nearly invisible in void
       }
       return base
     },

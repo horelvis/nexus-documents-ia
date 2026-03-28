@@ -412,7 +412,15 @@ class TripleQuery:
             lit_rows = await self._client.execute_cypher(lit_query, params=lit_params)
             for row in lit_rows:
                 predicate = row.get("predicate") or ""
-                if _is_excluded(predicate):
+                # Don't exclude labels/types from literals — frontend needs
+                # them for node label resolution and type display.
+                # Only apply user-specified exclude_predicates (e.g. prov/*).
+                skip = False
+                for pat in _exclude_compiled:
+                    if pat.search(predicate or ""):
+                        skip = True
+                        break
+                if skip:
                     continue
                 all_edges.append(self._row_to_triple(row))
 
