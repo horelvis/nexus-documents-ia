@@ -20,7 +20,7 @@ class DoclingProvider(ExtractionProvider):
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             response = await client.post(
                 f"{self._url}/v1/convert/file",
-                files={"file": (filename, file_bytes)},
+                files={"files": (filename, file_bytes)},
             )
             response.raise_for_status()
             data = response.json()

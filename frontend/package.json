@@ -52,6 +52,7 @@
     "@react-pdf/renderer": "^4.3.2",
     "@tabler/icons-react": "^3.38.0",
     "@tailwindcss/postcss": "^4.2.2",
+    "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-table": "^8.21.3",
     "axios": "^1.13.6",
     "class-variance-authority": "^0.7.1",

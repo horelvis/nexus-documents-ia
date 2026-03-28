@@ -63,7 +63,7 @@ The `db` service uses vanilla `postgres:15`. Knowledge graph operations use **Fa
 | Emma Agent Service | 8009 | LangGraph multi-agent RAG, Verified Generation |
 | Weaviate Service | 8007 | Vector search, RAG pipeline (embeddings via intelligence-docs) |
 | Intelligence Docs Service | 8012 | Text extraction (Docling/GLM-OCR), embedding (BGE-M3), entity extraction |
-| Knowledge Tree Service | 8011 | FalkorDB graph queries for entity expansion |
+| Knowledge Tree Service | 8011 | TrustGraph triple store (:Node/:Literal/:Rel), 4 LLM extractors, PROV-O provenance |
 | Elasticsearch Service | 8008 | Full-text search, hybrid search |
 | Background Worker | 8100 | Celery async task processing |
 | Emma Reactive Worker | — | Event listener + trigger engine (Redis Streams consumer) |
@@ -183,6 +183,26 @@ response = await router.chat(messages, role=ModelRole.CHAT)
 - `emma-agent-service/app/core/config.py` — Dual-model settings (`sglang_*` attrs, `VLLM_*` fallback)
 - `docker-compose.onpremise.yml` — `sglang-planner` service (profiles: [dual-model])
 
+### TrustGraph — Knowledge Graph Triple Store
+
+> **Full docs**: [`docs/architecture/TRUSTGRAPH.md`](docs/architecture/TRUSTGRAPH.md)
+
+The knowledge graph uses a **TrustGraph-model RDF-style triple store** (`:Node`/`:Literal`/`:Rel`) on FalkorDB. Documents are processed by 4 parallel LLM extractors (definitions, relationships, objects, topics) producing semantic triples with PROV-O provenance and automatic contradiction detection.
+
+**Schema**: Everything is a `:Node` (entities, documents, folders) or `:Literal` (values), connected by `:Rel` edges carrying URI predicates (e.g., `nouxcube://predicate/legal/empleado-de`). 32 predicates seeded across `core/`, `legal/`, `prov/` namespaces.
+
+**Pipeline**: `weaviate-service` → `POST /extract/triples` → `ExtractionCoordinator` → 4 extractors in parallel via `asyncio.gather` → dedup → FalkorDB MERGE → PROV-O → contradiction detection.
+
+**Key files**:
+- `knowledge-tree-service/app/services/triple_store.py` — CRUD (MERGE Node/Literal, CREATE Rel)
+- `knowledge-tree-service/app/services/triple_query.py` — 8 SPO query patterns + `build_context()`
+- `knowledge-tree-service/app/services/extractors/coordinator.py` — Orchestrates 4 extractors
+- `knowledge-tree-service/app/services/provenance.py` — PROV-O triples per extraction
+- `knowledge-tree-service/app/services/contradiction.py` — Batch contradiction detection
+- `knowledge-tree-service/scripts/reindex_trustgraph.py` — Full graph rebuild
+
+**Phases**: Phase 1 (Automated Ingest) — COMPLETE. Phase 2 (Semantic Similarity Retrieval) — PLANNED. Phase 3 (Ontology Structuring) — PLANNED.
+
 ### SmartSearch — Unified Multi-Store Search
 
 The `smart_search` tool replaces the separate `search_documents` and `search_legislation` tools. It orchestrates 3 data stores automatically so the LLM doesn't have to choose which tool to call.
@@ -199,7 +219,7 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 |-------|------|-----|
 | Weaviate | Tenant documents (hybrid search) | `WeaviateClient.hybrid_search()` with enrichment filters |
 | PublicKnowledge | BOE legislation (hybrid search) | `WeaviateClient.search_public_knowledge()` |
-| Apache AGE | Entity relationships (knowledge graph) | `KnowledgeTreeClient.get_documents_by_person()` |
+| FalkorDB | Entity relationships (TrustGraph triples) | `KnowledgeTreeClient.query_triples()` via graph_expander |
 
 **Enrichment Properties** (first-class Weaviate properties, not JSONB):
 - `domain` — Business domain (legal, fiscal, medical)
@@ -223,19 +243,24 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 - `emma-agent-service/app/agents/langgraph/tools/registry.py` — Tool registration
 - `emma-agent-service/app/agents/langgraph/sectors/config.py` — `rerank_weights` per sector
 - `weaviate-service/app/services/weaviate_service.py` — Enrichment properties + filters
-- `knowledge-tree-service/app/api/tree.py` — `/graph/documents-by-entity` endpoint
+- `knowledge-tree-service/app/api/triples.py` — `/triples/query` endpoint (graph expansion)
 
-**ReAct Agent Tools** (9 total):
+**ReAct Agent Tools** (13 total):
 | Tool | Purpose |
 |------|---------|
 | `smart_search` | Unified document + legislation search (auto-detects scope) |
 | `get_document_content` | Read full document by ID |
-| `structural_query` | Count, list, filter via Apache AGE graph |
+| `structural_query` | Count, list, filter via FalkorDB TrustGraph |
 | `analyze_domain` | Specialist domain analysis |
 | `web_search` | Internet search (Tavily primary, DuckDuckGo fallback) |
 | `search_jurisprudence` | CENDOJ jurisprudence search |
 | `list_sources` | Discover available data sources |
 | `query_connector` | Query external connectors (SharePoint, etc.) |
+| `generate_document` | Generate document from template |
+| `forge_document` | Create PDF documents |
+| `send_email` | Send email notifications |
+| `verified_generation` | Claim-by-claim verification sub-graph |
+| `predictive_analysis` | Predictive analysis sub-graph |
 | `terminate` | Signal completion with response |
 
 ### Prompt Management System

@@ -13,6 +13,52 @@ import type { EmmaMessage, DocumentInfo } from '@/lib/types/emma'
 import type { EmmaStateType } from '../EmmaStreamProvider'
 import { isHITLReview, isClarification } from '../types/interrupts'
 
+/**
+ * Filter sources to only those actually referenced in the response text.
+ * Matches by: title/name keywords, boe_id, or document_id.
+ */
+function filterReferencedSources(
+  sources: DocumentInfo[],
+  responseText: string,
+): DocumentInfo[] {
+  if (!responseText || sources.length === 0) return sources
+
+  const textLower = responseText.toLowerCase()
+
+  return sources.filter((src) => {
+    // Match by boe_id (e.g., "Real Decreto Legislativo 2/2015" or BOE ref)
+    if (src.boe_id && textLower.includes(src.boe_id.toLowerCase())) return true
+
+    // Match by document_id (rare in text, but possible)
+    if (src.id && textLower.includes(src.id.toLowerCase())) return true
+
+    // Match by title/name — extract significant keywords (3+ chars) and
+    // check if enough of them appear in the response text.
+    const name = src.name || ''
+    if (name) {
+      const nameLower = name.toLowerCase()
+
+      // Direct substring match for short names (≤40 chars)
+      if (nameLower.length <= 40 && nameLower.length >= 3 && textLower.includes(nameLower)) {
+        return true
+      }
+
+      // For longer names, check if significant keywords overlap.
+      // Strip common extensions and split into words.
+      const stripped = nameLower.replace(/\.(pdf|docx?|xlsx?|txt|md|odt|rtf)$/, '')
+      const words = stripped.split(/[\s_\-./]+/).filter((w) => w.length >= 3)
+      if (words.length === 0) return false
+
+      // Require at least 50% of significant words present (min 2 for long titles)
+      const threshold = Math.max(2, Math.ceil(words.length * 0.5))
+      const matched = words.filter((w) => textLower.includes(w)).length
+      if (matched >= threshold) return true
+    }
+
+    return false
+  })
+}
+
 /** Extract text content from an SDK message (handles string and array formats). */
 function getTextContent(m: SDKMessage): string {
   if (typeof m.content === 'string') return m.content
@@ -184,7 +230,7 @@ export function useMessageConverter(
       }
 
       if (sources.length > 0) {
-        stepsMetadata!.documents = sources.map((s) => {
+        const allDocs = sources.map((s) => {
           const src = s as Record<string, unknown>
           const pageRaw = src.page ?? src.page_number
           return {
@@ -194,12 +240,20 @@ export function useMessageConverter(
             boe_id: src.boe_id as string,
             graph_link: src.graph_link as string,
             source_type: (src.source_type as string) || (src.type as string),
-            fileType: (src.file_type as string) || (src.mime_type as string),
+            fileType: (src.file_type as string) || (src.mime_type as string) || (src.document_type as string),
             relevanceScore: Number(src.score || src.relevance) || undefined,
             page: pageRaw != null ? Number(pageRaw) : undefined,
             excerpt: (src.excerpt as string) || (src.snippet as string) || undefined,
           }
         }) as DocumentInfo[]
+
+        // Only show sources actually referenced in the response text.
+        // During streaming (success=false), show all so cards appear progressively.
+        const responseText = currentAiIdx >= 0 ? converted[currentAiIdx].content : ''
+        const filtered = success && responseText
+          ? filterReferencedSources(allDocs, responseText)
+          : allDocs
+        stepsMetadata!.documents = filtered.length > 0 ? filtered : allDocs
       }
 
       if (currentAiIdx >= 0) {

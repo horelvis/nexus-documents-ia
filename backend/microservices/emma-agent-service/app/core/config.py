@@ -161,12 +161,28 @@ class Settings(BaseSettings):
     # SmartSearch — Retrieval Intelligence (inline feedback)
     smart_search_feedback_enabled: bool = os.getenv("SMART_SEARCH_FEEDBACK_ENABLED", "true").lower() == "true"
 
-    # GraphRAG — Multi-hop subgraph extraction (Phase 5, replaces flat graph expansion)
+    # GraphRAG — Phase 1 (deprecated — use graph_rag_* for Phase 2)
+    # Multi-hop subgraph extraction (Phase 5, replaces flat graph expansion)
     graphrag_enabled: bool = os.getenv("GRAPHRAG_ENABLED", "true").lower() == "true"
     graphrag_max_hops: int = int(os.getenv("GRAPHRAG_MAX_HOPS", "2"))
     graphrag_max_nodes: int = int(os.getenv("GRAPHRAG_MAX_NODES", "30"))
     graphrag_include_legal: bool = os.getenv("GRAPHRAG_INCLUDE_LEGAL", "true").lower() == "true"
     graphrag_token_budget: int = int(os.getenv("GRAPHRAG_TOKEN_BUDGET", "1500"))
+
+    # ── Graph RAG Phase 2 ─────────────────────────────────────────
+    graph_rag_enabled: bool = os.getenv("GRAPH_RAG_ENABLED", "true").lower() == "true"
+    graph_rag_entity_limit: int = int(os.getenv("GRAPH_RAG_ENTITY_LIMIT", "50"))
+    graph_rag_max_hops: int = int(os.getenv("GRAPH_RAG_MAX_HOPS", "2"))
+    graph_rag_max_edges: int = int(os.getenv("GRAPH_RAG_MAX_EDGES", "150"))
+    graph_rag_edge_limit: int = int(os.getenv("GRAPH_RAG_EDGE_LIMIT", "25"))
+    graph_rag_prefilter_limit: int = int(os.getenv("GRAPH_RAG_PREFILTER_LIMIT", "30"))
+    graph_rag_label_cache_ttl: int = int(os.getenv("GRAPH_RAG_LABEL_CACHE_TTL", "300"))
+
+    # SmartSearch multi-concept (Phase 2)
+    smart_search_multi_concept: bool = os.getenv("SMART_SEARCH_MULTI_CONCEPT", "true").lower() == "true"
+
+    # Retrieval provenance tracking
+    retrieval_provenance_enabled: bool = os.getenv("RETRIEVAL_PROVENANCE_ENABLED", "true").lower() == "true"
 
     # Graph Context — inject structural context into react_loop system prompt
     graph_context_enabled: bool = os.getenv("GRAPH_CONTEXT_ENABLED", "true").lower() == "true"

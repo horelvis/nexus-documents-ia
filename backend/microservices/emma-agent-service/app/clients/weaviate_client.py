@@ -652,7 +652,7 @@ class WeaviateClient(BaseHTTPClient):
         """Get tenant statistics including document count."""
         try:
             return await self.get_json(
-                f"/weaviate/tenants/{tenant_id}/stats",
+                f"/weaviate/collections/{tenant_id}/stats",
                 headers=self._headers()
             )
         except Exception as e:

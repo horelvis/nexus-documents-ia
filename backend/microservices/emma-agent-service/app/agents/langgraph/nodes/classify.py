@@ -170,6 +170,16 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
         "fast_path_used": False,
         "use_swarm": use_swarm,
         "reasoning_steps": reasoning_steps,
+        # Reset ReAct control fields — these persist across turns via
+        # checkpointer (LastValue semantics) and must be cleared so that
+        # quality gates (step==0 check), anti-hallucination cleanup, and
+        # max_steps all work correctly on each new turn.
+        "current_step": 0,
+        "is_complete": False,
+        "tool_calls_history": [],
+        "sources": [],
+        "success": False,
+        "final_answer": None,
         "metadata": {
             "classify_intent": intent,
             "classify_confidence": confidence,

@@ -8,22 +8,38 @@ import { cn } from '@/lib/utils'
 interface EmmaMarkdownProps {
   content: string
   className?: string
+  /** Force light-mode colors (dark text on white background) regardless of theme.
+   *  Uses @tailwindcss/typography prose classes for clean document rendering. */
+  forceLight?: boolean
 }
 
 /**
- * Markdown renderer for Emma chat messages.
- * Uses react-markdown + remark-gfm with rich Tailwind component styling
- * for a professional, readable output (no @tailwindcss/typography dependency).
+ * Markdown renderer for Emma chat messages and document previews.
+ *
+ * - Chat (default): lightweight custom styles that inherit the chat theme colors.
+ * - Document preview (forceLight): full @tailwindcss/typography prose for
+ *   a clean, print-like rendering on a white background.
  */
-export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className }: EmmaMarkdownProps) {
+export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className, forceLight }: EmmaMarkdownProps) {
   if (!content) return null
 
+  // ── Document preview mode: use prose for clean typography ──
+  if (forceLight) {
+    return (
+      <div className={cn('prose prose-sm max-w-none prose-a:text-blue-700 prose-code:before:content-none prose-code:after:content-none', className)}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    )
+  }
+
+  // ── Chat mode: custom styles that inherit theme tokens ──
   return (
     <div className={cn('max-w-none text-sm leading-relaxed text-foreground/90', className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          // ── Headings ──
           h1: ({ children }) => (
             <h1 className="text-lg font-bold mt-5 mb-2.5 pb-1.5 border-b border-border/40 text-foreground">
               {children}
@@ -40,8 +56,6 @@ export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className }: E
           h4: ({ children }) => (
             <h4 className="text-sm font-semibold mt-3 mb-1 text-foreground/90">{children}</h4>
           ),
-
-          // ── Block elements ──
           p: ({ children }) => (
             <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>
           ),
@@ -51,8 +65,6 @@ export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className }: E
             </blockquote>
           ),
           hr: () => <hr className="my-5 border-border/40" />,
-
-          // ── Inline elements ──
           strong: ({ children }) => (
             <strong className="font-bold text-foreground">{children}</strong>
           ),
@@ -69,8 +81,6 @@ export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className }: E
               {children}
             </a>
           ),
-
-          // ── Lists ──
           ul: ({ children }) => (
             <ul className="my-2.5 ml-5 space-y-1.5 list-disc marker:text-primary/50">
               {children}
@@ -84,8 +94,6 @@ export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className }: E
           li: ({ children }) => (
             <li className="pl-1.5 leading-relaxed">{children}</li>
           ),
-
-          // ── Code ──
           code: ({ className: codeClassName, children, ...props }) => {
             const isBlock = codeClassName?.startsWith('language-')
             if (isBlock) {
@@ -109,8 +117,6 @@ export const EmmaMarkdown = memo(function EmmaMarkdown({ content, className }: E
               {children}
             </pre>
           ),
-
-          // ── Tables ──
           table: ({ children }) => (
             <div className="my-3 overflow-x-auto rounded-lg border border-border/40">
               <table className="min-w-full border-collapse text-xs">{children}</table>

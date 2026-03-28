@@ -1,9 +1,10 @@
 'use client'
 
-import React, { useState, useCallback, useMemo } from 'react'
-import { Document, Page, pdfjs } from 'react-pdf'
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { Document, Page as RawPage, pdfjs } from 'react-pdf'
 
-// Import PDF.js CSS for text layer and annotations support
+// Cast to any — react-pdf PageProps has a known type conflict with React 18
+const Page = RawPage as any
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
 
@@ -27,10 +28,19 @@ import { cn } from '@/lib/utils'
 // Configure PDF.js worker from CDN (matches react-pdf version)
 pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 
+const DOC_OPTIONS = {
+  cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+  cMapPacked: true,
+}
+
 interface PDFViewerProps {
   url: string
   fileName?: string
   className?: string
+  /** Compact mode: single page, auto-width, no toolbar (for inline source cards) */
+  compact?: boolean
+  /** Initial page to display (compact mode stays on this page) */
+  pageNumber?: number
   showToolbar?: boolean
   initialScale?: number
   height?: string | number
@@ -40,45 +50,70 @@ export default function PDFViewer({
   url,
   fileName = 'document.pdf',
   className,
+  compact = false,
+  pageNumber: initialPage = 1,
   showToolbar = true,
   initialScale = 1.0,
   height = '600px',
 }: PDFViewerProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [containerWidth, setContainerWidth] = useState<number>(0)
   const [numPages, setNumPages] = useState<number>(0)
-  const [pageNumber, setPageNumber] = useState<number>(1)
+  const [pageNumber, setPageNumber] = useState<number>(initialPage)
   const [scale, setScale] = useState<number>(initialScale)
   const [rotation, setRotation] = useState<number>(0)
   const [isLoading, setIsLoading] = useState<boolean>(true)
   const [error, setError] = useState<string | null>(null)
+  const [docLoaded, setDocLoaded] = useState(false)
 
-  // Resolve height
-  const resolvedHeight = typeof height === 'number' ? `${height}px` : height || '600px'
-  const isRelativeHeight = typeof height === 'string' && (height.includes('%') || height.includes('vh'))
+  // In compact mode, auto-measure container width
+  useEffect(() => {
+    if (!compact) return
+    const el = containerRef.current
+    if (!el) return
 
-  // Memoize file prop
+    const measure = () => setContainerWidth(Math.min(el.clientWidth, 500))
+    measure()
+
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [compact])
+
+  // Reset state when URL changes
+  useEffect(() => {
+    setDocLoaded(false)
+    setError(null)
+    setIsLoading(true)
+    setPageNumber(initialPage)
+  }, [url, initialPage])
+
   const fileSource = useMemo(() => url, [url])
-
-  // Memoize options - use pdfjs.version for CDN compatibility
-  const documentOptions = useMemo(
-    () => ({
-      cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-      cMapPacked: true,
-    }),
-    []
-  )
 
   const onDocumentLoadSuccess = useCallback((pdf: any) => {
     setNumPages(pdf.numPages)
+    setDocLoaded(true)
     setIsLoading(false)
     setError(null)
   }, [])
 
-  const onDocumentLoadError = useCallback((error: Error) => {
-    console.error('Error loading PDF:', error)
-    setError('Error loading PDF document')
+  const onDocumentLoadError = useCallback((err: Error) => {
+    console.error('PDFViewer load error:', err)
+    setError('Error al cargar el PDF')
     setIsLoading(false)
   }, [])
 
+  const onPageLoadError = useCallback((err: Error) => {
+    // Suppress WorkerTransport null errors (race condition on unmount)
+    if (err?.message?.includes('sendWithPromise') || err?.message?.includes('null')) {
+      console.warn('PDFViewer: PDF worker transport destroyed (unmount race), suppressed')
+      return
+    }
+    console.error('PDFViewer page error:', err)
+    setError('Error al renderizar la página')
+  }, [])
+
+  // Navigation
   const goToPrevPage = useCallback(() => {
     setPageNumber((prev) => Math.max(1, prev - 1))
   }, [])
@@ -89,28 +124,16 @@ export default function PDFViewer({
 
   const goToPage = useCallback(
     (page: number) => {
-      if (page >= 1 && page <= numPages) {
-        setPageNumber(page)
-      }
+      if (page >= 1 && page <= numPages) setPageNumber(page)
     },
     [numPages]
   )
 
-  const zoomIn = useCallback(() => {
-    setScale((prev) => Math.min(3.0, prev + 0.2))
-  }, [])
-
-  const zoomOut = useCallback(() => {
-    setScale((prev) => Math.max(0.5, prev - 0.2))
-  }, [])
-
-  const resetZoom = useCallback(() => {
-    setScale(1.0)
-  }, [])
-
-  const rotate = useCallback(() => {
-    setRotation((prev) => (prev + 90) % 360)
-  }, [])
+  // Zoom / rotate
+  const zoomIn = useCallback(() => setScale((prev) => Math.min(3.0, prev + 0.2)), [])
+  const zoomOut = useCallback(() => setScale((prev) => Math.max(0.5, prev - 0.2)), [])
+  const resetZoom = useCallback(() => setScale(1.0), [])
+  const rotate = useCallback(() => setRotation((prev) => (prev + 90) % 360), [])
 
   const downloadPDF = useCallback(() => {
     const link = document.createElement('a')
@@ -125,17 +148,56 @@ export default function PDFViewer({
     window.open(url, '_blank')
   }, [url])
 
+  // ── Compact mode (inline single-page preview) ──
+  if (compact) {
+    return (
+      <div ref={containerRef} className={cn('w-full flex justify-center', className)}>
+        {containerWidth > 0 && !error && (
+          <Document
+            file={fileSource}
+            options={DOC_OPTIONS}
+            onLoadSuccess={onDocumentLoadSuccess}
+            onLoadError={onDocumentLoadError}
+            loading={null}
+            className="flex justify-center w-full"
+          >
+            {docLoaded && (
+              <Page
+                pageNumber={pageNumber}
+                width={containerWidth}
+                className="shadow-lg"
+                loading={
+                  <div
+                    className="flex items-center justify-center bg-white dark:bg-gray-800 border border-border"
+                    style={{ width: containerWidth, aspectRatio: '1/1.414' }}
+                  >
+                    <IconLoader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                  </div>
+                }
+                error={null}
+                onLoadError={onPageLoadError}
+              />
+            )}
+          </Document>
+        )}
+        {error && (
+          <p className="text-xs text-muted-foreground py-4">{error}</p>
+        )}
+      </div>
+    )
+  }
+
+  // ── Full mode (toolbar + multi-page) ──
+
+  const resolvedHeight = typeof height === 'number' ? `${height}px` : height || '600px'
+  const isRelativeHeight = typeof height === 'string' && (height.includes('%') || height.includes('vh'))
+
   if (error) {
     return (
       <Card className={cn('h-full flex items-center justify-center p-6 text-center', className)}>
         <div>
           <div className="text-red-500 mb-4">
-            <svg
-              className="w-16 h-16 mx-auto mb-4"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
+            <svg className="w-16 h-16 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -144,10 +206,10 @@ export default function PDFViewer({
               />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold mb-2">Error loading PDF</h3>
+          <h3 className="text-lg font-semibold mb-2">Error al cargar el PDF</h3>
           <p className="text-muted-foreground mb-4">{error}</p>
           <Button onClick={() => window.location.reload()} variant="outline">
-            Try Again
+            Reintentar
           </Button>
         </div>
       </Card>
@@ -233,23 +295,27 @@ export default function PDFViewer({
         <div className="w-full flex justify-center">
           <Document
             file={fileSource}
-            options={documentOptions}
+            options={DOC_OPTIONS}
             onLoadSuccess={onDocumentLoadSuccess}
             onLoadError={onDocumentLoadError}
             loading={null}
             className="flex justify-center w-full"
           >
-            <Page
-              pageNumber={pageNumber}
-              scale={scale}
-              rotate={rotation}
-              className="shadow-lg max-w-full"
-              loading={
-                <div className="flex items-center justify-center h-96 bg-white border">
-                  <IconLoader2 className="h-6 w-6 animate-spin" />
-                </div>
-              }
-            />
+            {docLoaded && (
+              <Page
+                pageNumber={pageNumber}
+                scale={scale}
+                rotate={rotation}
+                className="shadow-lg max-w-full"
+                loading={
+                  <div className="flex items-center justify-center h-96 bg-white border">
+                    <IconLoader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                }
+                error={null}
+                onLoadError={onPageLoadError}
+              />
+            )}
           </Document>
         </div>
       </div>

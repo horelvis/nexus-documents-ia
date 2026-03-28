@@ -22,7 +22,10 @@ from app.api.async_dependencies import get_current_user_async
 from app.core.auth import verify_clerk_token, AuthError
 from app.db.models import User
 from app.schemas.auth import LoginResponse, LogoutResponse, SubscriptionInfo, UserPermissions
-from app.services.subscription_service_v2 import SubscriptionServiceV2
+try:
+    from app.services.subscription_service_v2 import SubscriptionServiceV2
+except ImportError:
+    SubscriptionServiceV2 = None  # on-premise: no Stripe subscription service
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
