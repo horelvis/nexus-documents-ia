@@ -104,12 +104,14 @@ async def top_entities(
     entity is selected.
     """
     tq = TripleQuery(falkordb_client)
-    # Filter to semantic entities only (exclude document/contradiction/chunk URIs)
-    # to get meaningful graph seeds for visualization
+    # Find entities with the most Node→Node connections (excluding
+    # contradiction edges), prioritizing semantic hubs that produce
+    # a rich, connected graph visualization.
     query = (
-        "MATCH (n:Node {user: $user})-[r:Rel]-() "
+        "MATCH (n:Node {user: $user})-[r:Rel]-(o:Node {user: $user}) "
         "WHERE n.uri STARTS WITH 'nouxcube://entity/' "
-        "WITH n.uri AS uri, count(r) AS degree "
+        "AND NOT r.uri ENDS WITH '/contradiction-subject' "
+        "WITH n.uri AS uri, count(DISTINCT r) AS degree "
         "ORDER BY degree DESC "
         "LIMIT $limit "
         "RETURN uri, degree"

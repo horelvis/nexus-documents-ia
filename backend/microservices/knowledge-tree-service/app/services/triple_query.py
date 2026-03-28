@@ -392,29 +392,49 @@ class TripleQuery:
 
             frontier = new_frontier
 
-        # Fetch Node→Literal properties for all visited entities
-        # (needed for labels, types, definitions in the frontend)
+        # Fetch Node→Literal properties for all visited entities.
+        # Two passes: (1) essential props for every entity (label, type, def)
+        # and (2) remaining literals with a cap.
         all_entity_uris = list(visited)
         if all_entity_uris:
-            lit_query = (
+            # Pass 1: Essential properties (no limit — one per entity per pred)
+            essential_query = (
                 "UNWIND $uris AS entity_uri "
                 "MATCH (s:Node {uri: entity_uri, user: $user})"
                 "-[r:Rel]->(o:Literal) "
+                "WHERE r.uri ENDS WITH '/core/label' "
+                "   OR r.uri ENDS WITH '/core/type' "
+                "   OR r.uri ENDS WITH '/core/definition' "
+                "RETURN s.uri AS subject, r.uri AS predicate, "
+                "o.value AS object, 'literal' AS object_type, "
+                "r.extraction_method AS extraction_method, "
+                "r.source_chunk AS source_chunk"
+            )
+            essential_params = self._base_params(user, collection, uris=all_entity_uris)
+            essential_rows = await self._client.execute_cypher(essential_query, params=essential_params)
+            for row in essential_rows:
+                all_edges.append(self._row_to_triple(row))
+
+            # Pass 2: Other literals (capped)
+            other_query = (
+                "UNWIND $uris AS entity_uri "
+                "MATCH (s:Node {uri: entity_uri, user: $user})"
+                "-[r:Rel]->(o:Literal) "
+                "WHERE NOT (r.uri ENDS WITH '/core/label' "
+                "        OR r.uri ENDS WITH '/core/type' "
+                "        OR r.uri ENDS WITH '/core/definition') "
                 "RETURN s.uri AS subject, r.uri AS predicate, "
                 "o.value AS object, 'literal' AS object_type, "
                 "r.extraction_method AS extraction_method, "
                 "r.source_chunk AS source_chunk "
                 "LIMIT $lit_limit"
             )
-            lit_params = self._base_params(
-                user, collection, uris=all_entity_uris, lit_limit=len(all_entity_uris) * 10
+            other_params = self._base_params(
+                user, collection, uris=all_entity_uris, lit_limit=len(all_entity_uris) * 5
             )
-            lit_rows = await self._client.execute_cypher(lit_query, params=lit_params)
-            for row in lit_rows:
+            other_rows = await self._client.execute_cypher(other_query, params=other_params)
+            for row in other_rows:
                 predicate = row.get("predicate") or ""
-                # Don't exclude labels/types from literals — frontend needs
-                # them for node label resolution and type display.
-                # Only apply user-specified exclude_predicates (e.g. prov/*).
                 skip = False
                 for pat in _exclude_compiled:
                     if pat.search(predicate or ""):
