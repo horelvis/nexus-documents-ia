@@ -72,13 +72,19 @@ export function GraphCanvas2D({
   const isPanningRef = useRef(false)
   const lastPanRef = useRef({ x: 0, y: 0 })
 
-  // ── ResizeObserver ──
+  // ── ResizeObserver (debounced to avoid layout thrash) ──
+  const sizeRef = useRef({ width: 0, height: 0 })
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     const obs = new ResizeObserver((entries) => {
       const { width, height } = entries[0].contentRect
-      if (width > 0 && height > 0) setSize({ width, height })
+      const w = Math.round(width)
+      const h = Math.round(height)
+      if (w > 0 && h > 0 && (w !== sizeRef.current.width || h !== sizeRef.current.height)) {
+        sizeRef.current = { width: w, height: h }
+        setSize({ width: w, height: h })
+      }
     })
     obs.observe(el)
     return () => obs.disconnect()
@@ -151,39 +157,49 @@ export function GraphCanvas2D({
   const nodeCount = graphNodes.length
   const sizeKey = `${size.width}x${size.height}`
 
-  // ── Animation loop ──
+  // ── Animation loop (breathing effect until settle) ──
+  const timeRef = useRef(0)
+  const settledRef = useRef(false)
+
   useEffect(() => {
     if (size.width === 0 || nodeCount === 0) return
 
     startTimeRef.current = performance.now()
-    let localSettled = false
+    settledRef.current = false
+    timeRef.current = 0
+    setSettled(false)
+    setTime(0)
 
-    const FPS_INTERVAL = 1000 / 30
+    let cancelled = false
 
     function animate(now: number) {
-      if (now - lastFrameRef.current < FPS_INTERVAL) {
+      if (cancelled) return
+
+      // Throttle to ~20fps for breathing (doesn't need 60fps)
+      if (now - lastFrameRef.current < 50) {
         animRef.current = requestAnimationFrame(animate)
         return
       }
       lastFrameRef.current = now
 
-      if (!localSettled && now - startTimeRef.current > SETTLE_TIME) {
-        localSettled = true
+      // Check settle
+      if (!settledRef.current && now - startTimeRef.current > SETTLE_TIME) {
+        settledRef.current = true
         setSettled(true)
+        // Stop animation entirely — no more state updates
+        return
       }
 
-      // Keep animating if not settled, or if there are active highlights
-      const hasHighlights = highlightsRef.current && highlightsRef.current.size > 0
-      if (!localSettled || hasHighlights) {
-        setTime((t) => t + 0.01)
-        animRef.current = requestAnimationFrame(animate)
-      }
+      timeRef.current += 0.015
+      setTime(timeRef.current)
+      animRef.current = requestAnimationFrame(animate)
     }
 
-    setSettled(false)
-    setTime(0)
     animRef.current = requestAnimationFrame(animate)
-    return () => cancelAnimationFrame(animRef.current)
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(animRef.current)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sizeKey, nodeCount])
 
