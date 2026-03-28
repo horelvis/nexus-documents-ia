@@ -20,13 +20,15 @@ Usage:
         python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --skip-clear
 
 Environment:
-    WEAVIATE_SERVICE_URL    Base URL for weaviate-service (default: http://weaviate-service:8000)
-    MICROSERVICES_API_KEY   API key for service-to-service auth
+    WEAVIATE_SERVICE_URL          Base URL for weaviate-service (default: http://weaviate-service:8000)
+    INTELLIGENCE_DOCS_SERVICE_URL Base URL for intelligence-docs-service (default: http://intelligence-docs-service:8012)
+    MICROSERVICES_API_KEY         API key for service-to-service auth
 """
 
 import argparse
 import asyncio
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -65,12 +67,17 @@ RESET = "\033[0m"
 # ── Weaviate helpers ───────────────────────────────────────────────────────────
 
 WEAVIATE_SERVICE_URL = settings.WEAVIATE_SERVICE_URL.rstrip("/")
+INTELLIGENCE_DOCS_SERVICE_URL = os.environ.get(
+    "INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8012"
+).rstrip("/")
 MICROSERVICES_API_KEY = settings.MICROSERVICES_API_KEY
 
 WEAVIATE_HEADERS = {
     "X-API-Key": MICROSERVICES_API_KEY,
     "Content-Type": "application/json",
 }
+
+EMBED_BATCH_SIZE = 64
 
 
 def _collection_name(tenant_id: str) -> str:
@@ -315,6 +322,153 @@ async def _resolve_duplicate_entities(
     return merged_count
 
 
+# ── Entity embeddings ─────────────────────────────────────────────────────────
+
+async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
+    """Query all :Node entities from FalkorDB, embed via intelligence-docs, upsert to Weaviate.
+
+    Steps:
+    1. Query entity nodes with label/type/definition properties from FalkorDB.
+    2. Build an embed text per entity.
+    3. Batch-embed via intelligence-docs-service /embed endpoint (batches of EMBED_BATCH_SIZE).
+    4. Delete existing entity embeddings for this tenant from weaviate-service.
+    5. Batch-upsert entities + embeddings to weaviate-service /entities/batch-upsert.
+
+    Returns the total number of entities upserted.
+    """
+    falkordb = FalkorDBClient()
+    await falkordb.initialize()
+
+    try:
+        rows = await falkordb.execute_cypher(
+            "MATCH (n:Node {user: $user}) "
+            "OPTIONAL MATCH (n)-[r1:Rel {uri: 'nouxcube://predicate/core/label'}]->(l:Literal) "
+            "OPTIONAL MATCH (n)-[r2:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal) "
+            "OPTIONAL MATCH (n)-[r3:Rel {uri: 'nouxcube://predicate/core/definition'}]->(d:Literal) "
+            "RETURN n.uri AS uri, l.value AS label, t.value AS type, d.value AS definition",
+            {"user": tenant_id},
+        )
+    finally:
+        await falkordb.close()
+
+    if not rows:
+        logger.info("  No :Node entities found for tenant=%s — skipping embeddings", tenant_id)
+        return 0
+
+    logger.info("  Found %d entity nodes to embed", len(rows))
+
+    # Build embed texts
+    entities: List[Dict[str, Any]] = []
+    embed_texts: List[str] = []
+
+    for row in rows:
+        uri: str = row.get("uri") or ""
+        label: Optional[str] = row.get("label")
+        entity_type: Optional[str] = row.get("type")
+        definition: Optional[str] = row.get("definition")
+
+        if not uri:
+            continue
+
+        # Humanize fallback label from URI last segment
+        if not label:
+            slug = uri.rsplit("/", 1)[-1]
+            label = slug.replace("-", " ").replace("_", " ").title()
+
+        type_str = entity_type or "entity"
+
+        if definition:
+            text = f"{label} ({type_str}). {definition}"
+        else:
+            text = f"{label} ({type_str})"
+
+        entities.append({
+            "uri": uri,
+            "label": label,
+            "type": type_str,
+            "definition": definition or "",
+        })
+        embed_texts.append(text)
+
+    if not entities:
+        logger.info("  No valid entities after filtering — skipping embeddings")
+        return 0
+
+    # Batch embed via intelligence-docs-service
+    all_embeddings: List[List[float]] = []
+    async with httpx.AsyncClient(timeout=120) as http:
+        for batch_start in range(0, len(embed_texts), EMBED_BATCH_SIZE):
+            batch = embed_texts[batch_start: batch_start + EMBED_BATCH_SIZE]
+            resp = await http.post(
+                f"{INTELLIGENCE_DOCS_SERVICE_URL}/embed",
+                json={"texts": batch, "task": "retrieval.passage"},
+                headers=WEAVIATE_HEADERS,
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"intelligence-docs-service /embed returned HTTP {resp.status_code}: "
+                    f"{resp.text[:300]}"
+                )
+            data = resp.json()
+            batch_embeddings: List[List[float]] = data.get("embeddings", data)
+            all_embeddings.extend(batch_embeddings)
+            logger.info(
+                "  Embedded batch %d-%d / %d",
+                batch_start + 1,
+                min(batch_start + EMBED_BATCH_SIZE, len(embed_texts)),
+                len(embed_texts),
+            )
+
+    if len(all_embeddings) != len(entities):
+        raise RuntimeError(
+            f"Embedding count mismatch: got {len(all_embeddings)} for {len(entities)} entities"
+        )
+
+    # Delete existing entity embeddings for this tenant
+    async with httpx.AsyncClient(timeout=60) as http:
+        del_resp = await http.delete(
+            f"{WEAVIATE_SERVICE_URL}/entities/delete",
+            params={"tenant_id": tenant_id},
+            headers=WEAVIATE_HEADERS,
+        )
+        if del_resp.status_code not in (200, 204, 404):
+            logger.warning(
+                "  DELETE /entities/delete returned HTTP %d — proceeding with upsert",
+                del_resp.status_code,
+            )
+        else:
+            logger.info("  Deleted existing entity embeddings for tenant=%s", tenant_id)
+
+        # Batch upsert entities + embeddings
+        upserted = 0
+        for batch_start in range(0, len(entities), EMBED_BATCH_SIZE):
+            batch_entities = entities[batch_start: batch_start + EMBED_BATCH_SIZE]
+            batch_embeddings = all_embeddings[batch_start: batch_start + EMBED_BATCH_SIZE]
+            upsert_resp = await http.post(
+                f"{WEAVIATE_SERVICE_URL}/entities/batch-upsert",
+                json={
+                    "entities": batch_entities,
+                    "embeddings": batch_embeddings,
+                    "tenant_id": tenant_id,
+                },
+                headers=WEAVIATE_HEADERS,
+            )
+            if upsert_resp.status_code not in (200, 201):
+                raise RuntimeError(
+                    f"weaviate-service /entities/batch-upsert returned HTTP "
+                    f"{upsert_resp.status_code}: {upsert_resp.text[:300]}"
+                )
+            upserted += len(batch_entities)
+            logger.info(
+                "  Upserted batch %d-%d / %d",
+                batch_start + 1,
+                min(batch_start + EMBED_BATCH_SIZE, len(entities)),
+                len(entities),
+            )
+
+    return upserted
+
+
 # ── Schema bootstrap ───────────────────────────────────────────────────────────
 
 async def _bootstrap_schema(client: FalkorDBClient) -> None:
@@ -511,6 +665,18 @@ async def reindex(
             else:
                 print(f"  {GREEN}OK{RESET}    Entity resolution — no duplicates found")
 
+        # ── Step 8: Entity embeddings ─────────────────────────────────────────
+        embed_count = 0
+        if not dry_run:
+            logger.info("── Phase 2: Entity Embeddings ──")
+            try:
+                embed_count = await _populate_entity_embeddings(tenant_id, collection)
+                print(f"  {GREEN}OK{RESET}    Entity embeddings — {embed_count} entities upserted")
+                logger.info("Entity embeddings: %d entities", embed_count)
+            except Exception as exc:
+                print(f"  {YELLOW}WARN{RESET}  Entity embeddings failed: {exc}")
+                logger.warning("Entity embeddings phase failed: %s", exc, exc_info=True)
+
         # ── Summary ────────────────────────────────────────────────────────────
         elapsed_total = time.monotonic() - t_total
         print()
@@ -521,6 +687,7 @@ async def reindex(
         print(f"  Triples created     : {total_triples}")
         print(f"  Contradictions      : {total_contradictions}")
         print(f"  Merged duplicates   : {merged_count if not dry_run else 'N/A'}")
+        print(f"  Entity embeddings   : {embed_count if not dry_run else 'N/A'}")
         print(f"  Total time          : {elapsed_total:.1f}s")
         print()
 
