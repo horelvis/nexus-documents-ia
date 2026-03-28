@@ -143,17 +143,20 @@ export function GraphCanvas2D({
   )
 
   // Highlighted entity IDs (selected node + neighbors)
-  const activeHighlights = useMemo(() => {
-    if (highlightedIds && highlightedIds.size > 0) return highlightedIds
-    return null
-  }, [highlightedIds])
+  const activeHighlights = highlightedIds && highlightedIds.size > 0 ? highlightedIds : null
+  const highlightsRef = useRef(activeHighlights)
+  highlightsRef.current = activeHighlights
+
+  // Track node count to detect data changes (stable primitive dep)
+  const nodeCount = graphNodes.length
+  const sizeKey = `${size.width}x${size.height}`
 
   // ── Animation loop ──
   useEffect(() => {
-    if (size.width === 0 || graphNodes.length === 0) return
+    if (size.width === 0 || nodeCount === 0) return
+
     startTimeRef.current = performance.now()
-    setSettled(false)
-    setTime(0)
+    let localSettled = false
 
     const FPS_INTERVAL = 1000 / 30
 
@@ -164,41 +167,25 @@ export function GraphCanvas2D({
       }
       lastFrameRef.current = now
 
-      if (now - startTimeRef.current > SETTLE_TIME) {
+      if (!localSettled && now - startTimeRef.current > SETTLE_TIME) {
+        localSettled = true
         setSettled(true)
-        if (activeHighlights && activeHighlights.size > 0) {
-          setTime((t) => t + 0.01)
-          animRef.current = requestAnimationFrame(animate)
-        }
-        return
       }
 
-      setTime((t) => t + 0.01)
-      animRef.current = requestAnimationFrame(animate)
+      // Keep animating if not settled, or if there are active highlights
+      const hasHighlights = highlightsRef.current && highlightsRef.current.size > 0
+      if (!localSettled || hasHighlights) {
+        setTime((t) => t + 0.01)
+        animRef.current = requestAnimationFrame(animate)
+      }
     }
 
+    setSettled(false)
+    setTime(0)
     animRef.current = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(animRef.current)
-  }, [size, graphNodes, activeHighlights])
-
-  // Restart anim on highlight change
-  useEffect(() => {
-    if (activeHighlights && activeHighlights.size > 0 && settled) {
-      const FPS_INTERVAL = 1000 / 30
-      function animate(now: number) {
-        if (now - lastFrameRef.current < FPS_INTERVAL) {
-          animRef.current = requestAnimationFrame(animate)
-          return
-        }
-        lastFrameRef.current = now
-        setTime((t) => t + 0.01)
-        if (activeHighlights && activeHighlights.size > 0) {
-          animRef.current = requestAnimationFrame(animate)
-        }
-      }
-      animRef.current = requestAnimationFrame(animate)
-    }
-  }, [activeHighlights, settled])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sizeKey, nodeCount])
 
   // ── Position helpers (breathing drift) ──
   const getPos = useCallback((node: GraphNode, t: number, isSettled: boolean) => {
