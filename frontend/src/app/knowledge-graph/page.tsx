@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import dynamic from "next/dynamic"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   IconNetwork,
@@ -28,25 +27,8 @@ import {
 } from "@/lib/services/knowledge-tree.service"
 import { EntitySearchBar } from "@/components/graph/EntitySearchBar"
 import { ExplainabilityLegend } from "./components/ExplainabilityLegend"
+import { GraphCanvas2D } from "./components/GraphCanvas2D"
 import { NodeDetailsDrawer } from "./components/NodeDetailsDrawer"
-
-// Dynamic import to avoid SSR issues with Three.js / WebGL
-const ExplainabilityGraph3D = dynamic(
-  () => import("./components/ExplainabilityGraph3D"),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex-1 flex items-center justify-center bg-[#07090f]">
-        <div className="flex flex-col items-center gap-3">
-          <IconLoader2 className="h-6 w-6 animate-spin text-cyan-500/60" />
-          <span className="text-[11px] text-slate-600 tracking-widest uppercase">
-            Cargando grafo 3D...
-          </span>
-        </div>
-      </div>
-    ),
-  }
-)
 
 export default function KnowledgeGraphPage() {
   const { isLoaded, isAuthenticated, tenantId } = useAuth()
@@ -239,7 +221,7 @@ export default function KnowledgeGraphPage() {
                 </div>
               </div>
             ) : (
-              <ExplainabilityGraph3D
+              <GraphCanvas2D
                 nodes={nodes}
                 links={links}
                 highlightedIds={highlightedIds}
