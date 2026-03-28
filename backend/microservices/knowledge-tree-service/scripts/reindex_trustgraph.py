@@ -68,7 +68,7 @@ RESET = "\033[0m"
 
 WEAVIATE_SERVICE_URL = settings.WEAVIATE_SERVICE_URL.rstrip("/")
 INTELLIGENCE_DOCS_SERVICE_URL = os.environ.get(
-    "INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8012"
+    "INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000"
 ).rstrip("/")
 MICROSERVICES_API_KEY = settings.MICROSERVICES_API_KEY
 
@@ -383,10 +383,11 @@ async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
             text = f"{label} ({type_str})"
 
         entities.append({
-            "uri": uri,
+            "entity_uri": uri,
             "label": label,
-            "type": type_str,
+            "entity_type": type_str,
             "definition": definition or "",
+            "collection": "default",
         })
         embed_texts.append(text)
 
@@ -427,7 +428,7 @@ async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
     # Delete existing entity embeddings for this tenant
     async with httpx.AsyncClient(timeout=60) as http:
         del_resp = await http.delete(
-            f"{WEAVIATE_SERVICE_URL}/entities/delete",
+            f"{WEAVIATE_SERVICE_URL}/weaviate/entities/delete",
             params={"tenant_id": tenant_id},
             headers=WEAVIATE_HEADERS,
         )
@@ -445,7 +446,7 @@ async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
             batch_entities = entities[batch_start: batch_start + EMBED_BATCH_SIZE]
             batch_embeddings = all_embeddings[batch_start: batch_start + EMBED_BATCH_SIZE]
             upsert_resp = await http.post(
-                f"{WEAVIATE_SERVICE_URL}/entities/batch-upsert",
+                f"{WEAVIATE_SERVICE_URL}/weaviate/entities/batch-upsert",
                 json={
                     "entities": batch_entities,
                     "embeddings": batch_embeddings,

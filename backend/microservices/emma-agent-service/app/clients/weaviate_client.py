@@ -708,7 +708,7 @@ class WeaviateClient(BaseHTTPClient):
             payload["collection"] = collection
         try:
             result = await self.post_json(
-                "/entities/search", json=payload, headers=self._headers()
+                "/weaviate/entities/search", json=payload, headers=self._headers()
             )
             return result.get("entities", [])
         except Exception as e:
@@ -732,7 +732,7 @@ class WeaviateClient(BaseHTTPClient):
             payload["collection"] = collection
         try:
             result = await self.post_json(
-                "/entities/search-by-embedding", json=payload, headers=self._headers()
+                "/weaviate/entities/search-by-embedding", json=payload, headers=self._headers()
             )
             return result.get("entities", [])
         except Exception as e:
