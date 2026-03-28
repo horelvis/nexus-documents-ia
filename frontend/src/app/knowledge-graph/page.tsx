@@ -105,6 +105,7 @@ export default function KnowledgeGraphPage() {
       }
       const response = await knowledgeTreeApi.getTripleNeighbors(
         tenantId, seeds, 2, 150,
+        ['prov/.*', '.*/contradiction-subject'],
       )
       const { nodes: n, edges: e, properties: props, contradictions: contras } = buildTrustGraphData(response.edges)
       setNodes(n)

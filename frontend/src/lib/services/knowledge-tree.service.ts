@@ -249,6 +249,7 @@ export const knowledgeTreeApi = {
     seedUris: string[],
     maxHops: number = 2,
     maxEdges: number = 150,
+    excludePredicates: string[] = ['prov/.*'],
   ): Promise<TripleNeighborsResponse> {
     try {
       const response = await apiClient.post<TripleNeighborsResponse>(
@@ -258,7 +259,7 @@ export const knowledgeTreeApi = {
           seed_uris: seedUris,
           max_hops: maxHops,
           max_edges: maxEdges,
-          exclude_predicates: ['prov/.*'],
+          exclude_predicates: excludePredicates,
         },
       )
       return response.data ?? { edges: [], entities_visited: 0, hops_used: 0 }
@@ -379,8 +380,17 @@ export function buildTrustGraphData(triples: Triple[]): {
 
     // Fallback: humanize URI
     if (!node.label) {
-      node.label = uri.split('/').pop()?.replace(/-/g, ' ') ?? uri
-      node.label = node.label.replace(/\b\w/g, c => c.toUpperCase())
+      const lastSegment = uri.split('/').pop() ?? uri
+      // Detect UUIDs (document nodes) — show type + short hash
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(lastSegment)
+      if (isUuid) {
+        const typeLabel = node.type !== 'other' ? node.type : 'doc'
+        node.label = `${typeLabel} …${lastSegment.slice(-6)}`
+      } else {
+        // Entity URIs: replace hyphens with spaces, title case
+        node.label = lastSegment.replace(/-/g, ' ')
+        node.label = node.label.replace(/\b\w/g, c => c.toUpperCase())
+      }
     }
   }
 
