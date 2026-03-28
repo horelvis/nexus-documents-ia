@@ -218,23 +218,31 @@ export function GraphCanvas2D({
     return lines
   }, [size])
 
-  // ── Zoom ──
-  const handleWheel = useCallback(
-    (e: React.WheelEvent) => {
+  // ── Zoom (native listener to allow preventDefault on passive wheel) ──
+  const zoomRef = useRef(zoom)
+  const panRef = useRef(pan)
+  zoomRef.current = zoom
+  panRef.current = pan
+
+  useEffect(() => {
+    const svg = svgRef.current
+    if (!svg) return
+    function onWheel(e: WheelEvent) {
       e.preventDefault()
       const delta = e.deltaY > 0 ? 0.9 : 1.1
-      const newZoom = Math.min(4, Math.max(0.25, zoom * delta))
-      const svg = svgRef.current
-      if (!svg) return
-      const rect = svg.getBoundingClientRect()
+      const z = zoomRef.current
+      const p = panRef.current
+      const newZoom = Math.min(4, Math.max(0.25, z * delta))
+      const rect = svg!.getBoundingClientRect()
       const cx = e.clientX - rect.left
       const cy = e.clientY - rect.top
-      const ratio = newZoom / zoom
-      setPan({ x: cx - (cx - pan.x) * ratio, y: cy - (cy - pan.y) * ratio })
+      const ratio = newZoom / z
+      setPan({ x: cx - (cx - p.x) * ratio, y: cy - (cy - p.y) * ratio })
       setZoom(newZoom)
-    },
-    [zoom, pan],
-  )
+    }
+    svg.addEventListener('wheel', onWheel, { passive: false })
+    return () => svg.removeEventListener('wheel', onWheel)
+  }, [])
 
   // ── Pan ──
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -301,7 +309,6 @@ export function GraphCanvas2D({
         width={size.width}
         height={size.height}
         style={{ display: 'block', background: BG_COLOR, cursor: isPanningRef.current ? 'grabbing' : 'default' }}
-        onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
       >
