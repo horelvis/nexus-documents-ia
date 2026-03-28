@@ -687,6 +687,58 @@ class WeaviateClient(BaseHTTPClient):
             logger.warning(f"Get tenant schema failed: {e}")
             return {"collections": [], "properties": {}}
 
+    # =========================================================================
+    # Entity Search (TrustGraph)
+    # =========================================================================
+
+    async def search_entities(
+        self,
+        query: str,
+        tenant_id: str,
+        collection: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Search TrustGraph entities by text similarity via weaviate-service."""
+        payload: dict[str, Any] = {
+            "query": query,
+            "tenant_id": tenant_id,
+            "limit": limit,
+        }
+        if collection:
+            payload["collection"] = collection
+        try:
+            result = await self.post_json(
+                "/entities/search", json=payload, headers=self._headers()
+            )
+            return result.get("entities", [])
+        except Exception as e:
+            logger.warning(f"Entity search failed: {e}")
+            return []
+
+    async def search_entities_by_embedding(
+        self,
+        embedding: list[float],
+        tenant_id: str,
+        collection: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """Search entities using a pre-computed embedding vector."""
+        payload: dict[str, Any] = {
+            "query_embedding": embedding,
+            "tenant_id": tenant_id,
+            "limit": limit,
+        }
+        if collection:
+            payload["collection"] = collection
+        try:
+            result = await self.post_json(
+                "/entities/search-by-embedding", json=payload, headers=self._headers()
+            )
+            return result.get("entities", [])
+        except Exception as e:
+            logger.warning(f"Entity search by embedding failed: {e}")
+            return []
+
 
 def get_weaviate_client() -> WeaviateClient:
     """

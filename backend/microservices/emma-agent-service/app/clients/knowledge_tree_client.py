@@ -226,6 +226,29 @@ class KnowledgeTreeClient(BaseHTTPClient):
             logger.warning(f"Triple stats failed: {e}")
             return {"success": False, "error": str(e)}
 
+    async def batch_neighbors(
+        self,
+        tenant_id: str,
+        seed_uris: List[str],
+        max_hops: int = 2,
+        max_edges: int = 150,
+        triples_per_entity: int = 30,
+        exclude_predicates: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """BFS subgraph traversal via /triples/neighbors."""
+        payload = {
+            "tenant_id": tenant_id,
+            "seed_uris": seed_uris,
+            "max_hops": max_hops,
+            "max_edges": max_edges,
+            "exclude_predicates": exclude_predicates or ["prov/.*"],
+        }
+        try:
+            return await self.post_json("/triples/neighbors", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Batch neighbors failed: {e}")
+            return {"edges": [], "entities_visited": 0, "hops_used": 0}
+
 
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None
 
