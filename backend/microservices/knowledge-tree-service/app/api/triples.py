@@ -5,7 +5,7 @@ Router prefix: /triples
 """
 
 import logging
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
@@ -91,6 +91,29 @@ async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
 
     triples = [TripleResult(**row) for row in rows]
     return TripleQueryResponse(triples=triples, count=len(triples))
+
+
+@router.get("/top-entities")
+async def top_entities(
+    tenant_id: str = Query(...),
+    limit: int = Query(default=10, ge=1, le=50),
+) -> List[Dict[str, Any]]:
+    """Return entity URIs with highest degree centrality (most connections).
+
+    Used by the frontend to seed the graph visualization when no specific
+    entity is selected.
+    """
+    tq = TripleQuery(falkordb_client)
+    query = (
+        "MATCH (n:Node {user: $user})-[r:Rel]-() "
+        "WITH n.uri AS uri, count(r) AS degree "
+        "ORDER BY degree DESC "
+        "LIMIT $limit "
+        "RETURN uri, degree"
+    )
+    params = {"user": tenant_id, "limit": limit}
+    rows = await tq._client.execute_cypher(query, params=params)
+    return [{"uri": r["uri"], "degree": r["degree"]} for r in rows]
 
 
 @router.post("/neighbors", response_model=BatchNeighborsResponse)

@@ -347,12 +347,15 @@ class TripleQuery:
             if len(all_edges) >= max_edges:
                 break
 
-            # Single UNWIND query for the entire frontier
+            # Single UNWIND query for the entire frontier.
+            # Bidirectional: capture both outgoing (s→o) and incoming (o→s)
+            # Node→Node edges so hub entities that are mostly targets are
+            # reachable too.
             query = (
                 "UNWIND $frontier AS seed_uri "
-                "MATCH (s:Node {uri: seed_uri, user: $user})"
-                "-[r:Rel]->(o:Node) "
-                f"WHERE o.user = $user{col_filter} "
+                "MATCH (s:Node {user: $user})"
+                "-[r:Rel]-(o:Node {user: $user}) "
+                f"WHERE (s.uri = seed_uri OR o.uri = seed_uri){col_filter} "
                 "RETURN s.uri AS subject, r.uri AS predicate, "
                 "o.uri AS object, 'node' AS object_type, "
                 "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk "
@@ -376,15 +379,42 @@ class TripleQuery:
                 all_edges.append(triple)
                 hop_had_results = True
 
+                # Bidirectional: expand frontier from both sides of the edge
+                subj_uri = row.get("subject")
                 obj_uri = row.get("object")
-                if obj_uri and obj_uri not in visited:
-                    visited.add(obj_uri)
-                    new_frontier.append(obj_uri)
+                for uri in (subj_uri, obj_uri):
+                    if uri and uri not in visited:
+                        visited.add(uri)
+                        new_frontier.append(uri)
 
             if hop_had_results:
                 hops_used += 1
 
             frontier = new_frontier
+
+        # Fetch Node→Literal properties for all visited entities
+        # (needed for labels, types, definitions in the frontend)
+        all_entity_uris = list(visited)
+        if all_entity_uris:
+            lit_query = (
+                "UNWIND $uris AS entity_uri "
+                "MATCH (s:Node {uri: entity_uri, user: $user})"
+                "-[r:Rel]->(o:Literal) "
+                "RETURN s.uri AS subject, r.uri AS predicate, "
+                "o.value AS object, 'literal' AS object_type, "
+                "r.extraction_method AS extraction_method, "
+                "r.source_chunk AS source_chunk "
+                "LIMIT $lit_limit"
+            )
+            lit_params = self._base_params(
+                user, collection, uris=all_entity_uris, lit_limit=len(all_entity_uris) * 10
+            )
+            lit_rows = await self._client.execute_cypher(lit_query, params=lit_params)
+            for row in lit_rows:
+                predicate = row.get("predicate") or ""
+                if _is_excluded(predicate):
+                    continue
+                all_edges.append(self._row_to_triple(row))
 
         return {
             "edges": all_edges,

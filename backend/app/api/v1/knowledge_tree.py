@@ -88,3 +88,30 @@ async def tree_graph_subgraph(request: Request, tenant_id: str = Depends(get_cur
     if body.get("max_nodes", 0) > 100:
         body["max_nodes"] = 100
     return await _proxy_post("/tree/graph/subgraph", tenant_id, body, timeout=60.0)
+
+
+# ── TrustGraph Phase 2: triple-based endpoints ──
+
+
+@router.get("/triples/stats")
+async def triples_stats(tenant_id: str = Depends(get_current_tenant_id_async)):
+    return await _proxy_get("/triples/stats", tenant_id)
+
+
+@router.get("/triples/top-entities")
+async def triples_top_entities(tenant_id: str = Depends(get_current_tenant_id_async)):
+    return await _proxy_get("/triples/top-entities", tenant_id)
+
+
+@router.post("/triples/query")
+async def triples_query(request: Request, tenant_id: str = Depends(get_current_tenant_id_async)):
+    body = await request.json()
+    body["tenant_id"] = tenant_id
+    return await _proxy_post("/triples/query", tenant_id, body)
+
+
+@router.post("/triples/neighbors")
+async def triples_neighbors(request: Request, tenant_id: str = Depends(get_current_tenant_id_async)):
+    body = await request.json()
+    body["tenant_id"] = tenant_id
+    return await _proxy_post("/triples/neighbors", tenant_id, body, timeout=60.0)

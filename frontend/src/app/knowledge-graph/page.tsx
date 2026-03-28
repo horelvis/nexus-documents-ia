@@ -91,7 +91,18 @@ export default function KnowledgeGraphPage() {
     setHighlightedIds(null)
     setFocusNodeId(null)
     try {
-      const seeds = seedUris ?? []
+      // If no seeds provided, fetch top entities by degree centrality
+      let seeds = seedUris ?? []
+      if (seeds.length === 0) {
+        const topEntities = await knowledgeTreeApi.getTopEntities(tenantId, 5)
+        seeds = topEntities.map((e) => e.uri)
+      }
+      if (seeds.length === 0) {
+        setNodes([])
+        setLinks([])
+        setIsLoading(false)
+        return
+      }
       const response = await knowledgeTreeApi.getTripleNeighbors(
         tenantId, seeds, 2, 150,
       )

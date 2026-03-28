@@ -227,6 +227,22 @@ export const knowledgeTreeApi = {
 
   // ── TrustGraph Phase 2 ──
 
+  /** GET /triples/top-entities — Entities with highest degree centrality */
+  async getTopEntities(
+    tenantId: string,
+    limit: number = 10,
+  ): Promise<Array<{ uri: string; degree: number }>> {
+    try {
+      const response = await apiClient.get<Array<{ uri: string; degree: number }>>(
+        `${BASE}/triples/top-entities?tenant_id=${encodeURIComponent(tenantId)}&limit=${limit}`,
+      )
+      return response.data ?? []
+    } catch (error) {
+      console.error('Top entities failed:', error)
+      return []
+    }
+  },
+
   /** POST /triples/neighbors — BFS subgraph via triple store */
   async getTripleNeighbors(
     tenantId: string,
