@@ -151,8 +151,12 @@ export function GraphCanvas2D({
   const activeHighlights = highlightedIds && highlightedIds.size > 0 ? highlightedIds : null
 
   // ── Animation loop — uses refs only, triggers forceRender ──
+  // Stable dep: node count as a number that only changes on real data load
+  const stableNodeCount = useRef(0)
+  if (graphNodes.length > 0) stableNodeCount.current = graphNodes.length
+
   useEffect(() => {
-    if (size.width === 0 || graphNodes.length === 0) return
+    if (size.width === 0 || stableNodeCount.current === 0) return
 
     startTimeRef.current = performance.now()
     settledRef.current = false
@@ -171,7 +175,7 @@ export function GraphCanvas2D({
 
       if (!settledRef.current && now - startTimeRef.current > SETTLE_TIME) {
         settledRef.current = true
-        forceRender() // one final render to show settled state
+        forceRender()
         return
       }
 
@@ -185,9 +189,9 @@ export function GraphCanvas2D({
       cancelled = true
       cancelAnimationFrame(animRef.current)
     }
-    // Only re-run when data or container actually changes
+    // Deps: only the initial size (once set, stays stable) and node data arrival
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [size.width, size.height, graphNodes.length])
+  }, [nodes.length, size.width > 0])
 
   // Read animation values from refs (no state deps)
   const time = timeRef.current
@@ -276,18 +280,8 @@ export function GraphCanvas2D({
     [onNodeClick],
   )
 
-  // ── Early returns ──
-  if (size.width === 0) {
-    return <div ref={containerRef} className={`w-full h-full ${className ?? ''}`} />
-  }
-
-  if (graphNodes.length === 0) {
-    return (
-      <div ref={containerRef} className={`w-full h-full flex items-center justify-center ${className ?? ''}`} style={{ background: BG_COLOR }}>
-        <IconLoader2 className="h-6 w-6 animate-spin text-cyan-500/40" />
-      </div>
-    )
-  }
+  // Show loading or empty — but ALWAYS render containerRef for ResizeObserver stability
+  const showGraph = size.width > 0 && graphNodes.length > 0
 
   // Type cluster labels (computed inline — cheap)
   const typeGroups = new Map<string, { x: number; y: number }>()
@@ -304,10 +298,16 @@ export function GraphCanvas2D({
     <div
       ref={containerRef}
       className={`relative w-full h-full overflow-hidden ${className ?? ''}`}
+      style={{ background: BG_COLOR }}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
     >
-      <svg
+      {!showGraph && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <IconLoader2 className="h-6 w-6 animate-spin text-cyan-500/40" />
+        </div>
+      )}
+      {showGraph && <svg
         ref={svgRef}
         width={size.width}
         height={size.height}
@@ -411,7 +411,7 @@ export function GraphCanvas2D({
             )
           })}
         </g>
-      </svg>
+      </svg>}
 
       {/* Zoom controls */}
       <div className="absolute bottom-4 right-4 flex flex-col gap-1.5 z-10">
