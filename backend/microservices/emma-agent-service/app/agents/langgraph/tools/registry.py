@@ -57,6 +57,7 @@ class ToolRegistry:
         from .smart_search import SmartSearchTool
         from .search import GetDocumentContentTool
         from .graph import StructuralQueryTool
+        from .graph_rag import GraphRAGTool
         from .specialists import AnalyzeDomainTool
         from .web import WebSearchTool
         from .discovery import ListSourcesTool
@@ -70,6 +71,7 @@ class ToolRegistry:
 
         tools: List[EmmaTool] = [
             SmartSearchTool(),         # Replaces SearchDocuments + SearchLegislation
+            GraphRAGTool(),            # Graph RAG: entity relationships via knowledge graph
             GetDocumentContentTool(),
             StructuralQueryTool(),
             AnalyzeDomainTool(),

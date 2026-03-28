@@ -1,4 +1,9 @@
 """
+DEPRECATED: Replaced by graph_rag tool in Phase 2.
+Use GraphRAGTool for TrustGraph-validated retrieval via knowledge graph.
+This module is kept for backward compatibility — SmartSearch still calls
+KnowledgeTreeClient.extract_subgraph independently.
+
 Sector-aware Graph Expander
 
 Expands query context by querying the TrustGraph triple store for the
