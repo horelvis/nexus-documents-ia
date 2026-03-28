@@ -355,9 +355,12 @@ class TripleQuery:
                 f"WHERE o.user = $user{col_filter} "
                 "RETURN s.uri AS subject, r.uri AS predicate, "
                 "o.uri AS object, 'node' AS object_type, "
-                "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk"
+                "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk "
+                "LIMIT $query_limit"
             )
-            params = self._base_params(user, collection, frontier=frontier)
+            # Safety limit: allow headroom for post-query predicate filtering
+            query_limit = max_edges * 3
+            params = self._base_params(user, collection, frontier=frontier, query_limit=query_limit)
             rows = await self._client.execute_cypher(query, params=params)
 
             new_frontier: List[str] = []
