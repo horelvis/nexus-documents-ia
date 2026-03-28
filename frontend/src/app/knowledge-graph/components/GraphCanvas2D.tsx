@@ -8,7 +8,7 @@
  * breathing animation, grid background, glow on hover.
  */
 
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo, useReducer } from 'react'
 import {
   IconZoomIn,
   IconZoomOut,
@@ -16,7 +16,7 @@ import {
   IconLoader2,
 } from '@tabler/icons-react'
 import type { TrustGraphNode, TrustGraphEdge } from '@/lib/services/knowledge-tree.service'
-import { ENTITY_TYPE_COLORS, getEntityColor } from './explainability-theme'
+import { getEntityColor } from './explainability-theme'
 
 // ── Internal types ──
 
@@ -60,11 +60,15 @@ export function GraphCanvas2D({
   const svgRef = useRef<SVGSVGElement>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [hovered, setHovered] = useState<string | null>(null)
-  const [settled, setSettled] = useState(false)
-  const [time, setTime] = useState(0)
+
+  // Animation state kept entirely in refs — no React state updates during animation
+  const timeRef = useRef(0)
+  const settledRef = useRef(false)
   const animRef = useRef<number>(0)
   const startTimeRef = useRef<number>(0)
   const lastFrameRef = useRef<number>(0)
+  // Force re-render without state deps: useReducer tick
+  const [, forceRender] = useReducer((x: number) => x + 1, 0)
 
   // Zoom + pan
   const [zoom, setZoom] = useState(1)
@@ -72,8 +76,8 @@ export function GraphCanvas2D({
   const isPanningRef = useRef(false)
   const lastPanRef = useRef({ x: 0, y: 0 })
 
-  // ── ResizeObserver (debounced to avoid layout thrash) ──
-  const sizeRef = useRef({ width: 0, height: 0 })
+  // ── ResizeObserver ──
+  const prevSizeRef = useRef({ width: 0, height: 0 })
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -81,8 +85,8 @@ export function GraphCanvas2D({
       const { width, height } = entries[0].contentRect
       const w = Math.round(width)
       const h = Math.round(height)
-      if (w > 0 && h > 0 && (w !== sizeRef.current.width || h !== sizeRef.current.height)) {
-        sizeRef.current = { width: w, height: h }
+      if (w > 0 && h > 0 && (w !== prevSizeRef.current.width || h !== prevSizeRef.current.height)) {
+        prevSizeRef.current = { width: w, height: h }
         setSize({ width: w, height: h })
       }
     })
@@ -97,7 +101,6 @@ export function GraphCanvas2D({
     const cx = size.width / 2
     const cy = size.height / 2
 
-    // Group by entity type
     const groups = new Map<string, TrustGraphNode[]>()
     for (const n of nodes) {
       const type = n.type || 'other'
@@ -109,7 +112,6 @@ export function GraphCanvas2D({
     const typeKeys = Array.from(groups.keys())
     const typePositions = new Map<string, { x: number; y: number }>()
 
-    // Place each type cluster in a circle
     typeKeys.forEach((type, i) => {
       const angle = (Math.PI * 2 * i) / typeKeys.length - Math.PI / 2
       const radius = Math.min(cx, cy) * 0.4
@@ -119,7 +121,6 @@ export function GraphCanvas2D({
       })
     })
 
-    // Place nodes around their type center
     const result: GraphNode[] = []
     for (const [type, typeNodes] of groups) {
       const center = typePositions.get(type)!
@@ -142,56 +143,40 @@ export function GraphCanvas2D({
     return result
   }, [nodes, size])
 
-  // Map for quick lookup
   const nodeMap = useMemo(
     () => new Map(graphNodes.map((n) => [n.id, n])),
     [graphNodes],
   )
 
-  // Highlighted entity IDs (selected node + neighbors)
   const activeHighlights = highlightedIds && highlightedIds.size > 0 ? highlightedIds : null
-  const highlightsRef = useRef(activeHighlights)
-  highlightsRef.current = activeHighlights
 
-  // Track node count to detect data changes (stable primitive dep)
-  const nodeCount = graphNodes.length
-  const sizeKey = `${size.width}x${size.height}`
-
-  // ── Animation loop (breathing effect until settle) ──
-  const timeRef = useRef(0)
-  const settledRef = useRef(false)
-
+  // ── Animation loop — uses refs only, triggers forceRender ──
   useEffect(() => {
-    if (size.width === 0 || nodeCount === 0) return
+    if (size.width === 0 || graphNodes.length === 0) return
 
     startTimeRef.current = performance.now()
     settledRef.current = false
     timeRef.current = 0
-    setSettled(false)
-    setTime(0)
 
     let cancelled = false
 
     function animate(now: number) {
       if (cancelled) return
 
-      // Throttle to ~20fps for breathing (doesn't need 60fps)
       if (now - lastFrameRef.current < 50) {
         animRef.current = requestAnimationFrame(animate)
         return
       }
       lastFrameRef.current = now
 
-      // Check settle
       if (!settledRef.current && now - startTimeRef.current > SETTLE_TIME) {
         settledRef.current = true
-        setSettled(true)
-        // Stop animation entirely — no more state updates
+        forceRender() // one final render to show settled state
         return
       }
 
       timeRef.current += 0.015
-      setTime(timeRef.current)
+      forceRender()
       animRef.current = requestAnimationFrame(animate)
     }
 
@@ -200,10 +185,15 @@ export function GraphCanvas2D({
       cancelled = true
       cancelAnimationFrame(animRef.current)
     }
+    // Only re-run when data or container actually changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sizeKey, nodeCount])
+  }, [size.width, size.height, graphNodes.length])
 
-  // ── Position helpers (breathing drift) ──
+  // Read animation values from refs (no state deps)
+  const time = timeRef.current
+  const settled = settledRef.current
+
+  // ── Position helpers ──
   const getPos = useCallback((node: GraphNode, t: number, isSettled: boolean) => {
     if (isSettled) return { x: node.cx, y: node.cy }
     const dx = Math.sin(t + node.cx * 0.01) * 0.5
@@ -222,7 +212,7 @@ export function GraphCanvas2D({
     [getPos],
   )
 
-  // ── Grid lines ──
+  // ── Grid ──
   const gridLines = useMemo(() => {
     const lines: React.ReactElement[] = []
     for (let x = 0; x < size.width; x += GRID_SPACING) {
@@ -234,7 +224,7 @@ export function GraphCanvas2D({
     return lines
   }, [size])
 
-  // ── Zoom (native listener to allow preventDefault on passive wheel) ──
+  // ── Zoom (native listener for passive:false) ──
   const zoomRef = useRef(zoom)
   const panRef = useRef(pan)
   zoomRef.current = zoom
@@ -279,16 +269,14 @@ export function GraphCanvas2D({
   }, [])
 
   const handleMouseUp = useCallback(() => { isPanningRef.current = false }, [])
-
   const handleReset = useCallback(() => { setZoom(1); setPan({ x: 0, y: 0 }) }, [])
 
-  // ── Click ──
   const handleNodeClick = useCallback(
     (node: GraphNode) => onNodeClick?.(node),
     [onNodeClick],
   )
 
-  // ── Render ──
+  // ── Early returns ──
   if (size.width === 0) {
     return <div ref={containerRef} className={`w-full h-full ${className ?? ''}`} />
   }
@@ -301,11 +289,10 @@ export function GraphCanvas2D({
     )
   }
 
-  // Type labels
+  // Type cluster labels (computed inline — cheap)
   const typeGroups = new Map<string, { x: number; y: number }>()
   for (const n of graphNodes) {
     if (!typeGroups.has(n.type)) {
-      // Find centroid of this type's nodes
       const sameType = graphNodes.filter((g) => g.type === n.type)
       const avgX = sameType.reduce((s, g) => s + g.cx, 0) / sameType.length
       const avgY = sameType.reduce((s, g) => s + g.cy, 0) / sameType.length
@@ -328,12 +315,10 @@ export function GraphCanvas2D({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
       >
-        {/* Grid (fixed) */}
         <g>{gridLines}</g>
 
-        {/* Transformed content */}
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
-          {/* Type domain labels */}
+          {/* Type labels */}
           {Array.from(typeGroups.entries()).map(([type, pos]) => (
             <text
               key={`label-${type}`}
@@ -349,9 +334,8 @@ export function GraphCanvas2D({
             </text>
           ))}
 
-          {/* Edges — gradient Bézier curves */}
+          {/* Edges */}
           {links.map((link, i) => {
-            const edgeKey = `edge-${i}`
             const srcId = typeof link.source === 'string' ? link.source : (link.source as any)?.id
             const tgtId = typeof link.target === 'string' ? link.target : (link.target as any)?.id
             const from = nodeMap.get(srcId)
@@ -367,27 +351,19 @@ export function GraphCanvas2D({
             const pulse = isHighlighted ? Math.sin(time * 4) * 0.15 + 0.15 : 0
             const alpha = Math.min(1, baseAlpha + pulse)
 
-            // Particle on highlighted edge
             const t = (time * 2) % 1
             const px = (1 - t) * (1 - t) * x1 + 2 * (1 - t) * t * mx + t * t * x2
             const py = (1 - t) * (1 - t) * y1 + 2 * (1 - t) * t * my + t * t * y2
 
-            const gradId = `grad-${i}`
-
             return (
-              <g key={edgeKey}>
+              <g key={`edge-${i}`}>
                 <defs>
-                  <linearGradient id={gradId} x1="0%" y1="0%" x2="100%" y2="0%">
+                  <linearGradient id={`grad-${i}`} x1="0%" y1="0%" x2="100%" y2="0%">
                     <stop offset="0%" stopColor={from.color} stopOpacity={alpha} />
                     <stop offset="100%" stopColor={to.color} stopOpacity={alpha} />
                   </linearGradient>
                 </defs>
-                <path
-                  d={path}
-                  stroke={`url(#${gradId})`}
-                  strokeWidth={isHighlighted ? 1.5 : 0.75}
-                  fill="none"
-                />
+                <path d={path} stroke={`url(#grad-${i})`} strokeWidth={isHighlighted ? 1.5 : 0.75} fill="none" />
                 {isHighlighted && <circle cx={px} cy={py} r={1.5} fill="#fff" />}
               </g>
             )
@@ -402,8 +378,6 @@ export function GraphCanvas2D({
             const r = isHighlighted || isHovered ? node.r * 1.4 : node.r
             const pulseR = isHighlighted && !settled ? Math.sin(time * 3) * 1.5 : 0
             const { x, y } = getPos(node, time, settled)
-
-            // Truncate label
             const label = node.label.length > 24 ? node.label.slice(0, 22) + '…' : node.label
 
             return (
@@ -414,27 +388,17 @@ export function GraphCanvas2D({
                 onMouseEnter={() => setHovered(node.id)}
                 onMouseLeave={() => setHovered(null)}
               >
-                {/* Glow */}
                 {(isHighlighted || isHovered) && (
                   <circle cx={x} cy={y} r={r + 8 + pulseR} fill={node.color} fillOpacity={0.15} />
                 )}
-
-                {/* Node circle */}
                 <circle
-                  cx={x}
-                  cy={y}
-                  r={r}
-                  fill={node.color}
-                  fillOpacity={alpha * 0.2}
-                  stroke={node.color}
-                  strokeOpacity={alpha}
+                  cx={x} cy={y} r={r}
+                  fill={node.color} fillOpacity={alpha * 0.2}
+                  stroke={node.color} strokeOpacity={alpha}
                   strokeWidth={isHighlighted ? 1.25 : 0.75}
                 />
-
-                {/* Label */}
                 <text
-                  x={x}
-                  y={y + r + 10}
+                  x={x} y={y + r + 10}
                   fill={`rgba(255,255,255,${alpha * (isHighlighted ? 1 : 0.7)})`}
                   fontSize={isHovered ? 8.5 : 7}
                   fontWeight={isHighlighted ? 'bold' : 'normal'}
@@ -451,55 +415,29 @@ export function GraphCanvas2D({
 
       {/* Zoom controls */}
       <div className="absolute bottom-4 right-4 flex flex-col gap-1.5 z-10">
-        <button
-          onClick={() => setZoom((z) => Math.min(4, z * 1.3))}
-          className="h-7 w-7 rounded-md border border-white/[0.06] bg-[#0A0A0F]/80 backdrop-blur text-slate-500 hover:text-slate-300 flex items-center justify-center transition-colors"
-          title="Acercar"
-        >
+        <button onClick={() => setZoom((z) => Math.min(4, z * 1.3))} className="h-7 w-7 rounded-md border border-white/[0.06] bg-[#0A0A0F]/80 backdrop-blur text-slate-500 hover:text-slate-300 flex items-center justify-center transition-colors" title="Acercar">
           <IconZoomIn className="h-3.5 w-3.5" />
         </button>
-        <button
-          onClick={() => setZoom((z) => Math.max(0.25, z / 1.3))}
-          className="h-7 w-7 rounded-md border border-white/[0.06] bg-[#0A0A0F]/80 backdrop-blur text-slate-500 hover:text-slate-300 flex items-center justify-center transition-colors"
-          title="Alejar"
-        >
+        <button onClick={() => setZoom((z) => Math.max(0.25, z / 1.3))} className="h-7 w-7 rounded-md border border-white/[0.06] bg-[#0A0A0F]/80 backdrop-blur text-slate-500 hover:text-slate-300 flex items-center justify-center transition-colors" title="Alejar">
           <IconZoomOut className="h-3.5 w-3.5" />
         </button>
-        <button
-          onClick={handleReset}
-          className="h-7 w-7 rounded-md border border-white/[0.06] bg-[#0A0A0F]/80 backdrop-blur text-slate-500 hover:text-slate-300 flex items-center justify-center transition-colors"
-          title="Centrar"
-        >
+        <button onClick={handleReset} className="h-7 w-7 rounded-md border border-white/[0.06] bg-[#0A0A0F]/80 backdrop-blur text-slate-500 hover:text-slate-300 flex items-center justify-center transition-colors" title="Centrar">
           <IconFocusCentered className="h-3.5 w-3.5" />
         </button>
       </div>
 
-      {/* Hover tooltip */}
+      {/* Tooltip */}
       {hovered && (() => {
         const node = nodeMap.get(hovered)
         if (!node) return null
         const { x, y } = getPos(node, time, settled)
-        // Transform position to screen coords
         const screenX = x * zoom + pan.x
         const screenY = y * zoom + pan.y
 
         return (
-          <div
-            className="absolute z-20 pointer-events-none"
-            style={{ left: screenX + 20, top: screenY - 20 }}
-          >
-            <div
-              className="rounded-lg px-3 py-2.5 backdrop-blur-xl"
-              style={{
-                background: 'rgba(10,10,15,0.95)',
-                border: `1px solid ${node.color}44`,
-                minWidth: 180,
-              }}
-            >
-              <div
-                className="font-bold text-[13px]"
-                style={{ color: node.color, fontFamily: FONT_FAMILY_MONO }}
-              >
+          <div className="absolute z-20 pointer-events-none" style={{ left: screenX + 20, top: screenY - 20 }}>
+            <div className="rounded-lg px-3 py-2.5 backdrop-blur-xl" style={{ background: 'rgba(10,10,15,0.95)', border: `1px solid ${node.color}44`, minWidth: 180 }}>
+              <div className="font-bold text-[13px]" style={{ color: node.color, fontFamily: FONT_FAMILY_MONO }}>
                 {node.label}
               </div>
               <div className="text-[11px] mt-1" style={{ color: '#888', fontFamily: FONT_FAMILY_MONO }}>
