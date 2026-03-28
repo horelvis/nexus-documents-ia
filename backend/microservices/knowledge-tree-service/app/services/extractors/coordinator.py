@@ -121,6 +121,47 @@ class ExtractionCoordinator:
                 deduped_triples.append(triple)
 
         triples_deduped = triples_total - len(deduped_triples)
+
+        # ── Entity linking: upgrade Literal → Node where object matches a known entity ──
+        # Collect all subjects that extractors created as :Node entities
+        known_entities: Set[str] = set()
+        for triple in deduped_triples:
+            subj = triple.get("subject", "")
+            if subj:
+                try:
+                    known_entities.add(URIBuilder.normalize_name(subj))
+                except ValueError:
+                    pass
+
+        # Predicates whose objects are always Literal (metadata, not relationships)
+        _ALWAYS_LITERAL = {"label", "type", "definition", "has-topic", "references-law"}
+
+        linked_count = 0
+        for triple in deduped_triples:
+            if triple.get("object_is_node"):
+                continue  # Already a Node
+            pred_name = triple.get("predicate_name", "")
+            if pred_name in _ALWAYS_LITERAL:
+                continue  # These are intrinsically Literal
+            obj = triple.get("object", "")
+            if not obj:
+                continue
+            try:
+                normalized_obj = URIBuilder.normalize_name(obj)
+            except ValueError:
+                continue
+            if normalized_obj in known_entities:
+                triple["object_is_node"] = True
+                linked_count += 1
+
+        if linked_count:
+            logger.info(
+                "Entity linking: upgraded %d Literal→Node (of %d triples, %d known entities)",
+                linked_count,
+                len(deduped_triples),
+                len(known_entities),
+            )
+
         triples_created = 0
         subject_uris: List[str] = []
 

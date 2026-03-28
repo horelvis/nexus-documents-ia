@@ -237,6 +237,122 @@ class TestCoordinator:
         assert result["triples_deduped"] == 1
         assert result["triples_created"] == 1
 
+    @pytest.mark.asyncio
+    async def test_entity_linking_upgrades_literal_to_node(self, falkordb_client):
+        """When RelationshipsExtractor marks an object as Literal but the
+        object matches a known entity from ObjectsExtractor, the coordinator
+        upgrades it to a Node→Node edge."""
+        store = TripleStore(falkordb_client)
+        doc_uri = "nouxcube://document/default/doc-entity-linking"
+        await store.merge_node(doc_uri, user="t1", collection="default")
+
+        coordinator = _make_coordinator(falkordb_client)
+
+        # ObjectsExtractor creates "ACME S.L." as an entity (subject)
+        obj_triple = _type_triple("ACME S.L.", "organization")
+
+        # RelationshipsExtractor creates "Juan García" → empleado-de → "ACME S.L."
+        # but INCORRECTLY marks object_is_node=False (LLM didn't recognize it)
+        rel_triple = {
+            "subject": "Juan García",
+            "predicate_ontology": "legal",
+            "predicate_name": "empleado-de",
+            "object": "ACME S.L.",
+            "object_is_node": False,  # ← LLM got this wrong
+            "extraction_method": "llm_relationships",
+            "source_chunk": SAMPLE_CHUNK[:200],
+        }
+
+        # DefinitionsExtractor creates labels for both
+        label_juan = _label_triple("Juan García")
+        label_acme = _label_triple("ACME S.L.")
+
+        with (
+            patch.object(
+                coordinator._definitions, "extract",
+                new=AsyncMock(return_value=[label_juan, label_acme])
+            ),
+            patch.object(
+                coordinator._relationships, "extract",
+                new=AsyncMock(return_value=[rel_triple])
+            ),
+            patch.object(
+                coordinator._objects, "extract",
+                new=AsyncMock(return_value=[obj_triple])
+            ),
+            patch.object(
+                coordinator._topics, "extract",
+                new=AsyncMock(return_value=[])
+            ),
+        ):
+            result = await coordinator.extract_chunk(
+                chunk_text=SAMPLE_CHUNK,
+                document_uri=doc_uri,
+                user="t1",
+                collection="default",
+            )
+
+        assert result["errors"] == []
+
+        # Verify: the empleado-de edge should be Node→Node, not Node→Literal
+        juan_uri = URIBuilder.entity("default", "Juan García")
+        acme_uri = URIBuilder.entity("default", "ACME S.L.")
+        empleado_pred = URIBuilder.predicate("legal", "empleado-de")
+
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (s:Node {uri: $s})-[r:Rel {uri: $p}]->(o:Node {uri: $o}) RETURN r",
+            params={"s": juan_uri, "p": empleado_pred, "o": acme_uri},
+        )
+        assert len(rows) == 1, (
+            f"Expected Node→Node edge Juan→empleado-de→ACME, "
+            f"but got {len(rows)} matches. Entity linking may have failed."
+        )
+
+    @pytest.mark.asyncio
+    async def test_entity_linking_preserves_metadata_literals(self, falkordb_client):
+        """Entity linking does NOT upgrade label/type/definition predicates —
+        those are always Literal even if the value matches an entity name."""
+        store = TripleStore(falkordb_client)
+        doc_uri = "nouxcube://document/default/doc-no-upgrade"
+        await store.merge_node(doc_uri, user="t1", collection="default")
+
+        coordinator = _make_coordinator(falkordb_client)
+
+        # "person" is both a type value AND could be normalized to match an entity
+        # but type predicates should NEVER be upgraded to Node
+        type_triple = _type_triple("Juan García", "person")
+        label_triple = _label_triple("Juan García")
+
+        with (
+            patch.object(
+                coordinator._definitions, "extract",
+                new=AsyncMock(return_value=[label_triple])
+            ),
+            patch.object(coordinator._relationships, "extract", new=AsyncMock(return_value=[])),
+            patch.object(
+                coordinator._objects, "extract",
+                new=AsyncMock(return_value=[type_triple])
+            ),
+            patch.object(coordinator._topics, "extract", new=AsyncMock(return_value=[])),
+        ):
+            result = await coordinator.extract_chunk(
+                chunk_text=SAMPLE_CHUNK,
+                document_uri=doc_uri,
+                user="t1",
+                collection="default",
+            )
+
+        assert result["errors"] == []
+
+        # Verify: type should still be a Literal, not a Node
+        juan_uri = URIBuilder.entity("default", "Juan García")
+        type_pred = URIBuilder.predicate("core", "type")
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (s:Node {uri: $s})-[r:Rel {uri: $p}]->(o:Literal {value: $v}) RETURN o",
+            params={"s": juan_uri, "p": type_pred, "v": "person"},
+        )
+        assert len(rows) == 1, "type triple should remain as Literal"
+
 
 # ---------------------------------------------------------------------------
 # TestExtractDocument — document-level
