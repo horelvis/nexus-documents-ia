@@ -297,7 +297,7 @@ export function GraphCanvas2D({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full overflow-hidden ${className ?? ''}`}
+      className={`overflow-hidden ${className ?? ''}`}
       style={{ background: BG_COLOR }}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseUp}
