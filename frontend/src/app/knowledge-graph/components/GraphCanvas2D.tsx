@@ -41,7 +41,7 @@ interface Props {
 const GRID_SPACING = 30
 const GRID_COLOR = 'rgba(255,255,255,0.015)'
 const BG_COLOR = '#0A0A0F'
-const SETTLE_TIME = 8000
+const SETTLE_TIME = 15000  // 15s of breathing before settling
 const NODE_RADIUS = 9
 const FONT_FAMILY_MONO = "'JetBrains Mono', 'IBM Plex Mono', monospace"
 const FONT_FAMILY_SANS = "'IBM Plex Sans', 'Inter', sans-serif"
@@ -200,8 +200,9 @@ export function GraphCanvas2D({
   // ── Position helpers ──
   const getPos = useCallback((node: GraphNode, t: number, isSettled: boolean) => {
     if (isSettled) return { x: node.cx, y: node.cy }
-    const dx = Math.sin(t + node.cx * 0.01) * 0.5
-    const dy = Math.cos(t + node.cy * 0.01) * 0.5
+    // Breathing drift — each node has a unique phase based on position
+    const dx = Math.sin(t * 1.5 + node.cx * 0.02) * 3
+    const dy = Math.cos(t * 1.5 + node.cy * 0.02) * 3
     return { x: node.cx + dx, y: node.cy + dy }
   }, [])
 
@@ -347,7 +348,7 @@ export function GraphCanvas2D({
               : false
 
             const { path, mx, my, x: x1, y: y1, x2, y2 } = getEdgePath(from, to, time, settled)
-            const baseAlpha = isHighlighted ? 0.7 : 0.12
+            const baseAlpha = isHighlighted ? 0.8 : 0.3
             const pulse = isHighlighted ? Math.sin(time * 4) * 0.15 + 0.15 : 0
             const alpha = Math.min(1, baseAlpha + pulse)
 
@@ -363,7 +364,7 @@ export function GraphCanvas2D({
                     <stop offset="100%" stopColor={to.color} stopOpacity={alpha} />
                   </linearGradient>
                 </defs>
-                <path d={path} stroke={`url(#grad-${i})`} strokeWidth={isHighlighted ? 1.5 : 0.75} fill="none" />
+                <path d={path} stroke={`url(#grad-${i})`} strokeWidth={isHighlighted ? 2 : 1} fill="none" />
                 {isHighlighted && <circle cx={px} cy={py} r={1.5} fill="#fff" />}
               </g>
             )
