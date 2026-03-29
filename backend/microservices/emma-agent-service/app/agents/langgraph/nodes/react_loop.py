@@ -72,6 +72,22 @@ def _detect_email_action(query: str) -> Tuple[bool, str]:
     return False, ""
 
 
+# ── Relationship query detection (→ graph_rag hint) ───────────────────
+_RELATIONSHIP_PATTERNS = re.compile(
+    r"\b(represent[ae]|vinculad[oa]s?|relacion(es|ados?)?|conect[ae]|"
+    r"trabaja.*(para|en)|emplea(do|da)|pertenece|asociad[oa]|"
+    r"regula(do)?|aplica(ble)?|qué ley|qué normativa|"
+    r"quién.*(representa|trabaja|dirige|gestiona)|"
+    r"relación entre|conexión entre|vínculo)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_relationship_query(query: str) -> bool:
+    """Detect if the query asks about relationships between entities."""
+    return bool(_RELATIONSHIP_PATTERNS.search(query))
+
+
 async def _build_system_message(state: ReActState) -> SystemMessage:
     """Build the system message with tools description and sector context."""
     registry = get_tool_registry()
@@ -127,6 +143,17 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
             f"el asunto y cuerpo del email."
             f"\nSi en la conversación se generó un documento con generate_document, "
             f"incluye su attachment_id."
+        )
+
+    # Detect relationship queries → force graph_rag as first tool
+    if _detect_relationship_query(query):
+        prompt += (
+            "\n\n## CONSULTA DE RELACIONES DETECTADA"
+            "\nEl usuario pregunta sobre relaciones entre entidades (personas, "
+            "empresas, leyes, conceptos)."
+            "\nUSA `graph_rag` como PRIMERA herramienta para buscar en el grafo "
+            "de conocimiento. NO uses smart_search primero."
+            "\nSi graph_rag no devuelve resultados suficientes, complementa con smart_search."
         )
 
     return SystemMessage(content=prompt)
