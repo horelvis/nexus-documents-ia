@@ -266,9 +266,11 @@ class GraphRAGTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Busca relaciones entre entidades en el grafo de conocimiento. "
-            "Útil cuando necesitas entender cómo se relacionan leyes, personas, "
-            "conceptos o documentos entre sí. Devuelve entidades y relaciones relevantes."
+            "PRIMERA OPCIÓN para preguntas sobre relaciones entre personas, empresas, "
+            "leyes o conceptos. Busca en el grafo de conocimiento quién representa a quién, "
+            "qué ley regula qué, qué personas están vinculadas a qué empresas, etc. "
+            "Usa esta herramienta ANTES que smart_search cuando la pregunta sea sobre "
+            "relaciones, vínculos, representaciones o conexiones entre entidades."
         )
 
     @property
