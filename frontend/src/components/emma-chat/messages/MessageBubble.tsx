@@ -19,6 +19,7 @@ import { ForgeResult } from '../ForgeResult'
 import { useStreamingText } from '../hooks/useStreamingText'
 import { GeneratedDocDownload } from './GeneratedDocDownload'
 import { ProgressBubble } from './ProgressBubble'
+import { EntityTags } from '../EntityTags'
 
 export interface MessageBubbleProps {
   message: EmmaMessage
@@ -216,6 +217,11 @@ export function MessageBubble({
             />
           ))}
         </div>
+      )}
+
+      {/* Entity tags from graph_rag — clickable → knowledge graph */}
+      {message.metadata?.entityTags && message.metadata.entityTags.length > 0 && (
+        <EntityTags entities={message.metadata.entityTags} />
       )}
 
       {/* Explanation — island block */}
