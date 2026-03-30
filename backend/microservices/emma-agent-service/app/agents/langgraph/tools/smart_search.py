@@ -1448,7 +1448,7 @@ def _rerank_results(
             graph_avg = float(graph_rag_data.get("avg_score", 0.5))
             graph_doc_set = set(graph_rag_data["expanded_doc_ids"])
             if doc_id in graph_doc_set:
-                # Continuous score from entity embedding similarity
+                # Continuous score from graph_rag (confidence-aware via pre-filter)
                 graph_score = graph_avg
             elif doc_id in graph_document_ids:
                 graph_score = 1.0  # Binary fallback from entity match
