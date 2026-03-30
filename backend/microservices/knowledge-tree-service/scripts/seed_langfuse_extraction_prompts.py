@@ -55,55 +55,51 @@ PROMPTS: Dict[str, Tuple[str, int]] = {
         """\
 Eres un extractor de definiciones conceptuales. Dado un fragmento de texto, extrae las definiciones explícitas o implícitas de términos, conceptos, personas, organizaciones o documentos mencionados.
 
-Para cada definición encontrada, devuelve un JSON array de objetos con:
-- "subject": nombre del término o entidad que se define
+Return one JSON object per line (JSONL format). Do NOT wrap in an array.
+Each object must have:
+- "entity": nombre del término o entidad que se define
 - "definition": definición o descripción extraída del texto (cita o paráfrasis fiel)
-- "type": tipo de la entidad ("concept", "person", "organization", "document", "place", "other")
 
 Reglas:
 - Solo extrae definiciones que estén claramente expresadas en el texto
 - No inventes ni inferas definiciones que no estén en el fragmento
 - Usa el texto exacto o paráfrasis muy cercanas
-- Si no hay definiciones, devuelve: []
-- SOLO el JSON array, sin explicaciones adicionales
+- Return nothing if no definitions are found
 
-Ejemplo de respuesta:
-[
-  {"subject": "contrato de trabajo", "definition": "acuerdo por el que una persona se obliga a prestar servicios a otra a cambio de retribución", "type": "concept"},
-  {"subject": "TechCorp SL", "definition": "empresa dedicada al desarrollo de software con sede en Madrid", "type": "organization"}
-]""",
+Example:
+{"entity": "contrato de trabajo", "definition": "acuerdo por el que una persona se obliga a prestar servicios a otra a cambio de retribución"}
+{"entity": "TechCorp SL", "definition": "empresa dedicada al desarrollo de software con sede en Madrid"}
+
+TEXT:
+{{chunk_text}}""",
         4096,
     ),
 
     "trustgraph_extract_relationships": (
         """\
-Eres un extractor de relaciones semánticas. Dado un fragmento de texto, extrae las relaciones entre entidades usando los predicados del mini-ontología del sistema.
+Eres un extractor de relaciones semánticas. Dado un fragmento de texto, extrae las relaciones entre entidades.
 
-Para cada relación encontrada, devuelve un JSON array de objetos con:
+Use these predicates when they fit:
+{{mini_ontology}}
+
+If none of the above predicates fit, use a descriptive predicate in Spanish (e.g., "regula", "modifica", "pertenece-a").
+
+Return one JSON object per line (JSONL format). Do NOT wrap in an array.
+Each object must have:
 - "subject": nombre de la entidad sujeto
-- "predicate": nombre del predicado (usa uno de los predicados definidos abajo)
+- "predicate": nombre del predicado (prefer ontology predicates above, or a descriptive one)
 - "object": nombre de la entidad u objeto de la relación
-- "object_is_literal": true si el objeto es un valor escalar (fecha, número, texto), false si es una entidad
-- "confidence": confianza de la extracción ("high", "medium", "low")
+- "object-entity": true if the object is a named entity, false if it is a literal value
 
-Predicados disponibles (sector/nombre):
-  Core: label, definition, type, has-topic, mentioned-in, contained-in, part-of, instance-of, supports, contradicts, semantic-type, domain
-  Legal: empleado-de, firmante-de, representante-de, regulado-por, salario-bruto, tipo-contrato, vigente-desde, vigente-hasta, clausula, obligacion, derecho, modifica, derogado-por, references-law
-  Prov: derived-from, method, model, timestamp, chunk-text, chunk-offset
+Return nothing if no relationships are found.
 
-Reglas:
-- Usa SOLO los predicados listados arriba. Si la relación no encaja en ninguno, omítela.
-- Para el predicado, usa el nombre corto (sin sector/), ej: "empleado-de" no "legal/empleado-de"
-- Solo extrae relaciones claramente expresadas en el texto
-- No inventes relaciones que no estén en el fragmento
-- Si no hay relaciones, devuelve: []
-- SOLO el JSON array, sin explicaciones adicionales
+Example:
+{"subject": "Juan García", "predicate": "empleado-de", "object": "TechCorp SL", "object-entity": true}
+{"subject": "Contrato 2025-001", "predicate": "vigente-desde", "object": "01/01/2025", "object-entity": false}
+{"subject": "Ley 31/1995", "predicate": "regula", "object": "prevención de riesgos laborales", "object-entity": false}
 
-Ejemplo de respuesta:
-[
-  {"subject": "Juan García", "predicate": "empleado-de", "object": "TechCorp SL", "object_is_literal": false, "confidence": "high"},
-  {"subject": "Contrato 2025-001", "predicate": "vigente-desde", "object": "01/01/2025", "object_is_literal": true, "confidence": "high"}
-]""",
+TEXT:
+{{chunk_text}}""",
         4096,
     ),
 
@@ -111,11 +107,10 @@ Ejemplo de respuesta:
         """\
 Eres un extractor de entidades nombradas. Dado un fragmento de texto, extrae TODAS las entidades con nombre propio o identificadores únicos.
 
-Para cada entidad encontrada, devuelve un JSON array de objetos con:
+Return one JSON object per line (JSONL format). Do NOT wrap in an array.
+Each object must have:
 - "name": nombre exacto de la entidad tal como aparece en el texto
 - "type": tipo de entidad ("person", "organization", "document", "place", "date", "legislation", "contract", "other")
-- "normalized": versión normalizada del nombre (sin tildes, mayúsculas a minúsculas, sin caracteres especiales)
-- "context": breve fragmento de contexto donde aparece la entidad (máximo 100 caracteres)
 
 Entidades a extraer:
 - Personas: nombres completos con apellidos
@@ -124,52 +119,46 @@ Entidades a extraer:
 - Lugares: ciudades, provincias, países, direcciones
 - Fechas: fechas concretas (no rangos genéricos)
 - Legislación: leyes, reglamentos, artículos con referencia
-- Contratos: referencias a contratos o acuerdos específicos
 
 NO extraer:
-- Valores numéricos sin contexto (cantidades, porcentajes)
+- Valores numéricos sin contexto
 - Emails, teléfonos, IBANs, NIFs (datos personales sensibles)
 - Términos genéricos sin nombre propio
-- Artículos de ley sin referencia específica
 
-Reglas:
-- Usa el texto EXACTO del documento para "name"
-- NO inventes entidades que no estén en el texto
-- Si no hay entidades, devuelve: []
-- SOLO el JSON array, sin explicaciones adicionales
+Return nothing if no entities are found.
 
-Ejemplo de respuesta:
-[
-  {"name": "Juan García López", "type": "person", "normalized": "juan-garcia-lopez", "context": "representado por Juan García López, con DNI"},
-  {"name": "TechCorp SL", "type": "organization", "normalized": "techcorp-sl", "context": "entre TechCorp SL (CIF: B12345678)"}
-]""",
+Example:
+{"name": "Juan García López", "type": "person"}
+{"name": "TechCorp SL", "type": "organization"}
+{"name": "Estatuto de los Trabajadores", "type": "legislation"}
+
+TEXT:
+{{chunk_text}}""",
         4096,
     ),
 
     "trustgraph_extract_topics": (
         """\
-Eres un extractor de temas y áreas temáticas. Dado un fragmento de texto, identifica los temas principales y secundarios tratados.
+Eres un extractor de temas y áreas temáticas. Dado un fragmento de texto, identifica los temas principales tratados.
 
-Devuelve un JSON array de objetos con:
-- "topic": nombre del tema (conciso, 1-4 palabras)
-- "relevance": nivel de relevancia ("primary", "secondary", "peripheral")
-- "domain": dominio al que pertenece el tema ("legal", "fiscal", "laboral", "medical", "financial", "administrative", "technical", "other")
-- "keywords": lista de 2-5 palabras clave asociadas al tema
+Return one JSON object per line (JSONL format). Do NOT wrap in an array.
+Each object must have:
+- "topic": nombre del tema (conciso, 1-4 palabras, en español)
 
 Reglas:
 - Extrae entre 1 y 8 temas por fragmento
-- Los temas "primary" son el foco central del texto
-- Los temas "secondary" son importantes pero no el foco principal
-- Los temas "peripheral" se mencionan brevemente
 - Usa nombres de temas en español
-- Si el texto es muy corto o no tiene temas claros, devuelve 1-2 temas genéricos
-- SOLO el JSON array, sin explicaciones adicionales
+- Focus on substantive topics — legal areas, business domains, subject matter
+- Avoid generic terms like "document" or "text"
+- Return nothing if no clear topics can be identified
 
-Ejemplo de respuesta:
-[
-  {"topic": "contrato laboral", "relevance": "primary", "domain": "laboral", "keywords": ["contrato", "trabajador", "empleador", "salario", "jornada"]},
-  {"topic": "protección de datos", "relevance": "secondary", "domain": "legal", "keywords": ["RGPD", "datos personales", "consentimiento"]}
-]""",
+Example:
+{"topic": "contrato laboral"}
+{"topic": "protección de datos"}
+{"topic": "derecho mercantil"}
+
+TEXT:
+{{chunk_text}}""",
         2048,
     ),
 }
