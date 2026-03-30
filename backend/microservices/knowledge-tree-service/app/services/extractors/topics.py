@@ -7,25 +7,38 @@ Each topic yields 1 triple:
 Subject is intentionally empty — the coordinator sets it to the document URI.
 """
 
+import logging
 from typing import Any, Dict, List
 
 from app.services.extractors.base import BaseExtractor
 
+logger = logging.getLogger(__name__)
+
 EXTRACTOR_NAME = "topics"
+LANGFUSE_PROMPT_NAME = "trustgraph_extract_topics"
+
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "topic": {"type": "string", "minLength": 1},
+    },
+    "required": ["topic"],
+}
 
 _PROMPT_TEMPLATE = """Identify the main topics and themes present in the following text.
 
-Return a JSON array where each element has:
+Return one JSON object per line (JSONL format). Do NOT wrap in an array.
+Each object must have:
 - "topic": a concise topic label in the same language as the text (string)
 
 Focus on substantive topics — legal areas, business domains, subject matter.
 Avoid generic terms like "document" or "text".
-Return an empty array [] if no clear topics can be identified.
+Return nothing if no clear topics can be identified.
 
-Respond ONLY with a valid JSON array. Example:
-[{{"topic": "derecho laboral"}},
- {{"topic": "contrato de trabajo"}},
- {{"topic": "jornada laboral"}}]
+Example:
+{{"topic": "derecho laboral"}}
+{{"topic": "contrato de trabajo"}}
+{{"topic": "jornada laboral"}}
 
 TEXT:
 {chunk_text}"""
@@ -35,24 +48,26 @@ class TopicsExtractor(BaseExtractor):
     """Extracts thematic topics from text chunks."""
 
     EXTRACTOR_NAME = "topics"
+    RESPONSE_SCHEMA = RESPONSE_SCHEMA
 
     def _build_prompt(self, chunk_text: str) -> str:
+        langfuse_prompt = self._get_langfuse_prompt(LANGFUSE_PROMPT_NAME)
+        if langfuse_prompt:
+            return langfuse_prompt.replace("{{chunk_text}}", chunk_text)
         return _PROMPT_TEMPLATE.format(chunk_text=chunk_text)
 
     def _parse_output(
         self, llm_output: str, chunk_text: str
     ) -> List[Dict[str, Any]]:
-        items = self._safe_parse_json(llm_output)
+        items = self._parse_jsonl(llm_output)
+        items = self._validate_items(items)
         triples: List[Dict[str, Any]] = []
 
         for item in items:
-            if not isinstance(item, dict):
-                continue
             topic = str(item.get("topic", "")).strip()
             if not topic:
                 continue
 
-            # Subject is empty — coordinator will set it to document_uri
             triples.append(
                 self._make_triple(
                     subject="",
