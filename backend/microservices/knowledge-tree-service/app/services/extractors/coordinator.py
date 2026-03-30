@@ -340,22 +340,28 @@ class ExtractionCoordinator:
             errors.append(f"batch_provenance: {exc}")
             logger.warning("Batch provenance recording failed: %s", exc)
 
-        # Step 3: Batch contradiction detection (edge metadata, not triples)
+        # Step 3: Parallel contradiction detection (edge metadata)
         contradictions_found = 0
         detector = ContradictionDetector(self._store._client)
+        contra_sem = asyncio.Semaphore(10)
 
-        for subject_uri in all_subject_uris:
-            try:
-                count = await detector.detect_and_mark(
-                    subject_uri=subject_uri,
-                    user=user,
+        async def _detect_subject(subject_uri: str) -> int:
+            async with contra_sem:
+                return await detector.detect_and_mark(
+                    subject_uri=subject_uri, user=user
                 )
-                contradictions_found += count
-            except Exception as exc:
-                errors.append(f"contradiction({subject_uri}): {exc}")
-                logger.warning(
-                    "Contradiction detection failed for %s: %s", subject_uri, exc
-                )
+
+        contra_tasks = [_detect_subject(uri) for uri in all_subject_uris]
+        contra_results = await asyncio.gather(*contra_tasks, return_exceptions=True)
+
+        subject_list = list(all_subject_uris)
+        for i, result in enumerate(contra_results):
+            if isinstance(result, BaseException):
+                subj = subject_list[i] if i < len(subject_list) else "?"
+                errors.append(f"contradiction({subj}): {result}")
+                logger.warning("Contradiction detection failed: %s", result)
+            else:
+                contradictions_found += result
 
         # Step 4: Log extraction summary
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
