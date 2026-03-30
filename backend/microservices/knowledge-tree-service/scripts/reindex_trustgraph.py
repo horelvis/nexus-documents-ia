@@ -577,6 +577,9 @@ async def reindex(
         error_count = 0
         total_triples = 0
         total_contradictions = 0
+        total_parse_failures = 0
+        total_empty_responses = 0
+        total_validation_failures = 0
 
         async with httpx.AsyncClient(timeout=120) as http:
             for idx, doc in enumerate(documents, 1):
@@ -632,6 +635,12 @@ async def reindex(
 
                     total_triples += triples
                     total_contradictions += contradictions
+                    parse_fails = result.get("parse_failures", 0)
+                    empty_resps = result.get("empty_responses", 0)
+                    validation_fails = result.get("validation_failures", 0)
+                    total_parse_failures += parse_fails
+                    total_empty_responses += empty_resps
+                    total_validation_failures += validation_fails
                     success_count += 1
 
                     status = f"{GREEN}OK{RESET}" if not doc_errors else f"{YELLOW}WARN{RESET}"
@@ -687,6 +696,9 @@ async def reindex(
         print(f"  Errors              : {RED if error_count else ''}{error_count}{RESET}")
         print(f"  Triples created     : {total_triples}")
         print(f"  Contradictions      : {total_contradictions}")
+        print(f"  Parse failures    : {total_parse_failures}")
+        print(f"  Empty responses   : {total_empty_responses}")
+        print(f"  Validation fails  : {total_validation_failures}")
         print(f"  Merged duplicates   : {merged_count if not dry_run else 'N/A'}")
         print(f"  Entity embeddings   : {embed_count if not dry_run else 'N/A'}")
         print(f"  Total time          : {elapsed_total:.1f}s")
