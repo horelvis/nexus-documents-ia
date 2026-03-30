@@ -105,3 +105,44 @@ class ProvenanceService:
             chunk_offset,
         )
         return extraction_uri
+
+    async def batch_record_extractions(
+        self,
+        document_uri: str,
+        chunks_metadata: list,
+        user: str,
+        collection: str,
+    ) -> int:
+        """Record provenance for multiple chunks in 2 batch UNWIND queries.
+
+        Args:
+            document_uri:    URI of the source document :Node.
+            chunks_metadata: List of dicts with keys:
+                extraction_method, model_name, chunk_text, chunk_offset
+            user:           Tenant/user identifier.
+            collection:     Collection scope.
+
+        Returns:
+            Number of provenance records created.
+        """
+        if not chunks_metadata:
+            return 0
+
+        derived_from_uri = URIBuilder.predicate(_PROV, "derived-from")
+
+        records = []
+        for meta in chunks_metadata:
+            records.append({
+                "extraction_uri": URIBuilder.extraction(),
+                "document_uri": document_uri,
+                "derived_from_uri": derived_from_uri,
+                "method": meta.get("extraction_method", "llm_coordinator"),
+                "model": meta.get("model_name", "unknown"),
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "chunk_text": meta.get("chunk_text", "")[:_MAX_CHUNK_TEXT],
+                "chunk_offset": str(meta.get("chunk_offset", 0)),
+            })
+
+        return await self._store.batch_store_provenance(
+            records, user=user, collection=collection
+        )

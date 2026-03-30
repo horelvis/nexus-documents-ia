@@ -260,6 +260,58 @@ class TripleStore:
 
         return stored
 
+    async def batch_store_provenance(
+        self, records: list, user: str, collection: str
+    ) -> int:
+        """Store multiple provenance records in 2 UNWIND queries.
+
+        Each record dict: extraction_uri, document_uri, derived_from_uri,
+        method, model, timestamp, chunk_text, chunk_offset
+        """
+        if not records:
+            return 0
+
+        # Query 1: Create extraction nodes + derived-from edges
+        await self._client.execute_cypher(
+            "UNWIND $records AS r "
+            "MERGE (e:Node {uri: r.extraction_uri, user: $user, collection: $col}) "
+            "ON CREATE SET e.created_at = timestamp() "
+            "WITH e, r "
+            "MATCH (d:Node {uri: r.document_uri, user: $user, collection: $col}) "
+            "MERGE (e)-[rel:Rel {uri: r.derived_from_uri, user: $user, collection: $col}]->(d) "
+            "ON CREATE SET rel.extraction_method = 'system'",
+            {"records": records, "user": user, "col": collection},
+        )
+
+        # Query 2: Create all literal metadata (5 per record)
+        flat = []
+        for r in records:
+            uri = r["extraction_uri"]
+            for pred, val in [
+                ("method", r["method"]),
+                ("model", r["model"]),
+                ("timestamp", r["timestamp"]),
+                ("chunk-text", r["chunk_text"]),
+                ("chunk-offset", r["chunk_offset"]),
+            ]:
+                flat.append({
+                    "e_uri": uri,
+                    "p_uri": f"nouxcube://predicate/prov/{pred}",
+                    "val": val,
+                })
+
+        if flat:
+            await self._client.execute_cypher(
+                "UNWIND $lits AS l "
+                "MATCH (e:Node {uri: l.e_uri, user: $user, collection: $col}) "
+                "MERGE (lit:Literal {value: l.val, user: $user, collection: $col}) "
+                "MERGE (e)-[r:Rel {uri: l.p_uri, user: $user, collection: $col}]->(lit) "
+                "ON CREATE SET r.extraction_method = 'system'",
+                {"lits": flat, "user": user, "col": collection},
+            )
+
+        return len(records)
+
     async def store_document_node(
         self,
         document_id: str,

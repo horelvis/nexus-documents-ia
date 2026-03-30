@@ -308,6 +308,8 @@ class ExtractionCoordinator:
         tasks = [_process_chunk(i, text) for i, text in enumerate(chunks)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        provenance_metadata: List[Dict[str, Any]] = []
+
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
                 errors.append(f"chunk[{i}]: {result}")
@@ -319,6 +321,24 @@ class ExtractionCoordinator:
                     errors.extend(
                         [f"chunk[{i}]/{e}" for e in result["errors"]]
                     )
+                provenance_metadata.append({
+                    "extraction_method": "llm_coordinator",
+                    "model_name": "Qwen3.5-27B-AWQ",
+                    "chunk_text": chunks[i],
+                    "chunk_offset": i,
+                })
+
+        # Step 2b: Batch record provenance for all chunks (2 UNWIND queries)
+        try:
+            await self._provenance.batch_record_extractions(
+                document_uri=document_uri,
+                chunks_metadata=provenance_metadata,
+                user=user,
+                collection=collection,
+            )
+        except Exception as exc:
+            errors.append(f"batch_provenance: {exc}")
+            logger.warning("Batch provenance recording failed: %s", exc)
 
         # Step 3: Batch contradiction detection (edge metadata, not triples)
         contradictions_found = 0
