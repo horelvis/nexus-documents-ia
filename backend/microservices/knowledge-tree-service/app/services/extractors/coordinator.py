@@ -163,11 +163,11 @@ class ExtractionCoordinator:
                 len(known_entities),
             )
 
-        triples_created = 0
         subject_uris: List[str] = []
-
-        # Store each triple
         source_chunk_id = f"{document_uri}#offset={chunk_offset}"
+
+        # ── Build batch triples ──────────────────────────────────────────
+        batch_triples: List[Dict[str, Any]] = []
 
         for triple in deduped_triples:
             subject = triple.get("subject", "")
@@ -177,65 +177,62 @@ class ExtractionCoordinator:
             object_is_node = triple.get("object_is_node", False)
             extraction_method = triple.get("extraction_method", "llm")
 
-            try:
-                # Topic triples: subject=="" and predicate_name=="has-topic"
-                # Link document_uri → topic literal directly
-                if predicate_name == "has-topic" and subject == "":
-                    await self._store.merge_literal(obj, user, collection)
-                    predicate_uri = URIBuilder.predicate(predicate_ontology, predicate_name)
-                    await self._store.create_rel(
-                        subject_uri=document_uri,
-                        predicate_uri=predicate_uri,
-                        object_value=obj,
-                        user=user,
-                        collection=collection,
-                        object_is_node=False,
-                        extraction_method=extraction_method,
-                        source_chunk=source_chunk_id,
-                    )
-                    if document_uri not in subject_uris:
-                        subject_uris.append(document_uri)
+            if not predicate_name:
+                continue
+
+            predicate_uri = URIBuilder.predicate(predicate_ontology, predicate_name)
+
+            # Topic triples: subject="" → link document_uri → topic literal
+            if predicate_name == "has-topic" and subject == "":
+                batch_triples.append({
+                    "s_uri": document_uri,
+                    "p_uri": predicate_uri,
+                    "o_val": obj,
+                    "object_is_entity": False,
+                    "method": extraction_method,
+                    "chunk": source_chunk_id,
+                })
+                if document_uri not in subject_uris:
+                    subject_uris.append(document_uri)
+            else:
+                try:
+                    s_uri = URIBuilder.entity(collection, subject)
+                except ValueError:
+                    continue
+                if object_is_node:
+                    try:
+                        o_uri = URIBuilder.entity(collection, obj)
+                    except ValueError:
+                        continue
+                    batch_triples.append({
+                        "s_uri": s_uri,
+                        "o_uri": o_uri,
+                        "p_uri": predicate_uri,
+                        "object_is_entity": True,
+                        "method": extraction_method,
+                        "chunk": source_chunk_id,
+                    })
                 else:
-                    subject_uri = await self._store.store_triple(
-                        subject_name=subject,
-                        predicate_ontology=predicate_ontology,
-                        predicate_name=predicate_name,
-                        object_value=obj,
-                        object_is_node=object_is_node,
-                        user=user,
-                        collection=collection,
-                        extraction_method=extraction_method,
-                        source_chunk=source_chunk_id,
-                    )
-                    if subject_uri not in subject_uris:
-                        subject_uris.append(subject_uri)
+                    batch_triples.append({
+                        "s_uri": s_uri,
+                        "o_val": obj.strip() if obj else obj,
+                        "p_uri": predicate_uri,
+                        "object_is_entity": False,
+                        "method": extraction_method,
+                        "chunk": source_chunk_id,
+                    })
+                if s_uri not in subject_uris:
+                    subject_uris.append(s_uri)
 
-                triples_created += 1
-
-            except Exception as exc:
-                errors.append(f"store({subject!r}, {predicate_name!r}, {obj!r}): {exc}")
-                logger.warning(
-                    "Failed to store triple (%r, %r, %r): %s",
-                    subject,
-                    predicate_name,
-                    obj,
-                    exc,
-                )
-
-        # Record PROV-O provenance
+        # ── Store all triples in 1-2 batch Cypher calls ──────────────────
+        triples_created = 0
         try:
-            await self._provenance.record_extraction(
-                document_uri=document_uri,
-                extraction_method="llm_coordinator",
-                model_name=model_name,
-                chunk_text=chunk_text,
-                chunk_offset=chunk_offset,
-                user=user,
-                collection=collection,
+            triples_created = await self._store.batch_store_triples(
+                batch_triples, user=user, collection=collection
             )
         except Exception as exc:
-            errors.append(f"provenance: {exc}")
-            logger.warning("Failed to record provenance: %s", exc)
+            errors.append(f"batch_store: {exc}")
+            logger.warning("Batch store failed: %s", exc)
 
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
 
