@@ -25,6 +25,18 @@ from app.services.uri_builder import URIBuilder
 
 logger = logging.getLogger(__name__)
 
+# Confidence base scores by extraction method
+_CONFIDENCE_BASE: Dict[str, float] = {
+    "system": 1.00,
+    "llm_definitions": 0.90,
+    "llm_topics": 0.85,
+    "llm_objects": 0.85,
+    "llm_relationships": 0.90,
+    "llm_relationships_fuzzy": 0.75,
+    "llm_relationships_freeform": 0.60,
+}
+_DEFAULT_CONFIDENCE = 0.70
+
 
 class ExtractionCoordinator:
     """Coordinates 4 LLM extractors for TrustGraph triple extraction.
@@ -181,6 +193,7 @@ class ExtractionCoordinator:
                 continue
 
             predicate_uri = URIBuilder.predicate(predicate_ontology, predicate_name)
+            confidence = _CONFIDENCE_BASE.get(extraction_method, _DEFAULT_CONFIDENCE)
 
             # Topic triples: subject="" → link document_uri → topic literal
             if predicate_name == "has-topic" and subject == "":
@@ -191,6 +204,7 @@ class ExtractionCoordinator:
                     "object_is_entity": False,
                     "method": extraction_method,
                     "chunk": source_chunk_id,
+                    "confidence": confidence,
                 })
                 if document_uri not in subject_uris:
                     subject_uris.append(document_uri)
@@ -211,6 +225,7 @@ class ExtractionCoordinator:
                         "object_is_entity": True,
                         "method": extraction_method,
                         "chunk": source_chunk_id,
+                        "confidence": confidence,
                     })
                 else:
                     batch_triples.append({
@@ -220,6 +235,7 @@ class ExtractionCoordinator:
                         "object_is_entity": False,
                         "method": extraction_method,
                         "chunk": source_chunk_id,
+                        "confidence": confidence,
                     })
                 if s_uri not in subject_uris:
                     subject_uris.append(s_uri)

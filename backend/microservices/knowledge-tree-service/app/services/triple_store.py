@@ -241,7 +241,7 @@ class TripleStore:
                 "MERGE (o:Node {uri: t.o_uri, user: $user, collection: $col}) "
                 "ON CREATE SET o.created_at = timestamp() "
                 "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
-                "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk",
+                "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk, r.confidence = t.confidence",
                 {"triples": node_triples, "user": user, "col": collection},
             )
             stored += len(node_triples)
@@ -253,7 +253,7 @@ class TripleStore:
                 "ON CREATE SET s.created_at = timestamp() "
                 "MERGE (o:Literal {value: t.o_val, user: $user, collection: $col}) "
                 "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
-                "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk",
+                "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk, r.confidence = t.confidence",
                 {"triples": literal_triples, "user": user, "col": collection},
             )
             stored += len(literal_triples)
