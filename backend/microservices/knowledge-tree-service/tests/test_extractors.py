@@ -8,6 +8,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch
 
+from app.services.extractors.base import BaseExtractor
 from app.services.extractors.definitions import DefinitionsExtractor
 from app.services.extractors.relationships import RelationshipsExtractor
 from app.services.extractors.objects import ObjectsExtractor
@@ -15,6 +16,117 @@ from app.services.extractors.topics import TopicsExtractor
 
 
 SAMPLE_CHUNK = "Juan García trabaja en Empresa ABC S.L. con un salario bruto de 3000€ mensuales."
+
+
+# ---------------------------------------------------------------------------
+# Stub extractor for unit-testing BaseExtractor helpers
+# ---------------------------------------------------------------------------
+
+
+class StubExtractor(BaseExtractor):
+    EXTRACTOR_NAME = "stub"
+    RESPONSE_SCHEMA = {
+        "type": "object",
+        "properties": {"name": {"type": "string", "minLength": 1}},
+        "required": ["name"],
+    }
+
+    def _build_prompt(self, chunk_text):
+        return ""
+
+    def _parse_output(self, llm_output, chunk_text):
+        return []
+
+
+def _make_extractor():
+    return StubExtractor()
+
+
+# ---------------------------------------------------------------------------
+# TestJSONLParsing
+# ---------------------------------------------------------------------------
+
+
+class TestJSONLParsing:
+    """Tests for BaseExtractor._parse_jsonl()."""
+
+    def test_parses_valid_jsonl(self):
+        ext = _make_extractor()
+        result = ext._parse_jsonl('{"name": "Juan"}\n{"name": "María"}')
+        assert len(result) == 2
+        assert result[0]["name"] == "Juan"
+        assert result[1]["name"] == "María"
+
+    def test_handles_trailing_commas(self):
+        ext = _make_extractor()
+        result = ext._parse_jsonl('{"name": "Juan"},\n{"name": "María"},')
+        assert len(result) == 2
+
+    def test_skips_bracket_lines(self):
+        ext = _make_extractor()
+        result = ext._parse_jsonl('[\n{"name": "Juan"}\n]')
+        assert len(result) == 1
+        assert result[0]["name"] == "Juan"
+
+    def test_skips_unparseable_lines(self):
+        ext = _make_extractor()
+        result = ext._parse_jsonl('{"name": "Juan"}\nnot json\n{"name": "María"}')
+        assert len(result) == 2
+
+    def test_empty_input(self):
+        ext = _make_extractor()
+        assert ext._parse_jsonl("") == []
+        assert ext._parse_jsonl("   ") == []
+
+    def test_truncated_jsonl_recovers_partial(self):
+        ext = _make_extractor()
+        result = ext._parse_jsonl('{"name": "Juan"}\n{"name": "Mar')
+        assert len(result) == 1
+        assert result[0]["name"] == "Juan"
+
+    def test_strips_markdown_fences(self):
+        ext = _make_extractor()
+        text = '```json\n{"name": "Juan"}\n{"name": "María"}\n```'
+        result = ext._parse_jsonl(text)
+        assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# TestSchemaValidation
+# ---------------------------------------------------------------------------
+
+
+class TestSchemaValidation:
+    """Tests for BaseExtractor._validate_items()."""
+
+    def test_valid_items_pass(self):
+        ext = _make_extractor()
+        items = [{"name": "Juan"}, {"name": "María"}]
+        result = ext._validate_items(items)
+        assert len(result) == 2
+
+    def test_invalid_items_rejected(self):
+        ext = _make_extractor()
+        items = [
+            {"name": "Juan"},        # valid
+            {"age": 30},             # missing required 'name'
+            {"name": ""},            # minLength violation
+            {"name": "María"},       # valid
+        ]
+        result = ext._validate_items(items)
+        assert len(result) == 2
+        assert result[0]["name"] == "Juan"
+        assert result[1]["name"] == "María"
+
+    def test_metrics_tracked(self):
+        ext = _make_extractor()
+        items = [
+            {"name": "Juan"},
+            {"age": 30},
+            {"name": ""},
+        ]
+        ext._validate_items(items)
+        assert ext._validation_failures == 2
 
 
 # ---------------------------------------------------------------------------
