@@ -411,3 +411,50 @@ class TestProvenance:
         assert preds["nouxcube://predicate/prov/model"] == "Qwen3.5-9B"
         assert "Juan García" in preds["nouxcube://predicate/prov/chunk-text"]
         assert preds["nouxcube://predicate/prov/chunk-offset"] == "1500"
+
+
+# ---------------------------------------------------------------------------
+# TestBatchStoreTriples
+# ---------------------------------------------------------------------------
+
+class TestBatchStoreTriples:
+    @pytest.mark.asyncio
+    async def test_batch_stores_node_and_literal_triples(self, falkordb_client):
+        store = _make_store(falkordb_client)
+        triples = [
+            {
+                "s_uri": "nouxcube://entity/col/juan",
+                "o_uri": "nouxcube://entity/col/empresa",
+                "p_uri": "nouxcube://predicate/legal/empleado-de",
+                "object_is_entity": True,
+                "method": "llm_relationships",
+                "chunk": "chunk-001",
+            },
+            {
+                "s_uri": "nouxcube://entity/col/contrato",
+                "o_val": "3000 EUR",
+                "p_uri": "nouxcube://predicate/legal/salario-bruto",
+                "object_is_entity": False,
+                "method": "llm_relationships",
+                "chunk": "chunk-001",
+            },
+        ]
+        await store.batch_store_triples(triples, user="u1", collection="col")
+
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (s:Node {uri: $s})-[r:Rel]->(o:Node {uri: $o}) RETURN r.uri AS p",
+            {"s": "nouxcube://entity/col/juan", "o": "nouxcube://entity/col/empresa"},
+        )
+        assert len(rows) == 1
+
+        rows = await falkordb_client.execute_cypher(
+            "MATCH (s:Node {uri: $s})-[r:Rel]->(o:Literal {value: $v}) RETURN r.uri AS p",
+            {"s": "nouxcube://entity/col/contrato", "v": "3000 EUR"},
+        )
+        assert len(rows) == 1
+
+    @pytest.mark.asyncio
+    async def test_batch_empty_list(self, falkordb_client):
+        store = _make_store(falkordb_client)
+        result = await store.batch_store_triples([], user="u1", collection="col")
+        assert result == 0

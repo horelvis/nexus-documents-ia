@@ -214,6 +214,52 @@ class TripleStore:
 
         return subject_uri
 
+    async def batch_store_triples(
+        self, triples: list, user: str, collection: str
+    ) -> int:
+        """Store multiple triples in batched Cypher UNWIND queries.
+
+        Each triple dict must have:
+          s_uri, p_uri, method, chunk, object_is_entity
+          + o_uri (if entity) or o_val (if literal)
+
+        Returns the number of triples stored.
+        """
+        if not triples:
+            return 0
+
+        node_triples = [t for t in triples if t.get("object_is_entity")]
+        literal_triples = [t for t in triples if not t.get("object_is_entity")]
+
+        stored = 0
+
+        if node_triples:
+            await self._client.execute_cypher(
+                "UNWIND $triples AS t "
+                "MERGE (s:Node {uri: t.s_uri, user: $user, collection: $col}) "
+                "ON CREATE SET s.created_at = timestamp() "
+                "MERGE (o:Node {uri: t.o_uri, user: $user, collection: $col}) "
+                "ON CREATE SET o.created_at = timestamp() "
+                "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
+                "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk",
+                {"triples": node_triples, "user": user, "col": collection},
+            )
+            stored += len(node_triples)
+
+        if literal_triples:
+            await self._client.execute_cypher(
+                "UNWIND $triples AS t "
+                "MERGE (s:Node {uri: t.s_uri, user: $user, collection: $col}) "
+                "ON CREATE SET s.created_at = timestamp() "
+                "MERGE (o:Literal {value: t.o_val, user: $user, collection: $col}) "
+                "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
+                "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk",
+                {"triples": literal_triples, "user": user, "col": collection},
+            )
+            stored += len(literal_triples)
+
+        return stored
+
     async def store_document_node(
         self,
         document_id: str,
