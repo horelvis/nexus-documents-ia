@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     SGLANG_BASE_URL: str = os.getenv("SGLANG_BASE_URL", "http://sglang:8000/v1")
     SGLANG_MODEL: str = os.getenv("SGLANG_MODEL", "Qwen/Qwen3-8B")
 
+    # Extraction parallelism
+    extraction_parallel_chunks: int = int(os.getenv("EXTRACTION_PARALLEL_CHUNKS", "5"))
+
     # Langfuse
     LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "pk-lf-local")
     LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "sk-lf-local")
