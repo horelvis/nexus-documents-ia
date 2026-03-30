@@ -6,23 +6,38 @@ Each entity yields 2 triples:
   (entity, core/definition, definition_text)
 """
 
+import logging
 from typing import Any, Dict, List
 
 from app.services.extractors.base import BaseExtractor
 
+logger = logging.getLogger(__name__)
+
 EXTRACTOR_NAME = "definitions"
+LANGFUSE_PROMPT_NAME = "trustgraph_extract_definitions"
+
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "entity": {"type": "string", "minLength": 1},
+        "definition": {"type": "string"},
+    },
+    "required": ["entity"],
+}
 
 _PROMPT_TEMPLATE = """Extract all named entities and their definitions from the following text.
 
-Return a JSON array where each element has:
+Return one JSON object per line (JSONL format). Do NOT wrap in an array.
+Each object must have:
 - "entity": the canonical name of the entity (string)
 - "definition": a concise description or definition of the entity from the text (string)
 
 Only include entities that are explicitly defined or described in the text.
-Return an empty array [] if no definitions are found.
+Return nothing if no definitions are found.
 
-Respond ONLY with a valid JSON array. Example:
-[{{"entity": "Contrato de Trabajo", "definition": "Acuerdo entre empleador y trabajador que regula las condiciones laborales"}}]
+Example:
+{{"entity": "Contrato de Trabajo", "definition": "Acuerdo entre empleador y trabajador que regula las condiciones laborales"}}
+{{"entity": "Empresa ABC S.L.", "definition": "Sociedad limitada dedicada al desarrollo de software"}}
 
 TEXT:
 {chunk_text}"""
@@ -32,19 +47,22 @@ class DefinitionsExtractor(BaseExtractor):
     """Extracts entity definitions from text chunks."""
 
     EXTRACTOR_NAME = "definitions"
+    RESPONSE_SCHEMA = RESPONSE_SCHEMA
 
     def _build_prompt(self, chunk_text: str) -> str:
+        langfuse_prompt = self._get_langfuse_prompt(LANGFUSE_PROMPT_NAME)
+        if langfuse_prompt:
+            return langfuse_prompt.replace("{{chunk_text}}", chunk_text)
         return _PROMPT_TEMPLATE.format(chunk_text=chunk_text)
 
     def _parse_output(
         self, llm_output: str, chunk_text: str
     ) -> List[Dict[str, Any]]:
-        items = self._safe_parse_json(llm_output)
+        items = self._parse_jsonl(llm_output)
+        items = self._validate_items(items)
         triples: List[Dict[str, Any]] = []
 
         for item in items:
-            if not isinstance(item, dict):
-                continue
             entity = str(item.get("entity", "")).strip()
             definition = str(item.get("definition", "")).strip()
             if not entity:
