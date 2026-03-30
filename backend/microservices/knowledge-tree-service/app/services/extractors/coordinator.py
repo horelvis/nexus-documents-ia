@@ -13,6 +13,7 @@ import logging
 import time
 from typing import Any, Dict, List, Set, Tuple
 
+from app.core.config import settings
 from app.services.contradiction import ContradictionDetector
 from app.services.extractors.definitions import DefinitionsExtractor
 from app.services.extractors.objects import ObjectsExtractor
@@ -266,28 +267,12 @@ class ExtractionCoordinator:
         """Extract and store triples for all chunks of a document.
 
         1. Creates the document :Node with metadata triples.
-        2. Processes each chunk sequentially via extract_chunk().
+        2. Processes chunks in parallel (bounded by extraction_parallel_chunks).
         3. Runs batch contradiction detection for all unique subjects.
 
-        Args:
-            chunks:        List of text chunks (in order).
-            document_id:   Unique document identifier.
-            user:          Tenant/user identifier.
-            collection:    Collection scope.
-            title:         Human-readable document title.
-            file_path:     File path (used to derive folder URI).
-            semantic_type: Document semantic type (e.g. "factura").
-            domain:        Business domain (e.g. "legal").
-
-        Returns:
-            Dict with keys:
-              success             — True on completion (even with partial errors)
-              document_uri        — canonical URI of the document :Node
-              triples_created     — total triples stored across all chunks
-              contradictions_found — total contradiction :Nodes created
-              chunks_processed    — number of chunks processed
-              extraction_time_ms  — total wall-clock ms
-              errors              — aggregated error messages
+        Returns dict with success, document_uri, triples_created,
+        contradictions_found, chunks_processed, extraction_time_ms, errors,
+        parse_failures, empty_responses, validation_failures.
         """
         t_start = time.monotonic()
         errors: List[str] = []
@@ -308,55 +293,95 @@ class ExtractionCoordinator:
             logger.error("Failed to create document node for %s: %s", document_id, exc)
             document_uri = URIBuilder.document(collection, document_id)
 
-        # Step 2: Process each chunk sequentially
+        # Step 2: Process chunks in parallel (bounded)
         total_triples = 0
         all_subject_uris: Set[str] = set()
+        sem = asyncio.Semaphore(settings.extraction_parallel_chunks)
 
-        for chunk_offset, chunk_text in enumerate(chunks):
-            try:
-                result = await self.extract_chunk(
-                    chunk_text=chunk_text,
+        async def _process_chunk(offset: int, text: str) -> Dict[str, Any]:
+            async with sem:
+                return await self.extract_chunk(
+                    chunk_text=text,
                     document_uri=document_uri,
                     user=user,
                     collection=collection,
-                    chunk_offset=chunk_offset,
+                    chunk_offset=offset,
                 )
+
+        tasks = [_process_chunk(i, text) for i, text in enumerate(chunks)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for i, result in enumerate(results):
+            if isinstance(result, BaseException):
+                errors.append(f"chunk[{i}]: {result}")
+                logger.error("Failed to process chunk %d: %s", i, result)
+            else:
                 total_triples += result["triples_created"]
                 all_subject_uris.update(result["subjects"])
                 if result["errors"]:
                     errors.extend(
-                        [f"chunk[{chunk_offset}]/{e}" for e in result["errors"]]
+                        [f"chunk[{i}]/{e}" for e in result["errors"]]
                     )
-            except Exception as exc:
-                errors.append(f"chunk[{chunk_offset}]: {exc}")
-                logger.error("Failed to process chunk %d: %s", chunk_offset, exc)
 
-        # Step 3: Batch contradiction detection per unique subject URI
-        contradiction_uris: List[str] = []
+        # Step 3: Batch contradiction detection (edge metadata, not triples)
+        contradictions_found = 0
         detector = ContradictionDetector(self._store._client)
 
         for subject_uri in all_subject_uris:
             try:
-                uris = await detector.detect_and_store(
+                count = await detector.detect_and_mark(
                     subject_uri=subject_uri,
                     user=user,
-                    collection=collection,
                 )
-                contradiction_uris.extend(uris)
+                contradictions_found += count
             except Exception as exc:
                 errors.append(f"contradiction({subject_uri}): {exc}")
                 logger.warning(
                     "Contradiction detection failed for %s: %s", subject_uri, exc
                 )
 
+        # Step 4: Log extraction summary
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
+        total_parse_failures = sum(
+            e._parse_failures for e in [
+                self._definitions, self._relationships,
+                self._objects, self._topics,
+            ]
+        )
+        total_empty = sum(
+            e._empty_responses for e in [
+                self._definitions, self._relationships,
+                self._objects, self._topics,
+            ]
+        )
+        total_validation = sum(
+            e._validation_failures for e in [
+                self._definitions, self._relationships,
+                self._objects, self._topics,
+            ]
+        )
+
+        logger.info(
+            "Document %s extraction complete: %d triples, %d parse_failures, "
+            "%d empty_responses, %d validation_failures, %d contradictions, %dms",
+            document_id,
+            total_triples,
+            total_parse_failures,
+            total_empty,
+            total_validation,
+            contradictions_found,
+            elapsed_ms,
+        )
 
         return {
             "success": True,
             "document_uri": document_uri,
             "triples_created": total_triples,
-            "contradictions_found": len(contradiction_uris),
+            "contradictions_found": contradictions_found,
             "chunks_processed": len(chunks),
             "extraction_time_ms": elapsed_ms,
+            "parse_failures": total_parse_failures,
+            "empty_responses": total_empty,
+            "validation_failures": total_validation,
             "errors": errors,
         }
