@@ -55,6 +55,8 @@ class TripleQuery:
             triple["extraction_method"] = row["extraction_method"]
         if "source_chunk" in row:
             triple["source_chunk"] = row["source_chunk"]
+        if "confidence" in row and row["confidence"] is not None:
+            triple["confidence"] = row["confidence"]
         return triple
 
     def _base_params(
@@ -358,7 +360,8 @@ class TripleQuery:
                 f"WHERE (s.uri = seed_uri OR o.uri = seed_uri){col_filter} "
                 "RETURN s.uri AS subject, r.uri AS predicate, "
                 "o.uri AS object, 'node' AS object_type, "
-                "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk "
+                "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk, "
+                "r.confidence AS confidence "
                 "LIMIT $query_limit"
             )
             # Safety limit: allow headroom for post-query predicate filtering
