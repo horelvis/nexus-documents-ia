@@ -258,39 +258,25 @@ class TestRelationshipsExtractor:
         assert "chunk-text" not in prompt
 
     @pytest.mark.asyncio
-    async def test_prov_predicate_rejected_from_extraction(self):
-        """'derived-from' (prov) is system-only — rejected from LLM extraction."""
-        mock_json = json.dumps([
-            {
-                "subject": "Doc A",
-                "predicate": "derived-from",
-                "object": "Doc B",
-                "object-entity": True,
-            }
-        ])
+    async def test_prov_predicate_accepted_with_prov_namespace(self):
+        """'derived-from' (prov) is resolved via exact match to prov namespace."""
+        mock_json = json.dumps([{"subject": "Doc A", "predicate": "derived-from", "object": "Doc B", "object-entity": True}])
         extractor = RelationshipsExtractor()
         with patch.object(extractor, "_call_llm", new=AsyncMock(return_value=mock_json)):
             triples = await extractor.extract(SAMPLE_CHUNK)
-
-        # prov predicates are system-only — not extractable by LLM
-        assert len(triples) == 0
+        assert len(triples) == 1
+        assert triples[0]["predicate_ontology"] == "prov"
 
     @pytest.mark.asyncio
-    async def test_unknown_predicate_rejected(self):
-        """Unknown predicate → rejected (not stored)."""
-        mock_json = json.dumps([
-            {
-                "subject": "A",
-                "predicate": "some-custom-predicate",
-                "object": "B",
-                "object-entity": False,
-            }
-        ])
+    async def test_unknown_predicate_accepted_as_freeform(self):
+        """Unknown predicate → accepted as free-form with 'extracted' namespace."""
+        mock_json = json.dumps([{"subject": "A", "predicate": "some-custom-predicate", "object": "B", "object-entity": False}])
         extractor = RelationshipsExtractor()
         with patch.object(extractor, "_call_llm", new=AsyncMock(return_value=mock_json)):
             triples = await extractor.extract(SAMPLE_CHUNK)
-
-        assert len(triples) == 0
+        assert len(triples) == 1
+        assert triples[0]["predicate_ontology"] == "extracted"
+        assert triples[0]["extraction_method"] == "llm_relationships_freeform"
 
     @pytest.mark.asyncio
     async def test_handles_empty_response(self):
@@ -433,6 +419,76 @@ class TestTopicsExtractor:
             triples = await extractor.extract(long_chunk)
         assert len(triples) == 1
         assert len(triples[0]["source_chunk"]) == 200
+
+
+# ---------------------------------------------------------------------------
+# OntologyRegistry fuzzy_match
+# ---------------------------------------------------------------------------
+
+
+class TestOntologyFuzzyMatch:
+    def test_exact_match_returns_predicate(self):
+        from app.services.ontology_registry import fuzzy_match
+        result = fuzzy_match("empleado-de")
+        assert result is not None
+        assert result[0] == "empleado-de"
+        assert result[1] == "legal"
+
+    def test_close_match_returns_best(self):
+        from app.services.ontology_registry import fuzzy_match
+        result = fuzzy_match("empleado_de")  # underscore
+        assert result is not None
+        assert result[0] == "empleado-de"
+
+    def test_no_match_returns_none(self):
+        from app.services.ontology_registry import fuzzy_match
+        result = fuzzy_match("zzz-totally-unknown-predicate")
+        assert result is None
+
+    def test_threshold_respected(self):
+        from app.services.ontology_registry import fuzzy_match
+        result = fuzzy_match("abc", threshold=0.9)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# RelationshipsExtractor free-form predicates
+# ---------------------------------------------------------------------------
+
+
+class TestRelationshipsExtractorFreeForm:
+    @pytest.mark.asyncio
+    async def test_accepts_freeform_predicate(self):
+        mock_output = '{"subject": "Ley X", "predicate": "regula", "object": "Sector Y", "object-entity": true}'
+        extractor = RelationshipsExtractor()
+        with patch.object(extractor, "_call_llm", new=AsyncMock(return_value=mock_output)):
+            triples = await extractor.extract(SAMPLE_CHUNK)
+        assert len(triples) == 1
+        assert triples[0]["predicate_name"] == "regula"
+        assert triples[0]["predicate_ontology"] == "extracted"
+        assert triples[0]["extraction_method"] == "llm_relationships_freeform"
+
+    @pytest.mark.asyncio
+    async def test_fuzzy_matches_underscore_predicate(self):
+        mock_output = '{"subject": "Juan", "predicate": "empleado_de", "object": "Empresa", "object-entity": true}'
+        extractor = RelationshipsExtractor()
+        with patch.object(extractor, "_call_llm", new=AsyncMock(return_value=mock_output)):
+            triples = await extractor.extract(SAMPLE_CHUNK)
+        assert len(triples) == 1
+        assert triples[0]["predicate_name"] == "empleado-de"
+        assert triples[0]["predicate_ontology"] == "legal"
+        assert triples[0]["extraction_method"] == "llm_relationships_fuzzy"
+
+    @pytest.mark.asyncio
+    async def test_parses_jsonl_format(self):
+        mock_output = (
+            '{"subject": "Juan", "predicate": "empleado-de", "object": "Empresa", "object-entity": true}\n'
+            '{"subject": "Contrato", "predicate": "salario-bruto", "object": "3000", "object-entity": false}'
+        )
+        extractor = RelationshipsExtractor()
+        with patch.object(extractor, "_call_llm", new=AsyncMock(return_value=mock_output)):
+            triples = await extractor.extract(SAMPLE_CHUNK)
+        assert len(triples) == 2
 
 
 # ---------------------------------------------------------------------------
