@@ -92,6 +92,28 @@ class ContradictionDetector:
 
         return len(contradictions)
 
+    async def apply_confidence_penalty(self, user: str) -> int:
+        """Batch-reduce confidence on all edges marked has_contradiction=true.
+
+        Sets confidence = max(confidence - 0.25, 0.10).
+        Returns the number of edges updated.
+        """
+        query = (
+            "MATCH ()-[r:Rel]->() "
+            "WHERE r.user = $user AND r.has_contradiction = true "
+            "AND r.confidence IS NOT NULL "
+            "SET r.confidence = CASE "
+            "  WHEN r.confidence - 0.25 < 0.10 THEN 0.10 "
+            "  ELSE r.confidence - 0.25 "
+            "END "
+            "RETURN count(r) AS updated"
+        )
+        rows = await self._client.execute_cypher(query, params={"user": user})
+        count = rows[0]["updated"] if rows else 0
+        if count:
+            logger.info("Applied confidence penalty to %d contradicted edges", count)
+        return count
+
     async def detect_batch_for_document(
         self, document_uri: str, user: str, collection: str
     ) -> int:

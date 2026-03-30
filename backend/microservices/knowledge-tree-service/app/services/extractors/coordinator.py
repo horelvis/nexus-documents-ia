@@ -379,6 +379,13 @@ class ExtractionCoordinator:
             else:
                 contradictions_found += result
 
+        # Step 3b: Apply confidence penalty to contradicted edges
+        try:
+            await detector.apply_confidence_penalty(user=user)
+        except Exception as exc:
+            errors.append(f"confidence_penalty: {exc}")
+            logger.warning("Confidence penalty failed: %s", exc)
+
         # Step 4: Log extraction summary
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
         total_parse_failures = sum(
