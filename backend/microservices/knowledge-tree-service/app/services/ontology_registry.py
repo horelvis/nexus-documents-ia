@@ -12,7 +12,8 @@ To add a new predicate:
 """
 
 import logging
-from typing import Dict, Optional, Set
+from difflib import SequenceMatcher
+from typing import Dict, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,33 @@ def get_extractable_predicates() -> Set[str]:
     """Return predicates available for LLM extraction (excludes prov/*)."""
     registry = _load_registry()
     return {name for name, ns in registry.items() if ns not in _SYSTEM_ONLY_NAMESPACES}
+
+
+def fuzzy_match(predicate_name: str, threshold: float = 0.8) -> Optional[Tuple[str, str]]:
+    """Fuzzy-match a predicate against the ontology.
+
+    Normalizes by replacing underscores with hyphens and lowercasing,
+    then uses SequenceMatcher for similarity scoring.
+
+    Returns (matched_name, namespace) if similarity >= threshold, else None.
+    """
+    registry = _load_registry()
+    if not registry:
+        return None
+    normalized = predicate_name.strip().lower().replace("_", "-")
+    if normalized in registry:
+        return (normalized, registry[normalized])
+    best_name: Optional[str] = None
+    best_score = 0.0
+    extractable = {name for name, ns in registry.items() if ns not in _SYSTEM_ONLY_NAMESPACES}
+    for name in extractable:
+        score = SequenceMatcher(None, normalized, name).ratio()
+        if score > best_score:
+            best_score = score
+            best_name = name
+    if best_name and best_score >= threshold:
+        return (best_name, registry[best_name])
+    return None
 
 
 def get_mini_ontology_text() -> str:
