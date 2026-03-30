@@ -22,6 +22,24 @@ class BaseExtractor(ABC):
 
     EXTRACTOR_NAME: str = "base"
     RESPONSE_SCHEMA: ClassVar[Dict[str, Any]] = {}
+    _shared_client: ClassVar[Optional[httpx.AsyncClient]] = None
+
+    @classmethod
+    def get_shared_client(cls) -> httpx.AsyncClient:
+        """Get or create a shared httpx.AsyncClient for all extractors."""
+        if cls._shared_client is None or cls._shared_client.is_closed:
+            cls._shared_client = httpx.AsyncClient(
+                timeout=60.0,
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            )
+        return cls._shared_client
+
+    @classmethod
+    async def close_shared_client(cls) -> None:
+        """Close the shared client. Call at shutdown or after reindex."""
+        if cls._shared_client is not None and not cls._shared_client.is_closed:
+            await cls._shared_client.aclose()
+            cls._shared_client = None
 
     def __init__(self) -> None:
         # Lazy import to avoid circular deps and allow env override in tests
@@ -225,19 +243,19 @@ class BaseExtractor(ABC):
             # leaving content=null.
             "chat_template_kwargs": {"enable_thinking": False},
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self._sglang_url}/chat/completions",
-                json=payload,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            msg = data["choices"][0]["message"]
-            content = msg.get("content")
-            # Fallback: some Qwen3.5 builds put output in reasoning_content
-            if content is None:
-                content = msg.get("reasoning_content", "")
-            return content or ""
+        client = self.get_shared_client()
+        resp = await client.post(
+            f"{self._sglang_url}/chat/completions",
+            json=payload,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        msg = data["choices"][0]["message"]
+        content = msg.get("content")
+        # Fallback: some Qwen3.5 builds put output in reasoning_content
+        if content is None:
+            content = msg.get("reasoning_content", "")
+        return content or ""
 
     # ------------------------------------------------------------------
     # Shared helpers

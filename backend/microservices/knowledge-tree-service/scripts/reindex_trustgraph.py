@@ -708,6 +708,9 @@ async def reindex(
             sys.exit(1)
 
     finally:
+        # Close shared HTTP client used by extractors
+        from app.services.extractors.base import BaseExtractor
+        await BaseExtractor.close_shared_client()
         await falkordb.close()
 
 
