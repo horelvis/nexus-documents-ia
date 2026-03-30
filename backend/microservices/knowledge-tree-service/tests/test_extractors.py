@@ -17,6 +17,16 @@ from app.services.extractors.topics import TopicsExtractor
 
 SAMPLE_CHUNK = "Juan García trabaja en Empresa ABC S.L. con un salario bruto de 3000€ mensuales."
 
+# Ontology-dependent tests need seed_ontology.py on sys.path (available inside Docker)
+def _ontology_loaded() -> bool:
+    from app.services.ontology_registry import get_extractable_predicates
+    return len(get_extractable_predicates()) > 0
+
+_skip_no_ontology = pytest.mark.skipif(
+    not _ontology_loaded(),
+    reason="seed_ontology.py not on path (run inside Docker)",
+)
+
 
 # ---------------------------------------------------------------------------
 # Stub extractor for unit-testing BaseExtractor helpers
@@ -202,6 +212,7 @@ class TestDefinitionsExtractor:
 # ---------------------------------------------------------------------------
 
 
+@_skip_no_ontology
 class TestRelationshipsExtractor:
     """Tests for RelationshipsExtractor."""
 
@@ -426,6 +437,7 @@ class TestTopicsExtractor:
 # ---------------------------------------------------------------------------
 
 
+@_skip_no_ontology
 class TestOntologyFuzzyMatch:
     def test_exact_match_returns_predicate(self):
         from app.services.ontology_registry import fuzzy_match
@@ -456,6 +468,7 @@ class TestOntologyFuzzyMatch:
 # ---------------------------------------------------------------------------
 
 
+@_skip_no_ontology
 class TestRelationshipsExtractorFreeForm:
     @pytest.mark.asyncio
     async def test_accepts_freeform_predicate(self):

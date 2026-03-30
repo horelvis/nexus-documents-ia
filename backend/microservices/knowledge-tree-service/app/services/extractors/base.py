@@ -126,7 +126,19 @@ class BaseExtractor(ABC):
             try:
                 parsed = json.loads(line)
                 if isinstance(parsed, dict):
-                    items.append(parsed)
+                    # Unwrap common wrapper keys (e.g. {"results": [...]})
+                    unwrapped = False
+                    for key in ("results", "entities", "items", "relationships",
+                                "topics", "definitions", "objects"):
+                        if key in parsed and isinstance(parsed[key], list):
+                            items.extend(
+                                item for item in parsed[key]
+                                if isinstance(item, dict)
+                            )
+                            unwrapped = True
+                            break
+                    if not unwrapped:
+                        items.append(parsed)
                 elif isinstance(parsed, list):
                     # Whole JSON array on a single line
                     items.extend(
