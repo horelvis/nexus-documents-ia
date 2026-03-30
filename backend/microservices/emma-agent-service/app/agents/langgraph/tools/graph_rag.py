@@ -120,12 +120,26 @@ class GraphRAGInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _build_edge_description(subject_label: str, predicate_name: str, object_label: str) -> str:
+def _build_edge_description(
+    subject_label: str,
+    predicate_name: str,
+    object_label: str,
+    confidence: Optional[float] = None,
+    source_chunk: Optional[str] = None,
+) -> str:
     """Build a human-readable edge description for embedding / LLM scoring.
 
-    Returns: '{subject_label}, {predicate_name}, {object_label}'
+    Includes confidence and source citation when available.
     """
-    return f"{subject_label}, {predicate_name}, {object_label}"
+    desc = f"{subject_label}, {predicate_name}, {object_label}"
+    if confidence is not None:
+        desc += f" [conf: {confidence:.2f}]"
+    if source_chunk:
+        doc_part = source_chunk.split("#")[0].rsplit("/", 1)[-1] if source_chunk else ""
+        offset_part = source_chunk.split("offset=")[-1] if "offset=" in source_chunk else ""
+        if doc_part:
+            desc += f" [fuente: {doc_part}#{offset_part}]"
+    return desc
 
 
 def _humanize_uri(uri: str) -> str:
@@ -358,6 +372,16 @@ class GraphRAGTool(EmmaTool):
             # Return just entities even without relationships
             return _format_entities_only(top_entities)
 
+        # ── Stage 2b: Confidence pre-filter ─────────────────────────────
+        confidence_threshold = settings.graph_rag_confidence_threshold
+        if confidence_threshold > 0:
+            edges = [
+                e for e in edges
+                if (e.get("confidence") or 1.0) >= confidence_threshold
+            ]
+            if not edges:
+                return _format_entities_only(top_entities)
+
         # ── Stage 3: Label resolution ────────────────────────────────────────
 
         cache = _get_label_cache(settings.graph_rag_label_cache_ttl)
@@ -425,7 +449,11 @@ class GraphRAGTool(EmmaTool):
             s_label = labels.get(s_uri, _humanize_uri(s_uri))
             p_name = _extract_predicate_name(p_uri)
             o_label = labels.get(o_uri, _humanize_uri(o_uri))
-            edge_descriptions.append(_build_edge_description(s_label, p_name, o_label))
+            edge_descriptions.append(_build_edge_description(
+                s_label, p_name, o_label,
+                confidence=edge.get("confidence"),
+                source_chunk=edge.get("source_chunk"),
+            ))
 
         # Batch embed descriptions
         desc_embeddings = await _batch_embed_edges(edge_descriptions, tenant_id)
@@ -607,17 +635,29 @@ def _format_context(
         p_uri = edge.get("predicate_uri", "")
         o_uri = edge.get("object_uri", "")
         score = edge.get("_llm_score", 0.5)
+        confidence = edge.get("confidence")
+        source = edge.get("source_chunk", "")
 
         s_label = labels.get(s_uri, _humanize_uri(s_uri))
         p_name = _extract_predicate_name(p_uri)
         o_label = labels.get(o_uri, _humanize_uri(o_uri))
 
-        relationship_list.append({
+        # Parse source for human-readable citation
+        doc_id = source.split("#")[0].rsplit("/", 1)[-1] if source else ""
+        chunk_offset = source.split("offset=")[-1] if source and "offset=" in source else ""
+
+        rel: Dict[str, Any] = {
             "subject": s_label,
             "predicate": p_name,
             "object": o_label,
             "score": round(score, 4),
-        })
+        }
+        if confidence is not None:
+            rel["confidence"] = round(confidence, 2)
+        if doc_id:
+            rel["source"] = f"{doc_id}#{chunk_offset}"
+
+        relationship_list.append(rel)
         scores.append(score)
 
     avg_score = sum(scores) / len(scores) if scores else 0.0
