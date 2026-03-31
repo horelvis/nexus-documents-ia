@@ -20,6 +20,7 @@ import { useStreamingText } from '../hooks/useStreamingText'
 import { GeneratedDocDownload } from './GeneratedDocDownload'
 import { ProgressBubble } from './ProgressBubble'
 import { EntityTags } from '../EntityTags'
+import { SourceEvidence } from '../SourceEvidence'
 
 export interface MessageBubbleProps {
   message: EmmaMessage
@@ -217,6 +218,17 @@ export function MessageBubble({
             />
           ))}
         </div>
+      )}
+
+      {/* Source evidence from graph_rag provenance */}
+      {message.metadata?.sourceEvidence && message.metadata.sourceEvidence.length > 0 && (
+        <SourceEvidence
+          sources={message.metadata.sourceEvidence}
+          onDocumentClick={(docId) => {
+            const doc = { name: docId, id: docId } as DocumentInfo
+            onOpenFullscreen?.(doc)
+          }}
+        />
       )}
 
       {/* Entity tags from graph_rag — clickable → knowledge graph */}
