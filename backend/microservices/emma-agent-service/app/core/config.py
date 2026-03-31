@@ -129,7 +129,7 @@ class Settings(BaseSettings):
 
     default_workflow: str = os.getenv("DEFAULT_WORKFLOW", "auto")
     agent_max_turns: int = int(os.getenv("AGENT_MAX_TURNS", "15"))
-    agent_timeout_seconds: int = int(os.getenv("AGENT_TIMEOUT_SECONDS", "300"))
+    agent_timeout_seconds: int = int(os.getenv("AGENT_TIMEOUT_SECONDS", "600"))
     agent_fallback_to_rag: bool = os.getenv("AGENT_FALLBACK_TO_RAG", "true").lower() == "true"
 
     # Concurrency Control
