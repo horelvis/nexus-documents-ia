@@ -261,6 +261,13 @@ export function useMessageConverter(
     // Extract entity tags from graph_rag tool results in reasoning steps
     const entityTags = extractEntityTags(reasoningSteps as Array<{ type: string; content: string; source?: string }>)
 
+    // Extract source evidence from graph_rag provenance
+    const sourceEvidence = reasoningSteps
+      .filter((s: any) => s.type === 'source_evidence')
+      .flatMap((s: any) => {
+        try { return JSON.parse(s.content) } catch { return [] }
+      })
+
     const hasMetadata = reasoningSteps.length > 0 || sources.length > 0 || explanation
 
     if (hasMetadata) {
@@ -268,6 +275,10 @@ export function useMessageConverter(
         slmIsThinking: !success && reasoningSteps.length > 0,
         rawReasoningSteps: reasoningSteps,
         entityTags: entityTags.length > 0 ? entityTags : undefined,
+      }
+
+      if (sourceEvidence.length > 0) {
+        stepsMetadata!.sourceEvidence = sourceEvidence
       }
 
       if (explanation) {

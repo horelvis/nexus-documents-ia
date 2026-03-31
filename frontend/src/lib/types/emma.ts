@@ -28,6 +28,14 @@ export interface Citation {
   relevance?: number
 }
 
+export interface SourceEvidenceItem {
+  document_id: string
+  document_title: string
+  chunk_offset: number
+  relationship: string
+  confidence?: number
+}
+
 export interface DocumentInfo {
   name: string
   id?: string
@@ -387,6 +395,8 @@ export interface EmmaMessage {
     rawReasoningSteps?: Array<{ type: string; content: string; source?: string }>
     // Entity tags extracted from graph_rag tool results
     entityTags?: Array<{ uri: string; label: string; type: string }>
+    // Source evidence from graph_rag provenance
+    sourceEvidence?: SourceEvidenceItem[]
   }
   suggestions?: string[]
   isStreaming?: boolean
