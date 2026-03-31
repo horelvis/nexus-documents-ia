@@ -392,11 +392,12 @@ class GraphRAGTool(EmmaTool):
         cache = _get_label_cache(settings.graph_rag_label_cache_ttl)
 
         # Collect all unique URIs appearing in edges
+        # BFS returns keys as "subject"/"predicate"/"object" (not *_uri)
         unique_uris: set = set()
         for edge in edges:
-            for key in ("subject_uri", "object_uri"):
+            for key in ("subject_uri", "subject", "object_uri", "object"):
                 uri = edge.get(key, "")
-                if uri:
+                if uri and uri.startswith("nouxcube://"):
                     unique_uris.add(uri)
         for e in top_entities:
             uri = e.get("entity_uri", "")
@@ -448,9 +449,9 @@ class GraphRAGTool(EmmaTool):
         # Build edge descriptions
         edge_descriptions: List[str] = []
         for edge in edges:
-            s_uri = edge.get("subject_uri", "")
-            p_uri = edge.get("predicate_uri", "")
-            o_uri = edge.get("object_uri", "")
+            s_uri = edge.get("subject_uri") or edge.get("subject", "")
+            p_uri = edge.get("predicate_uri") or edge.get("predicate", "")
+            o_uri = edge.get("object_uri") or edge.get("object", "")
             s_label = labels.get(s_uri, _humanize_uri(s_uri))
             p_name = _extract_predicate_name(p_uri)
             o_label = labels.get(o_uri, _humanize_uri(o_uri))
@@ -512,16 +513,21 @@ class GraphRAGTool(EmmaTool):
             trace_edges = []
             for edge in scored_final_edges:
                 trace_edges.append({
-                    "subject_uri": edge.get("subject_uri", ""),
-                    "predicate_uri": edge.get("predicate_uri", ""),
-                    "object_uri": edge.get("object_uri", ""),
+                    "subject_uri": edge.get("subject_uri") or edge.get("subject", ""),
+                    "predicate_uri": edge.get("predicate_uri") or edge.get("predicate", ""),
+                    "object_uri": edge.get("object_uri") or edge.get("object", ""),
                 })
 
+            logger.info(f"graph_rag: Stage 7 — tracing {len(trace_edges)} edges for provenance")
+            if trace_edges:
+                for te in trace_edges[:3]:
+                    logger.info(f"graph_rag: trace edge sample: s={te['subject_uri'][:60]} p={te['predicate_uri'][:60]} o={te['object_uri'][:60]}")
             if trace_edges:
                 raw_sources = await kts_client.trace_sources(
                     tenant_id=tenant_id,
                     edges=trace_edges,
                 )
+                logger.info(f"graph_rag: Stage 7 — got {len(raw_sources) if isinstance(raw_sources, list) else len(raw_sources.get('sources', []))} source(s)")
 
                 for src in (raw_sources if isinstance(raw_sources, list) else raw_sources.get("sources", [])):
                     doc_uri = f"nouxcube://document/default/{src['document_id']}"
@@ -538,7 +544,7 @@ class GraphRAGTool(EmmaTool):
                         "confidence": src.get("confidence"),
                     })
         except Exception as e:
-            logger.warning(f"graph_rag: source resolution failed: {e}")
+            logger.warning(f"graph_rag: source resolution failed: {e}", exc_info=True)
 
         if source_evidence:
             sources_text = "\n\n### Fuentes\n"
@@ -573,9 +579,9 @@ async def _llm_score_edges(
     edge_id_map: Dict[str, Dict[str, Any]] = {}
     edge_lines: List[str] = []
     for edge, desc in zip(edges, descriptions):
-        s = edge.get("subject_uri", "")
-        p = edge.get("predicate_uri", "")
-        o = edge.get("object_uri", "")
+        s = edge.get("subject_uri") or edge.get("subject", "")
+        p = edge.get("predicate_uri") or edge.get("predicate", "")
+        o = edge.get("object_uri") or edge.get("object", "")
         edge_id = f"{s}@@{p}@@{o}"
         edge_id_map[edge_id] = edge
         edge_lines.append(f"{edge_id} | {desc}")
@@ -680,9 +686,9 @@ def _format_context(
     relationship_list = []
     scores = []
     for edge in scored_edges:
-        s_uri = edge.get("subject_uri", "")
-        p_uri = edge.get("predicate_uri", "")
-        o_uri = edge.get("object_uri", "")
+        s_uri = edge.get("subject_uri") or edge.get("subject", "")
+        p_uri = edge.get("predicate_uri") or edge.get("predicate", "")
+        o_uri = edge.get("object_uri") or edge.get("object", "")
         score = edge.get("_llm_score", 0.5)
         confidence = edge.get("confidence")
         source = edge.get("source_chunk", "")
