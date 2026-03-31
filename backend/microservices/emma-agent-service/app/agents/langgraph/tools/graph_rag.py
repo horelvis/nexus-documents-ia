@@ -1,7 +1,7 @@
 """
 Emma ReAct Agent — Graph RAG Tool
 
-6-stage pipeline that retrieves knowledge-graph context for the ReAct agent:
+7-stage pipeline that retrieves knowledge-graph context for the ReAct agent:
 
   Stage 1: Entity retrieval
            Concept embeddings → Weaviate TrustGraphEntities vector search
@@ -28,6 +28,11 @@ Emma ReAct Agent — Graph RAG Tool
   Stage 6: Context formatting
            Render as markdown with Entities + Relationships sections
            → ToolResult(output=text, data={entities, expanded_doc_ids, avg_score})
+
+  Stage 7: Source provenance resolution
+           Scored edges → KTS /triples/trace-sources
+           → Resolve document_id, chunk_offset, confidence per edge
+           → Append "### Fuentes" section + source_evidence in data
 """
 
 import json
@@ -264,13 +269,14 @@ async def _batch_embed_edges(descriptions: List[str], tenant_id: str) -> List[Li
 class GraphRAGTool(EmmaTool):
     """Busca relaciones entre entidades en el grafo de conocimiento.
 
-    6-stage pipeline:
+    7-stage pipeline:
       1. Entity retrieval via Weaviate TrustGraphEntities
       2. BFS subgraph expansion via KTS /triples/neighbors
       3. Label resolution with TTL cache
       4. Semantic pre-filter (embedding similarity)
       5. LLM edge scoring
       6. Markdown context formatting
+      7. Source provenance resolution via KTS /triples/trace-sources
     """
 
     @property
@@ -494,12 +500,56 @@ class GraphRAGTool(EmmaTool):
 
         # ── Stage 6: Context formatting ──────────────────────────────────────
 
-        return _format_context(
+        result = _format_context(
             query=query,
             top_entities=top_entities,
             scored_edges=scored_final_edges,
             labels=labels,
         )
+
+        # ── Stage 7: Source provenance resolution ────────────────────────
+        source_evidence = []
+        try:
+            trace_edges = []
+            for edge in scored_final_edges:
+                trace_edges.append({
+                    "subject_uri": edge.get("subject_uri", ""),
+                    "predicate_uri": edge.get("predicate_uri", ""),
+                    "object_uri": edge.get("object_uri", ""),
+                })
+
+            if trace_edges:
+                raw_sources = await kts_client.trace_sources(
+                    tenant_id=tenant_id,
+                    edges=trace_edges,
+                )
+
+                for src in (raw_sources if isinstance(raw_sources, list) else raw_sources.get("sources", [])):
+                    doc_uri = f"nouxcube://document/default/{src['document_id']}"
+                    doc_title = labels.get(doc_uri, src["document_id"][:12])
+                    s_label = labels.get(src["subject_uri"], _humanize_uri(src["subject_uri"]))
+                    p_name = _extract_predicate_name(src["predicate_uri"])
+                    o_label = labels.get(src["object_uri"], _humanize_uri(src["object_uri"]))
+
+                    source_evidence.append({
+                        "document_id": src["document_id"],
+                        "document_title": doc_title,
+                        "chunk_offset": src["chunk_offset"],
+                        "relationship": f"{s_label} {p_name} {o_label}",
+                        "confidence": src.get("confidence"),
+                    })
+        except Exception as e:
+            logger.warning(f"graph_rag: source resolution failed: {e}")
+
+        if source_evidence:
+            sources_text = "\n\n### Fuentes\n"
+            for src in source_evidence[:10]:
+                conf_str = f" (conf: {src['confidence']:.2f})" if src.get('confidence') is not None else ""
+                sources_text += f"- \"{src['relationship']}\" — {src['document_title']} chunk {src['chunk_offset']}{conf_str}\n"
+            result.output += sources_text
+            result.data["source_evidence"] = source_evidence
+
+        return result
 
 
 # ---------------------------------------------------------------------------
