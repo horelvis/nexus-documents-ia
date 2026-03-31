@@ -123,12 +123,12 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
 
     # Inject memory recall clues (MemoRAG — document memory scan results)
     memory_clues = state.get("memory_clues")
-    if memory_clues:
+    if memory_clues and memory_clues.strip():
         prompt += f"\n\n## Pistas de memoria documental\nBasándote en los documentos del usuario, estas pistas pueden ayudarte a buscar mejor:\n{memory_clues}"
 
     # Inject structural graph context (knowledge graph grounding)
     graph_context = state.get("graph_context")
-    if graph_context:
+    if graph_context and graph_context.strip():
         prompt += f"\n\n{graph_context}"
 
     # Detect email-sending action and inject strong hint for small models
@@ -848,6 +848,14 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             "source": tc_name,
             "summary": _humanize_tool_result(tc_name, tc["args"], result),
         })
+
+        # Emit source_evidence from graph_rag
+        if tc_name == "graph_rag" and result.data and result.data.get("source_evidence"):
+            reasoning_steps.append({
+                "type": "source_evidence",
+                "content": json.dumps(result.data["source_evidence"], ensure_ascii=False),
+                "source": "graph_rag",
+            })
 
     # ─── HITL: Email confirmation interrupt ────────────────────────────
     # When send_email returns a preview, pause the graph and show
