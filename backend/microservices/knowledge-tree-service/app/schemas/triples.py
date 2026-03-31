@@ -132,6 +132,31 @@ class BatchNeighborsResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Trace sources (provenance resolution)
+# ---------------------------------------------------------------------------
+
+
+class TraceSourcesRequest(BaseModel):
+    edges: List[Dict[str, str]]
+    tenant_id: str
+    collection: str = "default"
+
+
+class TraceSourceResult(BaseModel):
+    subject_uri: str
+    predicate_uri: str
+    object_uri: str
+    document_id: str
+    chunk_offset: int = 0
+    confidence: Optional[float] = None
+    source_chunk: str = ""
+
+
+class TraceSourcesResponse(BaseModel):
+    sources: List[TraceSourceResult]
+
+
+# ---------------------------------------------------------------------------
 # Reindex
 # ---------------------------------------------------------------------------
 

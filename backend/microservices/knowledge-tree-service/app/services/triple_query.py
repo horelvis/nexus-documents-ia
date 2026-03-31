@@ -454,6 +454,77 @@ class TripleQuery:
         }
 
     # ------------------------------------------------------------------
+    # trace_sources
+    # ------------------------------------------------------------------
+
+    async def trace_sources(
+        self,
+        edges: List[Dict[str, str]],
+        user: str,
+        collection: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Trace edges back to their source document chunks.
+
+        For each edge, queries the :Rel for source_chunk and confidence,
+        parses the source_chunk URI to extract document_id and chunk_offset.
+        """
+        if not edges:
+            return []
+
+        col_filter = _col_where("r", collection)
+        results = []
+
+        for edge in edges:
+            s_uri = edge.get("subject_uri", "")
+            p_uri = edge.get("predicate_uri", "")
+            o_uri = edge.get("object_uri", "")
+
+            if not s_uri or not p_uri:
+                continue
+
+            query = (
+                "MATCH (s:Node {uri: $s_uri, user: $user})"
+                "-[r:Rel {uri: $p_uri}]->"
+                "(o {user: $user}) "
+                f"WHERE (o.uri = $o_uri OR o.value = $o_uri){col_filter} "
+                "RETURN r.source_chunk AS source_chunk, r.confidence AS confidence "
+                "LIMIT 1"
+            )
+            params = {"s_uri": s_uri, "p_uri": p_uri, "o_uri": o_uri, "user": user}
+            if collection:
+                params["collection"] = collection
+
+            rows = await self._client.execute_cypher(query, params=params)
+            if not rows:
+                continue
+
+            source_chunk = rows[0].get("source_chunk") or ""
+            confidence = rows[0].get("confidence")
+
+            doc_id = ""
+            chunk_offset = 0
+            if source_chunk and "#offset=" in source_chunk:
+                doc_part = source_chunk.split("#")[0]
+                doc_id = doc_part.rsplit("/", 1)[-1] if "/" in doc_part else ""
+                try:
+                    chunk_offset = int(source_chunk.split("offset=")[-1])
+                except ValueError:
+                    chunk_offset = 0
+
+            if doc_id:
+                results.append({
+                    "subject_uri": s_uri,
+                    "predicate_uri": p_uri,
+                    "object_uri": o_uri,
+                    "document_id": doc_id,
+                    "chunk_offset": chunk_offset,
+                    "confidence": confidence,
+                    "source_chunk": source_chunk,
+                })
+
+        return results
+
+    # ------------------------------------------------------------------
     # get_stats
     # ------------------------------------------------------------------
 

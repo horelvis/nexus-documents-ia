@@ -19,6 +19,8 @@ from app.schemas.triples import (
     ContextRequest,
     ContextResponse,
     StatsResponse,
+    TraceSourcesRequest,
+    TraceSourcesResponse,
     TripleQueryRequest,
     TripleQueryResponse,
     TripleResult,
@@ -150,6 +152,19 @@ async def batch_neighbors(request: BatchNeighborsRequest) -> BatchNeighborsRespo
         hops_used=result["hops_used"],
         count=len(edges),
     )
+
+
+@router.post("/trace-sources", response_model=TraceSourcesResponse)
+async def trace_sources(request: TraceSourcesRequest) -> TraceSourcesResponse:
+    """Trace edges back to source document chunks for provenance resolution."""
+    tq = TripleQuery(falkordb_client)
+
+    sources = await tq.trace_sources(
+        edges=request.edges,
+        user=request.tenant_id,
+        collection=request.collection,
+    )
+    return TraceSourcesResponse(sources=sources)
 
 
 @router.post("/context", response_model=ContextResponse)
