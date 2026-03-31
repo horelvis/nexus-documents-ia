@@ -1,18 +1,17 @@
 """
-Sector Configuration Dataclass and Enum
+Unified RAG Configuration
 
-Defines the structure of a sector configuration, which controls
-how the RAG pipeline behaves for a specific domain deployment.
+Single configuration for all domains. The knowledge graph provides
+dynamic context per query — static sector configs are no longer needed.
 
-A sector is set once via ACTIVE_SECTOR env var before data ingestion.
-Changing sectors requires clearing all data (Weaviate + FalkorDB graph).
+Entity patterns from all domains (legal, medical, documental) are merged
+into a single dict so any query benefits from comprehensive extraction.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -23,78 +22,127 @@ logger = logging.getLogger(__name__)
 _REQUIRED_RERANK_WEIGHTS = {"similarity", "quality", "graph", "recency", "entity"}
 
 
-class Sector(str, Enum):
-    """Available deployment sectors."""
-    LEGAL = "legal"
-    MEDICAL = "medical"
-    DOCUMENTAL = "documental"
+# ── Merged entity patterns (legal + medical + documental) ───────────
+UNIFIED_ENTITY_PATTERNS: Dict[str, List[str]] = {
+    # Legal
+    "ley": [
+        r"(?:Ley\s+(?:Orgánica\s+)?\d+/\d{4})",
+        r"(?:Real\s+Decreto(?:\s+Legislativo)?\s+\d+/\d{4})",
+        r"(?:R\.?D\.?\s*\d+/\d{4})",
+    ],
+    "articulo": [
+        r"(?:[Aa]rt(?:ículo)?\.?\s*\d+(?:\.\d+)*(?:\s*(?:bis|ter|quáter))?)",
+    ],
+    "sentencia": [
+        r"(?:STS\s+\d+/\d{4})",
+        r"(?:Sentencia\s+(?:del\s+)?(?:TS|TC|TSJ|AP)\s+(?:de\s+)?\d+)",
+        r"(?:SAP\s+\w+\s+\d+/\d{4})",
+    ],
+    "boe": [
+        r"(?:BOE(?:-[A-Z])?(?:\s*(?:núm\.?\s*)?\d+|-\d+))",
+    ],
+    "expediente": [
+        r"(?:[Ee]xpediente\s+(?:n[úu]m\.?\s*)?[\w/-]+)",
+    ],
+    # Medical
+    "cie10": [
+        r"(?:[A-Z]\d{2}(?:\.\d{1,2})?)",
+    ],
+    "farmaco": [
+        r"(?:(?:mg|ml|mcg|UI)\s*(?:/\s*(?:día|d|h|dosis))?)",
+        r"(?:\d+\s*(?:mg|ml|mcg|UI))",
+    ],
+    "procedimiento": [
+        r"(?:CIE-(?:9|10)-(?:MC|PCS)\s*[\w.]+)",
+    ],
+    "paciente": [
+        r"(?:(?:H\.?\s*C\.?\s*|Historia\s+Clínica\s+)(?:n[úu]m\.?\s*)?[\w/-]+)",
+        r"(?:NHC\s*[\w/-]+)",
+    ],
+    # Documental
+    "persona": [
+        # Spanish proper names: "Ana de la Fuente", "Pedro del Valle", "María García López"
+        # Each segment: connector+Name (e.g., "de la Fuente") or just Name (e.g., "García")
+        r"(?:[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+(?:de\s+la|de\s+los|del|de|y)\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+|\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)",
+    ],
+    "nif": [
+        r"(?:[A-Z]\d{7}[A-Z0-9])",
+        r"(?:\d{8}[A-Z])",
+    ],
+    "importe": [
+        r"(?:\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?\s*€)",
+        r"(?:€\s*\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})?)",
+    ],
+    "referencia": [
+        r"(?:\b(?:Ref|REF|Expediente|Exp)\b\.?\s*(?:[:#-]\s*|\s+)(?:[A-Z0-9][A-Z0-9/_-]{2,}))",
+    ],
+    "fecha": [
+        r"(?:\d{1,2}[/-]\d{1,2}[/-]\d{2,4})",
+        r"(?:\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+de\s+\d{4})",
+    ],
+}
+
+# ── Balanced rerank weights (average of legal/medical/documental) ───
+UNIFIED_RERANK_WEIGHTS: Dict[str, float] = {
+    "similarity": 0.37,
+    "quality": 0.18,
+    "graph": 0.22,
+    "recency": 0.10,
+    "entity": 0.13,
+}
+
+# ── All graph search properties (union of all domains) ──────────────
+UNIFIED_GRAPH_SEARCH_PROPERTIES: List[str] = [
+    "name", "title", "short_name", "boe_id", "domain",
+    "code", "associated_person",
+]
 
 
 @dataclass(frozen=True)
 class SectorConfig:
     """
-    Configuration for a specific deployment sector.
+    Unified RAG pipeline configuration.
 
-    Controls RAG pipeline parameters, agent selection, entity extraction,
-    and graph configuration for the active sector.
-
-    Attributes:
-        name: Human-readable sector name
-        sector: Sector enum value
-        agents: List of agent names active in this sector
-        default_agent: Fallback agent when plan is empty
-        hybrid_alpha: Weaviate hybrid search alpha (0=keyword, 1=semantic)
-        top_k: Number of documents to retrieve
-        rerank_enabled: Whether to apply cross-encoder reranking
-        chunk_strategy: Chunking strategy (semantic, legal_sections, paragraph)
-        chunk_size: Target chunk size in characters
-        chunk_overlap: Overlap between chunks in characters
-        entity_patterns: Regex patterns for entity extraction by type
-        system_prompt_key: Langfuse prompt name for sector system prompt
-        collection_suffix: Optional suffix for Weaviate collection names
-        men_domain: MEN service domain mapping
-        graph_search_properties: Node properties to search in FalkorDB graph queries
+    Replaces per-sector configs. The knowledge graph provides dynamic
+    context — this config holds balanced defaults for all domains.
     """
     name: str
-    sector: Sector
-    agents: List[str]
-    default_agent: str
     hybrid_alpha: float
     top_k: int
     rerank_enabled: bool
-    chunk_strategy: str
-    chunk_size: int
-    chunk_overlap: int
     entity_patterns: Dict[str, List[str]]
-    system_prompt_key: str = ""
-    collection_suffix: Optional[str] = None
-    men_domain: str = "general"
-    predictive_config: Optional[PredictiveConfig] = None
-    rerank_weights: Dict[str, float] = field(default_factory=lambda: {
-        "similarity": 0.40,
-        "quality": 0.20,
-        "graph": 0.20,
-        "recency": 0.10,
-        "entity": 0.10,
-    })
-    graph_search_properties: List[str] = field(default_factory=lambda: ["name", "title"])
+    rerank_weights: Dict[str, float] = field(default_factory=lambda: dict(UNIFIED_RERANK_WEIGHTS))
+    graph_search_properties: List[str] = field(default_factory=lambda: list(UNIFIED_GRAPH_SEARCH_PROPERTIES))
 
-    # Guardrail & Verification overrides
+    # Guardrail & Verification defaults
     guardrail_profile: str = "global"
     fidelity_confidence_cap: float = 0.80
     max_evidence: int = 5
     hitl_default: bool = False
 
-    # Explanation sector guidance (injected into explain prompt)
-    explain_guidance: str = "Usa lenguaje accesible. Describe los documentos consultados."
+    # Explanation guidance
+    explain_guidance: str = "Usa lenguaje accesible. Cita fuentes por nombre completo."
+
+    # Predictive config (resolved from predictive_config.py)
+    predictive_config: Optional[PredictiveConfig] = None
+
+    # Legacy compat — these are ignored but kept so serialized dicts don't break
+    sector: str = ""
+    agents: List[str] = field(default_factory=list)
+    default_agent: str = ""
+    chunk_strategy: str = "semantic"
+    chunk_size: int = 1200
+    chunk_overlap: int = 150
+    system_prompt_key: str = ""
+    men_domain: str = "general"
+    collection_suffix: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Validate rerank_weights keys on construction."""
         if self.rerank_weights:
             keys = set(self.rerank_weights.keys())
             missing = _REQUIRED_RERANK_WEIGHTS - keys
             if missing:
                 raise ValueError(
-                    f"SectorConfig '{self.name}' rerank_weights missing keys: {missing}. "
+                    f"SectorConfig rerank_weights missing keys: {missing}. "
                     f"Required: {_REQUIRED_RERANK_WEIGHTS}"
                 )

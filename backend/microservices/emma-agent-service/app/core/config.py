@@ -16,10 +16,10 @@ class Settings(BaseSettings):
     service_port: int = 8009
 
     # ==========================================================================
-    # Active Sector (Multi-Pipeline RAG)
+    # RAG Configuration (unified — knowledge graph provides dynamic context)
     # ==========================================================================
-    # Set before data ingestion. Valid: legal, medical, documental, or empty for generic mode.
-    # Changing sector requires clearing Weaviate collections + AGE graph.
+    # ACTIVE_SECTOR is deprecated — unified config is used for all domains.
+    # Kept for backwards compat with env files.
     active_sector: str = os.getenv("ACTIVE_SECTOR", "")
 
     MICROSERVICES_API_KEY: str = Field(
@@ -52,15 +52,15 @@ class Settings(BaseSettings):
         """Normalize 'vllm' → 'sglang' for backwards compat."""
         return "sglang" if self.llm_provider == "vllm" else self.llm_provider
 
-    # LLM Inference — Single-Model Dual-Phase (Qwen3.5-27B-AWQ)
-    # One model, two behavioral phases controlled by temperature + thinking:
+    # LLM Inference — Single-Model Dual-Phase (Qwen3.5-9B)
+    # One model, two behavioral phases controlled by temperature:
     # PLANNER phase: temp=0.3, no thinking → fast routing, tool calling, classification
-    # CHAT phase: temp=0.6, thinking on → reasoning, synthesis, final responses
+    # CHAT phase: temp=0.6 → reasoning, synthesis, final responses
     # Runtime: vLLM v0.18.0 (FlashAttention 4, prefix caching, kv-cache fp8)
     sglang_enabled: bool = os.getenv("SGLANG_ENABLED", os.getenv("VLLM_ENABLED", "true")).lower() == "true"
     sglang_dual_model: bool = os.getenv("SGLANG_DUAL_MODEL", os.getenv("VLLM_DUAL_MODEL", "false")).lower() == "true"
 
-    # Chat model (Qwen3.5-27B-AWQ) — quality generation
+    # Chat model (Qwen3.5-9B) — quality generation
     sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
     sglang_model: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "QuantTrio/Qwen3.5-27B-AWQ"))
     sglang_max_tokens: int = int(os.getenv("SGLANG_MAX_TOKENS", os.getenv("VLLM_MAX_TOKENS", "16384")))

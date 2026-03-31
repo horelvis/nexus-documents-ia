@@ -68,12 +68,8 @@ class GenerateDocumentTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Genera un documento NUEVO desde cero usando el LLM (redacción completa). "
-            "Usa esto SOLO cuando no existe un documento base que modificar, por ejemplo: "
-            "redactar un contrato nuevo, crear un informe, escribir una carta. "
-            "IMPORTANTE: Si el usuario quiere MODIFICAR un documento existente "
-            "(renovar contrato, cambiar fecha, actualizar datos), usa forge_document "
-            "en su lugar — es más rápido y preserva el formato original (tablas, estilos, firmas)."
+            "Genera documento nuevo desde cero (contrato, informe, carta). "
+            "Para modificar documentos existentes usa forge_document."
         )
 
     @property

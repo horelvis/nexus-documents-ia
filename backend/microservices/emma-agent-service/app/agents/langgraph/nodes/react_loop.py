@@ -102,10 +102,6 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
     prompt = prompt.replace("{tools_description}", tools_desc)
     prompt = prompt.replace("{current_date}", date.today().isoformat())
 
-    sector = state.get("sector", "")
-    if sector:
-        prompt += f"\n\nSector activo: {sector}"
-
     # Forward classify intent to system prompt
     intent = (state.get("metadata") or {}).get("classify_intent", "")
     if intent and intent not in ("conversational", "identity"):

@@ -43,11 +43,8 @@ class PredictiveAnalysisTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Analisis predictivo de un caso juridico o empresarial. "
-            "Extrae factores relevantes, evalua evidencia a favor y en contra, "
-            "y genera una recomendacion con probabilidades. "
-            "Usa esta herramienta cuando el usuario pida predecir resultados, "
-            "evaluar riesgos, o analizar probabilidades de un caso."
+            "Análisis predictivo: extrae factores, evalúa evidencia y genera "
+            "recomendación con probabilidades para casos jurídicos o empresariales."
         )
 
     @property

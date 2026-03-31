@@ -272,13 +272,8 @@ class SmartSearchTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Búsqueda inteligente unificada en documentos del usuario Y legislación española (BOE). "
-            "Detecta automáticamente qué buscar y filtra por tipo de documento (facturas, contratos, "
-            "nóminas, informes, etc.), por persona, y por rango de fechas. "
-            "Usa date_from/date_to para consultas temporales como 'facturas del último mes'. "
-            "Usa esto para: 'facturas de Javier', 'contratos de 2024', 'nóminas del departamento X', "
-            "o cualquier búsqueda documental/legal. "
-            "Para CONTAR documentos (cuántos hay), usa structural_query en su lugar."
+            "Búsqueda inteligente en todos los documentos y conocimiento disponible. "
+            "Filtra por tipo, persona, fechas. Para contar documentos usa structural_query."
         )
 
     @property
@@ -574,16 +569,13 @@ class SmartSearchTool(EmmaTool):
     def _extract_entities(
         self, query: str, sector_config: Dict[str, Any]
     ) -> Dict[str, List[str]]:
-        """Extract entities using sector patterns + generic patterns."""
+        """Extract entities using unified patterns (all domains merged)."""
         from app.agents.langgraph.sectors.entity_extractor import extract_entities
 
         patterns = sector_config.get("entity_patterns", {})
         if not patterns:
-            # Fallback: use documental patterns which cover persona/nif/fecha
-            from app.agents.langgraph.sectors.registry import SECTOR_CONFIGS
-            documental = SECTOR_CONFIGS.get("documental")
-            if documental:
-                patterns = documental.entity_patterns
+            from app.agents.langgraph.sectors.config import UNIFIED_ENTITY_PATTERNS
+            patterns = UNIFIED_ENTITY_PATTERNS
 
         return extract_entities(query, patterns) if patterns else {}
 
