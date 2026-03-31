@@ -250,6 +250,26 @@ class KnowledgeTreeClient(BaseHTTPClient):
             return {"edges": [], "entities_visited": 0, "hops_used": 0}
 
 
+    async def trace_sources(
+        self,
+        tenant_id: str,
+        edges: List[Dict[str, str]],
+        collection: str = "default",
+    ) -> List[Dict[str, Any]]:
+        """Trace graph edges back to source document chunks."""
+        payload = {
+            "edges": edges,
+            "tenant_id": tenant_id,
+            "collection": collection,
+        }
+        try:
+            result = await self.post_json("/triples/trace-sources", json=payload, headers=self._headers())
+            return result.get("sources", []) if isinstance(result, dict) else []
+        except Exception as e:
+            logger.warning(f"trace_sources failed: {e}")
+            return []
+
+
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None
 
 
