@@ -87,27 +87,29 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # SGLang — Qwen3.5-27B AWQ Q4 (Single-Model Architecture)
+  # vLLM — Qwen3.5-27B AWQ (Single-Model Architecture)
   # =============================================================================
-  # One SGLang instance on GPU (RTX 4090 24GB):
+  # One vLLM instance on GPU (RTX 3090 24GB):
   #
   #   Modelo                    VRAM (AWQ Q4)      Funcion
   #   ─────────────────────     ──────────────     ──────────────────────────
-  #   Qwen3.5-27B-AWQ           ~16 GB             Chat + Planner (single model)
+  #   Qwen3.5-27B-AWQ           ~19.8 GB           Chat + Planner (single model)
   #   BGE-M3                    CPU                Embeddings (EMBEDDING_DEVICE=cpu)
   #   ─────────────────────     ──────────────
-  #   Total GPU                 ~16 GB             Leaves ~6-7 GB for KV cache (32K ctx)
+  #   Total GPU                 ~19.8 GB           Leaves ~2.5 GB for KV cache (128K ctx via DeltaNet)
   #
-  # Single-model mode (SGLANG_DUAL_MODEL=false):
-  #   Only 'sglang' service runs. Both PLANNER and CHAT phases use same 27B model.
-  #   mem-fraction-static: 0.88 (full GPU, embeddings on CPU).
+  # Single-model dual-phase:
+  #   Both PLANNER (temp=0.3) and CHAT (temp=0.6) phases use same 27B model.
+  #   gpu-memory-utilization: 0.95, enforce-eager (no CUDA graphs).
   #
-  # Dual-model mode: NOT SUPPORTED with 27B (insufficient VRAM for two models).
+  # vLLM v0.18.0: AWQ Marlin auto-detect, kv-cache-dtype fp8, prefix caching.
+  # GPTQ-Int4 tested but uses ~23 GB (too large) — AWQ is more VRAM-efficient.
   # =============================================================================
 
-  # ── Qwen3.5-27B AWQ Q4 — Quality generation + tool calling ──
+  # ── Qwen3.5-27B AWQ — Quality generation + tool calling ──
+  # Service name kept as 'sglang' for backwards compat with SGLANG_BASE_URL refs
   sglang:
-    image: lmsysorg/sglang:v0.5.9
+    image: vllm/vllm-openai:v0.18.0-cu130
     ports:
       - "8001:8000"
     networks:
@@ -118,18 +120,21 @@ services:
       - HF_TOKEN=${HF_TOKEN}
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
+      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
     command: >
-      python -m sglang.launch_server
-      --model-path ${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
+      --model ${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       --served-model-name ${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       --port 8000
       --host 0.0.0.0
-      --context-length ${SGLANG_MAX_MODEL_LEN:-16384}
-      --mem-fraction-static ${SGLANG_GPU_UTIL:-0.88}
-      --quantization ${SGLANG_QUANTIZATION:-awq}
+      --max-model-len ${SGLANG_MAX_MODEL_LEN:-131072}
+      --gpu-memory-utilization ${SGLANG_GPU_UTIL:-0.95}
+      --dtype bfloat16
+      --kv-cache-dtype fp8
       --trust-remote-code
+      --enforce-eager
+      --enable-auto-tool-choice
       --tool-call-parser ${SGLANG_TOOL_PARSER:-qwen3_coder}
-      --reasoning-parser qwen3
+      --enable-prefix-caching
     deploy:
       resources:
         reservations:
@@ -144,50 +149,6 @@ services:
       retries: 10
       start_period: 600s
     restart: unless-stopped
-
-  # ── Planner Model (Qwen3.5-4B) — Fast tool calling, routing, clue generation ──
-  # Only used when SGLANG_DUAL_MODEL=true. Enable with: --profile dual-model
-  # Shares the GPU with sglang via mem-fraction-static partitioning.
-  sglang-planner:
-    image: lmsysorg/sglang:v0.5.9
-    ports:
-      - "8003:8000"
-    networks:
-      - backend-network
-    volumes:
-      - vllm_cache:/root/.cache/huggingface
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - NVIDIA_DISABLE_REQUIRE=1
-      - CUDA_VISIBLE_DEVICES=0
-    command: >
-      python -m sglang.launch_server
-      --model-path ${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
-      --served-model-name ${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
-      --port 8000
-      --host 0.0.0.0
-      --context-length ${SGLANG_PLANNER_MAX_MODEL_LEN:-8192}
-      --mem-fraction-static ${SGLANG_PLANNER_GPU_UTIL:-0.18}
-      --quantization fp8
-      --trust-remote-code
-      --tool-call-parser ${SGLANG_PLANNER_TOOL_PARSER:-qwen3_coder}
-      --reasoning-parser qwen3
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 180s
-    restart: unless-stopped
-    profiles:
-      - dual-model
 
 
   # =============================================================================
@@ -532,8 +493,8 @@ services:
       # Knowledge Tree Service (structural context)
       - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
       - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
-      # Multi-Pipeline RAG Sector
-      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
+      # Intelligence Docs Service (embeddings for graph_rag concept search)
+      - INTELLIGENCE_DOCS_SERVICE_URL=http://intelligence-docs-service:8000
       # SGLang Configuration — Dual-Model Architecture
       # Set SGLANG_DUAL_MODEL=true + docker compose --profile dual-model to enable
       - SGLANG_ENABLED=${SGLANG_ENABLED:-true}

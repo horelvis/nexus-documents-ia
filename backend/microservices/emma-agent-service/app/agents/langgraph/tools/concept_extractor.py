@@ -19,6 +19,7 @@ Falls back to regex extraction on any LLM failure.
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -179,7 +180,12 @@ async def _batch_embed(concepts: List[str], tenant_id: str) -> Dict[str, List[fl
 
     from app.core.config import settings
 
-    url = f"{settings.text_extraction_service_url}/embed"
+    # Embeddings live in intelligence-docs-service (not text_extraction_service)
+    base = os.getenv(
+        "INTELLIGENCE_DOCS_SERVICE_URL",
+        settings.text_extraction_service_url,
+    )
+    url = f"{base}/embed"
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as http_client:
