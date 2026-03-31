@@ -233,7 +233,9 @@ async def _batch_embed_edges(descriptions: List[str], tenant_id: str) -> List[Li
     if not descriptions:
         return []
 
-    url = f"{settings.text_extraction_service_url}/embed"
+    import os
+    base = os.getenv("INTELLIGENCE_DOCS_SERVICE_URL", settings.text_extraction_service_url)
+    url = f"{base}/embed"
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(

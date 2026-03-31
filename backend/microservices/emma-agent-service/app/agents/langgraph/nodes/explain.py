@@ -241,7 +241,7 @@ async def explain_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 facts_formatted=facts_formatted,
                 tools_human_names=tools_human_names,
                 source_names=source_names,
-                sector=sector,
+                sector="general",
                 sector_guidance=sector_guidance,
             )
         except Exception as e:
