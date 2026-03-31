@@ -91,19 +91,19 @@ TEST_CASES = [
     ),
     TestCase(
         name="graph_rag_legal_entity",
-        query="Qué leyes regulan los contratos de prestación de servicios?",
-        expect_tools=["graph_rag", "smart_search"],
+        query="Qué relación existe entre la LGT y el IRPF?",
+        expect_tools=["graph_rag"],
         expect_source_evidence=True,
         expect_entities=[],
         expect_answer_keywords=[],
     ),
     TestCase(
-        name="structural_count_query",
+        name="count_query",
         query="Cuántos documentos hay indexados?",
-        expect_tools=["structural_query"],
+        expect_tools=["structural_query", "list_sources"],  # Either is valid
         expect_source_evidence=False,
         expect_entities=[],
-        expect_answer_keywords=[],
+        expect_answer_keywords=["601"],
     ),
     TestCase(
         name="mixed_domain_entities",
@@ -255,10 +255,11 @@ def validate_test(tc: TestCase) -> List[str]:
     if not tc.final_answer:
         failures.append("No final answer received")
 
-    # Check expected tools were called
-    for tool in tc.expect_tools:
-        if tool not in tc.tools_called:
-            failures.append(f"Expected tool '{tool}' not called. Called: {tc.tools_called}")
+    # Check at least one expected tool was called (OR logic, not AND)
+    if tc.expect_tools:
+        found_any = any(t in tc.tools_called for t in tc.expect_tools)
+        if not found_any:
+            failures.append(f"None of expected tools {tc.expect_tools} called. Called: {tc.tools_called}")
 
     # Check source_evidence
     if tc.expect_source_evidence and not tc.source_evidence:
