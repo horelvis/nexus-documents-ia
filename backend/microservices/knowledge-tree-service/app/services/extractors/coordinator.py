@@ -22,6 +22,7 @@ from app.services.extractors.topics import TopicsExtractor
 from app.services.provenance import ProvenanceService
 from app.services.triple_store import TripleStore
 from app.services.uri_builder import URIBuilder
+from app.services.entity_blacklist import EntityBlacklist
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +118,12 @@ class ExtractionCoordinator:
 
         triples_total = len(all_triples)
 
+        # Predicates where only one value per entity is meaningful —
+        # the LLM often rephrases the same definition across extractors,
+        # producing variants like "Código de Comercio (BOE-A-1885-6627)"
+        # vs "Código de Comercio, con referencia BOE-A-1885-6627".
+        _UNIQUE_PER_ENTITY = {"definition", "label"}
+
         # Deduplicate by normalized key to catch case/accent variations
         # e.g. "Juan García" and "juan garcia" produce the same URI slug
         seen: Set[Tuple[str, str, str]] = set()
@@ -124,16 +131,44 @@ class ExtractionCoordinator:
         for triple in all_triples:
             raw_subj = triple.get("subject", "")
             raw_obj = triple.get("object", "")
-            key = (
-                URIBuilder.normalize_name(raw_subj) if raw_subj else "",
-                triple.get("predicate_name", ""),
-                URIBuilder.normalize_name(raw_obj) if raw_obj else "",
-            )
+            pred_name = triple.get("predicate_name", "")
+            norm_subj = URIBuilder.normalize_name(raw_subj) if raw_subj else ""
+
+            if pred_name in _UNIQUE_PER_ENTITY:
+                # One definition/label per entity — ignore object text variance
+                key = (norm_subj, pred_name, "")
+            else:
+                key = (
+                    norm_subj,
+                    pred_name,
+                    URIBuilder.normalize_name(raw_obj) if raw_obj else "",
+                )
+
             if key not in seen:
                 seen.add(key)
                 deduped_triples.append(triple)
 
         triples_deduped = triples_total - len(deduped_triples)
+
+        # ── Blacklist filtering: drop triples with blacklisted subjects/objects ──
+        _blacklist = EntityBlacklist()
+        pre_blacklist = len(deduped_triples)
+        filtered_triples: List[Dict[str, Any]] = []
+        for triple in deduped_triples:
+            subject = triple.get("subject", "")
+            obj = triple.get("object", "")
+            obj_is_node = triple.get("object_is_node", False)
+
+            if _blacklist.is_blacklisted(subject):
+                continue
+            if obj_is_node and _blacklist.is_blacklisted(obj):
+                continue
+            filtered_triples.append(triple)
+
+        blacklisted_count = pre_blacklist - len(filtered_triples)
+        if blacklisted_count:
+            logger.info("Blacklist filtered %d triples", blacklisted_count)
+        deduped_triples = filtered_triples
 
         # ── Entity linking: upgrade Literal → Node where object matches a known entity ──
         # Collect all subjects that extractors created as :Node entities

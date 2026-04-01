@@ -467,3 +467,75 @@ class TestExtractDocument:
         assert result["success"] is True
         assert result["chunks_processed"] == 2
         assert result["triples_created"] == 2
+
+
+# ---------------------------------------------------------------------------
+# TestBlacklistFiltering
+# ---------------------------------------------------------------------------
+
+
+class TestBlacklistFiltering:
+    """Blacklisted entities should be dropped before storage."""
+
+    @pytest.mark.asyncio
+    async def test_blacklisted_subject_dropped(self, falkordb_client):
+        coord = _make_coordinator(falkordb_client)
+        blacklisted_triples = [
+            _label_triple("mayor de edad"),
+            _type_triple("mayor de edad", "concept"),
+        ]
+        real_triples = [
+            _label_triple("Juan García"),
+            _rel_triple("Juan García", "ACME S.L."),
+        ]
+
+        with patch.object(coord._definitions, "extract", new_callable=AsyncMock) as mock_def, \
+             patch.object(coord._relationships, "extract", new_callable=AsyncMock) as mock_rel, \
+             patch.object(coord._objects, "extract", new_callable=AsyncMock) as mock_obj, \
+             patch.object(coord._topics, "extract", new_callable=AsyncMock) as mock_top:
+            mock_def.return_value = [blacklisted_triples[0], real_triples[0]]
+            mock_rel.return_value = [real_triples[1]]
+            mock_obj.return_value = [blacklisted_triples[1]]
+            mock_top.return_value = []
+
+            result = await coord.extract_chunk(
+                chunk_text=SAMPLE_CHUNK,
+                document_uri=DOC_URI,
+                user="test-user",
+                collection="default",
+            )
+
+        assert result["triples_created"] == 2
+
+    @pytest.mark.asyncio
+    async def test_blacklisted_object_dropped(self, falkordb_client):
+        coord = _make_coordinator(falkordb_client)
+        triples = [
+            {
+                "subject": "Juan García",
+                "predicate_ontology": "legal",
+                "predicate_name": "empleado-de",
+                "object": "empresa",
+                "object_is_node": True,
+                "extraction_method": "llm_relationships",
+                "source_chunk": SAMPLE_CHUNK[:200],
+            },
+        ]
+
+        with patch.object(coord._definitions, "extract", new_callable=AsyncMock) as mock_def, \
+             patch.object(coord._relationships, "extract", new_callable=AsyncMock) as mock_rel, \
+             patch.object(coord._objects, "extract", new_callable=AsyncMock) as mock_obj, \
+             patch.object(coord._topics, "extract", new_callable=AsyncMock) as mock_top:
+            mock_def.return_value = []
+            mock_rel.return_value = triples
+            mock_obj.return_value = []
+            mock_top.return_value = []
+
+            result = await coord.extract_chunk(
+                chunk_text=SAMPLE_CHUNK,
+                document_uri=DOC_URI,
+                user="test-user",
+                collection="default",
+            )
+
+        assert result["triples_created"] == 0
