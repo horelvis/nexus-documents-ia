@@ -14,6 +14,7 @@ import time
 from typing import Any, Dict, List, Set, Tuple
 
 from app.core.config import settings
+from app.services.consensus import ConsensusScorer
 from app.services.contradiction import ContradictionDetector
 from app.services.extractors.definitions import DefinitionsExtractor
 from app.services.extractors.objects import ObjectsExtractor
@@ -422,6 +423,28 @@ class ExtractionCoordinator:
             errors.append(f"confidence_penalty: {exc}")
             logger.warning("Confidence penalty failed: %s", exc)
 
+        # Step 3c: Consensus scoring — count independent sources per triple
+        consensus_scorer = ConsensusScorer(self._store._client)
+        consensus_sem = asyncio.Semaphore(10)
+
+        async def _score_subject(subject_uri: str) -> int:
+            async with consensus_sem:
+                return await consensus_scorer.compute_and_store(
+                    subject_uri=subject_uri, user=user
+                )
+
+        consensus_tasks = [_score_subject(uri) for uri in all_subject_uris]
+        consensus_results = await asyncio.gather(*consensus_tasks, return_exceptions=True)
+
+        total_consensus = 0
+        for i, result in enumerate(consensus_results):
+            if isinstance(result, BaseException):
+                subj = subject_list[i] if i < len(subject_list) else "?"
+                errors.append(f"consensus({subj}): {result}")
+                logger.warning("Consensus scoring failed: %s", result)
+            else:
+                total_consensus += result
+
         # Step 4: Log extraction summary
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
         total_parse_failures = sum(
@@ -445,13 +468,15 @@ class ExtractionCoordinator:
 
         logger.info(
             "Document %s extraction complete: %d triples, %d parse_failures, "
-            "%d empty_responses, %d validation_failures, %d contradictions, %dms",
+            "%d empty_responses, %d validation_failures, %d contradictions, "
+            "%d consensus_predicates, %dms",
             document_id,
             total_triples,
             total_parse_failures,
             total_empty,
             total_validation,
             contradictions_found,
+            total_consensus,
             elapsed_ms,
         )
 
