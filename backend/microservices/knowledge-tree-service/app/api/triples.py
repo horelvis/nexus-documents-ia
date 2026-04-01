@@ -19,12 +19,16 @@ from app.schemas.triples import (
     ContextRequest,
     ContextResponse,
     StatsResponse,
+    TemplateListItem,
+    TemplateRequest,
+    TemplateResponse,
     TraceSourcesRequest,
     TraceSourcesResponse,
     TripleQueryRequest,
     TripleQueryResponse,
     TripleResult,
 )
+from app.services.template_executor import TemplateExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -248,3 +252,30 @@ async def clear_tenant(tenant_id: str = Query(...)) -> dict:
     await ts.clear_tenant(user=tenant_id)
 
     return {"success": True, "deleted": deleted}
+
+
+_template_executor = TemplateExecutor()
+
+
+@router.post("/template", response_model=TemplateResponse)
+async def execute_template(request: TemplateRequest) -> TemplateResponse:
+    """Execute a named Cypher template with parameters."""
+    from fastapi import HTTPException
+
+    try:
+        result = await _template_executor.execute(
+            name=request.template_name,
+            client=falkordb_client,
+            user=request.tenant_id,
+            collection=request.collection,
+            **request.params,
+        )
+        return TemplateResponse(**result)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.get("/templates", response_model=List[TemplateListItem])
+async def list_templates() -> List[TemplateListItem]:
+    """List all available Cypher templates."""
+    return _template_executor.list_templates()

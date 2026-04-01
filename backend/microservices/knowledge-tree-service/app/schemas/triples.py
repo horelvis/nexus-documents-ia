@@ -171,3 +171,29 @@ class ReindexResponse(BaseModel):
     documents_processed: int = 0
     triples_created: int = 0
     errors: List[str] = []
+
+
+# ---------------------------------------------------------------------------
+# Template execution
+# ---------------------------------------------------------------------------
+
+
+class TemplateRequest(BaseModel):
+    """Execute a named Cypher template."""
+    tenant_id: str
+    template_name: str
+    collection: Optional[str] = None
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TemplateListItem(BaseModel):
+    name: str
+    description: str
+    hops: int
+
+
+class TemplateResponse(BaseModel):
+    results: List[Dict[str, Any]]
+    template: str
+    hops: int
+    count: int
