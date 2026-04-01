@@ -220,6 +220,62 @@ def _parse_scoring_json(content: str) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Stage 7b helper: resolve chunk text for source evidence
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_chunk_texts(
+    source_evidence: List[Dict[str, Any]],
+    tenant_id: str,
+    weaviate_client: Any,
+    max_snippet_chars: int = 300,
+) -> None:
+    """Fetch chunk content for each source and add chunk_text field.
+
+    Groups by document_id to minimize HTTP calls. Modifies source_evidence
+    in-place. Failures are silently skipped (chunk_text stays absent).
+    """
+    # Group sources by document_id
+    doc_chunks: Dict[str, List[Dict[str, Any]]] = {}
+    for src in source_evidence:
+        doc_id = src.get("document_id", "")
+        if doc_id:
+            doc_chunks.setdefault(doc_id, []).append(src)
+
+    # Fetch chunks per document (parallel)
+    import asyncio as _asyncio
+
+    async def _fetch_and_assign(doc_id: str, sources: List[Dict[str, Any]]):
+        try:
+            chunks = await weaviate_client.get_document_chunks(
+                tenant_id=tenant_id,
+                document_id=doc_id,
+            )
+            # Build offset→content map
+            chunk_map = {}
+            for ch in (chunks if isinstance(chunks, list) else chunks.get("chunks", [])):
+                idx = ch.get("chunk_index")
+                if idx is not None:
+                    chunk_map[idx] = ch.get("content", "")
+
+            for src in sources:
+                offset = src.get("chunk_offset")
+                text = chunk_map.get(offset, "")
+                if text:
+                    # Strip metadata prefix [CONTEXTO]...[CONTENIDO]
+                    if "[CONTENIDO]" in text:
+                        text = text.split("[CONTENIDO]", 1)[1].strip()
+                    src["chunk_text"] = text[:max_snippet_chars]
+        except Exception:
+            pass  # Non-critical — chunk_text simply won't be present
+
+    await _asyncio.gather(
+        *[_fetch_and_assign(doc_id, srcs) for doc_id, srcs in doc_chunks.items()],
+        return_exceptions=True,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Stage 4 helper: batch embed edge descriptions
 # ---------------------------------------------------------------------------
 
@@ -237,7 +293,7 @@ async def _batch_embed_edges(descriptions: List[str], tenant_id: str) -> List[Li
     base = os.getenv("INTELLIGENCE_DOCS_SERVICE_URL", settings.text_extraction_service_url)
     url = f"{base}/embed"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post(
                 url,
                 json={"texts": descriptions, "task": "retrieval.passage"},
@@ -259,7 +315,7 @@ async def _batch_embed_edges(descriptions: List[str], tenant_id: str) -> List[Li
         return vectors
 
     except Exception as e:
-        logger.warning(f"graph_rag: edge embedding failed: {e}")
+        logger.warning(f"graph_rag: edge embedding failed: {type(e).__name__}: {e}", exc_info=True)
         return []
 
 
@@ -546,7 +602,13 @@ class GraphRAGTool(EmmaTool):
         except Exception as e:
             logger.warning(f"graph_rag: source resolution failed: {e}", exc_info=True)
 
+        # ── Stage 7b: Resolve chunk text for source evidence ────────────
         if source_evidence:
+            try:
+                await _resolve_chunk_texts(source_evidence, tenant_id, weaviate_client)
+            except Exception as e:
+                logger.debug(f"graph_rag: chunk text resolution failed: {e}")
+
             sources_text = "\n\n### Fuentes\n"
             for src in source_evidence[:10]:
                 conf_str = f" (conf: {src['confidence']:.2f})" if src.get('confidence') is not None else ""

@@ -34,6 +34,7 @@ export interface SourceEvidenceItem {
   chunk_offset: number
   relationship: string
   confidence?: number
+  chunk_text?: string
 }
 
 export interface DocumentInfo {

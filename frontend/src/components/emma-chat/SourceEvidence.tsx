@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { IconChevronDown, IconChevronRight, IconFileText } from '@tabler/icons-react'
+import { IconChevronDown, IconChevronRight, IconFileText, IconQuote } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import type { SourceEvidenceItem } from '@/lib/types/emma'
 
@@ -19,6 +19,19 @@ function ConfidenceBadge({ confidence }: { confidence?: number }) {
   )
 }
 
+function ChunkPreview({ text }: { text: string }) {
+  return (
+    <div className="mt-1.5 rounded border border-border/40 bg-background/60 px-2.5 py-2">
+      <div className="flex items-start gap-1.5">
+        <IconQuote className="h-3 w-3 mt-0.5 text-muted-foreground/60 shrink-0" />
+        <p className="text-[11px] leading-relaxed text-muted-foreground italic">
+          {text}
+        </p>
+      </div>
+    </div>
+  )
+}
+
 interface SourceEvidenceProps {
   sources: SourceEvidenceItem[]
   onDocumentClick?: (documentId: string) => void
@@ -26,8 +39,21 @@ interface SourceEvidenceProps {
 
 export function SourceEvidence({ sources, onDocumentClick }: SourceEvidenceProps) {
   const [isExpanded, setIsExpanded] = useState(false)
+  const [expandedChunks, setExpandedChunks] = useState<Set<number>>(new Set())
 
   if (!sources || sources.length === 0) return null
+
+  const toggleChunk = (idx: number) => {
+    setExpandedChunks(prev => {
+      const next = new Set(prev)
+      if (next.has(idx)) {
+        next.delete(idx)
+      } else {
+        next.add(idx)
+      }
+      return next
+    })
+  }
 
   return (
     <div className="mt-2 rounded-lg border border-border/50 bg-muted/30">
@@ -47,22 +73,31 @@ export function SourceEvidence({ sources, onDocumentClick }: SourceEvidenceProps
       {isExpanded && (
         <div className="px-3 pb-3 space-y-2">
           {sources.map((src, idx) => (
-            <div key={idx} className="flex items-start gap-2 text-xs">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => onDocumentClick?.(src.document_id)}
-                    className="font-medium text-primary hover:underline truncate"
-                  >
-                    {src.document_title}
-                  </button>
-                  <span className="text-muted-foreground shrink-0">chunk {src.chunk_offset}</span>
-                  <ConfidenceBadge confidence={src.confidence} />
-                </div>
-                <p className="text-muted-foreground mt-0.5 line-clamp-1">
-                  {src.relationship}
-                </p>
+            <div key={idx} className="text-xs">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => onDocumentClick?.(src.document_id)}
+                  className="font-medium text-primary hover:underline truncate"
+                >
+                  {src.document_title}
+                </button>
+                <button
+                  onClick={() => src.chunk_text && toggleChunk(idx)}
+                  className={cn(
+                    'text-muted-foreground shrink-0',
+                    src.chunk_text && 'hover:text-foreground cursor-pointer underline decoration-dotted'
+                  )}
+                >
+                  chunk {src.chunk_offset}
+                </button>
+                <ConfidenceBadge confidence={src.confidence} />
               </div>
+              <p className="text-muted-foreground mt-0.5 line-clamp-1">
+                {src.relationship}
+              </p>
+              {src.chunk_text && expandedChunks.has(idx) && (
+                <ChunkPreview text={src.chunk_text} />
+              )}
             </div>
           ))}
         </div>
