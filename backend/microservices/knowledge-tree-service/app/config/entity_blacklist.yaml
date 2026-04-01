@@ -1,0 +1,35 @@
+# Entity blacklist — generic concepts that should NOT be extracted as :Node entities.
+# Terms are matched case-insensitively and accent-insensitively.
+# Add new terms as needed; changes take effect after service restart.
+
+legal_concepts:
+  - "mayor de edad"
+  - "menor de edad"
+  - "conyuge"
+  - "herederos forzosos"
+  - "parte contratante"
+  - "representante legal"
+  - "persona fisica"
+  - "persona juridica"
+  - "tercero"
+  - "causante"
+  - "deudor"
+  - "acreedor"
+  - "demandante"
+  - "demandado"
+  - "arrendador"
+  - "arrendatario"
+  - "fiador"
+
+generic:
+  - "empresa"
+  - "persona"
+  - "documento"
+  - "articulo"
+  - "parte"
+  - "seccion"
+  - "capitulo"
+  - "titulo"
+  - "disposicion"
+  - "clausula"
+  - "anexo"
