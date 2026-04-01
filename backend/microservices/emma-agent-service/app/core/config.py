@@ -179,6 +179,12 @@ class Settings(BaseSettings):
     graph_rag_label_cache_ttl: int = int(os.getenv("GRAPH_RAG_LABEL_CACHE_TTL", "300"))
     graph_rag_confidence_threshold: float = float(os.getenv("GRAPH_RAG_CONFIDENCE_THRESHOLD", "0.30"))
 
+    # Phase 3b: Smart Traversal
+    authority_weights_enabled: bool = os.getenv("AUTHORITY_WEIGHTS_ENABLED", "true").lower() == "true"
+    guided_expansion_enabled: bool = os.getenv("GUIDED_EXPANSION_ENABLED", "true").lower() == "true"
+    guided_expansion_max_hops: int = int(os.getenv("GUIDED_EXPANSION_MAX_HOPS", "2"))
+    consensus_scoring_enabled: bool = os.getenv("CONSENSUS_SCORING_ENABLED", "true").lower() == "true"
+
     # SmartSearch multi-concept (Phase 2)
     smart_search_multi_concept: bool = os.getenv("SMART_SEARCH_MULTI_CONCEPT", "true").lower() == "true"
 
