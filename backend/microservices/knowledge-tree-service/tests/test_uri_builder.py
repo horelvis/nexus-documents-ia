@@ -13,7 +13,8 @@ class TestEntityURI:
         assert URIBuilder.entity("default", "José María Azañón") == "nouxcube://entity/default/jose-maria-azanon"
 
     def test_lowercases(self):
-        assert URIBuilder.entity("default", "ACME CORP SL") == "nouxcube://entity/default/acme-corp-sl"
+        # "SL" is stripped as a corporate suffix — canonical form omits it
+        assert URIBuilder.entity("default", "ACME CORP SL") == "nouxcube://entity/default/acme-corp"
 
     def test_strips_extra_whitespace(self):
         assert URIBuilder.entity("default", "  Juan   García  ") == "nouxcube://entity/default/juan-garcia"

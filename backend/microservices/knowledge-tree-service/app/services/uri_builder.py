@@ -84,6 +84,21 @@ class URIBuilder:
         r"^([^,]+),\s*(.+)$"
     )
 
+    # Honorific prefixes to strip (matched at start of name, case-insensitive).
+    # Abbreviations (D., Dña., Dr., Dra., Sr., Sra.) require a trailing period.
+    # Full words (Don, Doña) require a trailing space.
+    _HONORIFIC_RE = re.compile(
+        r"^(?:d(?:ña|ra|r)?|sra?)\.\s*|^(?:don|doña)\s+",
+        re.IGNORECASE,
+    )
+
+    # Corporate suffixes to strip (matched at end of name, case-insensitive).
+    # Requires word boundary before suffix to avoid false positives like "Basel".
+    _CORPORATE_SUFFIX_RE = re.compile(
+        r"\s*\b(?:s\.?l\.?u?\.?|s\.?a\.?|s\.?c\.?)\.?\s*$",
+        re.IGNORECASE,
+    )
+
     @classmethod
     def normalize_name(cls, name: str) -> str:
         """Normalize a human-readable name to a URI-safe slug.
@@ -122,6 +137,12 @@ class URIBuilder:
                 and after_lower not in _company_suffixes
             ):
                 stripped = f"{after_comma} {before_comma}"
+
+        # 0b. Strip honorific prefixes (D., Don, Dña., Dr., Dra., Sr., Sra.)
+        stripped = cls._HONORIFIC_RE.sub("", stripped).strip()
+
+        # 0c. Strip corporate suffixes (S.L., S.A., S.L.U., S.C.)
+        stripped = cls._CORPORATE_SUFFIX_RE.sub("", stripped).strip()
 
         # 1. NFD + strip combining marks
         nfd = unicodedata.normalize("NFD", stripped)
