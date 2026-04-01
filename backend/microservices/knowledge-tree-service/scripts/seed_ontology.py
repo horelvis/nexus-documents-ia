@@ -49,7 +49,7 @@ RESET = "\033[0m"
 # sector: "core" | "legal" | "prov"
 
 PREDICATES: List[Tuple[str, str, str, str, str]] = [
-    # ── Core (~12) ─────────────────────────────────────────────────────────────
+    # ── Core (~15) ─────────────────────────────────────────────────────────────
     ("core", "label",         "Human-readable name of an entity",                              "any",          "literal"),
     ("core", "definition",    "Formal definition or description of an entity",                 "any",          "literal"),
     ("core", "type",          "Semantic type classification of an entity",                     "any",          "literal"),
@@ -62,22 +62,68 @@ PREDICATES: List[Tuple[str, str, str, str, str]] = [
     ("core", "contradicts",   "Claim or argument is in conflict with another claim",           "claim",        "claim"),
     ("core", "semantic-type", "Fine-grained document type (factura, contrato, nomina, etc.)",  "document",     "literal"),
     ("core", "domain",        "Business domain classification (legal, fiscal, medical, etc.)", "document",     "literal"),
+    ("core", "same-as",       "Two entities are the same real-world entity (dedup audit)",     "entity",       "entity"),
+    ("core", "supersedes",    "This entity or version replaces an older one",                  "any",          "any"),
+    ("core", "related-to",    "General semantic relationship between two entities",            "any",          "any"),
 
-    # ── Legal (~14) ────────────────────────────────────────────────────────────
-    ("legal", "empleado-de",       "Relación laboral entre persona y empresa",                          "person",       "organization"),
+    # ── Legal (~25) ────────────────────────────────────────────────────────────
+    ("legal", "empleado-de",       "Relacion laboral entre persona y empresa",                          "person",       "organization"),
     ("legal", "firmante-de",       "Persona que firma un contrato o documento",                         "person",       "document"),
-    ("legal", "representante-de",  "Persona que actúa como representante legal de una organización",    "person",       "organization"),
-    ("legal", "regulado-por",      "Entidad o actividad que está regulada por una norma jurídica",      "any",          "legislation"),
+    ("legal", "representante-de",  "Persona que actua como representante legal de una organizacion",    "person",       "organization"),
+    ("legal", "regulado-por",      "Entidad o actividad que esta regulada por una norma juridica",      "any",          "legislation"),
     ("legal", "salario-bruto",     "Importe del salario bruto anual o mensual pactado",                "contract",     "literal"),
     ("legal", "tipo-contrato",     "Modalidad o tipo de contrato laboral",                             "contract",     "literal"),
     ("legal", "vigente-desde",     "Fecha de inicio de vigencia de un contrato o norma",               "contract",     "literal"),
-    ("legal", "vigente-hasta",     "Fecha de finalización de vigencia de un contrato o norma",         "contract",     "literal"),
-    ("legal", "clausula",          "Cláusula o disposición específica de un contrato",                 "contract",     "literal"),
-    ("legal", "obligacion",        "Obligación impuesta por un contrato o norma",                      "any",          "literal"),
+    ("legal", "vigente-hasta",     "Fecha de finalizacion de vigencia de un contrato o norma",         "contract",     "literal"),
+    ("legal", "clausula",          "Clausula o disposicion especifica de un contrato",                 "contract",     "literal"),
+    ("legal", "obligacion",        "Obligacion impuesta por un contrato o norma",                      "any",          "literal"),
     ("legal", "derecho",           "Derecho reconocido a una parte por un contrato o norma",           "any",          "literal"),
-    ("legal", "modifica",          "Norma que modifica o enmienda otra norma jurídica",                "legislation",  "legislation"),
+    ("legal", "modifica",          "Norma que modifica o enmienda otra norma juridica",                "legislation",  "legislation"),
     ("legal", "derogado-por",      "Norma que ha sido derogada por otra posterior",                    "legislation",  "legislation"),
     ("legal", "references-law",    "Document or clause that references a specific law or article",     "document",     "legislation"),
+    ("legal", "parte-de-contrato", "Persona u organizacion que es parte en un contrato",               "any",          "contract"),
+    ("legal", "beneficiario-de",   "Persona o entidad que recibe un beneficio de un contrato o norma", "any",          "any"),
+    ("legal", "garante-de",        "Persona o entidad que garantiza una obligacion",                   "any",          "any"),
+    ("legal", "obligacion-de",     "Obligacion especifica que recae sobre una parte",                  "any",          "literal"),
+    ("legal", "duracion",          "Periodo de duracion de un contrato o relacion",                    "contract",     "literal"),
+    ("legal", "importe",           "Cantidad economica asociada a un contrato o transaccion",          "any",          "literal"),
+    ("legal", "cargo-de",          "Persona que ocupa un cargo en una organizacion",                   "person",       "organization"),
+    ("legal", "filial-de",         "Organizacion que es filial o subsidiaria de otra",                 "organization", "organization"),
+    ("legal", "administrador-de",  "Persona que es administrador de una sociedad",                     "person",       "organization"),
+    ("legal", "sujeto-a",          "Entidad sujeta a una norma o regulacion",                          "any",          "legislation"),
+    ("legal", "sancion",           "Sancion o penalizacion prevista por incumplimiento",               "any",          "literal"),
+
+    # ── Trust (~4) ─────────────────────────────────────────────────────────────
+    ("trust", "authority-weight",    "Peso de autoridad 0.0-1.0 por tipo de documento fuente",       "document-type", "literal"),
+    ("trust", "source-reliability",  "Fiabilidad de la fuente de extraccion (manual/llm/imported)",  "extraction",    "literal"),
+    ("trust", "temporal-validity",   "Indica si el triple sigue vigente temporalmente",              "triple",        "literal"),
+    ("trust", "consensus-score",     "Numero de fuentes independientes que confirman el triple",     "triple",        "literal"),
+
+    # ── Medical (~12) ──────────────────────────────────────────────────────────
+    ("medical", "diagnosticado-con",   "Paciente diagnosticado con una enfermedad o condicion",       "person",    "condition"),
+    ("medical", "prescrito-por",       "Medicamento o tratamiento prescrito por un profesional",      "treatment", "person"),
+    ("medical", "tratado-en",          "Paciente tratado en un centro o servicio medico",             "person",    "facility"),
+    ("medical", "alergia-a",           "Paciente con alergia documentada a una sustancia",           "person",    "substance"),
+    ("medical", "medicacion",          "Medicamento activo en el tratamiento del paciente",          "person",    "literal"),
+    ("medical", "antecedente",         "Antecedente medico relevante del paciente",                  "person",    "literal"),
+    ("medical", "resultado-de",        "Resultado de una prueba diagnostica o analisis",             "test",      "literal"),
+    ("medical", "derivado-a",          "Paciente derivado a un especialista o servicio",             "person",    "person"),
+    ("medical", "fecha-ingreso",       "Fecha de ingreso hospitalario",                              "person",    "literal"),
+    ("medical", "fecha-alta",          "Fecha de alta hospitalaria",                                 "person",    "literal"),
+    ("medical", "grupo-sanguineo",     "Grupo sanguineo del paciente",                               "person",    "literal"),
+    ("medical", "profesional-responsable", "Profesional medico responsable del paciente",            "person",    "person"),
+
+    # ── Documental (~10) ───────────────────────────────────────────────────────
+    ("documental", "autor-de",        "Persona autora de un documento o informe",                    "person",    "document"),
+    ("documental", "revisado-por",    "Persona que reviso o valido un documento",                    "document",  "person"),
+    ("documental", "aprobado-por",    "Persona que aprobo formalmente un documento",                 "document",  "person"),
+    ("documental", "version-de",      "Documento que es una version de otro anterior",               "document",  "document"),
+    ("documental", "fecha-creacion",  "Fecha de creacion del documento",                             "document",  "literal"),
+    ("documental", "fecha-revision",  "Fecha de ultima revision del documento",                      "document",  "literal"),
+    ("documental", "destinatario-de", "Persona o entidad destinataria de un documento",              "document",  "any"),
+    ("documental", "clasificado-como", "Clasificacion documental (confidencial, publico, etc.)",     "document",  "literal"),
+    ("documental", "referencia",      "Codigo o numero de referencia del documento",                 "document",  "literal"),
+    ("documental", "adjunto-a",       "Documento adjunto a otro documento principal",                "document",  "document"),
 
     # ── Prov (~6) ──────────────────────────────────────────────────────────────
     ("prov", "derived-from",   "Triple or entity derived from a source document or chunk",      "triple",       "document"),
