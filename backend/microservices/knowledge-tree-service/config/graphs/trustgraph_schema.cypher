@@ -8,3 +8,7 @@ CREATE INDEX FOR ()-[r:Rel]-() ON (r.user, r.collection);
 CREATE INDEX FOR ()-[r:Rel]-() ON (r.user, r.collection, r.uri);
 CREATE INDEX FOR (c:CollectionMetadata) ON (c.user, c.collection);
 CALL db.idx.fulltext.createNodeIndex('Node', 'uri');
+CREATE INDEX FOR ()-[r:Rel]-() ON (r.confidence);
+CREATE INDEX FOR ()-[r:Rel]-() ON (r.extraction_method);
+CREATE INDEX FOR (n:Node) ON (n.merged);
+CREATE INDEX FOR ()-[r:Rel]-() ON (r.has_contradiction);
