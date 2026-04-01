@@ -269,21 +269,28 @@ docker compose exec knowledge-tree-service \
 
 Schema migration, 4 LLM extractors, PROV-O provenance, contradiction detection, mini-ontology, API endpoints, cross-service integration, reindexation script. KTS fully rewritten: 18 commits, 59 files changed, +6,107 / -7,658 lines (net -1,551). 92 tests.
 
-### Phase 2: Semantic Similarity Retrieval (PLANNED)
+### Phase 2: Semantic Similarity Retrieval (COMPLETE)
 
-- Entity embeddings in Weaviate (`TrustGraphEntities` collection)
-- Subgraph extractor rewrite for semantic similarity retrieval
-- `trustgraph_context.py` — format triples + provenance for ReAct prompts
-- Frontend 3D/2D graph adaptation for `:Node`/`:Rel` rendering
-- `rerank_weights` migration to graph triples
+Entity embeddings in Weaviate (`TrustGraphEntities`), 7-stage graph_rag pipeline (entity retrieval, BFS subgraph, label resolution, semantic pre-filter, LLM edge scoring, context formatting, source provenance), frontend SourceEvidence panel with confidence badges.
 
-### Phase 3: Ontology Structuring (PLANNED)
+### Phase 3a: Clean Graph (COMPLETE)
 
-- Ontology RAG — vectorize predicates in Weaviate `OntologyTerms` collection
-- Per-sector predicate catalog (core ~10, legal ~25, medical ~20, documental ~15)
-- Binary validation against ontology (invalid predicates discarded)
-- Authority weight triples (`trust/authority-weight` per document type)
-- Source authority via Cypher queries — zero hardcode in application code
+Entity blacklist (YAML config + coordinator filtering), canonical name resolution (honorific/suffix stripping in URIBuilder), entity dedup script, Ontology RAG (`OntologyTerms` Weaviate collection, semantic predicate resolution in RelationshipsExtractor), expanded ontology (32→72 predicates with trust/medical/documental namespaces), predicate promotion pipeline, 4 new FalkorDB indexes (confidence, extraction_method, merged, has_contradiction).
+
+### Phase 3b: Smart Traversal (PLANNED)
+
+- Authority weight triples (`trust/authority-weight` per document type, zero hardcode)
+- Multi-hop Cypher templates (corporate_chain, org_people, applicable_regulations)
+- LLM-guided traversal expansion (Stage 2.5 in graph_rag)
+- Consensus scoring (cross-source agreement)
+
+### Phase 3c: Knowledge Expert (PLANNED)
+
+- Graph data assembly (`GraphAssembler` service)
+- Report templates (YAML-driven: entity_profile, compliance_report, contract_summary)
+- KPI engine (count, ratio, list, temporal, comparison)
+- `generate_knowledge_report` tool in ReAct agent
+- Document generation with verified citations from graph
 
 ## Key Design Decisions
 
