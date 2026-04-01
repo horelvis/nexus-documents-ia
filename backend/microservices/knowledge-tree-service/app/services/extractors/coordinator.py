@@ -35,6 +35,7 @@ _CONFIDENCE_BASE: Dict[str, float] = {
     "llm_relationships": 0.90,
     "llm_relationships_fuzzy": 0.75,
     "llm_relationships_freeform": 0.60,
+    "llm_relationships_semantic": 0.85,
 }
 _DEFAULT_CONFIDENCE = 0.70
 

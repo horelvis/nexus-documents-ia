@@ -19,6 +19,10 @@ from app.services.ontology_registry import (
     get_mini_ontology_text,
     get_namespace,
 )
+from app.services.ontology_search import OntologySearch
+
+# Module-level singleton
+_ontology_search = OntologySearch()
 
 logger = logging.getLogger(__name__)
 
@@ -137,3 +141,28 @@ class RelationshipsExtractor(BaseExtractor):
             )
 
         return triples
+
+    async def extract(self, chunk_text: str) -> list:
+        """Extract triples and resolve predicates with async OntologySearch.
+
+        Post-processes freeform predicates through semantic vector search.
+        If a match is found in OntologyTerms (score >= threshold), the
+        predicate is upgraded from extracted/ to the matched ontology namespace.
+        """
+        triples = await super().extract(chunk_text)
+
+        resolved = []
+        for triple in triples:
+            if triple.get("extraction_method") == "llm_relationships_freeform":
+                original_name = triple.get("predicate_name", "")
+                try:
+                    match = await _ontology_search.resolve_predicate(original_name)
+                except Exception:
+                    match = None
+                if match and match["method"] == "semantic_match":
+                    triple["predicate_name"] = match["predicate_name"]
+                    triple["predicate_ontology"] = match["namespace"]
+                    triple["extraction_method"] = "llm_relationships_semantic"
+            resolved.append(triple)
+
+        return resolved

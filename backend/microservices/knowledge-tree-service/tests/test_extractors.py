@@ -505,6 +505,112 @@ class TestRelationshipsExtractorFreeForm:
 
 
 # ---------------------------------------------------------------------------
+# TestSemanticPredicateResolution
+# ---------------------------------------------------------------------------
+
+
+class TestSemanticPredicateResolution:
+    """RelationshipsExtractor should use OntologySearch for freeform predicates."""
+
+    @pytest.mark.asyncio
+    async def test_freeform_upgraded_to_semantic(self):
+        """Freeform predicates matched by vector search get upgraded."""
+        from app.services.extractors.relationships import RelationshipsExtractor, _ontology_search
+        from app.services.extractors.base import BaseExtractor
+
+        ext = RelationshipsExtractor()
+
+        # Pre-built triples as if super().extract() already ran _parse_output
+        raw_triples = [
+            {
+                "subject": "Juan",
+                "predicate_ontology": "extracted",
+                "predicate_name": "trabaja-en",
+                "object": "ACME",
+                "object_is_node": True,
+                "extraction_method": "llm_relationships_freeform",
+                "source_chunk": "test chunk",
+            }
+        ]
+
+        mock_resolve = AsyncMock(return_value={
+            "predicate_name": "empleado-de",
+            "namespace": "legal",
+            "method": "semantic_match",
+            "score": 0.91,
+        })
+
+        with patch.object(BaseExtractor, "extract", new=AsyncMock(return_value=raw_triples)), \
+             patch.object(_ontology_search, "resolve_predicate", mock_resolve):
+            triples = await ext.extract("test chunk")
+
+        assert len(triples) == 1
+        assert triples[0]["predicate_name"] == "empleado-de"
+        assert triples[0]["predicate_ontology"] == "legal"
+        assert triples[0]["extraction_method"] == "llm_relationships_semantic"
+
+    @pytest.mark.asyncio
+    async def test_freeform_stays_when_no_match(self):
+        """Freeform predicates with no semantic match remain unchanged."""
+        from app.services.extractors.relationships import RelationshipsExtractor, _ontology_search
+        from app.services.extractors.base import BaseExtractor
+
+        ext = RelationshipsExtractor()
+
+        raw_triples = [
+            {
+                "subject": "Juan",
+                "predicate_ontology": "extracted",
+                "predicate_name": "pertenece-a",
+                "object": "Club",
+                "object_is_node": True,
+                "extraction_method": "llm_relationships_freeform",
+                "source_chunk": "test chunk",
+            }
+        ]
+
+        mock_resolve = AsyncMock(return_value=None)
+
+        with patch.object(BaseExtractor, "extract", new=AsyncMock(return_value=raw_triples)), \
+             patch.object(_ontology_search, "resolve_predicate", mock_resolve):
+            triples = await ext.extract("test chunk")
+
+        assert len(triples) == 1
+        assert triples[0]["predicate_ontology"] == "extracted"
+        assert triples[0]["extraction_method"] == "llm_relationships_freeform"
+
+    @pytest.mark.asyncio
+    async def test_non_freeform_not_touched(self):
+        """Non-freeform predicates (exact, fuzzy) are not sent to OntologySearch."""
+        from app.services.extractors.relationships import RelationshipsExtractor, _ontology_search
+        from app.services.extractors.base import BaseExtractor
+
+        ext = RelationshipsExtractor()
+
+        raw_triples = [
+            {
+                "subject": "Juan",
+                "predicate_ontology": "legal",
+                "predicate_name": "empleado-de",
+                "object": "ACME",
+                "object_is_node": True,
+                "extraction_method": "llm_relationships",
+                "source_chunk": "test chunk",
+            }
+        ]
+
+        mock_resolve = AsyncMock()
+
+        with patch.object(BaseExtractor, "extract", new=AsyncMock(return_value=raw_triples)), \
+             patch.object(_ontology_search, "resolve_predicate", mock_resolve):
+            triples = await ext.extract("test chunk")
+
+        assert len(triples) == 1
+        assert triples[0]["predicate_name"] == "empleado-de"
+        mock_resolve.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # __init__.py exports
 # ---------------------------------------------------------------------------
 
