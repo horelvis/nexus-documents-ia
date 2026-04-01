@@ -277,12 +277,9 @@ Entity embeddings in Weaviate (`TrustGraphEntities`), 7-stage graph_rag pipeline
 
 Entity blacklist (YAML config + coordinator filtering), canonical name resolution (honorific/suffix stripping in URIBuilder), entity dedup script, Ontology RAG (`OntologyTerms` Weaviate collection, semantic predicate resolution in RelationshipsExtractor), expanded ontology (32→72 predicates with trust/medical/documental namespaces), predicate promotion pipeline, 4 new FalkorDB indexes (confidence, extraction_method, merged, has_contradiction).
 
-### Phase 3b: Smart Traversal (PLANNED)
+### Phase 3b: Smart Traversal (COMPLETE)
 
-- Authority weight triples (`trust/authority-weight` per document type, zero hardcode)
-- Multi-hop Cypher templates (corporate_chain, org_people, applicable_regulations)
-- LLM-guided traversal expansion (Stage 2.5 in graph_rag)
-- Consensus scoring (cross-source agreement)
+Authority weight triples (14 document types seeded in `_authority` collection, resolved via Cypher — zero hardcode), consensus scoring (cross-source agreement counts stored as `consensus_count` on `:Rel` edges), multi-hop Cypher templates (5 templates: entity_relations, corporate_chain, org_people, count_by_predicate, applicable_regulations), LLM-guided expansion (Stage 2.5 in graph_rag — planner evaluates subgraph sufficiency), composite 5-signal edge scoring (semantic 0.35 + confidence 0.20 + authority 0.20 + consensus 0.15 + recency 0.10), chain-of-thought path formatting.
 
 ### Phase 3c: Knowledge Expert (PLANNED)
 
