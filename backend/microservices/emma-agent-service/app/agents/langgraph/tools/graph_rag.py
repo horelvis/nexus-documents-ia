@@ -280,6 +280,72 @@ async def _resolve_chunk_texts(
 # ---------------------------------------------------------------------------
 
 
+async def _resolve_authority_weights(
+    edges: List[Dict[str, Any]],
+    kts_client,
+    tenant_id: str,
+) -> Dict[int, float]:
+    """Resolve authority weights for edges by source document semantic_type.
+
+    Returns dict mapping edge index to authority weight (0.0-1.0).
+    Default 0.50 for edges without resolvable authority.
+    """
+    DEFAULT_AUTHORITY = 0.50
+
+    # Collect unique document URIs from source_chunk metadata
+    doc_uris: set = set()
+    for edge in edges:
+        chunk = edge.get("source_chunk", "")
+        if chunk and "#" in chunk:
+            doc_uris.add(chunk.split("#")[0])
+
+    if not doc_uris:
+        return {i: DEFAULT_AUTHORITY for i in range(len(edges))}
+
+    # For each document, get its semantic-type, then look up authority weight
+    authority_by_doc: Dict[str, float] = {}
+    for doc_uri in doc_uris:
+        try:
+            # Get semantic-type of document
+            type_result = await kts_client.query_triples(
+                tenant_id=tenant_id,
+                subject_uri=doc_uri,
+                predicate_uri="nouxcube://predicate/core/semantic-type",
+                limit=1,
+            )
+            triples = type_result.get("triples", [])
+            if not triples:
+                continue
+            sem_type = triples[0].get("object", "desconocido")
+
+            # Look up authority weight for this semantic_type
+            aw_result = await kts_client.query_triples(
+                tenant_id="_system",
+                subject_uri=f"nouxcube://entity/_system/{sem_type}",
+                predicate_uri="nouxcube://predicate/trust/authority-weight",
+                limit=1,
+            )
+            aw_triples = aw_result.get("triples", [])
+            if aw_triples:
+                try:
+                    authority_by_doc[doc_uri] = float(aw_triples[0].get("object", DEFAULT_AUTHORITY))
+                except (ValueError, TypeError):
+                    pass
+        except Exception:
+            pass
+
+    # Map authority to each edge
+    result = {}
+    for i, edge in enumerate(edges):
+        chunk = edge.get("source_chunk", "")
+        if chunk and "#" in chunk:
+            doc_uri = chunk.split("#")[0]
+            result[i] = authority_by_doc.get(doc_uri, DEFAULT_AUTHORITY)
+        else:
+            result[i] = DEFAULT_AUTHORITY
+    return result
+
+
 async def _batch_embed_edges(descriptions: List[str], tenant_id: str) -> List[List[float]]:
     """Batch embed edge descriptions via intelligence-docs-service.
 
@@ -537,6 +603,42 @@ class GraphRAGTool(EmmaTool):
             prefilter_indices = [idx for idx, _ in scored_edges[: settings.graph_rag_prefilter_limit]]
             filtered_edges = [edges[i] for i in prefilter_indices]
             filtered_descriptions = [edge_descriptions[i] for i in prefilter_indices]
+
+            # ── Composite 5-signal scoring ───────────────────────────────────
+            # Build similarity map: original edge index → similarity score
+            sim_map = {idx: sim for idx, sim in scored_edges}
+
+            authority_map: Dict[int, float] = {}
+            if settings.authority_weights_enabled:
+                try:
+                    authority_map = await _resolve_authority_weights(
+                        filtered_edges, kts_client, tenant_id
+                    )
+                except Exception as exc:
+                    logger.warning("Authority weight resolution failed: %s", exc)
+
+            for i, edge in enumerate(filtered_edges):
+                orig_idx = prefilter_indices[i]
+                semantic_sim = sim_map.get(orig_idx, 0.0)
+                confidence = (edge.get("confidence") or 0.0)
+                authority = authority_map.get(i, 0.50)
+                consensus = min(1.0, (edge.get("consensus_count") or 1) / 3)
+                recency = 0.5  # default — edges lack timestamps
+
+                composite = (
+                    0.35 * semantic_sim +
+                    0.20 * confidence +
+                    0.20 * authority +
+                    0.15 * consensus +
+                    0.10 * recency
+                )
+                edge["_composite_score"] = round(composite, 4)
+                edge["_authority"] = authority
+                edge["_consensus"] = round(consensus, 2)
+                edge["_semantic_sim"] = round(semantic_sim, 4)
+
+            # Re-sort by composite score
+            filtered_edges.sort(key=lambda e: e.get("_composite_score", 0), reverse=True)
         else:
             # No embeddings available — keep all (up to prefilter_limit)
             filtered_edges = edges[: settings.graph_rag_prefilter_limit]
