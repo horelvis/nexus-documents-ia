@@ -3248,6 +3248,135 @@ class WeaviateService:
             logger.error(f"Failed to ensure {collection_name} collection: {e}")
             return False
 
+    ONTOLOGY_TERMS_COLLECTION = "OntologyTerms"
+
+    async def ensure_ontology_terms_collection(self) -> bool:
+        """Create OntologyTerms collection if it does not already exist."""
+        collection_name = self.ONTOLOGY_TERMS_COLLECTION
+        try:
+            existing = self.client.collections.list_all()
+            if collection_name in existing:
+                logger.info(f"Collection {collection_name} already exists")
+                return True
+
+            dims = getattr(settings, "embedding_dimensions", 1024)
+
+            self.client.collections.create(
+                name=collection_name,
+                description="Vectorized predicate definitions for Ontology RAG (Phase 3a)",
+                vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
+                vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
+                    distance_metric=weaviate.classes.config.VectorDistances.COSINE,
+                ),
+                properties=[
+                    weaviate.classes.config.Property(
+                        name="predicate_name",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Predicate name (e.g. empleado-de)",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="namespace",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Ontology namespace (core, legal, trust, medical, documental)",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="description",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Human-readable description of the predicate",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="domain_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Expected subject type",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="range_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Expected object type",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="embed_text",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Text that was embedded (name + description)",
+                    ),
+                ],
+            )
+            logger.info(f"Created collection {collection_name} ({dims} dims, cosine HNSW)")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to ensure {collection_name} collection: {e}")
+            return False
+
+    async def search_ontology_terms(
+        self,
+        query_embedding: list[float],
+        limit: int = 3,
+        namespace: str | None = None,
+    ) -> list[dict]:
+        """Vector similarity search over OntologyTerms."""
+        try:
+            await self.ensure_ontology_terms_collection()
+            col = self.client.collections.get(self.ONTOLOGY_TERMS_COLLECTION)
+
+            filters = None
+            if namespace:
+                filters = weaviate.classes.query.Filter.by_property("namespace").equal(namespace)
+
+            response = col.query.near_vector(
+                near_vector=query_embedding,
+                limit=limit,
+                filters=filters,
+                return_metadata=weaviate.classes.query.MetadataQuery(distance=True),
+            )
+
+            results = []
+            for obj in response.objects:
+                score = 1.0 - (obj.metadata.distance or 0.0)
+                results.append({
+                    "predicate_name": obj.properties.get("predicate_name", ""),
+                    "namespace": obj.properties.get("namespace", ""),
+                    "description": obj.properties.get("description", ""),
+                    "score": round(score, 4),
+                })
+            return results
+
+        except Exception as e:
+            logger.error(f"OntologyTerms search failed: {e}")
+            return []
+
+    async def upsert_ontology_term(
+        self,
+        predicate_name: str,
+        namespace: str,
+        description: str,
+        domain_type: str,
+        range_type: str,
+        embed_text: str,
+        embedding: list[float],
+    ) -> bool:
+        """Insert a single OntologyTerm with pre-computed embedding."""
+        try:
+            await self.ensure_ontology_terms_collection()
+            col = self.client.collections.get(self.ONTOLOGY_TERMS_COLLECTION)
+
+            col.data.insert(
+                properties={
+                    "predicate_name": predicate_name,
+                    "namespace": namespace,
+                    "description": description,
+                    "domain_type": domain_type,
+                    "range_type": range_type,
+                    "embed_text": embed_text,
+                },
+                vector=embedding,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"OntologyTerm upsert failed for {namespace}/{predicate_name}: {e}")
+            return False
+
     async def search_trustgraph_entities(
         self,
         query_embedding: List[float],

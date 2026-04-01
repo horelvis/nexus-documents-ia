@@ -1917,3 +1917,70 @@ async def delete_entities(
     except Exception as e:
         logger.error(f"Entity delete failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# OntologyTerms — Ontology RAG Phase 3a
+# ============================================================================
+
+class OntologyTermSearchRequest(BaseModel):
+    """Search OntologyTerms by pre-computed embedding."""
+    embedding: List[float]
+    limit: int = 3
+    namespace: Optional[str] = None
+
+
+class OntologyTermUpsertRequest(BaseModel):
+    """Insert a single OntologyTerm."""
+    predicate_name: str
+    namespace: str
+    description: str
+    domain_type: str
+    range_type: str
+    embed_text: str
+    embedding: List[float]
+
+
+@router.post("/trustgraph/ensure-ontology-terms")
+async def ensure_ontology_terms(
+    _: bool = Depends(verify_api_key),
+):
+    """Ensure OntologyTerms collection exists."""
+    ok = await weaviate_service.ensure_ontology_terms_collection()
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to create OntologyTerms collection")
+    return {"status": "ok"}
+
+
+@router.post("/trustgraph/ontology-terms/search")
+async def search_ontology_terms(
+    request: OntologyTermSearchRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Vector search over OntologyTerms."""
+    results = await weaviate_service.search_ontology_terms(
+        query_embedding=request.embedding,
+        limit=request.limit,
+        namespace=request.namespace,
+    )
+    return {"results": results}
+
+
+@router.post("/trustgraph/ontology-terms")
+async def upsert_ontology_term(
+    request: OntologyTermUpsertRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Insert a single OntologyTerm with embedding."""
+    ok = await weaviate_service.upsert_ontology_term(
+        predicate_name=request.predicate_name,
+        namespace=request.namespace,
+        description=request.description,
+        domain_type=request.domain_type,
+        range_type=request.range_type,
+        embed_text=request.embed_text,
+        embedding=request.embedding,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to upsert OntologyTerm")
+    return {"status": "ok"}
