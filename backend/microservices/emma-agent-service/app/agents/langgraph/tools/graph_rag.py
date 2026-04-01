@@ -509,6 +509,88 @@ class GraphRAGTool(EmmaTool):
             if not edges:
                 return _format_entities_only(top_entities)
 
+        # ── Stage 2.5: LLM-Guided Expansion ─────────────────────────────────
+        if settings.guided_expansion_enabled and edges:
+            try:
+                # Summarize current subgraph for the planner
+                entity_names = list(set(
+                    e.get("subject", "").split("/")[-1].replace("-", " ")
+                    for e in edges[:20]
+                ))[:15]
+                rel_types = list(set(
+                    e.get("predicate", "").split("/")[-1]
+                    for e in edges[:20]
+                ))[:10]
+
+                from langchain_core.messages import SystemMessage, HumanMessage
+                from app.services.langfuse_prompt_client import PromptNotFoundError as _PNF
+                _GUIDED_EXPANSION_FALLBACK = (
+                    "Given the user query and current subgraph, determine if more traversal is needed. "
+                    'Respond with JSON: {"sufficient": true/false, "expand_from": ["uri1"], "reason": "..."}'
+                )
+                langfuse_client = get_langfuse_prompt_client()
+                try:
+                    expansion_prompt = await langfuse_client.get_prompt(
+                        "trustgraph_guided_expansion"
+                    )
+                    system_content = expansion_prompt.content
+                except _PNF:
+                    system_content = _GUIDED_EXPANSION_FALLBACK
+
+                planner = get_planner_model()
+
+                user_msg = (
+                    f"Query: {query}\n\n"
+                    f"Current entities ({len(entity_names)}): {', '.join(entity_names)}\n"
+                    f"Relationship types: {', '.join(rel_types)}\n"
+                    f"Total edges: {len(edges)}"
+                )
+
+                response = await planner.ainvoke([
+                    SystemMessage(content=system_content),
+                    HumanMessage(content=user_msg),
+                ])
+
+                try:
+                    raw = (response.content or "").strip()
+                    # Strip thinking tags and markdown code blocks
+                    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+                    md = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+                    if md:
+                        raw = md.group(1).strip()
+                    expansion = json.loads(raw)
+                    if not expansion.get("sufficient", True):
+                        expand_uris = expansion.get("expand_from", [])[:3]
+                        if expand_uris:
+                            logger.info(
+                                "Guided expansion: expanding from %d URIs (reason: %s)",
+                                len(expand_uris), expansion.get("reason", "")[:100]
+                            )
+                            extra_result = await kts_client.batch_neighbors(
+                                tenant_id=tenant_id,
+                                seed_uris=expand_uris,
+                                max_hops=settings.guided_expansion_max_hops,
+                                max_edges=settings.graph_rag_max_edges - len(edges),
+                            )
+                            extra_edges = extra_result.get("edges", [])
+                            existing_keys = {
+                                (e.get("subject", ""), e.get("predicate", ""), e.get("object", ""))
+                                for e in edges
+                            }
+                            added = 0
+                            for ee in extra_edges:
+                                key = (ee.get("subject", ""), ee.get("predicate", ""), ee.get("object", ""))
+                                if key not in existing_keys:
+                                    edges.append(ee)
+                                    existing_keys.add(key)
+                                    added += 1
+                            logger.info("Guided expansion added %d new edges (total: %d)", added, len(edges))
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    logger.debug("Guided expansion: planner response not valid JSON, skipping")
+
+            except Exception as exc:
+                logger.warning("Guided expansion failed, continuing: %s", exc)
+
         # ── Stage 3: Label resolution ────────────────────────────────────────
 
         cache = _get_label_cache(settings.graph_rag_label_cache_ttl)
