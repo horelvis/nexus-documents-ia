@@ -185,6 +185,9 @@ class Settings(BaseSettings):
     guided_expansion_max_hops: int = int(os.getenv("GUIDED_EXPANSION_MAX_HOPS", "2"))
     consensus_scoring_enabled: bool = os.getenv("CONSENSUS_SCORING_ENABLED", "true").lower() == "true"
 
+    # Phase 3c: Knowledge Expert
+    report_generation_enabled: bool = os.getenv("REPORT_GENERATION_ENABLED", "true").lower() == "true"
+
     # SmartSearch multi-concept (Phase 2)
     smart_search_multi_concept: bool = os.getenv("SMART_SEARCH_MULTI_CONCEPT", "true").lower() == "true"
 
