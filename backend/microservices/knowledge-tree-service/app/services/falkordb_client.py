@@ -108,7 +108,7 @@ class FalkorDBClient:
                 # Catch redis.exceptions.ConnectionError and similar without
                 # hard-importing redis at module level
                 err_type = type(e).__name__
-                if "ConnectionError" in err_type or "RedisError" in err_type:
+                if "ConnectionError" in err_type or "RedisError" in err_type or "BusyLoadingError" in err_type:
                     delay = RETRY_BASE_DELAY * attempt
                     if attempt < MAX_RETRIES:
                         logger.warning(
