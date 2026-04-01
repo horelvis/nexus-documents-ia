@@ -1,0 +1,71 @@
+# Report template registry — defines structure for knowledge graph reports.
+# Each report type specifies sections (with Cypher templates + predicate filters)
+# and KPIs (computed from graph data).
+
+reports:
+  entity_profile:
+    description: "Complete profile of an entity (person or organization)"
+    sections:
+      - name: "Identificacion"
+        templates: ["entity_relations"]
+        predicates: ["core/label", "core/type", "core/definition"]
+      - name: "Relaciones laborales"
+        templates: ["org_people"]
+        predicates: ["legal/empleado-de", "legal/cargo-de", "legal/administrador-de"]
+      - name: "Relaciones contractuales"
+        templates: ["entity_relations"]
+        predicates: ["legal/firmante-de", "legal/parte-de-contrato", "legal/representante-de"]
+      - name: "Marco normativo"
+        templates: ["applicable_regulations"]
+        predicates: []
+    kpis:
+      - name: "total_relaciones"
+        description: "Total relationships"
+        template: "entity_relations"
+        aggregation: "count"
+      - name: "documentos_fuente"
+        description: "Source documents"
+        template: "entity_relations"
+        aggregation: "count_distinct_sources"
+
+  compliance_report:
+    description: "Regulatory compliance report"
+    sections:
+      - name: "Normativa aplicable"
+        templates: ["applicable_regulations"]
+        predicates: []
+      - name: "Obligaciones contractuales"
+        templates: ["entity_relations"]
+        predicates: ["legal/clausula", "legal/obligacion", "legal/obligacion-de"]
+      - name: "Riesgos identificados"
+        templates: ["entity_relations"]
+        predicates: ["core/contradicts"]
+    kpis:
+      - name: "leyes_aplicables"
+        description: "Applicable laws"
+        template: "applicable_regulations"
+        aggregation: "count"
+      - name: "contradicciones"
+        description: "Contradictions found"
+        template: "entity_relations"
+        aggregation: "count"
+        filter_predicate: "core/contradicts"
+
+  contract_summary:
+    description: "Contract summary with verified graph data"
+    sections:
+      - name: "Partes"
+        templates: ["entity_relations"]
+        predicates: ["legal/firmante-de", "legal/representante-de", "legal/parte-de-contrato"]
+      - name: "Condiciones economicas"
+        templates: ["entity_relations"]
+        predicates: ["legal/salario-bruto", "legal/importe", "legal/duracion"]
+      - name: "Obligaciones"
+        templates: ["entity_relations"]
+        predicates: ["legal/clausula", "legal/obligacion", "legal/obligacion-de"]
+    kpis:
+      - name: "partes_involucradas"
+        description: "Parties involved"
+        template: "entity_relations"
+        aggregation: "count"
+        filter_predicate: "legal/firmante-de"
