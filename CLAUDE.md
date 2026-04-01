@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Docker Compose (IMPORTANT)
 - The **active compose** for on-premise is `docker-compose.onpremise.yml`, which **overrides** `docker-compose.yml`
 - Both files are loaded together: `docker compose` auto-detects them via `docker-compose.yml` + `docker-compose.onpremise.yml`
-- **Always edit `docker-compose.onpremise.yml`** for on-premise changes (SGLang config, services, etc.)
+- **Always edit `docker-compose.onpremise.yml`** for on-premise changes (vLLM/LLM config, services, etc.)
 - `docker-compose.yml` is the base; `docker-compose.onpremise.yml` overrides/extends it
-- SGLang config (model, quantization, GPU settings) lives in `docker-compose.onpremise.yml`
+- LLM config (model, quantization, GPU settings) lives in `docker-compose.onpremise.yml`
 
 ### Backend
 - **Start dev**: `cd backend/docker && docker compose up -d`
@@ -30,10 +30,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Onboarding (New Tenant)
 - **Full docs**: [`docs/on-premise/ONBOARDING.md`](docs/on-premise/ONBOARDING.md)
-- **Onboarding mode**: `cd backend/docker && ./onboarding.sh start` (GPU → Docling, SGLang off)
+- **Onboarding mode**: `cd backend/docker && ./onboarding.sh start` (GPU → Docling, vLLM off)
 - **Index all**: `./onboarding.sh sync-all` then `./onboarding.sh status` to monitor
 - **Download BOE**: `./onboarding.sh boe` (13 presets, ~47 Spanish laws)
-- **Go live**: `./onboarding.sh finish` (GPU → SGLang, Emma operational)
+- **Go live**: `./onboarding.sh finish` (GPU → vLLM, Emma operational)
 - **Compose override**: `docker-compose.onboarding.yml` (Docling GPU + disable RAG hierarchical)
 
 ### Full Stack
@@ -49,7 +49,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
 - **Database**: PostgreSQL 15 + Weaviate (vectors) + FalkorDB (graph) + Elasticsearch (full-text)
 - **Storage**: Google Cloud Storage
-- **AI/ML**: SGLang (dual-model: Qwen3.5-4B planner + Qwen3.5-9B chat) + LangGraph multi-agent orchestration
+- **AI/ML**: vLLM v0.18.0 (single-model: Qwen3.5-27B-AWQ, dual-phase PLANNER/CHAT) + LangGraph multi-agent orchestration
 
 ### PostgreSQL
 
@@ -67,8 +67,7 @@ The `db` service uses vanilla `postgres:15`. Knowledge graph operations use **Fa
 | Elasticsearch Service | 8008 | Full-text search, hybrid search |
 | Background Worker | 8100 | Celery async task processing |
 | Emma Reactive Worker | — | Event listener + trigger engine (Redis Streams consumer) |
-| SGLang Chat | internal | GPU inference — quality generation (Qwen3.5-9B) |
-| SGLang Planner | internal | GPU inference — fast tool calling (Qwen3.5-4B, dual-model only) |
+| vLLM | internal | GPU inference — Qwen3.5-27B-AWQ (single-model, dual-phase PLANNER/CHAT) |
 
 ### Deployment Mode (On-Premise Only)
 
@@ -136,8 +135,8 @@ MemoRAG-inspired dual-model routing where a fast planner model handles tool call
                     ┌──────────────────────────────────────────┐
                     │            LLMRouter                     │
                     │                                          │
-User Query ──────►  │  role=PLANNER → SGLang (4B, fast)       │
-                    │  role=CHAT    → SGLang (9B, quality)     │
+User Query ──────►  │  role=PLANNER → vLLM (27B, temp=0.3)    │
+                    │  role=CHAT    → vLLM (27B, temp=0.6)     │
                     │                                          │
                     │  Fallback chain per role+provider         │
                     └──────────────────────────────────────────┘
@@ -146,8 +145,8 @@ User Query ──────►  │  role=PLANNER → SGLang (4B, fast)       
 **Role Assignment**:
 | Role | Model | Used By | Purpose |
 |------|-------|---------|---------|
-| `PLANNER` | Qwen3.5-4B-AWQ (~3-4GB) | classify, memory_recall, react_loop, decompose, swarm_worker, intent_router, verified eval, heartbeat, fact_extractor | Tool calling, JSON extraction, routing |
-| `CHAT` | Qwen3.5-9B-AWQ (~8-10GB) | synthesize, synthesize_swarm, rlm_processor, writer_agent, specialists, prediction_synthesizer | User-facing text generation |
+| `PLANNER` | Qwen3.5-27B-AWQ (temp=0.3) | classify, memory_recall, react_loop, decompose, swarm_worker, intent_router, verified eval, heartbeat, fact_extractor | Tool calling, JSON extraction, routing |
+| `CHAT` | Qwen3.5-27B-AWQ (temp=0.6) | synthesize, synthesize_swarm, rlm_processor, writer_agent, specialists, prediction_synthesizer | User-facing text generation |
 
 **Usage**:
 ```python
@@ -189,19 +188,26 @@ response = await router.chat(messages, role=ModelRole.CHAT)
 
 The knowledge graph uses a **TrustGraph-model RDF-style triple store** (`:Node`/`:Literal`/`:Rel`) on FalkorDB. Documents are processed by 4 parallel LLM extractors (definitions, relationships, objects, topics) producing semantic triples with PROV-O provenance and automatic contradiction detection.
 
-**Schema**: Everything is a `:Node` (entities, documents, folders) or `:Literal` (values), connected by `:Rel` edges carrying URI predicates (e.g., `nouxcube://predicate/legal/empleado-de`). 32 predicates seeded across `core/`, `legal/`, `prov/` namespaces.
+**Schema**: Everything is a `:Node` (entities, documents, folders) or `:Literal` (values), connected by `:Rel` edges carrying URI predicates (e.g., `nouxcube://predicate/legal/empleado-de`). 72 predicates seeded across `core/`, `legal/`, `trust/`, `medical/`, `documental/`, `prov/` namespaces.
 
-**Pipeline**: `weaviate-service` → `POST /extract/triples` → `ExtractionCoordinator` → 4 extractors in parallel via `asyncio.gather` → dedup → FalkorDB MERGE → PROV-O → contradiction detection.
+**Pipeline**: `weaviate-service` → `POST /extract/triples` → `ExtractionCoordinator` → 4 extractors in parallel via `asyncio.gather` → dedup → blacklist filter → entity linking → FalkorDB MERGE → PROV-O → contradiction detection → consensus scoring.
 
 **Key files**:
 - `knowledge-tree-service/app/services/triple_store.py` — CRUD (MERGE Node/Literal, CREATE Rel)
 - `knowledge-tree-service/app/services/triple_query.py` — 8 SPO query patterns + `build_context()`
-- `knowledge-tree-service/app/services/extractors/coordinator.py` — Orchestrates 4 extractors
+- `knowledge-tree-service/app/services/extractors/coordinator.py` — Orchestrates 4 extractors + blacklist + consensus
 - `knowledge-tree-service/app/services/provenance.py` — PROV-O triples per extraction
 - `knowledge-tree-service/app/services/contradiction.py` — Batch contradiction detection
+- `knowledge-tree-service/app/services/consensus.py` — Cross-source agreement counting
+- `knowledge-tree-service/app/services/entity_blacklist.py` — Filter generic concepts from extraction
+- `knowledge-tree-service/app/services/ontology_search.py` — Semantic predicate resolution via Weaviate OntologyTerms
+- `knowledge-tree-service/app/services/template_executor.py` — Cypher template registry + execution
+- `knowledge-tree-service/app/services/graph_assembler.py` — Assemble graph data for reports (KPIs, sources, trust)
 - `knowledge-tree-service/scripts/reindex_trustgraph.py` — Full graph rebuild
 
-**Phases**: Phase 1 (Automated Ingest) — COMPLETE. Phase 2 (Semantic Similarity Retrieval) — PLANNED. Phase 3 (Ontology Structuring) — PLANNED.
+**graph_rag pipeline** (8 stages): Entity retrieval → BFS subgraph → **LLM-guided expansion** → Label resolution → Semantic pre-filter with **composite 5-signal scoring** (semantic + confidence + authority + consensus + recency) → LLM edge scoring → Context formatting with **chain-of-thought paths** → Source provenance.
+
+**Phases**: Phase 1 (Automated Ingest) — COMPLETE. Phase 2 (Semantic Similarity Retrieval) — COMPLETE. Phase 3a (Clean Graph) — COMPLETE. Phase 3b (Smart Traversal) — COMPLETE. Phase 3c (Knowledge Expert) — COMPLETE.
 
 ### SmartSearch — Unified Multi-Store Search
 
@@ -245,10 +251,11 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 - `weaviate-service/app/services/weaviate_service.py` — Enrichment properties + filters
 - `knowledge-tree-service/app/api/triples.py` — `/triples/query` endpoint (graph expansion)
 
-**ReAct Agent Tools** (13 total):
+**ReAct Agent Tools** (16 total):
 | Tool | Purpose |
 |------|---------|
 | `smart_search` | Unified document + legislation search (auto-detects scope) |
+| `graph_rag` | Knowledge graph retrieval with 8-stage pipeline (entity → BFS → guided expansion → scoring → provenance) |
 | `get_document_content` | Read full document by ID |
 | `structural_query` | Count, list, filter via FalkorDB TrustGraph |
 | `analyze_domain` | Specialist domain analysis |
@@ -261,6 +268,7 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 | `send_email` | Send email notifications |
 | `verified_generation` | Claim-by-claim verification sub-graph |
 | `predictive_analysis` | Predictive analysis sub-graph |
+| `generate_knowledge_report` | Generate structured reports with KPIs and verified citations from knowledge graph |
 | `terminate` | Signal completion with response |
 
 ### Prompt Management System

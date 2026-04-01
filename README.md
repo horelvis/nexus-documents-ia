@@ -27,7 +27,8 @@
 
 | Feature | Description |
 |---------|-------------|
-| **Emma AI Assistant** | Intelligent assistant with LangGraph ReAct agent + Swarm parallel execution |
+| **Emma AI Assistant** | Intelligent assistant with LangGraph ReAct agent (16 tools) + Swarm parallel execution |
+| **TrustGraph Knowledge Expert** | RDF-style knowledge graph (FalkorDB) with 72-predicate ontology, semantic retrieval, authority scoring, and report generation with verified citations |
 | **Emma Reactive** | Event-driven proactive AI — triggers, notifications, multi-channel (Telegram, WhatsApp, Slack, Email) |
 | **SmartSearch** | Unified multi-store search (Weaviate + BOE legislation + knowledge graph) |
 | **Multimodal RAG Pipeline** | 7-layer retrieval with hybrid search, cross-encoder reranking, and verified generation |
@@ -83,13 +84,13 @@ curl http://localhost:8000/health
 │  │  Shadcn/UI  │     │   :8000     │     │  │    Emma AI          │   │    │
 │  └─────────────┘     └─────────────┘     │  │  (LangGraph ReAct)   │   │    │
 │                             │            │  │                     │   │    │
-│                             │            │  │  9 Tools + Swarm    │   │    │
+│                             │            │  │  16 Tools + Swarm   │   │    │
 │                             ▼            │  │  + PostgresSaver    │   │    │
 │  ┌─────────────────────────────────────┐ │  └─────────────────────┘   │    │
 │  │         Data Layer                   │ │                           │    │
 │  │  ┌──────────┐ ┌──────────┐ ┌──────┐ │ │  ┌─────────────────────┐   │    │
 │  │  │PostgreSQL│ │ Weaviate │ │Redis │ │ │  │  vLLM Server        │   │    │
-│  │  │   +AGE   │ │ (Vector) │ │      │ │ │  │  Qwen3-4B (GPU)     │   │    │
+│  │  │   +AGE   │ │ (Vector) │ │      │ │ │  │  Qwen3.5-9B (GPU)   │   │    │
 │  │  └──────────┘ └──────────┘ └──────┘ │ │  └─────────────────────┘   │    │
 │  └─────────────────────────────────────┘ │                            │    │
 │                                          └────────────────────────────┘    │
@@ -104,11 +105,14 @@ Emma AI is built on **LangGraph** with a ReAct agent (8 nodes) + optional Swarm 
 | Tool | Purpose |
 |------|---------|
 | `smart_search` | Unified search across tenant documents, BOE legislation, and knowledge graph |
-| `structural_query` | Count, list, filter via Apache AGE graph |
+| `graph_rag` | Knowledge graph retrieval — 8-stage pipeline with authority scoring and multi-hop reasoning |
+| `structural_query` | Count, list, filter via FalkorDB TrustGraph |
 | `analyze_domain` | Specialist domain analysis (legal, fiscal, labor, medical) |
 | `get_document_content` | Read full document content by ID |
-| `web_search` | Internet search (DuckDuckGo) |
+| `web_search` | Internet search (Tavily primary, DuckDuckGo fallback) |
 | `search_jurisprudence` | CENDOJ jurisprudence search |
+| `generate_knowledge_report` | Generate structured reports with KPIs and verified citations from knowledge graph |
+| `forge_document` | Create PDF/DOCX documents from templates |
 | `query_connector` | Query external connectors (SharePoint, OneDrive, etc.) |
 
 **Persistence**: PostgresSaver checkpointer (conversation continuity) + AsyncPostgresStore (cross-session user memory)
