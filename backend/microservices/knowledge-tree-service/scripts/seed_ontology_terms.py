@@ -66,7 +66,7 @@ async def seed_ontology_terms(dry_run: bool = False) -> tuple:
     async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
         if not dry_run:
             # Ensure collection exists
-            resp = await client.post(f"{WEAVIATE_SERVICE_URL}/trustgraph/ensure-ontology-terms")
+            resp = await client.post(f"{WEAVIATE_SERVICE_URL}/weaviate/trustgraph/ensure-ontology-terms")
             if resp.status_code != 200:
                 print(f"  {RED}Failed to ensure OntologyTerms collection: {resp.text}{RESET}")
                 return 0, 0, 1
@@ -88,7 +88,7 @@ async def seed_ontology_terms(dry_run: bool = False) -> tuple:
                     continue
 
                 resp = await client.post(
-                    f"{WEAVIATE_SERVICE_URL}/trustgraph/ontology-terms",
+                    f"{WEAVIATE_SERVICE_URL}/weaviate/trustgraph/ontology-terms",
                     json={
                         "predicate_name": name,
                         "namespace": sector,

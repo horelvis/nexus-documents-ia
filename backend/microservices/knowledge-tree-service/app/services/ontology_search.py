@@ -84,7 +84,7 @@ class OntologySearch:
 
             # Search OntologyTerms
             search_resp = await client.post(
-                f"{_WEAVIATE_URL}/trustgraph/ontology-terms/search",
+                f"{_WEAVIATE_URL}/weaviate/trustgraph/ontology-terms/search",
                 json={"embedding": embedding, "limit": limit},
             )
             if search_resp.status_code != 200:
