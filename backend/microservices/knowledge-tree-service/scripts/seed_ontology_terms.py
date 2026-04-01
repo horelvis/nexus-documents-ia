@@ -35,8 +35,8 @@ RESET = "\033[0m"
 
 SKIP_NAMESPACES = {"prov"}
 
-WEAVIATE_SERVICE_URL = os.environ.get("WEAVIATE_SERVICE_URL", "http://weaviate-service:8007")
-INTELLIGENCE_DOCS_URL = os.environ.get("INTELLIGENCE_DOCS_URL", "http://intelligence-docs-service:8012")
+WEAVIATE_SERVICE_URL = os.environ.get("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
+INTELLIGENCE_DOCS_URL = os.environ.get("INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000")
 API_KEY = os.environ.get("MICROSERVICES_API_KEY", "")
 
 

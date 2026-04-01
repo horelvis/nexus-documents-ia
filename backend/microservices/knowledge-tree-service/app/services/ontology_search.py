@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 _SEMANTIC_THRESHOLD = 0.80
 
-_WEAVIATE_URL = os.environ.get("WEAVIATE_SERVICE_URL", "http://weaviate-service:8007")
-_INTELLIGENCE_URL = os.environ.get("INTELLIGENCE_DOCS_URL", "http://intelligence-docs-service:8012")
+_WEAVIATE_URL = os.environ.get("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
+_INTELLIGENCE_URL = os.environ.get("INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000")
 _API_KEY = os.environ.get("MICROSERVICES_API_KEY", "")
 
 
