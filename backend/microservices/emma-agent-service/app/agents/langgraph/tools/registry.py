@@ -68,6 +68,7 @@ class ToolRegistry:
         from .forge_document import ForgeDocumentTool
         from .verified_generation import VerifiedGenerationTool
         from .predictive_analysis import PredictiveAnalysisTool
+        from .knowledge_report import KnowledgeReportTool
 
         tools: List[EmmaTool] = [
             SmartSearchTool(),         # Replaces SearchDocuments + SearchLegislation
@@ -84,6 +85,7 @@ class ToolRegistry:
             SendEmailTool(),
             VerifiedGenerationTool(),  # Sub-graph: claim-by-claim verified document
             PredictiveAnalysisTool(),  # Sub-graph: factor extraction + prediction
+            KnowledgeReportTool(),     # Phase 3c: structured reports from knowledge graph
             TerminateTool(),  # Always last — the agent's "I'm done" signal
         ]
 
