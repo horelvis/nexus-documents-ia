@@ -281,13 +281,9 @@ Entity blacklist (YAML config + coordinator filtering), canonical name resolutio
 
 Authority weight triples (14 document types seeded in `_authority` collection, resolved via Cypher — zero hardcode), consensus scoring (cross-source agreement counts stored as `consensus_count` on `:Rel` edges), multi-hop Cypher templates (5 templates: entity_relations, corporate_chain, org_people, count_by_predicate, applicable_regulations), LLM-guided expansion (Stage 2.5 in graph_rag — planner evaluates subgraph sufficiency), composite 5-signal edge scoring (semantic 0.35 + confidence 0.20 + authority 0.20 + consensus 0.15 + recency 0.10), chain-of-thought path formatting.
 
-### Phase 3c: Knowledge Expert (PLANNED)
+### Phase 3c: Knowledge Expert (COMPLETE)
 
-- Graph data assembly (`GraphAssembler` service)
-- Report templates (YAML-driven: entity_profile, compliance_report, contract_summary)
-- KPI engine (count, ratio, list, temporal, comparison)
-- `generate_knowledge_report` tool in ReAct agent
-- Document generation with verified citations from graph
+`GraphAssembler` service (KTS, assembles facts/KPIs/sources from graph via Cypher templates), YAML-driven report templates (entity_profile, compliance_report, contract_summary), `generate_knowledge_report` tool (#16 in ReAct agent — calls assembler → LLM generation with Langfuse prompt → SSE progressive events), KPI engine (count + count_distinct_sources aggregations with confidence propagation), `POST /graph/assemble` API endpoint, Langfuse prompt (`trustgraph_report_generation`).
 
 ## Key Design Decisions
 
