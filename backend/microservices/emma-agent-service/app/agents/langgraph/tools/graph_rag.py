@@ -970,12 +970,55 @@ def _format_context(
         if doc_id and doc_id not in expanded_doc_ids:
             expanded_doc_ids.append(doc_id)
 
+    # ── Detect multi-hop chains ──────────────────────────────────────────
+    adjacency: Dict[str, List[Dict]] = {}
+    for edge in scored_edges:
+        subj = edge.get("subject_uri") or edge.get("subject", "")
+        if subj:
+            adjacency.setdefault(subj, []).append(edge)
+
+    chains_found = []
+    seed_entities = [e.get("entity_uri", "") for e in top_entities[:5]]
+    for seed_uri in seed_entities:
+        if seed_uri not in adjacency:
+            continue
+        for edge1 in adjacency[seed_uri][:5]:
+            hop2_uri = edge1.get("object_uri") or edge1.get("object", "")
+            if hop2_uri and hop2_uri in adjacency:
+                for edge2 in adjacency[hop2_uri][:3]:
+                    p1 = _extract_predicate_name(edge1.get("predicate_uri") or edge1.get("predicate", ""))
+                    p2 = _extract_predicate_name(edge2.get("predicate_uri") or edge2.get("predicate", ""))
+                    o2 = edge2.get("object_uri") or edge2.get("object", "")
+                    chain = {
+                        "path": [
+                            labels.get(seed_uri, _humanize_uri(seed_uri)),
+                            p1,
+                            labels.get(hop2_uri, _humanize_uri(hop2_uri)),
+                            p2,
+                            labels.get(o2, _humanize_uri(o2)),
+                        ],
+                        "confidence": min(
+                            edge1.get("confidence") or 0,
+                            edge2.get("confidence") or 0,
+                        ),
+                    }
+                    chains_found.append(chain)
+
+    # Build chain text for markdown output
+    chain_text = ""
+    if chains_found:
+        chain_text = "\n\n### Cadenas de relacion encontradas\n"
+        for chain in chains_found[:5]:
+            path_str = " → ".join(str(p) for p in chain["path"])
+            chain_text += f"- {path_str} (confianza: {chain['confidence']:.2f})\n"
+
     # Render markdown
     output = "## Knowledge Graph Context\n\n"
     output += "### Entities\n"
     output += json.dumps(entity_list, ensure_ascii=False, indent=2)
     output += "\n\n### Relationships\n"
     output += json.dumps(relationship_list, ensure_ascii=False, indent=2)
+    output += chain_text
     output += "\n"
 
     return ToolResult(
