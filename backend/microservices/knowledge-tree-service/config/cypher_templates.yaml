@@ -1,0 +1,70 @@
+# Cypher template registry — reusable multi-hop query patterns.
+# Each template has a Cypher pattern with $-prefixed parameters.
+# Tenant isolation ($user, $collection) is injected automatically.
+
+templates:
+  entity_relations:
+    description: "All direct relationships of an entity"
+    hops: 1
+    pattern: |
+      MATCH (s:Node {uri: $entity_uri, user: $user})-[r:Rel]->(o)
+      WHERE ($collection IS NULL OR r.collection = $collection)
+      RETURN s.uri AS subject, r.uri AS predicate,
+             CASE WHEN o:Node THEN o.uri ELSE o.value END AS object,
+             CASE WHEN o:Node THEN 'node' ELSE 'literal' END AS object_type,
+             r.confidence AS confidence, r.consensus_count AS consensus_count,
+             r.extraction_method AS extraction_method
+      ORDER BY r.confidence DESC
+
+  corporate_chain:
+    description: "Ownership chain: company -> group -> subsidiaries"
+    hops: 4
+    pattern: |
+      MATCH path = (start:Node {uri: $entity_uri, user: $user})
+        -[:Rel*1..4]->(end:Node {user: $user})
+      WHERE ALL(r IN relationships(path) WHERE
+        r.uri IN ['nouxcube://predicate/legal/filial-de',
+                   'nouxcube://predicate/legal/parte-de',
+                   'nouxcube://predicate/core/part-of'])
+      UNWIND relationships(path) AS r
+      WITH startNode(r) AS s, r, endNode(r) AS o
+      RETURN DISTINCT s.uri AS subject, r.uri AS predicate, o.uri AS object,
+             'node' AS object_type, r.confidence AS confidence
+      LIMIT $query_limit
+
+  org_people:
+    description: "People related to an organization at N hops"
+    hops: 3
+    pattern: |
+      MATCH (org:Node {uri: $entity_uri, user: $user})
+      MATCH path = (p:Node {user: $user})-[:Rel*1..3]->(org)
+      WHERE ANY(r IN relationships(path) WHERE
+        r.uri CONTAINS 'empleado' OR r.uri CONTAINS 'firmante'
+        OR r.uri CONTAINS 'representante' OR r.uri CONTAINS 'cargo'
+        OR r.uri CONTAINS 'administrador')
+      MATCH (p)-[:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal)
+      WHERE t.value = 'person'
+      RETURN DISTINCT p.uri AS subject,
+             'nouxcube://predicate/core/related-to' AS predicate,
+             org.uri AS object, 'node' AS object_type
+      LIMIT $query_limit
+
+  count_by_predicate:
+    description: "Count relations of a type for an entity"
+    hops: 1
+    pattern: |
+      MATCH (s:Node {uri: $entity_uri, user: $user})-[r:Rel {uri: $predicate_uri}]->(o)
+      RETURN count(o) AS total
+
+  applicable_regulations:
+    description: "Laws and regulations applicable to an entity"
+    hops: 2
+    pattern: |
+      MATCH (entity:Node {uri: $entity_uri, user: $user})
+      MATCH (entity)-[r1:Rel]->(mid:Node {user: $user})-[r2:Rel]->(law:Node {user: $user})
+      WHERE r2.uri CONTAINS 'regulado' OR r2.uri CONTAINS 'sujeto-a'
+      MATCH (law)-[:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal)
+      WHERE t.value = 'legislation'
+      RETURN DISTINCT law.uri AS subject, r2.uri AS predicate,
+             entity.uri AS object, 'node' AS object_type
+      LIMIT $query_limit
