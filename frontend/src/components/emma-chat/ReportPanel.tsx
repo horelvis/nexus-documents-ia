@@ -36,7 +36,16 @@ export function ReportPanel({ report, content }: ReportPanelProps) {
     setError(null)
     try {
       await generateReportDocument(report.report_id, 'new')
-      setDownloadUrl(getReportDownloadUrl(report.report_id))
+      // Download via fetch with auth token, then create blob URL
+      const url = getReportDownloadUrl(report.report_id)
+      const token = JSON.parse(sessionStorage.getItem('nexus_sso_tokens') || '{}').access_token || ''
+      const resp = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      })
+      if (!resp.ok) throw new Error(`Download failed: ${resp.status}`)
+      const blob = await resp.blob()
+      const blobUrl = URL.createObjectURL(blob)
+      setDownloadUrl(blobUrl)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al generar el documento')
     } finally {
@@ -117,8 +126,7 @@ export function ReportPanel({ report, content }: ReportPanelProps) {
             ) : (
               <a
                 href={downloadUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+                download={`informe_${report.entity_label.toLowerCase().replace(/\s+/g, '_')}.docx`}
                 className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
               >
                 <IconDownload className="h-4 w-4" />
