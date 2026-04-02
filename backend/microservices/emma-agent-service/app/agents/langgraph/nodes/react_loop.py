@@ -155,9 +155,9 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
     return SystemMessage(content=prompt)
 
 
-def _build_tool_context(state: ReActState) -> Dict[str, Any]:
+def _build_tool_context(state: ReActState, emit_sse=None) -> Dict[str, Any]:
     """Build minimal context dict for tool execution (avoids copying full state)."""
-    return {
+    ctx = {
         "tenant_id": state.get("tenant_id", ""),
         "user_id": state.get("user_id"),
         "user_role_ids": state.get("user_role_ids"),
@@ -168,6 +168,9 @@ def _build_tool_context(state: ReActState) -> Dict[str, Any]:
         "thread_id": state.get("thread_id", ""),
         "metadata": state.get("metadata"),
     }
+    if emit_sse is not None:
+        ctx["emit_sse"] = emit_sse
+    return ctx
 
 
 def _parse_thinking(content: str) -> tuple:
@@ -301,6 +304,14 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     step = state.get("current_step", 0)
     max_steps = state.get("max_steps", 10)
     tool_calls_history = list(state.get("tool_calls_history", []))
+
+    # Obtain stream writer for real-time SSE from tools (report.*, claim_*, etc.)
+    _stream_writer = None
+    try:
+        from langgraph.config import get_stream_writer
+        _stream_writer = get_stream_writer()
+    except Exception:
+        pass
 
     # Safety: max steps reached
     if step >= max_steps:
@@ -710,7 +721,12 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         else:
             regular_tcs.append(tc)
 
-    tool_context = _build_tool_context(state)
+    def _emit_sse_via_writer(event: dict):
+        """Bridge: tool emit_sse callback -> LangGraph stream writer."""
+        if _stream_writer:
+            _stream_writer({"type": event.get("event_type", "custom_event"), "data": event.get("payload", event)})
+
+    tool_context = _build_tool_context(state, emit_sse=_emit_sse_via_writer if _stream_writer else None)
     registry = get_tool_registry()
 
     # If terminate found, execute it and return immediately

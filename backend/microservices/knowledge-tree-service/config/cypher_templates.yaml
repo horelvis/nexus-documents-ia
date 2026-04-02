@@ -13,7 +13,8 @@ templates:
              CASE WHEN o:Node THEN o.uri ELSE o.value END AS object,
              CASE WHEN o:Node THEN 'node' ELSE 'literal' END AS object_type,
              r.confidence AS confidence, r.consensus_count AS consensus_count,
-             r.extraction_method AS extraction_method
+             r.extraction_method AS extraction_method,
+             r.source_chunk AS source_chunk
       ORDER BY r.confidence DESC
 
   corporate_chain:
@@ -29,7 +30,8 @@ templates:
       UNWIND relationships(path) AS r
       WITH startNode(r) AS s, r, endNode(r) AS o
       RETURN DISTINCT s.uri AS subject, r.uri AS predicate, o.uri AS object,
-             'node' AS object_type, r.confidence AS confidence
+             'node' AS object_type, r.confidence AS confidence,
+             r.source_chunk AS source_chunk
       LIMIT $query_limit
 
   org_people:
@@ -66,5 +68,6 @@ templates:
       MATCH (law)-[:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal)
       WHERE t.value = 'legislation'
       RETURN DISTINCT law.uri AS subject, r2.uri AS predicate,
-             entity.uri AS object, 'node' AS object_type
+             entity.uri AS object, 'node' AS object_type,
+             r2.source_chunk AS source_chunk
       LIMIT $query_limit
