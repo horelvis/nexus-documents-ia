@@ -21,6 +21,7 @@ import { GeneratedDocDownload } from './GeneratedDocDownload'
 import { ProgressBubble } from './ProgressBubble'
 import { EntityTags } from '../EntityTags'
 import { SourceEvidence } from '../SourceEvidence'
+import { ReportPanel } from '../ReportPanel'
 
 export interface MessageBubbleProps {
   message: EmmaMessage
@@ -90,6 +91,21 @@ export function MessageBubble({
           <SuggestionChips suggestions={message.suggestions} onClick={onSuggestionClick} />
         )}
         {onFeedback && <ActionBar message={message} onFeedback={onFeedback} />}
+      </EmmaMessageFlow>
+    )
+  }
+
+  // ── Knowledge Report result ──
+  if (message.report) {
+    return (
+      <EmmaMessageFlow>
+        <div className="max-w-none">
+          <EmmaMarkdown content={message.content} />
+          <ReportPanel report={message.report} content={message.content} />
+        </div>
+        {message.metadata?.explanation && (
+          <ExplanationPanel explanation={message.metadata.explanation} />
+        )}
       </EmmaMessageFlow>
     )
   }

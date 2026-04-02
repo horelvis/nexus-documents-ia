@@ -147,6 +147,11 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     },
     resultText: () => 'Jurisprudencia encontrada',
   },
+  generate_knowledge_report: {
+    icon: 'write' as ActivityIcon,
+    activeText: () => 'Generando informe de conocimiento...',
+    resultText: () => 'Informe generado',
+  },
 }
 
 // ─── Main export ───────────────────────────────────────────────────────────────

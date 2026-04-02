@@ -9,7 +9,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react'
 import type { Message as SDKMessage } from '@langchain/langgraph-sdk'
-import type { EmmaMessage, DocumentInfo } from '@/lib/types/emma'
+import type { EmmaMessage, DocumentInfo, ReportMetadata } from '@/lib/types/emma'
 import type { EntityTag } from '../EntityTags'
 import type { EmmaStateType } from '../EmmaStreamProvider'
 import { isHITLReview, isClarification } from '../types/interrupts'
@@ -268,6 +268,28 @@ export function useMessageConverter(
         try { return JSON.parse(s.content) } catch { return [] }
       })
 
+    // Extract report metadata from reasoning steps
+    const reportStep = reasoningSteps.find(
+      (s: any) => s.type === 'report_complete' || s.type === 'report.complete'
+    )
+    let reportMetadata: ReportMetadata | undefined
+    if (reportStep) {
+      try {
+        const parsed = typeof reportStep.content === 'string'
+          ? JSON.parse(reportStep.content)
+          : reportStep.content
+        if (parsed && parsed.report_id) {
+          reportMetadata = {
+            report_id: parsed.report_id,
+            entity_label: parsed.entity_label,
+            report_type: parsed.report_type,
+            trust_summary: parsed.trust_summary,
+            source_count: parsed.source_count,
+          }
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
     const hasMetadata = reasoningSteps.length > 0 || sources.length > 0 || explanation
 
     if (hasMetadata) {
@@ -316,6 +338,7 @@ export function useMessageConverter(
         // Attach to existing current-turn AI message
         converted[currentAiIdx] = {
           ...converted[currentAiIdx],
+          ...(reportMetadata ? { report: reportMetadata } : {}),
           metadata: { ...converted[currentAiIdx].metadata, ...stepsMetadata },
         }
       } else if (!success) {
