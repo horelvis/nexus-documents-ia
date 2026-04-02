@@ -46,6 +46,7 @@ from app.core.config import settings
 from app.api import emma_router, learning_router, uploads_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router, diagnostics_router, generated_documents_router
 from app.api.explainability import router as explainability_router
 from app.api.langgraph_protocol import router as langgraph_protocol_router
+from app.api.report_downloads import router as report_downloads_router
 from app.clients import get_weaviate_client
 
 # Configure logging
@@ -232,6 +233,7 @@ app.include_router(diagnostics_router, prefix="/diagnostics", tags=["diagnostics
 app.include_router(generated_documents_router, tags=["generated-documents"])
 app.include_router(explainability_router, prefix="/emma", tags=["explainability"])
 app.include_router(langgraph_protocol_router, tags=["langgraph-protocol"])
+app.include_router(report_downloads_router, tags=["reports"])
 
 
 # Health check
