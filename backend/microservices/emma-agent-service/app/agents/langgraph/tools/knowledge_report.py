@@ -176,11 +176,56 @@ class KnowledgeReportTool(EmmaTool):
                     },
                 })
 
+        # ── Stage 5: Store report in Redis for on-demand document generation ──
+        report_id = f"report_{uuid.uuid4().hex[:12]}"
+        try:
+            import redis.asyncio as aioredis
+
+            r = aioredis.from_url(settings.redis_url)
+            await r.setex(
+                f"emma:report:{report_id}:text",
+                3600,
+                report_text,
+            )
+            await r.setex(
+                f"emma:report:{report_id}:meta",
+                3600,
+                json.dumps({
+                    "entity_uri": entity_uri,
+                    "entity_label": entity_label,
+                    "report_type": report_type,
+                    "tenant_id": tenant_id,
+                    "sources": sources,
+                    "trust_summary": trust,
+                }),
+            )
+            await r.aclose()
+        except Exception as exc:
+            logger.warning(f"Failed to store report in Redis: {exc}")
+            report_id = ""
+
+        # ── Stage 6: Emit report.complete for frontend panel ──
+        if emit_sse and report_id:
+            emit_sse({
+                "event_type": "report.complete",
+                "event_id": str(uuid.uuid4()),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "payload": {
+                    "report_id": report_id,
+                    "entity_label": entity_label,
+                    "report_type": report_type,
+                    "trust_summary": trust,
+                    "source_count": len(sources),
+                },
+            })
+
         return ToolResult(
             output=report_text,
             data={
                 "report_type": report_type,
+                "report_id": report_id,
                 "entity_uri": entity_uri,
+                "entity_label": entity_label,
                 "kpis": kpis,
                 "sources": sources,
                 "trust_summary": trust,
