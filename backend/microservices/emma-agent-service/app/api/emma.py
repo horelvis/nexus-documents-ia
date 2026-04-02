@@ -647,24 +647,31 @@ async def _generate_langgraph_sse(
                 yield f"event: progress\ndata: {_dumps({'message': 'Sintetizando resultados...', 'stage': 'synthesizing', 'progress': 80})}\n\n"
 
             elif event_type.startswith("report."):
-                # Knowledge report progressive events (report.assembling, report.generating, report.kpi)
+                # Knowledge report progressive events
                 stage_labels = {
                     "report.assembling": "Recopilando datos del grafo...",
                     "report.generating": "Generando informe...",
                     "report.kpi": None,
+                    "report.complete": None,
                 }
-                label = stage_labels.get(event_type)
-                if event_type == "report.kpi":
+                if event_type == "report.complete":
+                    step_counter += 1
+                    _track_step("report_complete", "Informe generado")
+                    yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'report_complete', 'content': 'Informe generado', 'isThinking': True})}\n\n"
+                    yield f"event: report_complete\ndata: {_dumps(data)}\n\n"
+                elif event_type == "report.kpi":
                     kpi_name = data.get("description") or data.get("name", "")
                     kpi_value = data.get("value", "")
                     step_counter += 1
                     _track_step("report_kpi", f"{kpi_name}: {kpi_value}")
                     yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'report_kpi', 'content': f'KPI: {kpi_name} = {kpi_value}', 'isThinking': True})}\n\n"
                     yield f"event: report_kpi\ndata: {_dumps(data)}\n\n"
-                elif label:
-                    step_counter += 1
-                    _track_step("report_progress", label)
-                    yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'report_progress', 'content': label, 'isThinking': True})}\n\n"
+                else:
+                    label = stage_labels.get(event_type)
+                    if label:
+                        step_counter += 1
+                        _track_step("report_progress", label)
+                        yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'report_progress', 'content': label, 'isThinking': True})}\n\n"
 
             elif event_type == "token":
                 # Stream tokens for real-time text display
