@@ -244,6 +244,36 @@ const parseResponse = async <T>(response: Response, defaultErrorPrefix: string):
   return data as T
 }
 
+export async function generateReportDocument(
+  reportId: string,
+  mode: 'new' | 'template' = 'new',
+  templateDocumentId?: string,
+  title?: string,
+): Promise<{ download_url: string; format: string; size_bytes: number; title: string }> {
+  const token = getAccessToken()
+  const resp = await fetchWithTimeout(
+    `${BASE_API_URL}/emma/reports/${reportId}/generate-document`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token || ''}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        mode,
+        template_document_id: templateDocumentId,
+        title,
+      }),
+    },
+    true,
+  )
+  return parseResponse(resp, 'Failed to generate report document')
+}
+
+export function getReportDownloadUrl(reportId: string): string {
+  return `${BASE_API_URL}/emma/reports/${reportId}/download`
+}
+
 export function useEmmaService() {
   const apiBase = BASE_API_URL
 
