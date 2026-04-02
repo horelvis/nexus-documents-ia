@@ -524,6 +524,18 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             model = model.bind_tools(tool_schemas)
         model = model.bind(max_tokens=effective_max_tokens)
 
+        tool_names = [t["function"]["name"] for t in tool_schemas] if tool_schemas else []
+        logger.info(
+            f"ReAct step {step}: {len(llm_messages)} msgs, {len(tool_schemas)} tools "
+            f"({', '.join(tool_names[:5])}{'...' if len(tool_names) > 5 else ''}), "
+            f"max_tokens={effective_max_tokens}"
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            for i, m in enumerate(llm_messages):
+                role = m.get("role", "?")
+                content = (m.get("content") or "")[:150]
+                logger.debug(f"  msg[{i}] role={role}: {content!r}")
+
         per_request_thinking = state.get("enable_thinking")
         if per_request_thinking:
             model = model.bind(extra_body={
@@ -662,10 +674,14 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             logger.warning(
                 f"⚠️ ReAct step 0 — NO tool calls for intent '{intent}'. "
                 f"LLM responded directly without searching. "
-                f"Query: '{state.get('query', '')[:80]}'"
+                f"Query: '{state.get('query', '')[:80]}'. "
+                f"Response preview: '{content[:200]}'"
             )
         else:
-            logger.info(f"ReAct loop: step {step} — no tool calls, completing")
+            logger.info(
+                f"ReAct loop: step {step} — no tool calls, completing. "
+                f"Response preview: '{content[:200]}'"
+            )
 
         # Clean content of any raw tool_call tags from small models
         content = re.sub(r"</?tool_call>", "", content).strip()
