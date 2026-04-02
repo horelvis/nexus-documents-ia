@@ -100,7 +100,6 @@ export function MessageBubble({
     return (
       <EmmaMessageFlow>
         <div className="max-w-none">
-          <EmmaMarkdown content={message.content} />
           <ReportPanel report={message.report} content={message.content} />
         </div>
         {message.metadata?.explanation && (
