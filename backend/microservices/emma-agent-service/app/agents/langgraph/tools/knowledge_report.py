@@ -46,7 +46,11 @@ class KnowledgeReportTool(EmmaTool):
 
     @property
     def description(self) -> str:
-        return "Genera un informe estructurado con datos verificados del grafo de conocimiento, incluyendo KPIs y citas de fuentes"
+        return (
+            "Genera un informe/perfil/reporte completo de una entidad (persona, empresa, contrato). "
+            "Recopila datos del grafo automáticamente — NO necesita graph_rag previo. "
+            "Incluye KPIs, relaciones, fuentes y confianza."
+        )
 
     @property
     def parameters_schema(self) -> Type[BaseModel]:
