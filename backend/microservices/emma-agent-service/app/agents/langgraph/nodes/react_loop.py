@@ -1061,6 +1061,7 @@ _TOOL_CALL_LABELS = {
     "generate_document": lambda args: "Generando documento...",
     "forge_document": lambda args: "Creando documento PDF...",
     "send_email": lambda args: f"Enviando email a {args.get('to', '...')}...",
+    "generate_knowledge_report": lambda args: f"Generando informe de {args.get('entity_uri', '').split('/')[-1].replace('-', ' ')}...",
 }
 
 
@@ -1121,5 +1122,9 @@ def _humanize_tool_result(name: str, args: Dict[str, Any], result) -> str:
 
     if name == "forge_document":
         return "PDF creado"
+
+    if name == "generate_knowledge_report":
+        entity = args.get("entity_uri", "").split("/")[-1].replace("-", " ").title()
+        return f"Informe generado: {entity}" if entity else "Informe de conocimiento generado"
 
     return "Paso completado"
