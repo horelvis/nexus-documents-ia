@@ -266,8 +266,8 @@ async def _resolve_chunk_texts(
                     if "[CONTENIDO]" in text:
                         text = text.split("[CONTENIDO]", 1)[1].strip()
                     src["chunk_text"] = text[:max_snippet_chars]
-        except Exception:
-            pass  # Non-critical — chunk_text simply won't be present
+        except Exception as exc:
+            logger.warning("graph_rag: chunk fetch failed for doc %s: %s", doc_id, exc)
 
     await _asyncio.gather(
         *[_fetch_and_assign(doc_id, srcs) for doc_id, srcs in doc_chunks.items()],
@@ -791,7 +791,7 @@ class GraphRAGTool(EmmaTool):
             try:
                 await _resolve_chunk_texts(source_evidence, tenant_id, weaviate_client)
             except Exception as e:
-                logger.debug(f"graph_rag: chunk text resolution failed: {e}")
+                logger.warning(f"graph_rag: chunk text resolution failed: {e}")
 
             sources_text = "\n\n### Fuentes\n"
             for src in source_evidence[:10]:
