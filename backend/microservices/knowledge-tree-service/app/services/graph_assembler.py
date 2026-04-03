@@ -55,6 +55,43 @@ class GraphAssembler:
         self._client = client
         self._executor = template_executor or TemplateExecutor()
 
+    async def _resolve_labels(
+        self,
+        uris: set,
+        user: str,
+    ) -> dict:
+        """Batch-resolve Node URIs to human-readable labels via core/label lookup.
+
+        Returns dict mapping URI -> label. URIs without a label triple get
+        a fallback: uri.split('/')[-1].replace('-', ' ').title()
+        """
+        if not uris:
+            return {}
+
+        label_map = {}
+        try:
+            query = """
+                UNWIND $uris AS target_uri
+                MATCH (n:Node {uri: target_uri, user: $user})
+                      -[:Rel {uri: 'nouxcube://predicate/core/label'}]->(l:Literal)
+                RETURN n.uri AS uri, l.value AS label
+            """
+            rows = await self._client.execute_cypher(query, params={
+                "uris": list(uris),
+                "user": user,
+            })
+            for row in rows:
+                label_map[row["uri"]] = row["label"]
+        except Exception as exc:
+            logger.warning("Label resolution failed, using URI slugs: %s", exc)
+
+        # Fallback for URIs not resolved
+        for uri in uris:
+            if uri not in label_map:
+                label_map[uri] = uri.split("/")[-1].replace("-", " ").title()
+
+        return label_map
+
     async def assemble(
         self,
         entity_uri: str,
@@ -169,6 +206,16 @@ class GraphAssembler:
                 facts=section_facts,
                 confidence=round(section_confidence, 3),
             ))
+
+        # Resolve node labels in bulk
+        node_uris = {
+            f.object for f in all_facts
+            if f.object_type == "node" and f.object.startswith("nouxcube://")
+        }
+        label_map = await self._resolve_labels(node_uris, user)
+        for fact in all_facts:
+            if fact.object_type == "node" and fact.object in label_map:
+                fact.object = label_map[fact.object]
 
         # Compute KPIs
         kpis: List[KPIResult] = []

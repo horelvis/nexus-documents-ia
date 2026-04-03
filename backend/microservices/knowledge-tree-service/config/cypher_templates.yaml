@@ -35,20 +35,22 @@ templates:
       LIMIT $query_limit
 
   org_people:
-    description: "People related to an organization at N hops"
+    description: "People related to an organization with real predicates"
     hops: 3
     pattern: |
       MATCH (org:Node {uri: $entity_uri, user: $user})
-      MATCH path = (p:Node {user: $user})-[:Rel*1..3]->(org)
-      WHERE ANY(r IN relationships(path) WHERE
-        r.uri CONTAINS 'empleado' OR r.uri CONTAINS 'firmante'
+      MATCH (p:Node {user: $user})-[r:Rel]->(org)
+      WHERE (r.uri CONTAINS 'empleado' OR r.uri CONTAINS 'firmante'
         OR r.uri CONTAINS 'representante' OR r.uri CONTAINS 'cargo'
         OR r.uri CONTAINS 'administrador')
+        AND ($collection IS NULL OR r.collection = $collection)
       MATCH (p)-[:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal)
       WHERE t.value = 'person'
-      RETURN DISTINCT p.uri AS subject,
-             'nouxcube://predicate/core/related-to' AS predicate,
-             org.uri AS object, 'node' AS object_type
+      RETURN DISTINCT p.uri AS subject, r.uri AS predicate,
+             org.uri AS object, 'node' AS object_type,
+             r.confidence AS confidence, r.consensus_count AS consensus_count,
+             r.extraction_method AS extraction_method,
+             r.source_chunk AS source_chunk
       LIMIT $query_limit
 
   count_by_predicate:

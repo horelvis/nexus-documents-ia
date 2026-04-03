@@ -9,15 +9,21 @@ reports:
       - name: "Identificacion"
         templates: ["entity_relations"]
         predicates: ["core/label", "core/type", "core/definition"]
+      - name: "Perfil profesional"
+        templates: ["entity_relations"]
+        predicates: ["legal/cargo-de", "core/has-topic"]
       - name: "Relaciones laborales"
-        templates: ["org_people"]
-        predicates: ["legal/empleado-de", "legal/cargo-de", "legal/administrador-de"]
+        templates: ["org_people", "entity_relations"]
+        predicates: ["legal/empleado-de", "legal/cargo-de", "legal/administrador-de", "legal/tipo-contrato", "legal/vigente-desde", "legal/vigente-hasta", "legal/salario-bruto", "legal/duracion"]
       - name: "Relaciones contractuales"
         templates: ["entity_relations"]
-        predicates: ["legal/firmante-de", "legal/parte-de-contrato", "legal/representante-de"]
+        predicates: ["legal/firmante-de", "legal/parte-de-contrato", "legal/representante-de", "legal/importe", "legal/clausula"]
       - name: "Marco normativo"
-        templates: ["applicable_regulations"]
-        predicates: []
+        templates: ["applicable_regulations", "entity_relations"]
+        predicates: ["legal/references-law", "legal/regulado-por", "legal/sujeto-a", "legal/obligacion", "legal/derecho"]
+      - name: "Actividad documental"
+        templates: ["entity_relations"]
+        predicates: ["documental/autor-de", "documental/revisado-por", "documental/aprobado-por"]
     kpis:
       - name: "total_relaciones"
         description: "Total relationships"
@@ -27,6 +33,16 @@ reports:
         description: "Source documents"
         template: "entity_relations"
         aggregation: "count_distinct_sources"
+      - name: "contradicciones"
+        description: "Contradictions found"
+        template: "entity_relations"
+        aggregation: "count"
+        filter_predicate: "core/contradicts"
+      - name: "temas"
+        description: "Distinct topics"
+        template: "entity_relations"
+        aggregation: "count"
+        filter_predicate: "core/has-topic"
 
   compliance_report:
     description: "Regulatory compliance report"
