@@ -173,7 +173,7 @@ class EmmaQuery(BaseModel):
 class EmmaQueryResponse(BaseModel):
     """Response from Emma."""
     success: bool
-    answer: str
+    answer: str = ""
     domain: str = "general"
     tools_called: List[str] = Field(default_factory=list)
     iterations: int = 0

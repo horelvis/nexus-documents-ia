@@ -143,7 +143,11 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
                     "options": clarification_options,
                 })
 
-                logger.info(f"Classify: clarification resolved → '{refined_query[:80]}'")
+                if not refined_query or not isinstance(refined_query, str):
+                    refined_query = str(refined_query) if refined_query else query
+                    logger.warning("Classify: clarification returned non-string: %r, using original query", refined_query)
+                else:
+                    logger.info(f"Classify: clarification resolved → '{refined_query[:80]}'")
                 query = refined_query
                 try:
                     from .intent_router import classify_intent as _classify
