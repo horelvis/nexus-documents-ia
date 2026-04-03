@@ -83,7 +83,35 @@ class TestGraphAssembler:
         assert result.report_type == "entity_profile"
 
     @pytest.mark.asyncio
-    async def test_collects_sources(self):
+    async def test_collects_sources_with_resolved_titles(self):
+        """Document source IDs should be resolved to human-readable titles."""
+        mock_client = AsyncMock()
+        mock_executor = MagicMock()
+        mock_executor.execute = AsyncMock(return_value={
+            "results": [
+                {"subject": "s1", "predicate": "nouxcube://predicate/legal/empleado-de", "object": "o1", "object_type": "node",
+                 "confidence": 0.9, "source_chunk": "nouxcube://document/default/doc-001#offset=0"},
+            ],
+            "template": "entity_relations", "hops": 1, "count": 1,
+        })
+
+        mock_client.execute_cypher = AsyncMock(return_value=[
+            {"uri": "nouxcube://document/default/doc-001", "label": "Contrato Laboral 2025-001.pdf"},
+        ])
+
+        assembler = GraphAssembler(mock_client, mock_executor)
+        result = await assembler.assemble(
+            entity_uri="nouxcube://entity/default/test",
+            report_type="entity_profile",
+            user="test-tenant",
+        )
+
+        assert len(result.sources) > 0
+        assert result.sources[0].document_id == "Contrato Laboral 2025-001.pdf"
+
+    @pytest.mark.asyncio
+    async def test_source_titles_fallback_to_uuid(self):
+        """If document label not found, source ID should be the UUID slug."""
         mock_client = AsyncMock()
         mock_executor = MagicMock()
         mock_executor.execute = AsyncMock(return_value={
@@ -104,7 +132,8 @@ class TestGraphAssembler:
         )
 
         assert len(result.sources) > 0
-        assert "doc-001" in result.sources[0].document_id
+        # Fallback: Title-cased slug from URI
+        assert result.sources[0].document_id == "Doc 001"
 
     @pytest.mark.asyncio
     async def test_resolves_node_labels(self):

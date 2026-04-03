@@ -207,12 +207,13 @@ class GraphAssembler:
                 confidence=round(section_confidence, 3),
             ))
 
-        # Resolve node labels in bulk
+        # Resolve node + document labels in bulk (single FalkorDB round-trip)
         node_uris = {
             f.object for f in all_facts
             if f.object_type == "node" and f.object.startswith("nouxcube://")
         }
-        label_map = await self._resolve_labels(node_uris, user)
+        all_uris_to_resolve = node_uris | all_sources
+        label_map = await self._resolve_labels(all_uris_to_resolve, user)
         for fact in all_facts:
             if fact.object_type == "node" and fact.object in label_map:
                 fact.object = label_map[fact.object]
@@ -248,13 +249,15 @@ class GraphAssembler:
                 confidence=round(kpi_confidence, 3),
             ))
 
-        # Build sources list
+        # Build sources list with resolved document titles
         sources: List[SourceRef] = []
         for doc_uri in all_sources:
-            doc_id = doc_uri.rsplit("/", 1)[-1] if "/" in doc_uri else doc_uri
+            doc_title = label_map.get(doc_uri)
+            if not doc_title:
+                doc_title = doc_uri.rsplit("/", 1)[-1] if "/" in doc_uri else doc_uri
             sources.append(SourceRef(
                 document_uri=doc_uri,
-                document_id=doc_id,
+                document_id=doc_title,
             ))
 
         # Trust summary
