@@ -561,7 +561,10 @@ class GraphRAGTool(EmmaTool):
                     expansion = json.loads(raw)
                     if not expansion.get("sufficient", True):
                         expand_uris = expansion.get("expand_from", [])[:3]
-                        if expand_uris:
+                        remaining_budget = settings.graph_rag_max_edges - len(edges)
+                        if expand_uris and remaining_budget <= 0:
+                            logger.info("Guided expansion: skipped, edge budget exhausted (%d/%d)", len(edges), settings.graph_rag_max_edges)
+                        elif expand_uris and remaining_budget > 0:
                             logger.info(
                                 "Guided expansion: expanding from %d URIs (reason: %s)",
                                 len(expand_uris), expansion.get("reason", "")[:100]
@@ -570,7 +573,7 @@ class GraphRAGTool(EmmaTool):
                                 tenant_id=tenant_id,
                                 seed_uris=expand_uris,
                                 max_hops=settings.guided_expansion_max_hops,
-                                max_edges=settings.graph_rag_max_edges - len(edges),
+                                max_edges=remaining_budget,
                             )
                             extra_edges = extra_result.get("edges", [])
                             existing_keys = {
