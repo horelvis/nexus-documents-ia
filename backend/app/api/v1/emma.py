@@ -4,6 +4,7 @@ Dedicated router for Emma AI assistant, proxying to emma-agent-service.
 This replaces the legacy /weaviate/emma/* endpoints.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi.responses import Response
 import logging
 import httpx
 
