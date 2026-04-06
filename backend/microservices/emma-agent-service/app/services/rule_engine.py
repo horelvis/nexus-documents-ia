@@ -48,16 +48,10 @@ class RuleContext:
     def from_state(cls, state: Dict[str, Any]) -> "RuleContext":
         """Build RuleContext from RAGState or similar dict."""
         metadata = state.get("metadata", {})
-        sector_config = state.get("sector_config", {})
         retrieved_docs = state.get("retrieved_docs", [])
 
-        # Extract sector name
+        # Sector is no longer used — knowledge graph provides dynamic context
         sector = ""
-        if sector_config:
-            prompt_key = sector_config.get("system_prompt_key", "")
-            sector = prompt_key.replace("sectors.", "") if prompt_key else ""
-            if not sector:
-                sector = sector_config.get("sector", "")
 
         # Detect document type from retrieved docs
         doc_type = None

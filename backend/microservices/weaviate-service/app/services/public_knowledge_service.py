@@ -11,9 +11,9 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import uuid
-import httpx
 
 from app.core.config import settings
+from app.services.weaviate_service import generate_embedding
 from app.services.rag.semantic_chunker import SemanticChunker, DocumentChunk, DocumentType
 from app.schemas.public_knowledge import (
     PublicDocumentCreate,
@@ -311,25 +311,8 @@ class PublicKnowledgeService:
             logger.warning(f"Failed to ensure schema properties: {e}")
 
     async def _generate_embedding(self, text: str) -> Optional[List[float]]:
-        """Generate embedding using TEI (Text Embeddings Inference)"""
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{settings.tei_url}/embed",
-                    json={
-                        "inputs": text,
-                        "truncate": True
-                    },
-                    timeout=30.0
-                )
-                if response.status_code == 200:
-                    embeddings = response.json()
-                    # TEI returns array of embeddings, get first one
-                    if embeddings and len(embeddings) > 0:
-                        return embeddings[0]
-        except Exception as e:
-            logger.warning(f"Failed to generate embedding: {e}")
-        return None
+        """Generate embedding via intelligence-docs-service."""
+        return await generate_embedding(text)
 
     async def _find_existing_by_boe_id(self, boe_id: str) -> List[Dict[str, Any]]:
         """Find all objects with a given boe_id. Returns list of {uuid, parent_document_id, version_number}."""

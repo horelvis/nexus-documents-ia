@@ -54,8 +54,8 @@ class IdentityExtractionService:
         default_retention_days: int = 90,
     ):
         self.langextract_url = langextract_url or os.getenv(
-            "LANGEXTRACT_SERVICE_URL",
-            "http://langextract-service:8000"
+            "INTELLIGENCE_DOCS_SERVICE_URL",
+            "http://intelligence-docs-service:8000"
         )
         self.api_key = api_key or settings.MICROSERVICES_API_KEY
         self.default_retention_days = default_retention_days
@@ -306,7 +306,7 @@ class IdentityExtractionService:
         """Call langextract-service for OCR/extraction"""
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{self.langextract_url}/api/v1/extraction/identity/extract",
+                f"{self.langextract_url}/identity/extract",
                 headers={
                     "X-API-Key": self.api_key,
                     "X-Tenant-ID": tenant_id,

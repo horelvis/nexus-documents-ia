@@ -163,6 +163,22 @@ class KnowledgeExtractionService:
         Returns:
             KnowledgeExtractionResult with extracted entities and relationships
         """
+        # Ensure ACL fields are lists (callers may pass JSON strings from metadata)
+        if isinstance(acl_user_ids, str):
+            try:
+                acl_user_ids = json.loads(acl_user_ids) if acl_user_ids else []
+            except (json.JSONDecodeError, TypeError):
+                acl_user_ids = []
+        if isinstance(acl_role_ids, str):
+            try:
+                acl_role_ids = json.loads(acl_role_ids) if acl_role_ids else []
+            except (json.JSONDecodeError, TypeError):
+                acl_role_ids = []
+        if not isinstance(acl_user_ids, list):
+            acl_user_ids = []
+        if not isinstance(acl_role_ids, list):
+            acl_role_ids = []
+
         if not self._initialized:
             await self.initialize()
 
@@ -541,39 +557,36 @@ class KnowledgeExtractionService:
                 logger.warning(f"⚠️ Failed to store entity {entity.entity_value}: {e}")
                 continue
 
-        # Store in knowledge-tree-service sector graph
-        # This creates typed nodes (Persona, Organizacion) with INSTANCE_OF
-        # edges to the ontology — replacing the old NetworkX graph_service
+        # Store in knowledge-tree-service via TrustGraph triple extraction.
+        # Send raw chunk texts to KTS and let the 4 LLM extractors build the graph.
+        # This replaces the old entity-by-entity store_entities() approach.
         if entity_map:
             try:
                 from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
-                kt_entities = [
-                    {
-                        "type": (e.entity_type.value if hasattr(e.entity_type, 'value') else str(e.entity_type)),
-                        "value": e.entity_value,
-                        "confidence": e.extraction_confidence,
-                        "attributes": {
-                            "domain": e.domain.value if hasattr(e.domain, 'value') else str(e.domain),
-                            "label": e.entity_label or e.entity_value,
-                        },
-                    }
-                    for e in entities
-                    if e.entity_value in entity_map
-                ]
+                # Build chunk list from entity context texts as a proxy for chunks
+                # (the full chunk list is not available here — use context windows)
+                chunk_texts = list({
+                    e.context_text for e in entities if e.context_text
+                })
+                # Fall back to a single content window if no context texts
+                if not chunk_texts:
+                    chunk_texts = [content[:4000]] if content else []
 
-                kt_result = await knowledge_tree_legal_client.store_entities(
-                    tenant_id=tenant_id,
-                    document_id=document_id,
-                    entities=kt_entities,
-                )
-
-                kt_stored = kt_result.get("entities_stored", 0)
-                if kt_stored > 0:
-                    logger.info(f"📊 Stored {kt_stored} entities in sector graph")
+                if chunk_texts:
+                    kt_result = await knowledge_tree_legal_client.extract_triples(
+                        tenant_id=tenant_id,
+                        document_id=document_id,
+                        chunks=chunk_texts,
+                    )
+                    triples_extracted = kt_result.get("triples_extracted", 0)
+                    logger.info(
+                        f"📊 TrustGraph extraction queued: "
+                        f"{triples_extracted} triples for document {document_id}"
+                    )
 
             except Exception as e:
-                logger.warning(f"⚠️ Failed to store entities in knowledge-tree: {e}")
+                logger.warning(f"⚠️ Failed to trigger TrustGraph extraction: {e}")
 
         logger.info(f"📦 Stored {len(entity_map)} entities in Weaviate")
         return entity_map

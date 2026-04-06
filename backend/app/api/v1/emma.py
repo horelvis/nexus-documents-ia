@@ -4,6 +4,7 @@ Dedicated router for Emma AI assistant, proxying to emma-agent-service.
 This replaces the legacy /weaviate/emma/* endpoints.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
+from fastapi.responses import Response
 import logging
 import httpx
 
@@ -1201,3 +1202,114 @@ async def emma_generated_info(
     except Exception as e:
         logger.error(f"❌ Generated doc info error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Explainability Endpoints (proxy to emma-agent-service /emma/explainability/*)
+# =============================================================================
+
+@router.get("/explainability/graph")
+async def explainability_graph(
+    request: Request,
+    tenant_id: str = Depends(get_current_tenant_id_async),
+):
+    """Full tenant knowledge graph for 3D visualization."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/explainability/graph",
+                params={"tenant_id": tenant_id},
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Explainability graph error: {e}")
+        raise HTTPException(status_code=502, detail="Explainability service unavailable")
+
+
+@router.get("/explainability/trace/{thread_id}/{message_index}")
+async def explainability_trace(
+    thread_id: str,
+    message_index: int,
+    current_user: User = Depends(get_current_user_async),
+):
+    """Per-response reasoning trace for the ReasoningModal."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/explainability/trace/{thread_id}/{message_index}",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Explainability trace error: {e}")
+        raise HTTPException(status_code=502, detail="Explainability service unavailable")
+
+
+# ── Knowledge Report Document Generation ──────────────────────────────
+
+
+@router.post("/reports/{report_id}/generate-document")
+async def report_generate_document(
+    report_id: str,
+    request: Request,
+    current_user: User = Depends(get_current_user_async),
+):
+    """Generate DOCX from a stored knowledge report. Proxies to Emma."""
+    try:
+        body = await request.json()
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+            response = await client.post(
+                f"{EMMA_SERVICE_URL}/emma/reports/{report_id}/generate-document",
+                json=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
+                },
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return response.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Report generate-document error: {e}")
+        raise HTTPException(status_code=502, detail="Report generation service unavailable")
+
+
+@router.get("/reports/{report_id}/download")
+async def report_download(
+    report_id: str,
+    current_user: User = Depends(get_current_user_async),
+):
+    """Download a generated report DOCX. Proxies to Emma."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+            response = await client.get(
+                f"{EMMA_SERVICE_URL}/emma/reports/{report_id}/download",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=response.text)
+            return Response(
+                content=response.content,
+                media_type=response.headers.get("content-type", "application/octet-stream"),
+                headers={
+                    "Content-Disposition": response.headers.get(
+                        "content-disposition", f'attachment; filename="report_{report_id}.docx"'
+                    ),
+                },
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Report download error: {e}")
+        raise HTTPException(status_code=502, detail="Report download service unavailable")

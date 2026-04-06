@@ -15,9 +15,9 @@ class Settings(BaseSettings):
     # Weaviate Service (for verification tasks)
     weaviate_service_url: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8007")
 
-    # vLLM configuration (for claim verification)
-    vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-4B-Thinking-2507")
+    # SGLang configuration (for claim verification)
+    sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+    sglang_model: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3-4B-Thinking-2507"))
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

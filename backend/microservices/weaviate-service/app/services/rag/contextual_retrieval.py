@@ -624,23 +624,23 @@ class ContextualRetrievalService:
         self._enabled = settings.contextual_retrieval_enabled if hasattr(settings, 'contextual_retrieval_enabled') else True
 
     async def _get_llm_client(self):
-        """Lazy load LLM client (calls vLLM directly via HTTP)."""
+        """Lazy load LLM client (calls SGLang directly via HTTP)."""
         if self._llm_client is None:
             try:
-                from app.services.rag.context_enricher import _call_vllm_chat
+                from app.services.rag.context_enricher import _call_sglang_chat
 
                 # Create a thin wrapper that matches the expected interface
-                class _VLLMWrapper:
+                class _SGLangWrapper:
                     async def chat(self, messages, temperature=0.3, max_tokens=200, **kwargs):
                         class _Response:
                             def __init__(self, text):
                                 self.content = text
-                        result = await _call_vllm_chat(messages, temperature, max_tokens)
+                        result = await _call_sglang_chat(messages, temperature, max_tokens)
                         return _Response(result)
 
-                self._llm_client = _VLLMWrapper()
+                self._llm_client = _SGLangWrapper()
             except Exception as e:
-                logger.warning(f"Failed to create vLLM client: {e}")
+                logger.warning(f"Failed to create SGLang client: {e}")
         return self._llm_client
 
     def detect_domain(

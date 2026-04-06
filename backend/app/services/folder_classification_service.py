@@ -10,10 +10,11 @@ Implements the Learn-First approach:
 
 Architecture:
 - RAG: Weaviate vector search for similar classified documents
-- LLM: vLLM (Qwen3-4B) for classification decision with structured output
+- LLM: SGLang (Qwen3-4B) for classification decision with structured output
 """
 
 import logging
+import os
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
@@ -63,8 +64,8 @@ class FolderClassificationService:
 
     DEFAULT_K = 7
     DEFAULT_MIN_CONFIDENCE = 0.6
-    VLLM_BASE_URL = "http://vllm:8000/v1"
-    VLLM_MODEL = "Qwen/Qwen3-4B"
+    SGLANG_BASE_URL = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+    SGLANG_MODEL = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3-4B"))
     WEAVIATE_SERVICE_URL = "http://weaviate-service:8000"
 
     def __init__(
@@ -72,13 +73,13 @@ class FolderClassificationService:
         tenant_id: str,
         k: int = None,
         min_confidence: float = None,
-        vllm_base_url: str = None,
+        sglang_base_url: str = None,
         weaviate_url: str = None,
     ):
         self.tenant_id = tenant_id
         self.k = k or self.DEFAULT_K
         self.min_confidence = min_confidence or self.DEFAULT_MIN_CONFIDENCE
-        self.vllm_base_url = vllm_base_url or self.VLLM_BASE_URL
+        self.sglang_base_url = sglang_base_url or self.SGLANG_BASE_URL
         self.weaviate_url = weaviate_url or self.WEAVIATE_SERVICE_URL
 
     async def get_similar_classified_documents(
@@ -225,9 +226,9 @@ JSON:"""
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
-                    f"{self.vllm_base_url}/chat/completions",
+                    f"{self.sglang_base_url}/chat/completions",
                     json={
-                        "model": self.VLLM_MODEL,
+                        "model": self.SGLANG_MODEL,
                         "messages": [
                             {"role": "user", "content": prompt}
                         ],
@@ -238,7 +239,7 @@ JSON:"""
                 )
 
                 if response.status_code != 200:
-                    logger.error(f"vLLM error: {response.status_code} - {response.text}")
+                    logger.error(f"SGLang error: {response.status_code} - {response.text}")
                     return ClassificationResult(
                         carpeta="/Sin Clasificar",
                         confianza=0.0,
@@ -252,7 +253,7 @@ JSON:"""
                 return self._parse_llm_response(llm_response)
 
         except httpx.HTTPError as e:
-            logger.error(f"HTTP error calling vLLM: {e}")
+            logger.error(f"HTTP error calling SGLang: {e}")
             return ClassificationResult(
                 carpeta="/Sin Clasificar",
                 confianza=0.0,

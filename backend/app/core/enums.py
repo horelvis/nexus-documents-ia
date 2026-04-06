@@ -219,7 +219,8 @@ class ChannelType(str, Enum):
 @unique
 class LLMProvider(str, Enum):
     """Supported LLM providers."""
-    VLLM = "vllm"
+    SGLANG = "sglang"
+    VLLM = "vllm"  # backward compat alias
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"

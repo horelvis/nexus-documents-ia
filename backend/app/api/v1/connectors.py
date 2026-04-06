@@ -112,10 +112,11 @@ async def _connector_to_response(
     users_syncing = users_syncing_result.scalar() or 0
 
     # Get document counts by status from IndexedDocument
+    # "pending" includes both 'pending' and 'processing' for UI progress tracking
     doc_counts = await db.execute(
         select(
             func.count(IndexedDocument.id).label("total"),
-            func.sum(func.cast(IndexedDocument.indexing_status == "pending", Integer)).label("pending"),
+            func.sum(func.cast(IndexedDocument.indexing_status.in_(["pending", "processing"]), Integer)).label("pending"),
             func.sum(func.cast(IndexedDocument.indexing_status == "indexed", Integer)).label("indexed"),
             func.sum(func.cast(IndexedDocument.indexing_status == "failed", Integer)).label("failed"),
         )
@@ -1097,7 +1098,7 @@ async def trigger_connector_sync(
     mcp_url = _get_mcp_url(connector.connector_type)
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 f"{mcp_url}/sync",
                 json={
@@ -1111,21 +1112,56 @@ async def trigger_connector_sync(
             result = response.json()
             task_id = result.get("job_id", "unknown")
 
+            # For full_sync, wait for the job to complete so that
+            # indexing_status is reset to 'pending' before the frontend
+            # calls index-pending.  Sync jobs typically take 1-5 seconds.
+            if full_sync and task_id != "unknown":
+                import asyncio
+                for _ in range(15):  # max 15 seconds wait
+                    await asyncio.sleep(1)
+                    try:
+                        job_resp = await client.get(
+                            f"{mcp_url}/jobs/{task_id}",
+                            headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+                        )
+                        if job_resp.status_code == 200:
+                            job_data = job_resp.json()
+                            if job_data.get("status") in ("completed", "failed"):
+                                break
+                    except Exception:
+                        pass  # poll failure is non-fatal
+
         sync_type = "full" if full_sync else "incremental"
         logger.info(
             f"Triggered sync for connector {connector_id}, "
             f"type={sync_type}, failed_reset={failed_reset_count}, task_id={task_id}"
         )
 
-        message = f"Sync ({sync_type}) queued for processing"
+        # Count pending documents so frontend knows how many will be indexed
+        pending_count = 0
+        if full_sync:
+            from app.db.models import IndexedDocument
+            pending_result = await db.execute(
+                select(func.count(IndexedDocument.id))
+                .where(IndexedDocument.connector_id == connector_id)
+                .where(IndexedDocument.indexing_status == "pending")
+            )
+            pending_count = pending_result.scalar() or 0
+
+        message = f"Sync ({sync_type}) completed"
+        if pending_count > 0:
+            message += f" — {pending_count} documents ready to index"
+        elif not full_sync:
+            message = f"Sync ({sync_type}) queued for processing"
         if failed_reset_count > 0:
             message += f" - reset {failed_reset_count} failed documents"
 
         return {
-            "status": "queued",
+            "status": "completed" if full_sync else "queued",
             "task_id": task_id,
             "connector_id": str(connector_id),
             "failed_reset": failed_reset_count,
+            "pending_count": pending_count,
             "message": message,
         }
 

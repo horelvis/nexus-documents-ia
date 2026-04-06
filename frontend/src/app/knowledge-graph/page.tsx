@@ -1,8 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import dynamic from "next/dynamic"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import {
   IconNetwork,
   IconLoader2,
@@ -18,48 +17,30 @@ import {
 } from "@/components/ui"
 import { useAuth } from "@/contexts/auth-context"
 import { AppSidebar } from "@/components/layout/app-sidebar"
-import { explainabilityApi } from "@/lib/services/explainability.service"
-import type { ExplainNode, ExplainLink } from "./components/explainability-theme"
-import { ExplainabilityStatsBar } from "./components/ExplainabilityStatsBar"
+import {
+  knowledgeTreeApi,
+  buildTrustGraphData,
+  type TrustGraphNode,
+  type TrustGraphEdge,
+  type EntityProperty,
+  type Contradiction,
+} from "@/lib/services/knowledge-tree.service"
+import { EntitySearchBar } from "@/components/graph/EntitySearchBar"
 import { ExplainabilityLegend } from "./components/ExplainabilityLegend"
-import { ExplainabilitySearchBar } from "./components/ExplainabilitySearchBar"
+import { GraphCanvas2D } from "./components/GraphCanvas2D"
 import { NodeDetailsDrawer } from "./components/NodeDetailsDrawer"
-
-// Dynamic import to avoid SSR issues with Three.js / WebGL
-const ExplainabilityGraph3D = dynamic(
-  () => import("./components/ExplainabilityGraph3D"),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="flex-1 flex items-center justify-center bg-[#07090f]">
-        <div className="flex flex-col items-center gap-3">
-          <IconLoader2 className="h-6 w-6 animate-spin text-cyan-500/60" />
-          <span className="text-[11px] text-slate-600 tracking-widest uppercase">
-            Cargando grafo 3D...
-          </span>
-        </div>
-      </div>
-    ),
-  }
-)
-
-interface GraphStats {
-  total_entities: number
-  total_documents: number
-  total_claims: number
-  total_laws: number
-  total_contradictions: number
-}
 
 export default function KnowledgeGraphPage() {
   const { isLoaded, isAuthenticated, tenantId } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   // ── State ──
-  const [nodes, setNodes] = useState<ExplainNode[]>([])
-  const [links, setLinks] = useState<ExplainLink[]>([])
-  const [stats, setStats] = useState<GraphStats | null>(null)
-  const [selectedNode, setSelectedNode] = useState<ExplainNode | null>(null)
+  const [nodes, setNodes] = useState<TrustGraphNode[]>([])
+  const [links, setLinks] = useState<TrustGraphEdge[]>([])
+  const [properties, setProperties] = useState<Map<string, EntityProperty[]>>(new Map())
+  const [contradictions, setContradictions] = useState<Contradiction[]>([])
+  const [selectedNode, setSelectedNode] = useState<TrustGraphNode | null>(null)
   const [highlightedIds, setHighlightedIds] = useState<Set<string> | null>(null)
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -70,12 +51,21 @@ export default function KnowledgeGraphPage() {
     if (isLoaded && !isAuthenticated) router.push("/auth/sign-in")
   }, [isLoaded, isAuthenticated, router])
 
+  // ── Deep-link: ?entity= from chat entity tags ──
+  const initialEntity = searchParams.get("entity")
+
   // ── Load data ──
   useEffect(() => {
-    if (isLoaded && isAuthenticated) loadData()
-  }, [isLoaded, isAuthenticated]) // eslint-disable-line react-hooks/exhaustive-deps
+    if (isLoaded && isAuthenticated && tenantId) {
+      if (initialEntity) {
+        loadGraph([decodeURIComponent(initialEntity)])
+      } else {
+        loadGraph()
+      }
+    }
+  }, [isLoaded, isAuthenticated, tenantId, initialEntity]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadData() {
+  async function loadGraph(seedUris?: string[]) {
     if (!tenantId) return
     setIsLoading(true)
     setError(null)
@@ -83,22 +73,32 @@ export default function KnowledgeGraphPage() {
     setHighlightedIds(null)
     setFocusNodeId(null)
     try {
-      const res = await explainabilityApi.getExplainabilityGraph(tenantId)
-      if (res.error) {
-        setError(res.error)
-        return
+      // If no seeds provided, fetch top entities by degree centrality
+      let seeds = seedUris ?? []
+      if (seeds.length === 0) {
+        const topEntities = await knowledgeTreeApi.getTopEntities(tenantId, 5)
+        seeds = topEntities.map((e) => e.uri)
       }
-      const data = res.data
-      if (!data || data.nodes.length === 0) {
+      if (seeds.length === 0) {
         setNodes([])
         setLinks([])
-        setStats(null)
+        setIsLoading(false)
         return
       }
-      // Map API types to ExplainNode / ExplainLink (shapes match directly)
-      setNodes(data.nodes as unknown as ExplainNode[])
-      setLinks(data.edges as unknown as ExplainLink[])
-      setStats(data.stats)
+      const response = await knowledgeTreeApi.getTripleNeighbors(
+        tenantId, seeds, 2, 150,
+        ['prov/.*', '.*/contradiction-subject'],
+      )
+      const { nodes: n, edges: e, properties: props, contradictions: contras } = buildTrustGraphData(response.edges)
+      setNodes(n)
+      setLinks(e)
+      setProperties(props)
+      setContradictions(contras)
+
+      // If loaded from entity deep-link, focus on the seed
+      if (seedUris?.length === 1) {
+        setFocusNodeId(seedUris[0])
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar el grafo")
     } finally {
@@ -107,7 +107,7 @@ export default function KnowledgeGraphPage() {
   }
 
   // ── Node click → open drawer ──
-  function handleNodeClick(node: ExplainNode | null) {
+  function handleNodeClick(node: TrustGraphNode | null) {
     if (!node) {
       setSelectedNode(null)
       return
@@ -116,21 +116,15 @@ export default function KnowledgeGraphPage() {
   }
 
   // ── Navigate to a related node ──
-  function handleNavigate(nodeId: string) {
-    const target = nodes.find((n) => n.id === nodeId)
+  function handleNavigate(nodeUri: string) {
+    const target = nodes.find((n) => n.id === nodeUri)
     if (target) {
       setSelectedNode(target)
-      setFocusNodeId(nodeId)
+      setFocusNodeId(nodeUri)
+    } else {
+      // Entity not in current subgraph — reload centered on it
+      loadGraph([nodeUri])
     }
-  }
-
-  // ── Search filter ──
-  function handleFilter(ids: Set<string> | null) {
-    setHighlightedIds(ids)
-  }
-
-  function handleFocus(nodeId: string) {
-    setFocusNodeId(nodeId)
   }
 
   // ── Auth loading guard ──
@@ -167,16 +161,20 @@ export default function KnowledgeGraphPage() {
           </div>
 
           {/* Stats inline */}
-          {stats && (
-            <div className="ml-3 flex-1 overflow-x-auto">
-              <ExplainabilityStatsBar stats={stats} />
+          {nodes.length > 0 && (
+            <div className="ml-3 flex items-center gap-3 text-[10px] text-slate-500 font-mono">
+              <span>{nodes.length} nodos</span>
+              <span>{links.length} relaciones</span>
+              {contradictions.length > 0 && (
+                <span className="text-rose-400">{contradictions.length} conflictos</span>
+              )}
             </div>
           )}
 
           {/* Refresh */}
           <div className="ml-auto">
             <button
-              onClick={loadData}
+              onClick={() => loadGraph()}
               disabled={isLoading}
               className="flex items-center justify-center h-7 w-7 rounded-md border border-white/[0.06] text-slate-500 hover:text-slate-300 hover:bg-white/[0.04] transition-colors disabled:opacity-40"
               title="Recargar"
@@ -223,7 +221,7 @@ export default function KnowledgeGraphPage() {
                 </div>
               </div>
             ) : (
-              <ExplainabilityGraph3D
+              <GraphCanvas2D
                 nodes={nodes}
                 links={links}
                 highlightedIds={highlightedIds}
@@ -233,12 +231,14 @@ export default function KnowledgeGraphPage() {
               />
             )}
 
-            {/* Search — top left overlay */}
-            {!isLoading && nodes.length > 0 && (
-              <ExplainabilitySearchBar
-                nodes={nodes}
-                onFilter={handleFilter}
-                onFocus={handleFocus}
+            {/* Entity search — top left overlay */}
+            {!isLoading && tenantId && (
+              <EntitySearchBar
+                tenantId={tenantId}
+                onSelect={(entity) => {
+                  loadGraph([entity.entity_uri])
+                }}
+                className="absolute top-4 left-4 w-72 z-10"
               />
             )}
 
@@ -247,11 +247,13 @@ export default function KnowledgeGraphPage() {
           </div>
         </main>
 
-        {/* Node details drawer — rendered outside main so it slides over correctly */}
+        {/* Node details drawer */}
         <NodeDetailsDrawer
           node={selectedNode}
           edges={links}
           allNodes={nodes}
+          properties={selectedNode ? (properties.get(selectedNode.id) ?? []) : []}
+          contradictions={contradictions}
           onClose={() => setSelectedNode(null)}
           onNavigate={handleNavigate}
         />

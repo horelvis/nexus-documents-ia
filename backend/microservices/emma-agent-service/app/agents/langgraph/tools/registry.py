@@ -57,6 +57,7 @@ class ToolRegistry:
         from .smart_search import SmartSearchTool
         from .search import GetDocumentContentTool
         from .graph import StructuralQueryTool
+        from .graph_rag import GraphRAGTool
         from .specialists import AnalyzeDomainTool
         from .web import WebSearchTool
         from .discovery import ListSourcesTool
@@ -67,9 +68,11 @@ class ToolRegistry:
         from .forge_document import ForgeDocumentTool
         from .verified_generation import VerifiedGenerationTool
         from .predictive_analysis import PredictiveAnalysisTool
+        from .knowledge_report import KnowledgeReportTool
 
         tools: List[EmmaTool] = [
             SmartSearchTool(),         # Replaces SearchDocuments + SearchLegislation
+            GraphRAGTool(),            # Graph RAG: entity relationships via knowledge graph
             GetDocumentContentTool(),
             StructuralQueryTool(),
             AnalyzeDomainTool(),
@@ -82,6 +85,7 @@ class ToolRegistry:
             SendEmailTool(),
             VerifiedGenerationTool(),  # Sub-graph: claim-by-claim verified document
             PredictiveAnalysisTool(),  # Sub-graph: factor extraction + prediction
+            KnowledgeReportTool(),     # Phase 3c: structured reports from knowledge graph
             TerminateTool(),  # Always last — the agent's "I'm done" signal
         ]
 
@@ -126,31 +130,20 @@ class ToolRegistry:
         available: List[EmmaTool] = []
         excluded: Set[str] = set()
 
-        # Check sector agent availability
-        has_specialists = True  # Default: all sectors have at least general analysis
-
-        if sector:
-            from ..sectors.registry import SECTOR_CONFIGS
-            sector_config = SECTOR_CONFIGS.get(sector)
-            if sector_config:
-                sector_agents = set(sector_config.agents)
-                has_specialists = len(sector_agents) > 0
-
         for tool in self._tools.values():
             name = tool.name
 
-            # Always include these
+            # Always include core tools
             if name in ("terminate", "smart_search", "get_document_content",
-                        "structural_query", "list_sources"):
+                        "structural_query", "list_sources", "analyze_domain",
+                        "graph_rag"):
                 available.append(tool)
                 continue
 
-            # Conditional tools
-            if name == "analyze_domain" and has_specialists:
+            # Feature-gated tools
+            if name == "web_search" and features.get("web_search_enabled", False):
                 available.append(tool)
-            elif name == "web_search" and features.get("web_search_enabled", False):
-                available.append(tool)
-            elif name == "search_jurisprudence" and features.get("cendoj_enabled", False) and sector == "legal":
+            elif name == "search_jurisprudence" and features.get("cendoj_enabled", False):
                 available.append(tool)
             elif name == "query_connector" and features.get("connectors_enabled", False):
                 available.append(tool)
@@ -160,7 +153,7 @@ class ToolRegistry:
                 available.append(tool)
             elif name == "send_email" and features.get("email_enabled", True):
                 available.append(tool)
-            elif name not in ("analyze_domain", "web_search", "search_jurisprudence",
+            elif name not in ("web_search", "search_jurisprudence",
                               "query_connector", "generate_document", "forge_document",
                               "send_email"):
                 # Unknown tool — include by default

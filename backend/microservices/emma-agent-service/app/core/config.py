@@ -16,10 +16,10 @@ class Settings(BaseSettings):
     service_port: int = 8009
 
     # ==========================================================================
-    # Active Sector (Multi-Pipeline RAG)
+    # RAG Configuration (unified — knowledge graph provides dynamic context)
     # ==========================================================================
-    # Set before data ingestion. Valid: legal, medical, documental, or empty for generic mode.
-    # Changing sector requires clearing Weaviate collections + AGE graph.
+    # ACTIVE_SECTOR is deprecated — unified config is used for all domains.
+    # Kept for backwards compat with env files.
     active_sector: str = os.getenv("ACTIVE_SECTOR", "")
 
     MICROSERVICES_API_KEY: str = Field(
@@ -45,35 +45,40 @@ class Settings(BaseSettings):
     # LLM Configuration
     # ==========================================================================
     agents_enabled: bool = os.getenv("AGENTS_ENABLED", "true").lower() == "true"
-    llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
+    llm_provider: str = os.getenv("LLM_PROVIDER", "sglang").lower()
 
-    # SGLang configuration — Single-Model Dual-Phase (Qwen3.5-9B)
-    # One model, two behavioral phases controlled by temperature + thinking:
+    @property
+    def llm_provider_normalized(self) -> str:
+        """Normalize 'vllm' → 'sglang' for backwards compat."""
+        return "sglang" if self.llm_provider == "vllm" else self.llm_provider
+
+    # LLM Inference — Single-Model Dual-Phase (Qwen3.5-9B)
+    # One model, two behavioral phases controlled by temperature:
     # PLANNER phase: temp=0.3, no thinking → fast routing, tool calling, classification
-    # CHAT phase: temp=0.6, thinking on → reasoning, synthesis, final responses
-    # Runtime: SGLang v0.5.9 | Set VLLM_DUAL_MODEL=true for separate planner model
-    vllm_enabled: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
-    vllm_dual_model: bool = os.getenv("VLLM_DUAL_MODEL", "false").lower() == "true"
+    # CHAT phase: temp=0.6 → reasoning, synthesis, final responses
+    # Runtime: vLLM v0.18.0 (FlashAttention 4, prefix caching, kv-cache fp8)
+    sglang_enabled: bool = os.getenv("SGLANG_ENABLED", os.getenv("VLLM_ENABLED", "true")).lower() == "true"
+    sglang_dual_model: bool = os.getenv("SGLANG_DUAL_MODEL", os.getenv("VLLM_DUAL_MODEL", "false")).lower() == "true"
 
     # Chat model (Qwen3.5-9B) — quality generation
-    vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B")
-    vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "16384"))
-    vllm_temperature: float = float(os.getenv("VLLM_TEMPERATURE", "0.6"))
-    vllm_enable_thinking: bool = os.getenv("VLLM_ENABLE_THINKING", "false").lower() == "true"
-    vllm_thinking_budget: int = int(os.getenv("VLLM_THINKING_BUDGET", "4096"))
+    sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+    sglang_model: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "QuantTrio/Qwen3.5-27B-AWQ"))
+    sglang_max_tokens: int = int(os.getenv("SGLANG_MAX_TOKENS", os.getenv("VLLM_MAX_TOKENS", "16384")))
+    sglang_temperature: float = float(os.getenv("SGLANG_TEMPERATURE", os.getenv("VLLM_TEMPERATURE", "0.6")))
+    sglang_enable_thinking: bool = os.getenv("SGLANG_ENABLE_THINKING", os.getenv("VLLM_ENABLE_THINKING", "false")).lower() == "true"
+    sglang_thinking_budget: int = int(os.getenv("SGLANG_THINKING_BUDGET", os.getenv("VLLM_THINKING_BUDGET", "4096")))
 
     # Planner parameters — always used for ModelRole.PLANNER regardless of dual_model
-    # dual_model=true: separate SGLang instance at vllm_planner_url
+    # dual_model=true: separate SGLang instance at sglang_planner_url
     # dual_model=false: same model, these temp/max_tokens override chat defaults
-    vllm_planner_url: str = os.getenv("VLLM_PLANNER_URL", os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1"))
-    vllm_planner_model: str = os.getenv("VLLM_PLANNER_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B"))
-    vllm_planner_max_tokens: int = int(os.getenv("VLLM_PLANNER_MAX_TOKENS", "4096"))
-    vllm_planner_temperature: float = float(os.getenv("VLLM_PLANNER_TEMPERATURE", "0.3"))
+    sglang_planner_url: str = os.getenv("SGLANG_PLANNER_URL", os.getenv("VLLM_PLANNER_URL", os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))))
+    sglang_planner_model: str = os.getenv("SGLANG_PLANNER_MODEL", os.getenv("VLLM_PLANNER_MODEL", os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "QuantTrio/Qwen3.5-27B-AWQ"))))
+    sglang_planner_max_tokens: int = int(os.getenv("SGLANG_PLANNER_MAX_TOKENS", os.getenv("VLLM_PLANNER_MAX_TOKENS", "4096")))
+    sglang_planner_temperature: float = float(os.getenv("SGLANG_PLANNER_TEMPERATURE", os.getenv("VLLM_PLANNER_TEMPERATURE", "0.3")))
 
-    # LLM Layer (ChatOpenAI) — aliases for backwards compatibility with VLLM_* vars
-    llm_base_url: str = os.getenv("LLM_BASE_URL", os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1"))
-    llm_model: str = os.getenv("LLM_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3.5-9B"))
+    # LLM Layer (ChatOpenAI) — aliases for backwards compatibility with SGLANG_*/VLLM_* vars
+    llm_base_url: str = os.getenv("LLM_BASE_URL", os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1")))
+    llm_model: str = os.getenv("LLM_MODEL", os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "QuantTrio/Qwen3.5-27B-AWQ")))
     llm_api_key: str = os.getenv("LLM_API_KEY", "not-needed")
     planner_temperature: float = float(os.getenv("PLANNER_TEMPERATURE", "0.3"))
     planner_max_tokens: int = int(os.getenv("PLANNER_MAX_TOKENS", "4096"))
@@ -106,7 +111,7 @@ class Settings(BaseSettings):
 
     # LLM Fallback Configuration (automatic failover between providers)
     llm_fallback_enabled: bool = os.getenv("LLM_FALLBACK_ENABLED", "false").lower() == "true"
-    llm_fallback_chain: str = os.getenv("LLM_FALLBACK_CHAIN", "vllm,openrouter,openai")
+    llm_fallback_chain: str = os.getenv("LLM_FALLBACK_CHAIN", "sglang,openrouter,openai")
 
     # ==========================================================================
     # Redis Configuration (for sessions and caching)
@@ -124,7 +129,7 @@ class Settings(BaseSettings):
 
     default_workflow: str = os.getenv("DEFAULT_WORKFLOW", "auto")
     agent_max_turns: int = int(os.getenv("AGENT_MAX_TURNS", "15"))
-    agent_timeout_seconds: int = int(os.getenv("AGENT_TIMEOUT_SECONDS", "300"))
+    agent_timeout_seconds: int = int(os.getenv("AGENT_TIMEOUT_SECONDS", "600"))
     agent_fallback_to_rag: bool = os.getenv("AGENT_FALLBACK_TO_RAG", "true").lower() == "true"
 
     # Concurrency Control
@@ -156,12 +161,38 @@ class Settings(BaseSettings):
     # SmartSearch — Retrieval Intelligence (inline feedback)
     smart_search_feedback_enabled: bool = os.getenv("SMART_SEARCH_FEEDBACK_ENABLED", "true").lower() == "true"
 
-    # GraphRAG — Multi-hop subgraph extraction (Phase 5, replaces flat graph expansion)
+    # GraphRAG — Phase 1 (deprecated — use graph_rag_* for Phase 2)
+    # Multi-hop subgraph extraction (Phase 5, replaces flat graph expansion)
     graphrag_enabled: bool = os.getenv("GRAPHRAG_ENABLED", "true").lower() == "true"
     graphrag_max_hops: int = int(os.getenv("GRAPHRAG_MAX_HOPS", "2"))
     graphrag_max_nodes: int = int(os.getenv("GRAPHRAG_MAX_NODES", "30"))
     graphrag_include_legal: bool = os.getenv("GRAPHRAG_INCLUDE_LEGAL", "true").lower() == "true"
     graphrag_token_budget: int = int(os.getenv("GRAPHRAG_TOKEN_BUDGET", "1500"))
+
+    # ── Graph RAG Phase 2 ─────────────────────────────────────────
+    graph_rag_enabled: bool = os.getenv("GRAPH_RAG_ENABLED", "true").lower() == "true"
+    graph_rag_entity_limit: int = int(os.getenv("GRAPH_RAG_ENTITY_LIMIT", "50"))
+    graph_rag_max_hops: int = int(os.getenv("GRAPH_RAG_MAX_HOPS", "2"))
+    graph_rag_max_edges: int = int(os.getenv("GRAPH_RAG_MAX_EDGES", "150"))
+    graph_rag_edge_limit: int = int(os.getenv("GRAPH_RAG_EDGE_LIMIT", "25"))
+    graph_rag_prefilter_limit: int = int(os.getenv("GRAPH_RAG_PREFILTER_LIMIT", "30"))
+    graph_rag_label_cache_ttl: int = int(os.getenv("GRAPH_RAG_LABEL_CACHE_TTL", "300"))
+    graph_rag_confidence_threshold: float = float(os.getenv("GRAPH_RAG_CONFIDENCE_THRESHOLD", "0.30"))
+
+    # Phase 3b: Smart Traversal
+    authority_weights_enabled: bool = os.getenv("AUTHORITY_WEIGHTS_ENABLED", "true").lower() == "true"
+    guided_expansion_enabled: bool = os.getenv("GUIDED_EXPANSION_ENABLED", "true").lower() == "true"
+    guided_expansion_max_hops: int = int(os.getenv("GUIDED_EXPANSION_MAX_HOPS", "2"))
+    consensus_scoring_enabled: bool = os.getenv("CONSENSUS_SCORING_ENABLED", "true").lower() == "true"
+
+    # Phase 3c: Knowledge Expert
+    report_generation_enabled: bool = os.getenv("REPORT_GENERATION_ENABLED", "true").lower() == "true"
+
+    # SmartSearch multi-concept (Phase 2)
+    smart_search_multi_concept: bool = os.getenv("SMART_SEARCH_MULTI_CONCEPT", "true").lower() == "true"
+
+    # Retrieval provenance tracking
+    retrieval_provenance_enabled: bool = os.getenv("RETRIEVAL_PROVENANCE_ENABLED", "true").lower() == "true"
 
     # Graph Context — inject structural context into react_loop system prompt
     graph_context_enabled: bool = os.getenv("GRAPH_CONTEXT_ENABLED", "true").lower() == "true"
@@ -171,7 +202,7 @@ class Settings(BaseSettings):
 
     # SmartSearch — Cross-Encoder Reranking (neural, FlashRank CPU)
     smart_search_cross_encoder_enabled: bool = os.getenv("SMART_SEARCH_CROSS_ENCODER_ENABLED", "true").lower() == "true"
-    smart_search_cross_encoder_model: str = os.getenv("SMART_SEARCH_CROSS_ENCODER_MODEL", "ms-marco-MiniLM-L-12-v2")
+    smart_search_cross_encoder_model: str = os.getenv("SMART_SEARCH_CROSS_ENCODER_MODEL", "ms-marco-MultiBERT-L-12")
     smart_search_cross_encoder_weight: float = float(os.getenv("SMART_SEARCH_CROSS_ENCODER_WEIGHT", "0.6"))
 
     # CRAG Quality Gates — prevent hallucination and premature termination
@@ -213,8 +244,8 @@ class Settings(BaseSettings):
     # LLM Fallback
     llm_retry_delay_seconds: float = float(os.getenv("LLM_RETRY_DELAY_SECONDS", "0.5"))
 
-    # Agent Fallback Timeouts (factor_agent, writer_agent raw vLLM calls)
-    agent_raw_vllm_timeout_seconds: float = float(os.getenv("AGENT_RAW_VLLM_TIMEOUT_SECONDS", "60"))
+    # Agent Fallback Timeouts (factor_agent, writer_agent raw SGLang calls)
+    agent_raw_sglang_timeout_seconds: float = float(os.getenv("AGENT_RAW_SGLANG_TIMEOUT_SECONDS", os.getenv("AGENT_RAW_VLLM_TIMEOUT_SECONDS", "60")))
 
     # Visualization settings
     enable_dynamic_display: bool = os.getenv("ENABLE_DYNAMIC_DISPLAY", "true").lower() == "true"
@@ -257,8 +288,8 @@ class Settings(BaseSettings):
     knowledge_tree_service_url: str = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree-service:8011")
     knowledge_tree_service_timeout: int = int(os.getenv("KNOWLEDGE_TREE_SERVICE_TIMEOUT", "30"))
 
-    # Text Extraction Service (for uploaded files)
-    text_extraction_service_url: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://textextract-service:8000")
+    # Intelligence Docs Service (text extraction for uploaded files)
+    text_extraction_service_url: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://intelligence-docs-service:8000")
     text_extraction_service_timeout: int = int(os.getenv("TEXT_EXTRACTION_SERVICE_TIMEOUT", "60"))
 
     # Database (for session persistence)

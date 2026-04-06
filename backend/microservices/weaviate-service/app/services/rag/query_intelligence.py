@@ -348,25 +348,10 @@ class QueryIntelligence:
         return unique_terms[:10]  # Limit to 10 key terms
 
     async def _generate_embeddings(self, text: str) -> Optional[List[float]]:
-        """Generate embeddings via TEI (Text Embeddings Inference)"""
+        """Generate embeddings via intelligence-docs-service."""
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    f"{self._tei_url}/embed",
-                    json={
-                        "inputs": text,
-                        "truncate": True
-                    }
-                )
-                if response.status_code == 200:
-                    embeddings = response.json()
-                    # TEI returns a list of embeddings, we want the first one
-                    if embeddings and len(embeddings) > 0:
-                        return embeddings[0]
-                    return None
-                else:
-                    logger.warning(f"TEI embedding failed: {response.status_code}")
-                    return None
+            from app.clients import intelligence_client
+            return await intelligence_client.embed(text, task="retrieval.query")
         except Exception as e:
             logger.warning(f"Could not generate embeddings: {e}")
             return None

@@ -49,7 +49,7 @@ function StepRow({ step }: { step: ActivityStep }) {
         ) : (
           <>
             <Icon className="h-3.5 w-3.5 text-blue-400" />
-            <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+            <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-blue-400" />
           </>
         )}
       </div>
@@ -98,7 +98,7 @@ export function ActivityTimeline({ steps, isStreaming, executionTimeMs, classNam
         <IconListCheck className="h-3.5 w-3.5" />
         <span className="font-medium">{headerText}</span>
         {isStreaming && (
-          <span className="ml-auto h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+          <span className="ml-auto h-1.5 w-1.5 rounded-full bg-blue-500" />
         )}
       </button>
 
@@ -111,7 +111,7 @@ export function ActivityTimeline({ steps, isStreaming, executionTimeMs, classNam
             <div className="flex items-center gap-2 animate-in fade-in-50 duration-300">
               <div className="relative flex-shrink-0">
                 <IconPencil className="h-3.5 w-3.5 text-blue-400" />
-                <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+                <span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-blue-400" />
               </div>
               <span className="text-xs font-semibold text-foreground leading-tight">
                 Redactando respuesta...

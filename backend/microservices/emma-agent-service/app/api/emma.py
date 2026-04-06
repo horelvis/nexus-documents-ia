@@ -173,7 +173,7 @@ class EmmaQuery(BaseModel):
 class EmmaQueryResponse(BaseModel):
     """Response from Emma."""
     success: bool
-    answer: str
+    answer: str = ""
     domain: str = "general"
     tools_called: List[str] = Field(default_factory=list)
     iterations: int = 0
@@ -466,6 +466,18 @@ async def _generate_langgraph_sse(
     try:
         step_counter = 0
         first_token_sent = False
+        reasoning_steps: list[dict] = []  # Collect for persistence
+
+        def _track_step(step_type: str, content: str, detail: str = ""):
+            """Append reasoning step for later persistence."""
+            import time
+            reasoning_steps.append({
+                "step": step_counter,
+                "type": step_type,
+                "content": content,
+                "detail": detail,
+                "timestamp_ms": int(time.time() * 1000),
+            })
         # Session loaded for document context restoration and TTL extension.
         # Conversation history is NO LONGER loaded here — PostgresSaver
         # checkpointer restores previous messages automatically from its
@@ -504,6 +516,7 @@ async def _generate_langgraph_sse(
             elif event_type == "retrieve_complete":
                 doc_count = data.get("doc_count", 0)
                 step_counter += 1
+                _track_step("search_result", f"{doc_count} documentos recuperados")
                 yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'search_result', 'content': f'{doc_count} documentos recuperados', 'isThinking': True})}\n\n"
                 yield f"event: progress\ndata: {_dumps({'message': f'Recuperados {doc_count} documentos', 'stage': 'retrieval', 'progress': 20})}\n\n"
 
@@ -514,9 +527,11 @@ async def _generate_langgraph_sse(
 
                 # Emit reasoning steps for traceability
                 step_counter += 1
+                _track_step("analyzing", f'Dominios detectados: {", ".join(domains)}')
                 yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Dominios detectados: {", ".join(domains)}', 'isThinking': True})}\n\n"
 
                 step_counter += 1
+                _track_step("preparing", f'Agentes seleccionados: {", ".join(agents)}')
                 yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'preparing', 'content': f'Agentes seleccionados: {", ".join(agents)}', 'isThinking': True})}\n\n"
 
                 # Emit plan ready
@@ -539,11 +554,13 @@ async def _generate_langgraph_sse(
                 }.get(agent_name, agent_name)
 
                 step_counter += 1
+                _track_step("analyzing", f"Ejecutando {agent_display}...")
                 yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'analyzing', 'content': f'Ejecutando {agent_display}...', 'isThinking': True})}\n\n"
 
             elif event_type == "structural_step":
                 # Reasoning step from structural query tool
                 step_counter += 1
+                _track_step("querying", data.get("content", ""))
                 yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'querying', 'content': data.get('content', ''), 'detail': data.get('content', ''), 'isThinking': True})}\n\n"
 
             elif event_type == "agent_complete":
@@ -559,6 +576,7 @@ async def _generate_langgraph_sse(
                     # Truncate to first sentence, max 100 chars
                     first_sentence = _re.split(r'[.\n]', content.strip())[0][:100]
                     step_counter += 1
+                    _track_step("thinking", first_sentence, content)
                     yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'thinking', 'content': first_sentence, 'detail': content, 'isThinking': True})}\n\n"
 
             elif event_type == "tool_call":
@@ -566,6 +584,7 @@ async def _generate_langgraph_sse(
                 if content:
                     action_type, human_text, detail = _humanize_tool_call(content)
                     step_counter += 1
+                    _track_step(action_type, human_text, detail)
                     yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'isThinking': True})}\n\n"
 
             elif event_type == "tool_result":
@@ -574,6 +593,7 @@ async def _generate_langgraph_sse(
                     source = data.get("source", "")
                     action_type, human_text, detail = _humanize_observation(content, source)
                     step_counter += 1
+                    _track_step(action_type, human_text, detail)
                     yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': action_type, 'content': human_text, 'detail': detail, 'isThinking': True})}\n\n"
 
             elif event_type == "reasoning_step":
@@ -597,12 +617,14 @@ async def _generate_langgraph_sse(
                         "connector": "connecting", "transformation": "analyzing",
                     }.get(step_type, step_type)
                     step_counter += 1
+                    _track_step(semantic_type, content)
                     yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': semantic_type, 'content': content, 'isThinking': True})}\n\n"
 
             # Swarm events (parallel sub-agent execution)
             elif event_type == "swarm_started":
                 num_workers = data.get("num_workers", 0)
                 step_counter += 1
+                _track_step("swarm_decompose", f"Descomponiendo en {num_workers} tareas paralelas...")
                 yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'swarm_decompose', 'content': f'Descomponiendo en {num_workers} tareas paralelas...', 'isThinking': True})}\n\n"
                 yield f"event: swarm_started\ndata: {_dumps(data)}\n\n"
 
@@ -623,6 +645,33 @@ async def _generate_langgraph_sse(
                 step_counter += 1
                 yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'swarm_synthesize', 'content': f'Sintetizando resultados de {successful_count} agentes...', 'isThinking': True})}\n\n"
                 yield f"event: progress\ndata: {_dumps({'message': 'Sintetizando resultados...', 'stage': 'synthesizing', 'progress': 80})}\n\n"
+
+            elif event_type.startswith("report."):
+                # Knowledge report progressive events
+                stage_labels = {
+                    "report.assembling": "Recopilando datos del grafo...",
+                    "report.generating": "Generando informe...",
+                    "report.kpi": None,
+                    "report.complete": None,
+                }
+                if event_type == "report.complete":
+                    step_counter += 1
+                    _track_step("report_complete", "Informe generado")
+                    yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'report_complete', 'content': 'Informe generado', 'isThinking': True})}\n\n"
+                    yield f"event: report_complete\ndata: {_dumps(data)}\n\n"
+                elif event_type == "report.kpi":
+                    kpi_name = data.get("description") or data.get("name", "")
+                    kpi_value = data.get("value", "")
+                    step_counter += 1
+                    _track_step("report_kpi", f"{kpi_name}: {kpi_value}")
+                    yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'report_kpi', 'content': f'KPI: {kpi_name} = {kpi_value}', 'isThinking': True})}\n\n"
+                    yield f"event: report_kpi\ndata: {_dumps(data)}\n\n"
+                else:
+                    label = stage_labels.get(event_type)
+                    if label:
+                        step_counter += 1
+                        _track_step("report_progress", label)
+                        yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'report_progress', 'content': label, 'isThinking': True})}\n\n"
 
             elif event_type == "token":
                 # Stream tokens for real-time text display
@@ -649,6 +698,28 @@ async def _generate_langgraph_sse(
 
             elif event_type == "complete":
                 metadata = data.get("metadata", {})
+
+                # Persist reasoning trace to Redis (fire-and-forget)
+                if reasoning_steps:
+                    try:
+                        import redis.asyncio as aioredis
+                        r = aioredis.from_url(settings.redis_url, decode_responses=True)
+                        trace_key = f"reasoning_trace:{thread_id}:{step_counter}"
+                        trace_data = {
+                            "thread_id": thread_id,
+                            "message_index": step_counter,
+                            "timeline": reasoning_steps,
+                            "tools_used": data.get("agents_used", []),
+                            "total_execution_ms": data.get("latency_ms", 0),
+                            "sources_cited": len(data.get("sources", [])),
+                        }
+                        await r.set(trace_key, json.dumps(trace_data), ex=86400)  # 24h TTL
+                        # Also store latest message index for this thread
+                        await r.set(f"reasoning_trace:{thread_id}:latest", str(step_counter), ex=86400)
+                        await r.close()
+                    except Exception as e:
+                        logger.warning(f"Failed to persist reasoning trace: {e}")
+
                 # Normal completion — final result
                 suggestions = _generate_contextual_suggestions(
                     query.query,

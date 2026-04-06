@@ -2,13 +2,13 @@
 Celery tasks for claim verification.
 
 Implements the "Verifier" component of the Agent Self-Verifies pattern.
-Each task searches Weaviate for evidence and uses vLLM to evaluate
+Each task searches Weaviate for evidence and uses SGLang to evaluate
 whether the evidence supports the given claim.
 
 Task Flow:
     1. Receive claim text and context
     2. Search Weaviate for relevant evidence (hybrid search)
-    3. Use vLLM to evaluate if evidence supports the claim
+    3. Use SGLang to evaluate if evidence supports the claim
     4. If rejected but correctable, generate a correction
     5. Return VerificationResult
 """
@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 
 # Configuration from environment
 WEAVIATE_SERVICE_URL = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
-VLLM_BASE_URL = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-VLLM_MODEL = os.getenv("VLLM_MODEL", "Qwen/Qwen3-4B")
+SGLANG_BASE_URL = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+SGLANG_MODEL = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3-4B"))
 MICROSERVICES_API_KEY = os.getenv("MICROSERVICES_API_KEY", "")
 
 # Web Search for supplementary evidence
@@ -128,7 +128,7 @@ async def _evaluate_claim_with_llm(
     confidence_threshold: float = CONFIDENCE_THRESHOLD,
 ) -> Dict[str, Any]:
     """
-    Use vLLM to evaluate if the evidence supports the claim.
+    Use SGLang to evaluate if the evidence supports the claim.
 
     The LLM analyzes the claim against the evidence and returns:
     - supported: bool - whether evidence supports the claim
@@ -192,10 +192,10 @@ Evaluate if the claim is supported by the evidence. Respond with JSON only."""
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
-                f"{VLLM_BASE_URL}/chat/completions",
+                f"{SGLANG_BASE_URL}/chat/completions",
                 headers={"Content-Type": "application/json"},
                 json={
-                    "model": VLLM_MODEL,
+                    "model": SGLANG_MODEL,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
@@ -255,7 +255,7 @@ Evaluate if the claim is supported by the evidence. Respond with JSON only."""
                     }
 
             else:
-                logger.error(f"❌ vLLM returned {response.status_code}: {response.text}")
+                logger.error(f"❌ SGLang returned {response.status_code}: {response.text}")
                 return {
                     "supported": False,
                     "confidence": 0.0,
@@ -285,7 +285,7 @@ async def _verify_claim(
     Core verification logic.
 
     1. Search Weaviate for evidence
-    2. Evaluate claim against evidence using vLLM
+    2. Evaluate claim against evidence using SGLang
     3. Return structured result
 
     Args:

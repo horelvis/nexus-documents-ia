@@ -9,7 +9,7 @@ Usage:
     from app.tools.adapters import get_tool_adapter
 
     # Get adapter for current LLM provider
-    adapter = get_tool_adapter("vllm")  # or "openai", "anthropic"
+    adapter = get_tool_adapter("sglang")  # or "openai", "anthropic"
 
     # Convert tools for request
     provider_tools = adapter.format_tools_for_request(tools)
@@ -21,7 +21,7 @@ Usage:
     result_messages = adapter.format_tool_results(results)
 
 Supported Providers:
-    - hermes/vllm: Hermes format for vLLM with Qwen3
+    - hermes/sglang: Hermes format for SGLang with Qwen3
     - openai/gpt-4/gpt-4o: OpenAI's native tool calling
     - anthropic (TODO): Claude's tool use format
     - ollama (TODO): Ollama's native format
@@ -39,12 +39,12 @@ def get_tool_adapter(provider: str) -> ToolCallAdapter:
     Get the appropriate adapter for an LLM provider.
 
     This is the main entry point for getting adapters. It handles
-    provider name normalization and falls back to Hermes (vLLM)
+    provider name normalization and falls back to Hermes (SGLang)
     if the provider is unknown.
 
     Args:
         provider: LLM provider name (case-insensitive)
-                 Examples: "vllm", "openai", "gpt-4o", "hermes"
+                 Examples: "sglang", "openai", "gpt-4o", "hermes"
 
     Returns:
         Appropriate ToolCallAdapter instance
@@ -57,7 +57,8 @@ def get_tool_adapter(provider: str) -> ToolCallAdapter:
 
     # Map common aliases
     alias_map = {
-        "vllm": "hermes",
+        "sglang": "hermes",
+        "vllm": "hermes",  # backward compatibility
         "qwen": "hermes",
         "qwen3": "hermes",
         "llama": "hermes",
@@ -111,7 +112,7 @@ def get_adapter_for_model(model_name: str) -> ToolCallAdapter:
         # TODO: Return AnthropicAdapter when implemented
         return HermesAdapter()  # Fallback for now
 
-    # Default to Hermes for local/vLLM models
+    # Default to Hermes for local/SGLang models
     return HermesAdapter()
 
 

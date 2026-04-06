@@ -35,23 +35,24 @@ class Settings(BaseSettings):
 
     # Agent Framework / LLM configuration
     agents_enabled: bool = os.getenv("AGENTS_ENABLED", "true").lower() == "true"
-    # NOTE: Using vllm-qwen3vl image (vLLM + transformers 4.57+) for Qwen3 support
-    llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
+    # NOTE: Using SGLang runtime (transformers 4.57+) for Qwen3 support
+    # Normalize "vllm" → "sglang" for backward compatibility
+    llm_provider: str = (lambda p: "sglang" if p == "vllm" else p)(os.getenv("LLM_PROVIDER", "sglang").lower())
 
-    # vLLM configuration (PRIMARY - legal domain GPU inference)
+    # SGLang configuration (PRIMARY - legal domain GPU inference)
     # Model: horelvis/boe-legal-qwen-7b - Fine-tuned for Spanish legal domain (BOE)
     # Features: Superior legal reasoning, legislation cross-references
     # VRAM: ~4GB INT4 bitsandbytes (coexists with BGE-M3 at ~2GB = ~6GB total)
-    vllm_enabled: bool = os.getenv("VLLM_ENABLED", "true").lower() == "true"
-    vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b")
-    vllm_max_tokens: int = int(os.getenv("VLLM_MAX_TOKENS", "4096"))
-    vllm_temperature: float = float(os.getenv("VLLM_TEMPERATURE", "0.6"))  # Recommended for thinking mode
+    sglang_enabled: bool = os.getenv("SGLANG_ENABLED", os.getenv("VLLM_ENABLED", "true")).lower() == "true"
+    sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+    sglang_model: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b"))
+    sglang_max_tokens: int = int(os.getenv("SGLANG_MAX_TOKENS", os.getenv("VLLM_MAX_TOKENS", "4096")))
+    sglang_temperature: float = float(os.getenv("SGLANG_TEMPERATURE", os.getenv("VLLM_TEMPERATURE", "0.6")))  # Recommended for thinking mode
     # Thinking mode settings
-    vllm_enable_thinking: bool = os.getenv("VLLM_ENABLE_THINKING", "true").lower() == "true"
-    vllm_thinking_budget: int = int(os.getenv("VLLM_THINKING_BUDGET", "4096"))  # Increased for complex reasoning
+    sglang_enable_thinking: bool = os.getenv("SGLANG_ENABLE_THINKING", os.getenv("VLLM_ENABLE_THINKING", "true")).lower() == "true"
+    sglang_thinking_budget: int = int(os.getenv("SGLANG_THINKING_BUDGET", os.getenv("VLLM_THINKING_BUDGET", "4096")))  # Increased for complex reasoning
 
-    # Ollama configuration (LEGACY - use vLLM instead)
+    # Ollama configuration (LEGACY - use SGLang instead)
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "llama3.2:latest"))
 

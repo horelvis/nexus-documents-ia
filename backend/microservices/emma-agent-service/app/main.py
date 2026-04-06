@@ -16,7 +16,7 @@ Separated from weaviate-service to enable:
 """
 import warnings
 
-# Suppress httpx deprecation warning from litellm
+# Suppress httpx deprecation warning from litellm (transitive dep via semantic-router, not used directly)
 warnings.filterwarnings(
     "ignore",
     message="Use 'content=<...>' to upload raw bytes/text content.",
@@ -44,7 +44,9 @@ import time
 
 from app.core.config import settings
 from app.api import emma_router, learning_router, uploads_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router, diagnostics_router, generated_documents_router
+from app.api.explainability import router as explainability_router
 from app.api.langgraph_protocol import router as langgraph_protocol_router
+from app.api.report_downloads import router as report_downloads_router
 from app.clients import get_weaviate_client
 
 # Configure logging
@@ -229,7 +231,9 @@ app.include_router(heartbeat_router, prefix="/emma", tags=["heartbeat"])
 app.include_router(prompts_router, tags=["prompts"])
 app.include_router(diagnostics_router, prefix="/diagnostics", tags=["diagnostics"])
 app.include_router(generated_documents_router, tags=["generated-documents"])
+app.include_router(explainability_router, prefix="/emma", tags=["explainability"])
 app.include_router(langgraph_protocol_router, tags=["langgraph-protocol"])
+app.include_router(report_downloads_router, tags=["reports"])
 
 
 # Health check
@@ -269,7 +273,7 @@ async def service_info():
             "Domain-specific routing",
             "Conversation memory",
             "Session management",
-            "Multi-provider LLM support (vLLM, OpenAI, Anthropic)",
+            "Multi-provider LLM support (SGLang, OpenAI, Anthropic)",
         ],
         "agents": [
             "Emma (main orchestrator)",
@@ -283,7 +287,7 @@ async def service_info():
         },
         "dependencies": {
             "weaviate_service": settings.weaviate_service_url,
-            "vllm": settings.vllm_base_url if settings.vllm_enabled else None,
+            "sglang": settings.sglang_base_url if settings.sglang_enabled else None,
         },
         "note": "Query planning handled by LLM reasoning (SIL/SLM Router removed)"
     }
@@ -300,7 +304,7 @@ async def agents_status():
             "orchestration": "LangGraph",
             "config": {
                 "enabled": settings.agents_enabled,
-                "model": settings.vllm_model,
+                "model": settings.sglang_model,
             }
         }
     except Exception as e:

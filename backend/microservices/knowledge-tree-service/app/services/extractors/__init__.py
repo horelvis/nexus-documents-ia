@@ -1,21 +1,13 @@
-"""Entity and reference extraction services."""
+"""TrustGraph LLM extractors — 4 extraction strategies."""
 
-from .legal_reference_extractor import (
-    LegalReferenceExtractor,
-    legal_reference_extractor,
-    LegalReferences,
-    ArticleRef,
-    Modification,
-    Derogation,
-    BOEAnalysis,
-)
+from app.services.extractors.definitions import DefinitionsExtractor
+from app.services.extractors.objects import ObjectsExtractor
+from app.services.extractors.relationships import RelationshipsExtractor
+from app.services.extractors.topics import TopicsExtractor
 
 __all__ = [
-    "LegalReferenceExtractor",
-    "legal_reference_extractor",
-    "LegalReferences",
-    "ArticleRef",
-    "Modification",
-    "Derogation",
-    "BOEAnalysis",
+    "DefinitionsExtractor",
+    "ObjectsExtractor",
+    "RelationshipsExtractor",
+    "TopicsExtractor",
 ]

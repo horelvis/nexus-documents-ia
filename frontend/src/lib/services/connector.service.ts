@@ -683,6 +683,8 @@ export interface SyncTriggerResponse {
   task_id: string
   connector_id: string
   message: string
+  pending_count?: number
+  failed_reset?: number
 }
 
 // Index pending response type

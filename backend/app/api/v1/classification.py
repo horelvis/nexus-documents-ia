@@ -9,7 +9,7 @@ Endpoints for managing the Learn-First document classification system:
 
 Architecture:
 - RAG: Weaviate vector search finds similar classified documents
-- LLM: vLLM (Qwen3-4B) decides folder with reasoning
+- LLM: SGLang (Qwen3-4B) decides folder with reasoning
 - Learn-First: System learns from user's manual organization
 """
 

@@ -182,6 +182,94 @@ class KnowledgeTreeClient(BaseHTTPClient):
             return {"nodes": [], "edges": [], "root_entities": [], "pruned_count": 0}
 
 
+    async def query_triples(
+        self,
+        tenant_id: str,
+        subject_uri: Optional[str] = None,
+        predicate_uri: Optional[str] = None,
+        object_value: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """Query triples from TrustGraph."""
+        payload = {
+            "tenant_id": tenant_id,
+            "limit": limit,
+        }
+        if subject_uri is not None:
+            payload["subject_uri"] = subject_uri
+        if predicate_uri is not None:
+            payload["predicate_uri"] = predicate_uri
+        if object_value is not None:
+            payload["object_value"] = object_value
+        try:
+            return await self.post_json("/triples/query", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Triple query failed: {e}")
+            return {"success": False, "triples": [], "error": str(e)}
+
+    async def get_triple_context(self, tenant_id: str, limit: int = 20) -> Dict[str, Any]:
+        """Get LLM context from triple store."""
+        payload = {"tenant_id": tenant_id, "limit": limit}
+        try:
+            return await self.post_json("/triples/context", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Triple context failed: {e}")
+            return {"success": False, "context_for_llm": "", "error": str(e)}
+
+    async def get_triple_stats(self, tenant_id: str) -> Dict[str, Any]:
+        """Get graph statistics."""
+        try:
+            return await self.get_json(
+                f"/triples/stats?tenant_id={tenant_id}", headers=self._headers()
+            )
+        except Exception as e:
+            logger.warning(f"Triple stats failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def batch_neighbors(
+        self,
+        tenant_id: str,
+        seed_uris: List[str],
+        max_hops: int = 2,
+        max_edges: int = 150,
+        triples_per_entity: int = 30,
+        exclude_predicates: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """BFS subgraph traversal via /triples/neighbors."""
+        payload = {
+            "tenant_id": tenant_id,
+            "seed_uris": seed_uris,
+            "max_hops": max_hops,
+            "max_edges": max_edges,
+            "exclude_predicates": exclude_predicates or ["prov/.*"],
+        }
+        try:
+            return await self.post_json("/triples/neighbors", json=payload, headers=self._headers())
+        except Exception as e:
+            logger.warning(f"Batch neighbors failed: {e}")
+            return {"edges": [], "entities_visited": 0, "hops_used": 0}
+
+
+    async def trace_sources(
+        self,
+        tenant_id: str,
+        edges: List[Dict[str, str]],
+        collection: str = "default",
+    ) -> List[Dict[str, Any]]:
+        """Trace graph edges back to source document chunks."""
+        payload = {
+            "edges": edges,
+            "tenant_id": tenant_id,
+            "collection": collection,
+        }
+        try:
+            result = await self.post_json("/triples/trace-sources", json=payload, headers=self._headers())
+            return result.get("sources", []) if isinstance(result, dict) else []
+        except Exception as e:
+            logger.warning(f"trace_sources failed: {e}")
+            return []
+
+
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None
 
 

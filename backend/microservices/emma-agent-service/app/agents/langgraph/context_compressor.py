@@ -218,7 +218,7 @@ def trim_messages_to_token_budget(
 
     # Step 3: Drop oldest non-system messages until within budget
     # Keep dropping from the front, but ALWAYS preserve the first user message
-    # (SGLang/vLLM requires at least one "user" role message)
+    # (SGLang requires at least one "user" role message)
 
     # Find and protect the first user message
     first_user_idx = None

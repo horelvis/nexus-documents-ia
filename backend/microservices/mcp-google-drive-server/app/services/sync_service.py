@@ -139,6 +139,7 @@ async def run_sync_job(
                         connector_id=UUID(connector_id),
                         owner_id=owner_id,
                         stats=stats,
+                        full_sync=full_sync,
                     )
                 except Exception as e:
                     stats["items_failed"] += 1
@@ -199,6 +200,7 @@ async def _process_drive_file(
     connector_id: UUID,
     owner_id: UUID,
     stats: Dict[str, Any],
+    full_sync: bool = False,
 ) -> None:
     """Process a single file from Google Drive into IndexedDocument."""
     # Build metadata
@@ -235,25 +237,49 @@ async def _process_drive_file(
     )
 
     if existing:
-        await conn.execute(
-            """
-            UPDATE indexed_documents SET
-                title = $1,
-                external_url = $2,
-                external_path = $3,
-                mime_type = $4,
-                size_bytes = $5,
-                file_extension = $6,
-                source_modified_at = $7,
-                updated_at = $8
-            WHERE connector_id = $9 AND external_id = $10
-            """,
-            title, external_url, external_path,
-            mime_type, size_bytes, file_extension,
-            file.modified_at,
-            datetime.now(timezone.utc),
-            connector_id, file.id,
-        )
+        # full_sync resets indexing_status to 'pending' so documents are re-indexed
+        if full_sync:
+            await conn.execute(
+                """
+                UPDATE indexed_documents SET
+                    title = $1,
+                    external_url = $2,
+                    external_path = $3,
+                    mime_type = $4,
+                    size_bytes = $5,
+                    file_extension = $6,
+                    source_modified_at = $7,
+                    updated_at = $8,
+                    indexing_status = 'pending',
+                    indexing_error = NULL
+                WHERE connector_id = $9 AND external_id = $10
+                """,
+                title, external_url, external_path,
+                mime_type, size_bytes, file_extension,
+                file.modified_at,
+                datetime.now(timezone.utc),
+                connector_id, file.id,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE indexed_documents SET
+                    title = $1,
+                    external_url = $2,
+                    external_path = $3,
+                    mime_type = $4,
+                    size_bytes = $5,
+                    file_extension = $6,
+                    source_modified_at = $7,
+                    updated_at = $8
+                WHERE connector_id = $9 AND external_id = $10
+                """,
+                title, external_url, external_path,
+                mime_type, size_bytes, file_extension,
+                file.modified_at,
+                datetime.now(timezone.utc),
+                connector_id, file.id,
+            )
         stats["items_updated"] += 1
     else:
         import uuid as uuid_mod
@@ -407,7 +433,7 @@ async def run_index_pending_job(
         await pool.release(conn)
 
 
-# Extensions that textextract-service can process (whitelist)
+# Extensions that intelligence-docs-service can process (whitelist)
 _INDEXABLE_EXTENSIONS = {
     ".pdf", ".doc", ".docx", ".txt", ".md", ".csv", ".ppt", ".pptx",
     ".xlsx", ".xls", ".html", ".odt", ".rtf", ".epub", ".xml", ".json",
@@ -427,7 +453,7 @@ async def _index_single_document(
     doc_id = doc["id"]
     processing_start = time.time()
 
-    # Early skip: avoid downloading files that textextract cannot process
+    # Early skip: avoid downloading files that intelligence-docs-service cannot process
     ext = (doc.get("file_extension") or "").lower()
     if ext and not ext.startswith("."):
         ext = f".{ext}"
@@ -443,7 +469,7 @@ async def _index_single_document(
         )
         return False
 
-    # Early skip: files larger than textextract max (50MB)
+    # Early skip: files larger than 50MB limit
     _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
     size_bytes = doc.get("size_bytes") or 0
     if size_bytes > _MAX_FILE_SIZE:

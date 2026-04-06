@@ -64,7 +64,7 @@ class TextExtractionClient(BaseHTTPClient):
 
         response = await self.request(
             "POST",
-            "/api/v1/text-extraction/extract",
+            "/extract",
             tenant_id=self.tenant_id,
             user_id=self.user_id,
             files=files,

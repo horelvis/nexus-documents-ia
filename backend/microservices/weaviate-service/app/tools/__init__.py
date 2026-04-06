@@ -2,7 +2,7 @@
 Emma Tool Framework - Model-Agnostic Tool Calling System.
 
 This package provides a complete tool framework for Emma that is independent
-of any specific LLM provider. It allows seamless switching between vLLM,
+of any specific LLM provider. It allows seamless switching between SGLang,
 OpenAI, Anthropic, or any other provider without changing tool implementations.
 
 Quick Start:
@@ -16,7 +16,7 @@ Quick Start:
     # Setup
     registry = get_registry()
     executor = ToolExecutor(registry)
-    adapter = get_tool_adapter("vllm")
+    adapter = get_tool_adapter("sglang")
 
     # Get tools for tenant
     tools = registry.get_tools_for_tenant(tenant_id)
@@ -43,7 +43,7 @@ Package Structure:
     └── adapters/            # LLM-specific format adapters
         ├── __init__.py
         ├── base.py          # ToolCallAdapter ABC
-        ├── hermes.py        # vLLM/Qwen3 adapter
+        ├── hermes.py        # SGLang/Qwen3 adapter
         └── openai.py        # GPT-4/GPT-4o adapter
 
 Creating New Tools:

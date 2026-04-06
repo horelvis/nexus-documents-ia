@@ -73,10 +73,8 @@ class SendEmailTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Envia un email con adjuntos opcionales (documentos generados). "
-            "SIEMPRE llama primero con confirmed=false para mostrar un preview al usuario. "
-            "Solo envia (confirmed=true) cuando el usuario confirme explicitamente. "
-            "Puede adjuntar documentos generados con generate_document usando su attachment_id."
+            "Envía email con adjuntos opcionales. "
+            "Llama con confirmed=false para preview, confirmed=true solo tras confirmación."
         )
 
     @property

@@ -147,6 +147,11 @@ const TOOL_CONFIGS: Record<string, ToolConfig> = {
     },
     resultText: () => 'Jurisprudencia encontrada',
   },
+  generate_knowledge_report: {
+    icon: 'write' as ActivityIcon,
+    activeText: () => 'Generando informe de conocimiento...',
+    resultText: () => 'Informe generado',
+  },
 }
 
 // ─── Main export ───────────────────────────────────────────────────────────────
@@ -209,7 +214,24 @@ export function humanizeSteps(steps: RawReasoningStep[]): ActivityStep[] {
       continue
     }
 
-    // 3. Everything else — skip
+    // 3. Report progress events (report.assembling, report.generating, report.complete)
+    if (step.type.startsWith('report.')) {
+      const reportLabels: Record<string, { text: string; icon: ActivityIcon }> = {
+        'report.assembling': { text: 'Recopilando datos del grafo...', icon: 'search' },
+        'report.generating': { text: 'Generando informe...', icon: 'write' },
+        'report.complete': { text: 'Informe generado', icon: 'done' },
+      }
+      const label = reportLabels[step.type]
+      if (label) {
+        const status = step.type === 'report.complete' ? 'completed' : 'active' as const
+        result.push({ id: `step-${globalIdx}`, text: label.text, status, icon: label.icon })
+        globalIdx++
+      }
+      i++
+      continue
+    }
+
+    // 4. Everything else — skip
     i++
   }
 

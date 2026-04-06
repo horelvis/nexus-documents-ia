@@ -93,14 +93,8 @@ class CendojSearchTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Busca jurisprudencia en CENDOJ (Centro de Documentación Judicial). "
-            "Devuelve referencias a sentencias relevantes del Tribunal Supremo o "
-            "Audiencia Nacional: ROJ, ECLI, fecha, tribunal, resumen breve y "
-            "enlace directo a CENDOJ. No almacena contenido — solo referencias. "
-            "Usa esto cuando necesites fundamentar un análisis con jurisprudencia "
-            "española o verificar si existe doctrina sobre un tema legal. "
-            "Con with_content>0, también descarga y extrae texto de las sentencias "
-            "más relevantes como contexto efímero (fundamentos de derecho y fallo)."
+            "Busca jurisprudencia española en CENDOJ. Devuelve sentencias del TS/AN "
+            "con ROJ, ECLI, fecha, resumen y enlace. Con with_content>0 extrae texto."
         )
 
     @property

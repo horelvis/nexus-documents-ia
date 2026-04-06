@@ -108,7 +108,7 @@ class FalkorDBClient:
                 # Catch redis.exceptions.ConnectionError and similar without
                 # hard-importing redis at module level
                 err_type = type(e).__name__
-                if "ConnectionError" in err_type or "RedisError" in err_type:
+                if "ConnectionError" in err_type or "RedisError" in err_type or "BusyLoadingError" in err_type:
                     delay = RETRY_BASE_DELAY * attempt
                     if attempt < MAX_RETRIES:
                         logger.warning(
@@ -125,7 +125,7 @@ class FalkorDBClient:
                     raise
 
     async def bootstrap_schema(self) -> None:
-        """Read and execute schema from knowledge_graph_schema.cypher.
+        """Read and execute schema from trustgraph_schema.cypher.
 
         Idempotent — FalkorDB ignores duplicate index creation.
         """
@@ -137,7 +137,7 @@ class FalkorDBClient:
             Path(__file__).resolve().parents[2]
             / "config"
             / "graphs"
-            / "knowledge_graph_schema.cypher"
+            / "trustgraph_schema.cypher"
         )
 
         if not schema_path.exists():

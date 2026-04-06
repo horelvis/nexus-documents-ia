@@ -231,6 +231,69 @@ class KnowledgeTreeLegalClient:
             logger.warning(f"Failed to store entities in knowledge-tree: {e}")
             return {"success": False, "entities_stored": 0}
 
+    async def extract_triples(
+        self,
+        tenant_id: str,
+        document_id: str,
+        chunks: List[str],
+        collection: str = "default",
+        title: str = "",
+        file_path: str = "",
+        semantic_type: str = "",
+        domain: str = "",
+    ) -> Dict[str, Any]:
+        """Trigger TrustGraph triple extraction for a document's chunks."""
+        try:
+            return await self._request("POST", "/extract/triples", json={
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "chunks": chunks,
+                "collection": collection,
+                "title": title,
+                "file_path": file_path,
+                "semantic_type": semantic_type,
+                "domain": domain,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to extract triples for {document_id}: {e}")
+            return {"success": False, "triples_extracted": 0}
+
+    async def index_structural_triples(
+        self,
+        tenant_id: str,
+        document_id: str,
+        collection: str = "default",
+        title: str = "",
+        file_path: str = "",
+        semantic_type: str = "",
+        domain: str = "",
+    ) -> Dict[str, Any]:
+        """Index document structural data without LLM extraction."""
+        try:
+            return await self._request("POST", "/extract/structural", json={
+                "tenant_id": tenant_id,
+                "document_id": document_id,
+                "collection": collection,
+                "title": title,
+                "file_path": file_path,
+                "semantic_type": semantic_type,
+                "domain": domain,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to index structural triples for {document_id}: {e}")
+            return {"success": False}
+
+    async def get_triple_context(self, tenant_id: str, limit: int = 20) -> Dict[str, Any]:
+        """Get LLM context from the triple store."""
+        try:
+            return await self._request("POST", "/triples/context", json={
+                "tenant_id": tenant_id,
+                "limit": limit,
+            })
+        except Exception as e:
+            logger.warning(f"Failed to get triple context for tenant {tenant_id}: {e}")
+            return {"context": "", "triples": []}
+
     async def get_document_entities(
         self, document_id: str, tenant_id: str
     ) -> List[Dict[str, Any]]:

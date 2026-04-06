@@ -108,7 +108,7 @@ class Suggestion(BaseModel):
 class EmmaResponse(BaseModel):
     """Schema for Emma AI query responses"""
     query: str
-    answer: str
+    answer: str = ""
     session_id: str
     tenant_id: str
     decision_path: List[str]

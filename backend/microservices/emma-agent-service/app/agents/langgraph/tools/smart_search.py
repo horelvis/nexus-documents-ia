@@ -272,13 +272,8 @@ class SmartSearchTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Búsqueda inteligente unificada en documentos del usuario Y legislación española (BOE). "
-            "Detecta automáticamente qué buscar y filtra por tipo de documento (facturas, contratos, "
-            "nóminas, informes, etc.), por persona, y por rango de fechas. "
-            "Usa date_from/date_to para consultas temporales como 'facturas del último mes'. "
-            "Usa esto para: 'facturas de Javier', 'contratos de 2024', 'nóminas del departamento X', "
-            "o cualquier búsqueda documental/legal. "
-            "Para CONTAR documentos (cuántos hay), usa structural_query en su lugar."
+            "Búsqueda inteligente en todos los documentos y conocimiento disponible. "
+            "Filtra por tipo, persona, fechas. Para contar documentos usa structural_query."
         )
 
     @property
@@ -429,17 +424,50 @@ class SmartSearchTool(EmmaTool):
 
         dropped_filters: List[str] = []
 
+        # Pre-computed concepts from graph_rag pipeline (Phase 2)
+        concepts_result = context.get("_concepts")
+
+        # Collect doc results separately so multi-concept and single-query paths
+        # can both feed into the same merge step below.
+        pre_fetched_doc_results: Optional[List[Dict[str, Any]]] = None
+
         if search_docs:
-            search_tasks.append(self._search_documents(
-                client, tenant_id, expanded_query, limit, alpha,
-                person_filter=enriched_person,
-                domain_filter=enriched_domain,
-                semantic_type_filter=enriched_semantic_type,
-                folder_filter=folder_filter,
-                date_from=date_from,
-                date_to=date_to,
-                dropped_filters=dropped_filters,
-            ))
+            # Multi-concept search (Phase 2): parallel per-concept hybrid search
+            if (
+                settings.smart_search_multi_concept
+                and concepts_result is not None
+                and hasattr(concepts_result, "low_level")
+                and concepts_result.low_level
+            ):
+                logger.info(
+                    f"🔀 Multi-concept search: {len(concepts_result.low_level)} concepts"
+                )
+                pre_fetched_doc_results = await self._multi_concept_search(
+                    concepts=concepts_result.low_level,
+                    weaviate_client=client,
+                    tenant_id=tenant_id,
+                    expanded_query=expanded_query,
+                    alpha=alpha,
+                    enriched_person=enriched_person,
+                    enriched_domain=enriched_domain,
+                    enriched_semantic_type=enriched_semantic_type,
+                    folder_filter=folder_filter,
+                    date_from=date_from,
+                    date_to=date_to,
+                    total_limit=limit,
+                )
+            else:
+                # Original single-query hybrid search (fallback)
+                search_tasks.append(self._search_documents(
+                    client, tenant_id, expanded_query, limit, alpha,
+                    person_filter=enriched_person,
+                    domain_filter=enriched_domain,
+                    semantic_type_filter=enriched_semantic_type,
+                    folder_filter=folder_filter,
+                    date_from=date_from,
+                    date_to=date_to,
+                    dropped_filters=dropped_filters,
+                ))
 
         if search_legislation:
             legislation_domain = enriched_domain or ""
@@ -448,16 +476,22 @@ class SmartSearchTool(EmmaTool):
                 client, expanded_query, min(limit, 8), legislation_domain, boe_ids
             ))
 
-        if not search_tasks:
+        if not search_tasks and pre_fetched_doc_results is None:
             return ToolResult(
                 output="No se pudo determinar el ámbito de búsqueda.",
                 sources=[], data={"result_count": 0},
             )
 
+        # Run remaining search tasks (legislation or single-query docs)
         raw_results_groups = await asyncio.gather(*search_tasks, return_exceptions=True)
 
         # ── Step 6: Merge + deduplicate ──
         all_results: List[Dict[str, Any]] = []
+
+        # Inject pre-fetched multi-concept doc results
+        if pre_fetched_doc_results is not None:
+            all_results.extend(pre_fetched_doc_results)
+
         for group in raw_results_groups:
             if isinstance(group, Exception):
                 logger.warning(f"Search sub-task failed: {group}")
@@ -475,8 +509,10 @@ class SmartSearchTool(EmmaTool):
         # ── Step 7: Multi-signal re-rank (Phases 3+4, ~1ms) ──
         if settings.smart_search_rerank_enabled:
             rerank_weights = self._get_rerank_weights(sector_config_dict)
+            graph_rag_data = context.get("_graph_rag_data")
             all_results = _rerank_results(
-                all_results, graph_doc_ids, entities, rerank_weights
+                all_results, graph_doc_ids, entities, rerank_weights,
+                graph_rag_data=graph_rag_data,
             )
 
         # ── Step 7b: Cross-encoder re-rank (neural, ~50-100ms) ──
@@ -533,16 +569,13 @@ class SmartSearchTool(EmmaTool):
     def _extract_entities(
         self, query: str, sector_config: Dict[str, Any]
     ) -> Dict[str, List[str]]:
-        """Extract entities using sector patterns + generic patterns."""
+        """Extract entities using unified patterns (all domains merged)."""
         from app.agents.langgraph.sectors.entity_extractor import extract_entities
 
         patterns = sector_config.get("entity_patterns", {})
         if not patterns:
-            # Fallback: use documental patterns which cover persona/nif/fecha
-            from app.agents.langgraph.sectors.registry import SECTOR_CONFIGS
-            documental = SECTOR_CONFIGS.get("documental")
-            if documental:
-                patterns = documental.entity_patterns
+            from app.agents.langgraph.sectors.config import UNIFIED_ENTITY_PATTERNS
+            patterns = UNIFIED_ENTITY_PATTERNS
 
         return extract_entities(query, patterns) if patterns else {}
 
@@ -788,6 +821,107 @@ class SmartSearchTool(EmmaTool):
             logger.warning(f"Graph expansion failed (non-fatal): {e}")
 
         return doc_ids, boe_ids
+
+    async def _multi_concept_search(
+        self,
+        concepts: list,
+        weaviate_client: Any,
+        tenant_id: str,
+        expanded_query: str,
+        alpha: float,
+        enriched_person: Optional[str],
+        enriched_domain: Optional[str],
+        enriched_semantic_type: Optional[str],
+        folder_filter: Optional[str],
+        date_from: Optional[str],
+        date_to: Optional[str],
+        total_limit: int,
+    ) -> List[Dict[str, Any]]:
+        """Run independent hybrid search per concept, merge + dedup.
+
+        For each low-level concept, runs hybrid_search with the concept as the
+        query. Results are merged and deduplicated by document_id, keeping the
+        highest score per document.
+        """
+        if not concepts:
+            return []
+
+        per_concept_limit = max(3, total_limit // len(concepts))
+        tasks = []
+        for concept in concepts:
+            tasks.append(
+                weaviate_client.hybrid_search(
+                    tenant_id=tenant_id,
+                    query=concept,
+                    limit=per_concept_limit,
+                    alpha=alpha,
+                    person_filter=enriched_person,
+                    domain_filter=enriched_domain,
+                    semantic_type_filter=enriched_semantic_type,
+                    folder_filter=folder_filter,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+            )
+
+        if not tasks:
+            return []
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Merge + dedup by document_id, keep highest score
+        merged: Dict[str, Any] = {}
+        for result_list in results:
+            if isinstance(result_list, Exception):
+                logger.warning(f"Multi-concept search partial failure: {result_list}")
+                continue
+            if not isinstance(result_list, list):
+                continue
+            for r in result_list:
+                doc_id = r.document_id if hasattr(r, "document_id") else r.get("document_id", "")
+                if not doc_id:
+                    continue
+                r_score = r.score if hasattr(r, "score") else r.get("score", 0)
+                existing_score = 0.0
+                if doc_id in merged:
+                    ex = merged[doc_id]
+                    existing_score = ex.score if hasattr(ex, "score") else ex.get("score", 0)
+                if doc_id not in merged or r_score > existing_score:
+                    merged[doc_id] = r
+
+        deduped = sorted(
+            merged.values(),
+            key=lambda d: d.score if hasattr(d, "score") else d.get("score", 0),
+            reverse=True,
+        )
+
+        # Convert SearchResult objects to dicts (same format as _search_documents)
+        formatted = []
+        for r in deduped[:total_limit]:
+            if hasattr(r, "document_id"):
+                # SearchResult object
+                formatted.append({
+                    "document_id": r.document_id,
+                    "title": r.metadata.get("title", "Sin título"),
+                    "content": r.content[:500] if r.content else "",
+                    "score": r.score,
+                    "type": "tenant_document",
+                    "quality_score": r.metadata.get("quality_score", 0.0),
+                    "domain": r.metadata.get("domain", ""),
+                    "semantic_type": r.metadata.get("semantic_type", ""),
+                    "associated_person": r.metadata.get("associated_person", ""),
+                    "created_at": r.metadata.get("created_at", ""),
+                    "folder_path": r.metadata.get("folder_path", ""),
+                    "document_type": r.metadata.get("document_type", ""),
+                    "tags": r.metadata.get("tags", []),
+                    "chunk_index": r.metadata.get("chunk_index"),
+                    "page_number": r.metadata.get("page_number"),
+                    "excerpt": (r.content[:200] if r.content else ""),
+                })
+            else:
+                formatted.append(r)
+
+        return formatted
 
     async def _get_documents_by_person(
         self, tenant_id: str, person_name: str
@@ -1265,6 +1399,7 @@ def _rerank_results(
     graph_document_ids: Set[str],
     query_entities: Dict[str, List[str]],
     weights: Dict[str, float],
+    graph_rag_data: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Re-rank results using 5 signals with sector-tunable weights.
@@ -1272,7 +1407,8 @@ def _rerank_results(
     Signals:
       - similarity (0-1): Raw hybrid score from Weaviate
       - quality (0-1): quality_score from DocumentIntelligence
-      - graph (0 or 1): Whether the document was found via knowledge graph
+      - graph (0-1): Continuous score from Graph RAG provenance (Phase 2),
+                     or binary 0/1 from entity match (backward compat)
       - recency (0-1): Exponential decay, half-life 90 days
       - entity (0-1): Fraction of query entities matching document metadata
     """
@@ -1298,9 +1434,21 @@ def _rerank_results(
         # Signal 2: Quality
         qual_score = float(result.get("quality_score", 0.0) or 0.0)
 
-        # Signal 3: Graph presence
+        # Signal 3: Graph presence — continuous score from Graph RAG (Phase 2)
         doc_id = result.get("document_id", "")
-        graph_score = 1.0 if doc_id in graph_document_ids else 0.0
+        if graph_rag_data and graph_rag_data.get("expanded_doc_ids"):
+            graph_avg = float(graph_rag_data.get("avg_score", 0.5))
+            graph_doc_set = set(graph_rag_data["expanded_doc_ids"])
+            if doc_id in graph_doc_set:
+                # Continuous score from graph_rag (confidence-aware via pre-filter)
+                graph_score = graph_avg
+            elif doc_id in graph_document_ids:
+                graph_score = 1.0  # Binary fallback from entity match
+            else:
+                graph_score = 0.0
+        else:
+            # Binary fallback (backward compat)
+            graph_score = 1.0 if doc_id in graph_document_ids else 0.0
 
         # Signal 4: Recency (exponential decay)
         rec_score = 0.5  # default for unknown dates

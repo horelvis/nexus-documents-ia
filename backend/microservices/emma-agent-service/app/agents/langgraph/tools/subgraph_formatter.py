@@ -146,6 +146,8 @@ def _render_tree(
             continue
 
         # Skip low-value edges at deeper levels
+        # NOTE: INSTANCE_OF and HAS_MEMORY are legacy AGE labels — may need updating
+        # for TrustGraph Phase 2 where all edges are :Rel with URI predicates.
         edge_label = edge["label"]
         if depth >= 2 and edge_label in ("INSTANCE_OF", "HAS_MEMORY"):
             continue
@@ -153,7 +155,8 @@ def _render_tree(
         child_indent = "  " * (depth + 1)
         child_label = _format_node(target_node)
 
-        # Add traceability for REFERENCES_LAW edges (formerly APLICA)
+        # Add traceability for REFERENCES_LAW edges
+        # NOTE: APLICA is a legacy label kept for backward compat during migration.
         edge_suffix = ""
         edge_props = edge.get("properties", {})
         if edge_label in ("REFERENCES_LAW", "APLICA") and edge_props:
@@ -171,7 +174,7 @@ def _render_tree(
         _render_tree(target_id, node_map, adjacency, visited, lines, depth + 1, max_depth)
 
     # Note absence of legal reference edges for root document nodes
-    if depth == 0 and node.get("label") in ("Document", "structural_document"):
+    if depth == 0 and node.get("label") in ("Document",):
         has_aplica = any(
             e["label"] in ("REFERENCES_LAW", "APLICA")
             for e in adjacency.get(node_id, [])
@@ -191,7 +194,7 @@ def _format_node(node: Dict) -> str:
 
     # Node type in parentheses
     type_parts = []
-    if label and label not in ("unknown", "Document", "Folder", "structural_document", "structural_folder"):
+    if label and label not in ("unknown", "Document", "Folder"):
         type_parts.append(label)
 
     stype = props.get("semantic_type")

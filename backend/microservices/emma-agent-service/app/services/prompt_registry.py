@@ -514,6 +514,35 @@ PROMPT_REGISTRY: Dict[str, PromptEntry] = {
         description="User template with verified facts and sector guidance",
         section="explain",
     ),
+
+    # ── NER (entity extraction, consumed by intelligence-docs-service) ────
+    "ner_system": PromptEntry(
+        yaml_path=("ner", "system"),
+        description="System prompt for OpenAI NER entity extraction (persons, orgs, dates, expedientes)",
+        section="ner",
+    ),
+    "ner_fewshot_user": PromptEntry(
+        yaml_path=("ner", "fewshot_user"),
+        description="Few-shot example user turn for NER extraction",
+        section="ner",
+    ),
+    "ner_fewshot_assistant": PromptEntry(
+        yaml_path=("ner", "fewshot_assistant"),
+        description="Few-shot example assistant turn for NER extraction",
+        section="ner",
+    ),
+
+    # ── TrustGraph Phase 2 ──────────────────────────────────────────────────
+    "trustgraph_extract_concepts": PromptEntry(
+        yaml_path=("trustgraph", "extract_concepts"),
+        description="Extract high/low-level concepts from user query for Graph RAG",
+        section="trustgraph",
+    ),
+    "trustgraph_edge_scoring": PromptEntry(
+        yaml_path=("trustgraph", "edge_scoring"),
+        description="Score knowledge graph edges for relevance to query",
+        section="trustgraph",
+    ),
 }
 
 

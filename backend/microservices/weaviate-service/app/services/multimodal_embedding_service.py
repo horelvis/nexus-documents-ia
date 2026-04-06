@@ -2,7 +2,7 @@
 Multimodal Embedding Service
 
 Provides unified embedding generation for text and visual content using
-Qwen3-VL-Embedding-2B model via vLLM's OpenAI-compatible API.
+Qwen3-VL-Embedding-2B model via SGLang's OpenAI-compatible API.
 
 Architecture (Unified Qwen3-VL):
     ┌────────────────────────────────────────┐
@@ -226,7 +226,7 @@ class MultimodalEmbeddingService:
         import time
 
         try:
-            # vLLM OpenAI-compatible embeddings endpoint
+            # SGLang OpenAI-compatible embeddings endpoint
             response = await self._qwen_client.post(
                 f"{settings.multimodal_embedding_url}/embeddings",
                 json={
@@ -321,7 +321,7 @@ class MultimodalEmbeddingService:
 
                 image_inputs.append(f"data:{mime_type};base64,{img_b64}")
 
-            # Use vLLM's vision embedding endpoint
+            # Use SGLang's vision embedding endpoint
             # Format: {"input": [{"type": "image_url", "image_url": {"url": data_url}}]}
             formatted_inputs = [
                 {"type": "image_url", "image_url": {"url": url}}
@@ -592,7 +592,7 @@ class MultimodalEmbeddingService:
 
         # Check Qwen3-VL (PRIMARY)
         try:
-            # vLLM health endpoint is at /health (not /v1/health)
+            # SGLang health endpoint is at /health (not /v1/health)
             base_url = settings.embedding_url.replace("/v1", "")
             response = await self._qwen_client.get(
                 f"{base_url}/health",

@@ -1,0 +1,11 @@
+# Security Constraints for NouxCubeIA Backend
+# Apply with: pip install -c security-constraints.txt -r requirements.txt
+#
+# This file blocks known-compromised and vulnerable package versions
+# across ALL microservices, regardless of their individual requirements.txt.
+
+# litellm: Supply chain attack — versions 1.82.7-1.82.8 contained credential stealer
+# (SNYK-PYTHON-LITELLM-15762713, March 24, 2026)
+# Also: unpatched RCE bypass via pty module (NSIDE-SA-2026-002)
+# Also: SQL injection CVE-2025-45809 (fixed in 1.81.0)
+litellm>=1.82.0,<1.82.7

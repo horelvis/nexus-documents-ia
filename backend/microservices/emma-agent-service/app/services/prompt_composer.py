@@ -83,15 +83,8 @@ class PromptComposer:
         """
         metadata = state.get("metadata", {})
         retrieved_docs = state.get("retrieved_docs", [])
-        sector_config = state.get("sector_config", {})
-
-        # Extract sector name
+        # Sector is no longer used — knowledge graph provides dynamic context
         sector = ""
-        if sector_config:
-            prompt_key = sector_config.get("system_prompt_key", "")
-            sector = prompt_key.replace("sectors.", "") if prompt_key else ""
-            if not sector:
-                sector = sector_config.get("sector", "")
 
         # Extract detected domains
         domains = state.get("detected_domains", [])

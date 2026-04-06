@@ -512,7 +512,7 @@ class GmailChannelService:
         mime_type: str,
     ) -> Optional[str]:
         """
-        Extract text from attachment using textextract-service.
+        Extract text from attachment using intelligence-docs-service.
 
         Args:
             file_content: Attachment bytes
@@ -523,10 +523,9 @@ class GmailChannelService:
             Extracted text, or None if failed
         """
         try:
-            extract_url = f"{settings.TEXT_EXTRACTION_SERVICE_URL}/extract"
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    extract_url,
+                    "http://intelligence-docs-service:8000/extract",
                     files={"file": (filename, file_content, mime_type)},
                     timeout=60.0,
                 )

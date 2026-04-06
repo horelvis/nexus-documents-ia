@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""
+Migration: NER prompts for OpenAI NER entity extraction provider.
+
+Pushes prompt changes directly to Langfuse.
+These prompts are consumed by intelligence-docs-service's OpenAINerProvider.
+
+Changes:
+  1. ner_system           — System prompt for entity extraction
+  2. ner_fewshot_user     — Few-shot example (user turn)
+  3. ner_fewshot_assistant — Few-shot example (assistant turn)
+
+Usage:
+    docker compose exec emma-agent-service python scripts/migrate_ner_prompts.py
+    docker compose exec emma-agent-service python scripts/migrate_ner_prompts.py --dry-run
+    docker compose exec emma-agent-service python scripts/migrate_ner_prompts.py --force
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+
+# ── System prompt ────────────────────────────────────────────────────────────
+
+NER_SYSTEM_PROMPT = """\
+Eres un extractor de entidades. Dado un texto, extrae SOLO entidades con nombre propio.
+
+Devuelve SOLO un JSON array con objetos que tengan "class" y "text":
+[{"class": "person", "text": "Juan García López"}, {"class": "empresa", "text": "TechCorp SL"}]
+
+Clases válidas:
+- person: Nombres de personas (ej: "Carlos Ruiz Fernández", "Dña. María López")
+- empresa: Nombres de empresas u organizaciones (ej: "Construcciones del Norte SL", "INSS")
+- date: Fechas concretas (ej: "15 de marzo de 2024", "01/02/2025")
+- expediente: Números de expediente (ej: "EXP-2025/0341-FAM")
+
+NO extraigas:
+- Descripciones genéricas ("muy grave", "negligencia médica", "responsabilidad civil")
+- Importes monetarios, horas, porcentajes
+- Emails, teléfonos, direcciones postales
+- DNI, NIF, CIF, NIE, IBAN (ya se extraen por otro medio)
+- Artículos de ley o referencias legales (ej: "Artículo 96 del Código Civil")
+- Roles o profesiones sin nombre propio
+
+Reglas:
+- Usa el texto EXACTO del documento
+- NO inventes datos que no estén en el texto
+- SOLO el JSON array, sin explicaciones
+- Si no hay entidades, devuelve: []"""
+
+
+# ── Few-shot example (user turn) ─────────────────────────────────────────────
+
+NER_FEWSHOT_USER = """\
+Texto: Contrato entre TechCorp SL (CIF: B12345678) representada por D. Juan Garcia Lopez \
+y la trabajadora Maria Perez Ruiz (NIF: 12345678A). Salario: 30.000 EUR anuales. \
+Fecha inicio: 01/02/2025. Se regirá por el Estatuto de los Trabajadores. \
+El email de contacto es rrhh@techcorp.es."""
+
+
+# ── Few-shot example (assistant turn) ────────────────────────────────────────
+
+NER_FEWSHOT_ASSISTANT = """\
+[{"class": "empresa", "text": "TechCorp SL"}, {"class": "person", "text": "Juan Garcia Lopez"}, \
+{"class": "person", "text": "Maria Perez Ruiz"}, {"class": "date", "text": "01/02/2025"}]"""
+
+
+def get_langfuse_client():
+    """Create Langfuse client from environment."""
+    from langfuse import Langfuse
+
+    host = os.getenv("LANGFUSE_HOST", "http://langfuse:3000")
+    public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+
+    if not public_key or not secret_key:
+        print("ERROR: LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY must be set")
+        sys.exit(1)
+
+    return Langfuse(public_key=public_key, secret_key=secret_key, host=host), host
+
+
+def migrate_prompt(langfuse, name: str, content: str, dry_run: bool, force: bool) -> bool:
+    """Create or update a prompt in Langfuse."""
+    print(f"── {name} ──")
+
+    exists = False
+    try:
+        langfuse.get_prompt(name=name)
+        exists = True
+    except Exception:
+        pass
+
+    if exists and not force:
+        print("  SKIP: Prompt already exists (use --force to overwrite)")
+        return True
+
+    action = "UPDATE" if exists else "CREATE"
+
+    if dry_run:
+        print(f"  DRY RUN: Would {action} prompt ({len(content)} chars)")
+        return True
+
+    langfuse.create_prompt(
+        name=name,
+        prompt=content,
+        type="text",
+        labels=["production"],
+        config={"section": "ner", "service": "intelligence-docs-service", "migrated_by": "migrate_ner_prompts"},
+    )
+    print(f"  OK: {action} {name} ({len(content)} chars)")
+    return True
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Migrate NER prompts to Langfuse")
+    parser.add_argument("--dry-run", action="store_true", help="Show what would change without modifying Langfuse")
+    parser.add_argument("--force", action="store_true", help="Overwrite existing prompts (creates new version)")
+    args = parser.parse_args()
+
+    langfuse, host = get_langfuse_client()
+    print(f"Connected to Langfuse at {host}\n")
+
+    results = []
+    results.append(("ner_system", migrate_prompt(langfuse, "ner_system", NER_SYSTEM_PROMPT, args.dry_run, args.force)))
+    results.append(("ner_fewshot_user", migrate_prompt(langfuse, "ner_fewshot_user", NER_FEWSHOT_USER, args.dry_run, args.force)))
+    results.append(("ner_fewshot_assistant", migrate_prompt(langfuse, "ner_fewshot_assistant", NER_FEWSHOT_ASSISTANT, args.dry_run, args.force)))
+
+    print("\n── Summary ──")
+    for name, ok in results:
+        status = "OK" if ok else "FAIL"
+        print(f"  {status} {name}")
+
+    failures = sum(1 for _, ok in results if not ok)
+    if failures:
+        print(f"\n{failures} migration(s) failed")
+        sys.exit(1)
+    elif args.dry_run:
+        print("\nDry run complete — no changes made")
+    else:
+        print("\nAll migrations applied successfully")
+
+
+if __name__ == "__main__":
+    main()

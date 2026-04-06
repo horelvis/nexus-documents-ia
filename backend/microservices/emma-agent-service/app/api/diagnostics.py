@@ -5,7 +5,7 @@ Three tiers of verification, each progressively deeper:
 
 Tier 1 — Infrastructure (~3s):
     Verifies all dependencies are reachable and functional.
-    PostgreSQL, Redis, Weaviate, Knowledge-Tree, vLLM/SGLang, Langfuse.
+    PostgreSQL, Redis, Weaviate, Knowledge-Tree, SGLang, Langfuse.
 
 Tier 2 — Integration (~15s):
     Verifies cross-service operations work end-to-end.
@@ -13,7 +13,9 @@ Tier 2 — Integration (~15s):
 
 Tier 3 — E2E Pipeline (~30s):
     Runs canary queries through the full ReAct pipeline.
-    Classify, SmartSearch retrieval, full ReAct loop, user memory cycle.
+    Classify, SmartSearch retrieval, full ReAct loop, user memory cycle,
+    list_sources, main API health, multi-turn step reset, knowledge tree
+    integrity (FalkorDB TrustGraph triples), multi-turn pipeline.
 
 Usage:
     GET  /diagnostics/infra          — Tier 1 only (fast, for healthchecks)
@@ -73,7 +75,7 @@ def _overall_status(checks: Dict[str, Any]) -> str:
     if any(s == "error" for s in statuses):
         errors = [k for k, v in checks.items() if v.get("status") == "error"]
         # Critical deps that make service non-functional
-        critical = {"redis", "vllm", "weaviate_service"}
+        critical = {"redis", "sglang", "weaviate_service"}
         if any(e in critical for e in errors):
             return "critical"
         return "degraded"
@@ -104,23 +106,34 @@ async def _check_redis() -> Dict[str, Any]:
 
 
 async def _check_postgresql() -> Dict[str, Any]:
-    """Verify PostgreSQL connectivity via Main API health or direct."""
+    """Verify PostgreSQL connectivity via checkpointer pool or Main API."""
     t0 = time.time()
     try:
-        import httpx
-        # Main API exposes /health which checks DB
-        async with httpx.AsyncClient(timeout=5) as client:
-            resp = await client.get(
-                f"{settings.api_url}/health",
-                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
-            )
-            ms = (time.time() - t0) * 1000
-            if resp.status_code == 200:
-                data = resp.json()
-                return _ok(ms, f"main-api healthy, db={data.get('database', 'unknown')}")
-            return _fail(ms, f"HTTP {resp.status_code}")
+        # Try direct DB check via checkpointer pool (always available)
+        from app.core.checkpointer import _ensure_pool
+        pool = await _ensure_pool()
+        async with pool.connection() as conn:
+            row = await conn.execute("SELECT 1")
+            result = await row.fetchone()
+        ms = (time.time() - t0) * 1000
+        if result and result[0] == 1:
+            return _ok(ms, "PostgreSQL direct query OK")
+        return _fail(ms, "unexpected query result")
     except Exception as e:
-        return _fail((time.time() - t0) * 1000, str(e)[:100])
+        # Fallback: try Main API /health
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=5) as client:
+                resp = await client.get(
+                    f"{settings.api_url}/health",
+                    headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+                )
+                ms = (time.time() - t0) * 1000
+                if resp.status_code == 200:
+                    return _ok(ms, f"PostgreSQL via main-api OK")
+                return _fail(ms, f"direct: {str(e)[:50]}; api: HTTP {resp.status_code}")
+        except Exception as e2:
+            return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
 async def _check_weaviate_service() -> Dict[str, Any]:
@@ -157,15 +170,15 @@ async def _check_knowledge_tree() -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_vllm() -> Dict[str, Any]:
-    """Verify vLLM/SGLang is loaded and serving."""
+async def _check_sglang() -> Dict[str, Any]:
+    """Verify SGLang is loaded and serving."""
     t0 = time.time()
-    if not settings.vllm_enabled:
-        return _skip("vLLM disabled")
+    if not settings.sglang_enabled:
+        return _skip("SGLang disabled")
     try:
         import httpx
-        # vllm_base_url already ends with /v1
-        base = settings.vllm_base_url.rstrip("/")
+        # sglang_base_url already ends with /v1
+        base = settings.sglang_base_url.rstrip("/")
         models_url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
         async with httpx.AsyncClient(timeout=5) as client:
             resp = await client.get(models_url)
@@ -206,12 +219,12 @@ async def run_infra_checks() -> Dict[str, Any]:
         _check_postgresql(),
         _check_weaviate_service(),
         _check_knowledge_tree(),
-        _check_vllm(),
+        _check_sglang(),
         _check_langfuse(),
         return_exceptions=True,
     )
 
-    names = ["redis", "postgresql", "weaviate_service", "knowledge_tree", "vllm", "langfuse"]
+    names = ["redis", "postgresql", "weaviate_service", "knowledge_tree", "sglang", "langfuse"]
     checks = {}
     for name, result in zip(names, results):
         if isinstance(result, Exception):
@@ -572,8 +585,8 @@ async def _check_graph_entity_query(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_claims_endpoint() -> Dict[str, Any]:
-    """Verify KTS claims extraction endpoint is reachable and functional."""
+async def _check_triples_endpoint() -> Dict[str, Any]:
+    """Verify KTS TrustGraph triples query endpoint is reachable."""
     t0 = time.time()
     try:
         import httpx
@@ -581,15 +594,16 @@ async def _check_claims_endpoint() -> Dict[str, Any]:
 
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
-                f"{settings.knowledge_tree_service_url}/claims",
-                params={"tenant_id": "00000000-0000-0000-0000-000000000001", "document_id": "__probe__"},
+                f"{settings.knowledge_tree_service_url}/triples/stats",
+                params={"tenant_id": "00000000-0000-0000-0000-000000000001"},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
             )
             ms = (time.time() - t0) * 1000
             if resp.status_code == 200:
                 data = resp.json()
-                total = data.get("total", len(data.get("claims", [])))
-                return _ok(ms, f"claims endpoint OK ({total} claims for probe doc)")
+                nodes = data.get("nodes", 0)
+                rels = data.get("rels", 0)
+                return _ok(ms, f"triples stats OK ({nodes} nodes, {rels} rels)")
             return _fail(ms, f"HTTP {resp.status_code}: {resp.text[:80]}")
     except Exception as e:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
@@ -779,6 +793,251 @@ async def _check_conversation_context(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
+async def _check_list_sources(tenant_id: str) -> Dict[str, Any]:
+    """Verify list_sources tool returns tenant stats (not 404).
+
+    Catches: wrong URL in weaviate_client.get_tenant_stats(),
+    Pydantic schema mismatches in collection stats endpoint.
+    """
+    t0 = time.time()
+    try:
+        from app.clients import get_weaviate_client
+        client = get_weaviate_client()
+        stats = await client.get_tenant_stats(tenant_id)
+        ms = (time.time() - t0) * 1000
+
+        if "error" in stats and stats.get("document_count", 0) == 0:
+            return _fail(ms, f"get_tenant_stats error: {str(stats.get('error', ''))[:80]}")
+        doc_count = stats.get("document_count", 0)
+        return _ok(ms, f"{doc_count} chunks indexed")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_main_api_health() -> Dict[str, Any]:
+    """Verify Main API (port 8000) responds to /health.
+
+    Catches: import errors (subscription_service_v2, workflows, etc.)
+    that crash the API on startup but don't affect emma-agent-service.
+    """
+    t0 = time.time()
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{settings.api_url}/health",
+                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+            )
+            ms = (time.time() - t0) * 1000
+            if resp.status_code == 200:
+                return _ok(ms, "main API reachable")
+            return _fail(ms, f"HTTP {resp.status_code}: {resp.text[:60]}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_multi_turn_step_reset(tenant_id: str) -> Dict[str, Any]:
+    """Verify current_step resets between turns (classify node).
+
+    Catches: checkpointer leaking current_step across turns, which
+    disables Quality Gate 1 (step-0 no-tools) and anti-hallucination
+    cleanup. Simulates classify output and checks reset fields.
+    """
+    t0 = time.time()
+    try:
+        from app.agents.langgraph.nodes.classify import classify_node
+        from langchain_core.messages import HumanMessage
+
+        # Simulate state with stale current_step from a prior turn
+        fake_state = {
+            "query": "test query",
+            "messages": [HumanMessage(content="test query")],
+            "tenant_id": tenant_id,
+            "current_step": 5,  # stale value from prior turn
+            "is_complete": True,
+            "tool_calls_history": [{"name": "smart_search"}],
+            "metadata": {"classify_intent": "old_intent"},
+            "reasoning_steps": [],
+            "swarm_worker_results": [],
+        }
+
+        result = await classify_node(fake_state)
+        ms = (time.time() - t0) * 1000
+
+        step = result.get("current_step")
+        is_complete = result.get("is_complete")
+        tool_history = result.get("tool_calls_history")
+
+        if step == 0 and is_complete is False and tool_history == []:
+            return _ok(ms, "classify resets control fields correctly")
+        issues = []
+        if step != 0:
+            issues.append(f"current_step={step} (should be 0)")
+        if is_complete is not False:
+            issues.append(f"is_complete={is_complete} (should be False)")
+        if tool_history != []:
+            issues.append(f"tool_calls_history not reset")
+        return _fail(ms, "; ".join(issues))
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_knowledge_tree_integrity(tenant_id: str) -> Dict[str, Any]:
+    """Verify knowledge-tree-service TrustGraph is functional.
+
+    Tests:
+    1. /triples/stats — graph connectivity and FalkorDB health
+    2. /triples/query — SPO query execution against FalkorDB
+    3. /triples/context — LLM context generation from graph
+
+    Does NOT create persistent data — uses probe queries only.
+    """
+    t0 = time.time()
+    issues = []
+    try:
+        import httpx
+        kts_url = settings.knowledge_tree_service_url
+        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            # 1. Triples stats — verifies FalkorDB connection
+            resp = await client.get(
+                f"{kts_url}/triples/stats",
+                params={"tenant_id": tenant_id},
+                headers=headers,
+            )
+            if resp.status_code != 200:
+                issues.append(f"triples/stats HTTP {resp.status_code}")
+            else:
+                stats = resp.json()
+                nodes = stats.get("nodes", -1)
+                rels = stats.get("rels", -1)
+                if nodes < 0 or rels < 0:
+                    issues.append("triples/stats returned invalid counts")
+
+            # 2. SPO query — verifies Cypher execution against FalkorDB
+            resp2 = await client.post(
+                f"{kts_url}/triples/query",
+                json={"tenant_id": tenant_id, "subject": "__probe__"},
+                headers=headers,
+            )
+            if resp2.status_code != 200:
+                issues.append(f"triples/query HTTP {resp2.status_code}")
+
+            # 3. Context endpoint — verifies graph-to-LLM context generation
+            resp3 = await client.post(
+                f"{kts_url}/triples/context",
+                json={"tenant_id": tenant_id, "query": "test"},
+                headers=headers,
+            )
+            if resp3.status_code != 200:
+                issues.append(f"triples/context HTTP {resp3.status_code}")
+
+        ms = (time.time() - t0) * 1000
+        if issues:
+            return _fail(ms, "; ".join(issues))
+
+        graph_nodes = stats.get("nodes", 0)
+        graph_rels = stats.get("rels", 0)
+        return _ok(ms, f"TrustGraph OK ({graph_nodes} nodes, {graph_rels} rels)")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
+    """Verify the ReAct pipeline works correctly on turn 2 of a conversation.
+
+    Sends two queries to the SAME thread_id:
+    1. "Hola" (greeting — fast-path or simple response)
+    2. "¿Cuántos documentos tengo?" (document_query — should trigger tools)
+
+    Catches: current_step/metadata leaking across turns via checkpointer,
+    Quality Gate not firing on turn 2, anti-hallucination cleanup skipped.
+    """
+    t0 = time.time()
+    try:
+        import uuid
+        from app.agents.langgraph.api import execute_langgraph_query
+
+        thread_id = f"diag-multiturn-{uuid.uuid4().hex[:8]}"
+
+        # Turn 1: greeting (warms up the thread in checkpointer)
+        resp1 = await execute_langgraph_query(
+            query="Hola",
+            tenant_id=tenant_id,
+            user_id="diagnostics-probe",
+            thread_id=thread_id,
+        )
+        if not resp1.success:
+            ms = (time.time() - t0) * 1000
+            return _fail(ms, f"Turn 1 failed: {resp1.answer[:60] if resp1.answer else 'no answer'}")
+
+        # Turn 2: document query — must use tools (not respond without searching)
+        resp2 = await execute_langgraph_query(
+            query="¿Cuántos documentos tengo?",
+            tenant_id=tenant_id,
+            user_id="diagnostics-probe",
+            thread_id=thread_id,
+        )
+        ms = (time.time() - t0) * 1000
+
+        if not resp2.success:
+            return _fail(ms, f"Turn 2 failed: {resp2.answer[:60] if resp2.answer else 'no answer'}")
+
+        # Check the answer doesn't contain "give up" phrases
+        _gave_up = ["no encontré", "no he encontrado", "no tengo acceso", "no puedo buscar"]
+        answer_lower = (resp2.answer or "").lower()
+        gave_up = any(p in answer_lower for p in _gave_up)
+
+        # Check metadata shows tools were used (steps > 0 means tool calls happened)
+        steps = resp2.metadata.get("react_total_steps", 0) if resp2.metadata else 0
+
+        if gave_up and steps <= 1:
+            return _fail(ms, f"Turn 2: LLM gave up without searching (steps={steps})")
+
+        return _ok(ms, f"Turn 2 OK: steps={steps}, answer: {(resp2.answer or '')[:50]}...")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_graph_rag_entity_retrieval(tenant_id: str) -> Dict[str, Any]:
+    """Verify Weaviate TrustGraphEntities returns results."""
+    t0 = time.time()
+    try:
+        from app.clients.weaviate_client import get_weaviate_client
+        client = get_weaviate_client()
+        results = await client.search_entities(
+            query="test", tenant_id=tenant_id, limit=1,
+        )
+        ms = (time.time() - t0) * 1000
+        if isinstance(results, list):
+            return _ok(ms, f"entity_count={len(results)}")
+        return _fail(ms, f"unexpected result type: {type(results).__name__}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
+async def _check_graph_rag_subgraph_traversal(tenant_id: str) -> Dict[str, Any]:
+    """Verify KTS /triples/neighbors returns valid response."""
+    t0 = time.time()
+    try:
+        from app.clients.knowledge_tree_client import get_knowledge_tree_client
+        client = get_knowledge_tree_client()
+        result = await client.batch_neighbors(
+            tenant_id=tenant_id,
+            seed_uris=["nouxcube://entity/default/test"],
+            max_hops=1,
+            max_edges=5,
+        )
+        ms = (time.time() - t0) * 1000
+        has_keys = "edges" in result and "entities_visited" in result
+        if has_keys:
+            return _ok(ms, "subgraph traversal OK")
+        return _fail(ms, f"missing keys in response: {list(result.keys())}")
+    except Exception as e:
+        return _fail((time.time() - t0) * 1000, str(e)[:100])
+
+
 async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
     """Run all Tier 3 E2E pipeline checks (sequential — they use LLM)."""
     t0 = time.time()
@@ -793,13 +1052,20 @@ async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
         ("smart_search_person", _check_smart_search_person(tenant_id)),
         ("smart_search_legislation", _check_smart_search_legislation(tenant_id)),
         ("graph_entity_query", _check_graph_entity_query(tenant_id)),
-        ("claims_endpoint", _check_claims_endpoint()),
+        ("triples_endpoint", _check_triples_endpoint()),
         ("react_pipeline", _check_react_pipeline(tenant_id)),
         ("conversation_context", _check_conversation_context(tenant_id)),
         ("user_memory", _check_user_memory(tenant_id)),
         ("generate_document", _check_generate_document(tenant_id)),
         ("send_email_preview", _check_send_email_preview()),
         ("generated_doc_storage", _check_generated_doc_download()),
+        ("list_sources", _check_list_sources(tenant_id)),
+        ("main_api_health", _check_main_api_health()),
+        ("multi_turn_step_reset", _check_multi_turn_step_reset(tenant_id)),
+        ("knowledge_tree_integrity", _check_knowledge_tree_integrity(tenant_id)),
+        ("multi_turn_pipeline", _check_multi_turn_pipeline(tenant_id)),
+        ("graph_rag_entity_retrieval", _check_graph_rag_entity_retrieval(tenant_id)),
+        ("graph_rag_subgraph_traversal", _check_graph_rag_subgraph_traversal(tenant_id)),
     ]:
         try:
             checks[name] = await asyncio.wait_for(coro, timeout=30)

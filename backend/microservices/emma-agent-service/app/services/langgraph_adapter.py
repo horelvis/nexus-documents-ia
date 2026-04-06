@@ -265,6 +265,21 @@ async def translate_to_langgraph_sse(
                     },
                 })
 
+            elif event_type.startswith("report."):
+                # Knowledge report progressive events — pass through as
+                # reasoning steps so useStream UI can detect them.
+                step = {"type": event_type, "content": json.dumps(data) if isinstance(data, dict) else str(data)}
+                reasoning_steps.append(step)
+                yield _sse_line("updates", {
+                    "react_loop": step,
+                })
+                yield _sse_line("values", {
+                    "messages": list(messages) + (
+                        [_make_ai_message(accumulated_text, msg_id=ai_msg_id)] if accumulated_text else []
+                    ),
+                    "reasoning_steps": list(reasoning_steps),
+                })
+
             elif event_type == "complete":
 
 

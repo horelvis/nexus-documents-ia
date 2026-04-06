@@ -92,9 +92,38 @@ export function getNodeRadius(node: SimNode): number {
   }
 }
 
-// ── Edge styling ──
+// ── TrustGraph entity type colors (same palette as 3D) ──
+
+export const ENTITY_TYPE_COLORS: Record<string, string> = {
+  document: '#3b82f6',
+  person: '#f59e0b',
+  law: '#06b6d4',
+  organization: '#22c55e',
+  contract: '#f43f5e',
+  amount: '#a855f7',
+  date: '#64748b',
+  place: '#f97316',
+  topic: '#14b8a6',
+  other: '#6b7280',
+}
+
+export function getTrustGraphNodeColor(type: string): string {
+  return ENTITY_TYPE_COLORS[type] ?? ENTITY_TYPE_COLORS.other
+}
+
+export function getTrustGraphNodeRadius(connectionCount: number): number {
+  return 6 + Math.log(connectionCount + 1) * 3
+}
+
+// ── Edge styling (legacy label-based) ──
 
 const EDGE_STYLES: Record<string, { dash: string; opacity: number }> = {
+  CONTAINED_IN: { dash: "none", opacity: 0.3 },
+  CONTAINS: { dash: "none", opacity: 0.25 },
+  MENTIONED_IN: { dash: "none", opacity: 0.4 },
+  RELATED_TO: { dash: "2 2", opacity: 0.2 },
+  BELONGS_TO: { dash: "4 2", opacity: 0.2 },
+  REFERENCES_LAW: { dash: "4 2", opacity: 0.35 },
   ASOCIADO_A: { dash: "none", opacity: 0.35 },
   APLICA: { dash: "4 2", opacity: 0.3 },
   INSTANCE_OF: { dash: "2 2", opacity: 0.2 },
@@ -106,6 +135,23 @@ const EDGE_STYLES: Record<string, { dash: string; opacity: number }> = {
 
 export function getEdgeStyle(label: string) {
   return EDGE_STYLES[label] || { dash: "none", opacity: 0.2 }
+}
+
+// ── TrustGraph edge styles by namespace ──
+
+export const NAMESPACE_EDGE_STYLES: Record<string, {
+  stroke: string
+  strokeWidth: number
+  dashArray?: string
+  opacity: number
+}> = {
+  core: { stroke: '#94a3b8', strokeWidth: 1.5, opacity: 0.6 },
+  legal: { stroke: '#22d3ee', strokeWidth: 2.5, opacity: 0.8 },
+  prov: { stroke: '#475569', strokeWidth: 1, dashArray: '2,4', opacity: 0.3 },
+}
+
+export function getNamespaceEdgeStyle(namespace: string) {
+  return NAMESPACE_EDGE_STYLES[namespace] ?? NAMESPACE_EDGE_STYLES.core
 }
 
 // ── Converters: API response → D3 sim data ──
@@ -157,11 +203,16 @@ function getNodeKindFromLabel(label: string): NodeKind {
     case "structural_document":
     case "document":
       return "document"
-    case "Persona": return "person"
+    case "Persona":
+    case "person":
+      return "person"
     case "LegalLaw":
     case "law":
       return "law"
-    case "EntityType": return "entity_type"
+    case "EntityType":
+    case "Entity":
+    case "entity_type":
+      return "entity_type"
     case "DocumentMemory": return "memory"
     case "Folder":
     case "folder":
@@ -207,6 +258,34 @@ export const KIND_LABELS: Record<NodeKind, string> = {
   memory: "Memoria",
   folder: "Carpeta",
   unknown: "Otro",
+}
+
+// ── TrustGraph → SimNode/SimLink converters ──
+
+import type { TrustGraphNode, TrustGraphEdge } from "@/lib/services/knowledge-tree.service"
+
+export function trustGraphNodesToSim(nodes: TrustGraphNode[]): SimNode[] {
+  return nodes.map((n) => ({
+    id: n.id,
+    label: n.type,
+    name: n.label,
+    kind: (n.type === "person" ? "person" : n.type === "law" ? "law" : n.type === "document" ? "document" : "entity_type") as NodeKind,
+    properties: {
+      definition: n.definition,
+      connectionCount: n.connectionCount,
+      entityType: n.type,
+    },
+  }))
+}
+
+export function trustGraphEdgesToSim(edges: TrustGraphEdge[]): SimLink[] {
+  return edges.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    edgeLabel: e.predicate,
+    properties: { namespace: e.namespace, weight: e.weight },
+  }))
 }
 
 export { KIND_COLORS, LAW_DOMAIN_COLORS }

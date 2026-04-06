@@ -29,8 +29,8 @@ def get_planner_model() -> ChatOpenAI:
     Configured for fast, deterministic output:
     - Low temperature (0.3)
     - Thinking disabled
-    - 4096 max tokens
-    - repetition_penalty to prevent generation loops
+    - 2048 max tokens (tuned for 9B)
+    - Light repetition_penalty (1.08 — 9B needs less than 27B)
     """
     global _planner_model
     if _planner_model is None:
@@ -43,7 +43,7 @@ def get_planner_model() -> ChatOpenAI:
             temperature=settings.planner_temperature,
             max_tokens=settings.planner_max_tokens,
             extra_body={
-                "repetition_penalty": 1.15,
+                "repetition_penalty": 1.08,
                 "chat_template_kwargs": {"enable_thinking": False},
             },
         )
@@ -54,10 +54,10 @@ def get_chat_model() -> ChatOpenAI:
     """Get the chat ChatOpenAI instance (lazy, singleton).
 
     Configured for quality generation:
-    - Higher temperature (0.6)
+    - Moderate temperature (0.5, tuned for 9B coherence)
     - Thinking disabled by default (toggle via chat_with_thinking)
-    - 16384 max tokens
-    - repetition_penalty to prevent generation loops
+    - 8192 max tokens (tuned for 9B)
+    - Light repetition_penalty (1.08)
     """
     global _chat_model
     if _chat_model is None:
@@ -70,7 +70,7 @@ def get_chat_model() -> ChatOpenAI:
             temperature=settings.chat_temperature,
             max_tokens=settings.chat_max_tokens,
             extra_body={
-                "repetition_penalty": 1.15,
+                "repetition_penalty": 1.08,
                 "chat_template_kwargs": {"enable_thinking": False},
             },
         )
@@ -113,7 +113,7 @@ async def chat_with_thinking(
                 "temperature": settings.chat_temperature,
                 "max_tokens": settings.chat_max_tokens,
                 "chat_template_kwargs": {"enable_thinking": True},
-                "repetition_penalty": 1.15,
+                "repetition_penalty": 1.08,
                 **kwargs,
             },
         )

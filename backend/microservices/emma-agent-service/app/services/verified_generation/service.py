@@ -275,13 +275,8 @@ class VerifiedDocumentService:
             create_initial_state,
         )
 
-        # Check if HITL is enabled — sector override takes precedence
-        from app.agents.langgraph.sectors.registry import get_active_sector_config
-        sector_config = get_active_sector_config()
-        if sector_config and sector_config.hitl_default:
-            hitl_enabled = True
-        else:
-            hitl_enabled = settings.verified_hitl_enabled
+        # HITL from settings (unified config — no sector override)
+        hitl_enabled = settings.verified_hitl_enabled
 
         initial_state = create_initial_state(
             session_id=session_id,
@@ -299,8 +294,8 @@ class VerifiedDocumentService:
                 "max_correction_attempts": request.max_correction_attempts,
                 "verification_timeout_seconds": request.verification_timeout_seconds,
                 "document_type": request.document_type,
-                "fidelity_confidence_cap": sector_config.fidelity_confidence_cap if sector_config else 0.80,
-                "max_evidence": sector_config.max_evidence if sector_config else 5,
+                "fidelity_confidence_cap": 0.80,
+                "max_evidence": 5,
             },
             hitl_enabled=hitl_enabled,
         )

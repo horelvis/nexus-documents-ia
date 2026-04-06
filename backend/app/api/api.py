@@ -12,9 +12,9 @@ Deployment modes:
 """
 
 from app.api.v1 import (
-    document_insights, documents, document_shares, document_categorization, tenants, auth, admin, chat,
+    document_insights, documents, document_shares, document_categorization, tenants, auth, admin,
     agents, webhooks, search, teams, users, entities,
-    assistant, migration, weaviate, lgpd, workflows, analysis_queue, channels,
+    weaviate, lgpd, analysis_queue, channels,
     internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
     document_acl, folders, classification, sharing_insights, emma,
 )
@@ -40,19 +40,12 @@ if FeatureFlags.is_enabled(Feature.SSO_MULTI_PROTOCOL):
     api_router.include_router(auth_sso.router, prefix="/auth", tags=["sso-auth"])
     logger.debug("SSO multi-protocol routes enabled")
 
-# Stripe billing (conditional)
-if FeatureFlags.is_enabled(Feature.STRIPE_BILLING):
-    from app.api.v1 import stripe
-    api_router.include_router(stripe.router, prefix="/stripe", tags=["stripe"])
-    logger.debug("Stripe billing routes enabled")
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
 api_router.include_router(document_shares.router, prefix="/shares", tags=["document-shares"])
 api_router.include_router(document_categorization.router, prefix="/categorization", tags=["categorization"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(tenants.router, prefix="/tenants", tags=["tenants"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])
-api_router.include_router(chat.router, prefix="/chat", tags=["chat"])
-api_router.include_router(assistant.router, tags=["assistant"])
 api_router.include_router(google_drive.router)
 
 # AI Agents (always enabled - core Emma functionality)
@@ -119,14 +112,9 @@ if FeatureFlags.is_enabled(Feature.DASHBOARD_ANALYTICS):
     api_router.include_router(dashboard.router, prefix="/dashboard", tags=["dashboard"])
     logger.debug("Dashboard analytics routes enabled")
 
-# NEW: Migration management for Qdrant->Weaviate transition
-api_router.include_router(migration.router, prefix="/migration", tags=["migration"])
 
 # LGPD Compliance - User data deletion for Brazilian LGPD law
 api_router.include_router(lgpd.router, prefix="/lgpd", tags=["lgpd"])
-
-# Workflow Management - Camunda BPM integration
-api_router.include_router(workflows.router, tags=["workflows"])
 
 # Analysis Queue - Emma AI document analysis queue
 api_router.include_router(analysis_queue.router, prefix="/analysis", tags=["analysis-queue"])
@@ -134,10 +122,6 @@ api_router.include_router(analysis_queue.router, prefix="/analysis", tags=["anal
 # Emma Voice Mode - Gemini Live API integration
 from app.api.v1 import gemini_voice
 api_router.include_router(gemini_voice.router, prefix="/gemini", tags=["gemini-voice"])
-
-# TTS Service - Text-to-Speech for Emma Chat responses
-from app.api.v1 import tts
-api_router.include_router(tts.router, prefix="/tts", tags=["tts"])
 
 # NexusLM - NotebookLM-style document notebooks with podcast generation
 from app.api.v1 import notebooks

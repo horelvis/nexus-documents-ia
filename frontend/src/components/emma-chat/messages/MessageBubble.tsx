@@ -19,6 +19,9 @@ import { ForgeResult } from '../ForgeResult'
 import { useStreamingText } from '../hooks/useStreamingText'
 import { GeneratedDocDownload } from './GeneratedDocDownload'
 import { ProgressBubble } from './ProgressBubble'
+import { EntityTags } from '../EntityTags'
+import { SourceEvidence } from '../SourceEvidence'
+import { ReportPanel } from '../ReportPanel'
 
 export interface MessageBubbleProps {
   message: EmmaMessage
@@ -88,6 +91,20 @@ export function MessageBubble({
           <SuggestionChips suggestions={message.suggestions} onClick={onSuggestionClick} />
         )}
         {onFeedback && <ActionBar message={message} onFeedback={onFeedback} />}
+      </EmmaMessageFlow>
+    )
+  }
+
+  // ── Knowledge Report result ──
+  if (message.report) {
+    return (
+      <EmmaMessageFlow>
+        <div className="max-w-none">
+          <ReportPanel report={message.report} content={message.content} />
+        </div>
+        {message.metadata?.explanation && (
+          <ExplanationPanel explanation={message.metadata.explanation} />
+        )}
       </EmmaMessageFlow>
     )
   }
@@ -216,6 +233,22 @@ export function MessageBubble({
             />
           ))}
         </div>
+      )}
+
+      {/* Source evidence from graph_rag provenance */}
+      {message.metadata?.sourceEvidence && message.metadata.sourceEvidence.length > 0 && (
+        <SourceEvidence
+          sources={message.metadata.sourceEvidence}
+          onDocumentClick={(docId) => {
+            const doc = { name: docId, id: docId } as DocumentInfo
+            onOpenFullscreen?.(doc)
+          }}
+        />
+      )}
+
+      {/* Entity tags from graph_rag — clickable → knowledge graph */}
+      {message.metadata?.entityTags && message.metadata.entityTags.length > 0 && (
+        <EntityTags entities={message.metadata.entityTags} />
       )}
 
       {/* Explanation — island block */}

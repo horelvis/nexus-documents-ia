@@ -40,9 +40,10 @@ const nextConfig: NextConfig = {
 
   // Rewrite API calls to backend
   async rewrites() {
-    // BACKEND_URL is a server-side runtime env var (set in Docker compose).
-    // NEXT_PUBLIC_* vars are baked at build time and won't change in containers.
+    // Server-side runtime env vars for rewrite destination.
+    // Priority: BACKEND_URL > API_BASE_URL > NEXT_PUBLIC_BACKEND_URL > fallback
     const backendUrl = process.env.BACKEND_URL ||
+                       process.env.API_BASE_URL ||
                        process.env.NEXT_PUBLIC_BACKEND_URL ||
                        process.env.NEXT_PUBLIC_API_URL?.replace(/\/api\/v1\/?$/, '') ||
                        "http://localhost:8000"

@@ -9,9 +9,56 @@
  */
 import { useEffect, useMemo, useRef } from 'react'
 import type { Message as SDKMessage } from '@langchain/langgraph-sdk'
-import type { EmmaMessage, DocumentInfo } from '@/lib/types/emma'
+import type { EmmaMessage, DocumentInfo, ReportMetadata } from '@/lib/types/emma'
+import type { EntityTag } from '../EntityTags'
 import type { EmmaStateType } from '../EmmaStreamProvider'
 import { isHITLReview, isClarification } from '../types/interrupts'
+
+/**
+ * Filter sources to only those actually referenced in the response text.
+ * Matches by: title/name keywords, boe_id, or document_id.
+ */
+function filterReferencedSources(
+  sources: DocumentInfo[],
+  responseText: string,
+): DocumentInfo[] {
+  if (!responseText || sources.length === 0) return sources
+
+  const textLower = responseText.toLowerCase()
+
+  return sources.filter((src) => {
+    // Match by boe_id (e.g., "Real Decreto Legislativo 2/2015" or BOE ref)
+    if (src.boe_id && textLower.includes(src.boe_id.toLowerCase())) return true
+
+    // Match by document_id (rare in text, but possible)
+    if (src.id && textLower.includes(src.id.toLowerCase())) return true
+
+    // Match by title/name — extract significant keywords (3+ chars) and
+    // check if enough of them appear in the response text.
+    const name = src.name || ''
+    if (name) {
+      const nameLower = name.toLowerCase()
+
+      // Direct substring match for short names (≤40 chars)
+      if (nameLower.length <= 40 && nameLower.length >= 3 && textLower.includes(nameLower)) {
+        return true
+      }
+
+      // For longer names, check if significant keywords overlap.
+      // Strip common extensions and split into words.
+      const stripped = nameLower.replace(/\.(pdf|docx?|xlsx?|txt|md|odt|rtf)$/, '')
+      const words = stripped.split(/[\s_\-./]+/).filter((w) => w.length >= 3)
+      if (words.length === 0) return false
+
+      // Require at least 50% of significant words present (min 2 for long titles)
+      const threshold = Math.max(2, Math.ceil(words.length * 0.5))
+      const matched = words.filter((w) => textLower.includes(w)).length
+      if (matched >= threshold) return true
+    }
+
+    return false
+  })
+}
 
 /** Extract text content from an SDK message (handles string and array formats). */
 function getTextContent(m: SDKMessage): string {
@@ -55,6 +102,46 @@ function formatResumeMessage(content: string): string | null {
   }
 
   return null
+}
+
+/**
+ * Extract entity tags from reasoning_steps that contain graph_rag results.
+ * The graph_rag tool output includes a JSON entity list in markdown format:
+ *   ### Entities
+ *   [{"name": "...", "type": "...", "definition": "..."}]
+ *
+ * We parse these to create clickable entity tags.
+ */
+function extractEntityTags(reasoningSteps: Array<{ type: string; content: string; source?: string }>): EntityTag[] {
+  const entities: EntityTag[] = []
+  const seen = new Set<string>()
+
+  for (const step of reasoningSteps) {
+    // Look for graph_rag tool results that contain entity JSON
+    if (step.content && step.content.includes('Knowledge Graph Context')) {
+      const entityMatch = step.content.match(/### Entities\s*\n(\[[\s\S]*?\])\s*\n/)
+      if (entityMatch) {
+        try {
+          const parsed = JSON.parse(entityMatch[1]) as Array<{ name: string; type: string; definition?: string }>
+          for (const entity of parsed.slice(0, 8)) {
+            const uri = entity.name.toLowerCase().replace(/\s+/g, '-')
+            if (!seen.has(uri)) {
+              seen.add(uri)
+              entities.push({
+                uri: `nouxcube://entity/${uri}`,
+                label: entity.name,
+                type: entity.type || 'other',
+              })
+            }
+          }
+        } catch {
+          // JSON parse failed — skip
+        }
+      }
+    }
+  }
+
+  return entities
 }
 
 export function useMessageConverter(
@@ -171,12 +258,49 @@ export function useMessageConverter(
       }
     }
 
+    // Extract entity tags from graph_rag tool results in reasoning steps
+    const entityTags = extractEntityTags(reasoningSteps as Array<{ type: string; content: string; source?: string }>)
+
+    // Extract source evidence from graph_rag provenance
+    const sourceEvidence = reasoningSteps
+      .filter((s: any) => s.type === 'source_evidence')
+      .flatMap((s: any) => {
+        try { return JSON.parse(s.content) } catch { return [] }
+      })
+
+    // Extract report metadata from reasoning steps
+    const reportStep = reasoningSteps.find(
+      (s: any) => s.type === 'report_complete' || s.type === 'report.complete'
+    )
+    let reportMetadata: ReportMetadata | undefined
+    if (reportStep) {
+      try {
+        const parsed = typeof reportStep.content === 'string'
+          ? JSON.parse(reportStep.content)
+          : reportStep.content
+        if (parsed && parsed.report_id) {
+          reportMetadata = {
+            report_id: parsed.report_id,
+            entity_label: parsed.entity_label,
+            report_type: parsed.report_type,
+            trust_summary: parsed.trust_summary,
+            source_count: parsed.source_count,
+          }
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
     const hasMetadata = reasoningSteps.length > 0 || sources.length > 0 || explanation
 
     if (hasMetadata) {
       const stepsMetadata: EmmaMessage['metadata'] = {
         slmIsThinking: !success && reasoningSteps.length > 0,
         rawReasoningSteps: reasoningSteps,
+        entityTags: entityTags.length > 0 ? entityTags : undefined,
+      }
+
+      if (sourceEvidence.length > 0) {
+        stepsMetadata!.sourceEvidence = sourceEvidence
       }
 
       if (explanation) {
@@ -184,7 +308,7 @@ export function useMessageConverter(
       }
 
       if (sources.length > 0) {
-        stepsMetadata!.documents = sources.map((s) => {
+        const allDocs = sources.map((s) => {
           const src = s as Record<string, unknown>
           const pageRaw = src.page ?? src.page_number
           return {
@@ -194,18 +318,27 @@ export function useMessageConverter(
             boe_id: src.boe_id as string,
             graph_link: src.graph_link as string,
             source_type: (src.source_type as string) || (src.type as string),
-            fileType: (src.file_type as string) || (src.mime_type as string),
+            fileType: (src.file_type as string) || (src.mime_type as string) || (src.document_type as string),
             relevanceScore: Number(src.score || src.relevance) || undefined,
             page: pageRaw != null ? Number(pageRaw) : undefined,
             excerpt: (src.excerpt as string) || (src.snippet as string) || undefined,
           }
         }) as DocumentInfo[]
+
+        // Only show sources actually referenced in the response text.
+        // During streaming (success=false), show all so cards appear progressively.
+        const responseText = currentAiIdx >= 0 ? converted[currentAiIdx].content : ''
+        const filtered = success && responseText
+          ? filterReferencedSources(allDocs, responseText)
+          : allDocs
+        stepsMetadata!.documents = filtered.length > 0 ? filtered : allDocs
       }
 
       if (currentAiIdx >= 0) {
         // Attach to existing current-turn AI message
         converted[currentAiIdx] = {
           ...converted[currentAiIdx],
+          ...(reportMetadata ? { report: reportMetadata } : {}),
           metadata: { ...converted[currentAiIdx].metadata, ...stepsMetadata },
         }
       } else if (!success) {

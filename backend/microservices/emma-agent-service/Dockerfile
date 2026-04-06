@@ -23,6 +23,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 # Install Python dependencies
+# Note: litellm is pinned in requirements.txt to block compromised versions
+# (SNYK-PYTHON-LITELLM-15762713). See backend/security-constraints.txt for details.
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 

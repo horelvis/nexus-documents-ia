@@ -1,1 +1,0 @@
-"""Text Extraction microservice package."""

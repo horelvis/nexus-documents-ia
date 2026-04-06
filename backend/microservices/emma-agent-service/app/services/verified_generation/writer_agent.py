@@ -1,7 +1,7 @@
 """
 Writer Agent for Verified Document Generation.
 
-Generates ONE claim at a time using vLLM, incorporating context from
+Generates ONE claim at a time using SGLang, incorporating context from
 previously verified claims. This ensures each new claim builds on
 validated information only.
 
@@ -121,15 +121,15 @@ class WriterAgent:
     """
     Writer Agent that generates claims one at a time.
 
-    Uses vLLM for generation with low temperature for deterministic,
+    Uses SGLang for generation with low temperature for deterministic,
     factual output. Each claim is short and focused to facilitate
     verification.
     """
 
     def __init__(
         self,
-        vllm_base_url: Optional[str] = None,
-        vllm_model: Optional[str] = None,
+        sglang_base_url: Optional[str] = None,
+        sglang_model: Optional[str] = None,
         temperature: float = 0.3,
         max_tokens: int = 150,
     ):
@@ -137,13 +137,13 @@ class WriterAgent:
         Initialize the Writer Agent.
 
         Args:
-            vllm_base_url: vLLM server URL
-            vllm_model: Model to use
+            sglang_base_url: SGLang server URL
+            sglang_model: Model to use
             temperature: Generation temperature (lower = more deterministic)
             max_tokens: Max tokens per claim (keep short)
         """
-        self._vllm_base_url = vllm_base_url or settings.vllm_base_url
-        self._vllm_model = vllm_model or settings.vllm_model
+        self._sglang_base_url = sglang_base_url or settings.sglang_base_url
+        self._sglang_model = sglang_model or settings.sglang_model
         self._temperature = temperature
         self._max_tokens = max_tokens
 
@@ -209,11 +209,11 @@ class WriterAgent:
             user_prompt = user_cached.content if user_cached else FALLBACK_CLAIM_USER_FIRST.format(**variables)
 
         # Generate claim
-        raw_text = await self._call_vllm(
+        raw_text = await self._call_sglang(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
-        logger.info(f"🔍 Raw vLLM response ({len(raw_text)} chars): {raw_text[:300]}")
+        logger.info(f"🔍 Raw SGLang response ({len(raw_text)} chars): {raw_text[:300]}")
 
         # Clean the generated text
         claim_text = self._clean_claim_text(raw_text)
@@ -282,7 +282,7 @@ class WriterAgent:
         )
         check_prompt = user_cached.content if user_cached else FALLBACK_COMPLETION_USER.format(**variables)
 
-        response = await self._call_vllm(
+        response = await self._call_sglang(
             system_prompt=system_prompt,
             user_prompt=check_prompt,
         )
@@ -402,7 +402,7 @@ class WriterAgent:
 
         return text
 
-    async def _call_vllm(
+    async def _call_sglang(
         self,
         system_prompt: str,
         user_prompt: str,
@@ -431,15 +431,15 @@ class WriterAgent:
             if response and response.content:
                 return response.content.strip()
             else:
-                logger.warning("⚠️ ChatOpenAI returned empty response, falling back to raw vLLM")
+                logger.warning("⚠️ ChatOpenAI returned empty response, falling back to raw SGLang")
         except Exception as e:
-            logger.warning(f"⚠️ LLM router failed ({e}), falling back to raw vLLM")
+            logger.warning(f"⚠️ LLM router failed ({e}), falling back to raw SGLang")
 
-        # Fallback: direct vLLM call
+        # Fallback: direct SGLang call
         try:
-            async with httpx.AsyncClient(timeout=settings.agent_raw_vllm_timeout_seconds) as client:
+            async with httpx.AsyncClient(timeout=settings.agent_raw_sglang_timeout_seconds) as client:
                 payload = {
-                    "model": self._vllm_model,
+                    "model": self._sglang_model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
@@ -454,7 +454,7 @@ class WriterAgent:
                 }
 
                 response = await client.post(
-                    f"{self._vllm_base_url}/chat/completions",
+                    f"{self._sglang_base_url}/chat/completions",
                     headers={"Content-Type": "application/json"},
                     json=payload,
                 )
@@ -464,11 +464,11 @@ class WriterAgent:
                     content = data["choices"][0]["message"]["content"]
                     return content.strip()
                 else:
-                    logger.error(f"❌ vLLM returned {response.status_code}: {response.text}")
-                    raise Exception(f"vLLM error: {response.status_code}")
+                    logger.error(f"❌ SGLang returned {response.status_code}: {response.text}")
+                    raise Exception(f"SGLang error: {response.status_code}")
 
         except Exception as e:
-            logger.error(f"❌ vLLM call failed: {e}")
+            logger.error(f"❌ SGLang call failed: {e}")
             raise
 
 

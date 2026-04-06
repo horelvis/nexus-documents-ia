@@ -468,29 +468,22 @@ async def stream_document(
             detail="Document not available (no cache and source connector unavailable)"
         )
 
-        # Preparar respuesta
-        content_type = indexed_doc.mime_type or "application/octet-stream"
-        filename = indexed_doc.title or "document"
+    # Preparar respuesta
+    content_type = indexed_doc.mime_type or "application/octet-stream"
+    filename = indexed_doc.title or "document"
 
-        content_headers = {
-            "Content-Type": content_type,
-            "Content-Disposition": f'inline; filename="{filename}"',
-            "Content-Length": str(len(content)),
-            "X-Source": "connector"
-        }
+    content_headers = {
+        "Content-Type": content_type,
+        "Content-Disposition": f'inline; filename="{filename}"',
+        "Content-Length": str(len(content)),
+        "X-Source": "connector"
+    }
 
-        return StreamingResponse(
-            io.BytesIO(content),
-            headers=content_headers,
-            media_type=content_type
-        )
-
-    except FileNotFoundError as e:
-        logger.error(f"Document not found in connector: {e}")
-        raise HTTPException(status_code=404, detail="Document not found in external system")
-    except Exception as e:
-        logger.error(f"Error downloading from connector {indexed_doc.connector_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Error downloading from connector: {str(e)}")
+    return StreamingResponse(
+        io.BytesIO(content),
+        headers=content_headers,
+        media_type=content_type
+    )
 
 
 @router.get("/{doc_id}/pdf")
@@ -1244,16 +1237,16 @@ async def process_identity_document(
     logger.info(f"AUDIT: {audit_entry}")
 
     try:
-        # Call langextract-service for identity document extraction
-        langextract_url = os.getenv(
-            "LANGEXTRACT_SERVICE_URL",
-            "http://langextract-service:8000"
+        # Call intelligence-docs-service for identity document extraction
+        intelligence_url = os.getenv(
+            "INTELLIGENCE_DOCS_SERVICE_URL",
+            "http://intelligence-docs-service:8000"
         )
         api_key = settings.MICROSERVICES_API_KEY
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{langextract_url}/api/v1/extraction/identity/extract",
+                f"{intelligence_url}/identity/extract",
                 headers={
                     "X-API-Key": api_key,
                     "X-Tenant-ID": tenant_id,

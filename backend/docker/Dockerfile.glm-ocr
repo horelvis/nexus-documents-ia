@@ -1,0 +1,4 @@
+FROM lmsysorg/sglang:dev
+
+# GLM-OCR requires latest transformers (model type glm_ocr not in releases yet)
+RUN pip install --no-cache-dir git+https://github.com/huggingface/transformers.git

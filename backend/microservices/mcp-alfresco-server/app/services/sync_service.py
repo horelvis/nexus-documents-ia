@@ -222,6 +222,7 @@ async def _process_document(
     owner_id: UUID,
     base_url: str,
     stats: Dict[str, Any],
+    full_sync: bool = False,
 ) -> None:
     """
     Process a single document from Alfresco search results.
@@ -286,28 +287,54 @@ async def _process_document(
 
     if existing:
         # Update existing
-        await conn.execute(
-            """
-            UPDATE indexed_documents SET
-                title = $1,
-                description = $2,
-                external_path = $3,
-                external_url = $4,
-                mime_type = $5,
-                size_bytes = $6,
-                file_extension = $7,
-                source_modified_at = $8,
-                shared_with_users = $9::jsonb,
-                shared_with_groups = $10::jsonb,
-                updated_at = $11
-            WHERE connector_id = $12 AND external_id = $13
-            """,
-            title, description, external_path, external_url,
-            mime_type, size_bytes, file_extension, source_modified,
-            shared_users_json, shared_groups_json,
-            datetime.now(timezone.utc),
-            connector_id, node_id,
-        )
+        if full_sync:
+            await conn.execute(
+                """
+                UPDATE indexed_documents SET
+                    title = $1,
+                    description = $2,
+                    external_path = $3,
+                    external_url = $4,
+                    mime_type = $5,
+                    size_bytes = $6,
+                    file_extension = $7,
+                    source_modified_at = $8,
+                    shared_with_users = $9::jsonb,
+                    shared_with_groups = $10::jsonb,
+                    updated_at = $11,
+                    indexing_status = 'pending',
+                    indexing_error = NULL
+                WHERE connector_id = $12 AND external_id = $13
+                """,
+                title, description, external_path, external_url,
+                mime_type, size_bytes, file_extension, source_modified,
+                shared_users_json, shared_groups_json,
+                datetime.now(timezone.utc),
+                connector_id, node_id,
+            )
+        else:
+            await conn.execute(
+                """
+                UPDATE indexed_documents SET
+                    title = $1,
+                    description = $2,
+                    external_path = $3,
+                    external_url = $4,
+                    mime_type = $5,
+                    size_bytes = $6,
+                    file_extension = $7,
+                    source_modified_at = $8,
+                    shared_with_users = $9::jsonb,
+                    shared_with_groups = $10::jsonb,
+                    updated_at = $11
+                WHERE connector_id = $12 AND external_id = $13
+                """,
+                title, description, external_path, external_url,
+                mime_type, size_bytes, file_extension, source_modified,
+                shared_users_json, shared_groups_json,
+                datetime.now(timezone.utc),
+                connector_id, node_id,
+            )
         stats["items_updated"] += 1
     else:
         # Create new
@@ -447,6 +474,7 @@ async def run_sync_job(
                             owner_id=owner_id,
                             base_url=base_url,
                             stats=stats,
+                            full_sync=full_sync,
                         )
                     except Exception as e:
                         stats["items_failed"] += 1
@@ -640,7 +668,7 @@ async def run_index_pending_job(
         await pool.release(conn)
 
 
-# Extensions that textextract-service can process (whitelist)
+# Extensions that intelligence-docs-service can process (whitelist)
 _INDEXABLE_EXTENSIONS = {
     ".pdf", ".doc", ".docx", ".txt", ".md", ".csv", ".ppt", ".pptx",
     ".xlsx", ".xls", ".html", ".odt", ".rtf", ".epub", ".xml", ".json",
@@ -661,7 +689,7 @@ async def _index_single_document(
     doc_id = doc["id"]
     processing_start = time.time()
 
-    # Early skip: avoid downloading files that textextract cannot process
+    # Early skip: avoid downloading files that intelligence-docs-service cannot process
     ext = (doc.get("file_extension") or "").lower()
     if ext and not ext.startswith("."):
         ext = f".{ext}"
@@ -677,7 +705,7 @@ async def _index_single_document(
         )
         return False
 
-    # Early skip: files larger than textextract max (50MB)
+    # Early skip: files larger than 50MB limit
     _MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
     size_bytes = doc.get("size_bytes") or 0
     if size_bytes > _MAX_FILE_SIZE:

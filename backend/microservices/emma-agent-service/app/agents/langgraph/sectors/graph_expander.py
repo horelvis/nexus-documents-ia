@@ -1,22 +1,71 @@
 """
+DEPRECATED: Replaced by graph_rag tool in Phase 2.
+Use GraphRAGTool for TrustGraph-validated retrieval via knowledge graph.
+This module is kept for backward compatibility — SmartSearch still calls
+KnowledgeTreeClient.extract_subgraph independently.
+
 Sector-aware Graph Expander
 
-Expands query context by querying the FalkorDB knowledge graph for the
-active sector. Uses extracted entities and semantic HTTP endpoints on
-knowledge-tree-service (get_documents_by_person, extract_subgraph).
+Expands query context by querying the TrustGraph triple store for the
+active sector. Uses extracted entities to build normalized URI slugs
+and calls /triples/query on knowledge-tree-service to find linked documents.
 
 No raw Cypher is constructed here — all graph logic lives in
 knowledge-tree-service.
+
+IMPORTANT: Entity URIs MUST match URIBuilder.entity(collection, name) format:
+    nouxcube://entity/{collection}/{normalized-name}
+The collection is typically "default" for the reindex pipeline.
 """
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+import re
+import unicodedata
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
 # Maximum entities per type to expand (avoids runaway fan-out)
 _MAX_ENTITIES_PER_TYPE = 5
+
+# Predicate used to link :Node subjects to document :Literal objects
+_MENTIONED_IN = "nouxcube://predicate/core/mentioned-in"
+_DOCUMENT_URI_PREFIX = "nouxcube://document/"
+
+# Default collection used by reindex pipeline (must match coordinator.py)
+_DEFAULT_COLLECTION = "default"
+
+
+_COMMA_NAME_RE = re.compile(r"^([^,]+),\s*(.+)$")
+
+
+def _normalize_name(name: str) -> str:
+    """Normalize a name to URI slug — mirrors URIBuilder.normalize_name().
+
+    Includes "Last, First" → "First Last" reordering for person names.
+    """
+    stripped = name.strip()
+    # Reorder "Last, First" if after-comma looks like a first name
+    m = _COMMA_NAME_RE.match(stripped)
+    if m:
+        before, after = m.group(1).strip(), m.group(2).strip()
+        _co = {"s.l.", "s.a.", "s.l.u.", "inc", "ltd", "gmbh", "corp"}
+        if not any(ch.isdigit() for ch in after) and len(after.split()) <= 4 and after.lower() not in _co:
+            stripped = f"{after} {before}"
+    nfd = unicodedata.normalize("NFD", stripped)
+    ascii_approx = "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
+    lowered = ascii_approx.lower()
+    hyphenated = re.sub(r"[^a-z0-9]+", "-", lowered)
+    return hyphenated.strip("-")
+
+
+def _entity_uri(entity_type: str, value: str, collection: str = _DEFAULT_COLLECTION) -> str:
+    """Build a TrustGraph URI matching URIBuilder.entity(collection, name)."""
+    slug = _normalize_name(value)
+    if not slug:
+        return ""
+    return f"nouxcube://entity/{collection}/{slug}"
 
 
 async def expand_with_sector_graph(
@@ -26,11 +75,12 @@ async def expand_with_sector_graph(
     tenant_id: str,
 ) -> Dict[str, Any]:
     """
-    Expand context using the sector's FalkorDB knowledge graph.
+    Expand context using the TrustGraph triple store.
 
-    Uses semantic HTTP endpoints on knowledge-tree-service:
-    - get_documents_by_person() for person/entity lookups
-    - extract_subgraph() for multi-hop graph expansion
+    For each extracted entity, builds a normalized URI slug and calls
+    /triples/query with subject_uri=entity_uri and predicate_uri=mentioned-in
+    to find linked documents.  Also calls /triples/context for general
+    graph context to enrich LLM prompts.
 
     All entity lookups are batched with asyncio.gather() to avoid N+1.
 
@@ -43,8 +93,8 @@ async def expand_with_sector_graph(
     Returns:
         Dict with:
             - graph_context: str — textual context from graph expansion
-            - related_entities: list — related nodes found
-            - paths: list — relationship paths found
+            - related_entities: list — entity URIs found as subjects
+            - paths: list — relationship paths found (subject → predicate → object)
             - expanded_doc_ids: list — document IDs found via entity lookup
     """
     if not entities:
@@ -55,7 +105,7 @@ async def expand_with_sector_graph(
             "expanded_doc_ids": [],
         }
 
-    related_entities: List[Dict[str, Any]] = []
+    related_entities: List[str] = []
     paths: List[str] = []
     expanded_doc_ids: List[str] = []
 
@@ -65,72 +115,71 @@ async def expand_with_sector_graph(
         client = get_knowledge_tree_client()
 
         # ------------------------------------------------------------------
-        # Phase 1: Batch entity → document lookups via asyncio.gather()
+        # Phase 1: Batch entity → document lookups via /triples/query
+        # Each entity maps to a URI; we look for mentioned-in links to docs.
         # ------------------------------------------------------------------
         lookup_tasks = []
-        lookup_meta = []  # Track (entity_type, value) for each task
+        lookup_meta: List[tuple] = []  # (entity_type, value, entity_uri)
 
         for entity_type, values in entities.items():
             for value in values[:_MAX_ENTITIES_PER_TYPE]:
                 if not value or not value.strip():
                     continue
-                # Map entity types to FalkorDB convention
-                ft_type = _map_entity_type(entity_type)
+                uri = _entity_uri(entity_type, value.strip())
+                if not uri:
+                    continue
                 lookup_tasks.append(
-                    client.get_documents_by_person(
+                    client.query_triples(
                         tenant_id=tenant_id,
-                        person_name=value.strip(),
-                        entity_type=ft_type,
+                        subject_uri=uri,
+                        limit=50,
                     )
                 )
-                lookup_meta.append((entity_type, value))
+                lookup_meta.append((entity_type, value, uri))
 
         if lookup_tasks:
             results = await asyncio.gather(*lookup_tasks, return_exceptions=True)
-            for (etype, evalue), result in zip(lookup_meta, results):
+            for (etype, evalue, euri), result in zip(lookup_meta, results):
                 if isinstance(result, Exception):
-                    logger.warning(f"Entity lookup failed for {etype}={evalue}: {result}")
+                    logger.warning(f"Triple query failed for {etype}={evalue}: {result}")
                     continue
-                if result:
-                    expanded_doc_ids.extend(result)
+                triples = result.get("triples", []) if isinstance(result, dict) else []
+                if triples:
+                    related_entities.append(euri)
+                for triple in triples:
+                    obj = triple.get("object", "")
+                    pred = triple.get("predicate", "")
+                    paths.append(f"{euri} -[{pred}]-> {obj}")
+                    # Extract document IDs from source_chunk provenance
+                    # format: nouxcube://document/{collection}/{doc_id}#offset=N
+                    source = triple.get("source_chunk", "")
+                    if source and _DOCUMENT_URI_PREFIX in source:
+                        doc_part = source.split("#")[0]  # strip #offset=N
+                        doc_id = doc_part.split("/")[-1]  # last segment = UUID
+                        if doc_id:
+                            expanded_doc_ids.append(doc_id)
+                    # Also check if object itself is a document URI
+                    if obj.startswith(_DOCUMENT_URI_PREFIX):
+                        doc_id = obj[len(_DOCUMENT_URI_PREFIX):]
+                        if doc_id:
+                            expanded_doc_ids.append(doc_id)
 
-        # Deduplicate document IDs
+        # Deduplicate
         expanded_doc_ids = list(dict.fromkeys(expanded_doc_ids))
+        related_entities = list(dict.fromkeys(related_entities))
 
         # ------------------------------------------------------------------
-        # Phase 2: Extract subgraph for richer context
+        # Phase 2: General triple context for LLM enrichment
         # ------------------------------------------------------------------
-        subgraph_entities = []
-        for entity_type, values in entities.items():
-            for value in values[:_MAX_ENTITIES_PER_TYPE]:
-                if value and value.strip():
-                    subgraph_entities.append({
-                        "name": value.strip(),
-                        "type": _map_entity_type(entity_type),
-                    })
-
-        if subgraph_entities:
-            subgraph = await client.extract_subgraph(
-                tenant_id=tenant_id,
-                entities=subgraph_entities,
-                max_hops=2,
-                max_nodes=30,
-                include_legal=True,
-            )
-
-            for node in subgraph.get("nodes", []):
-                related_entities.append(node)
-            for edge in subgraph.get("edges", []):
-                src = edge.get("source_id", "?")
-                tgt = edge.get("target_id", "?")
-                label = edge.get("label", "?")
-                paths.append(f"{src} -[{label}]-> {tgt}")
+        context_result = await client.get_triple_context(tenant_id=tenant_id, limit=20)
+        llm_context_text = context_result.get("context_for_llm", "") if isinstance(context_result, dict) else ""
 
     except Exception as e:
         logger.warning(f"Graph expansion failed: {e}")
+        llm_context_text = ""
 
     # Build textual context from results
-    graph_context = _build_context_text(related_entities, paths)
+    graph_context = _build_context_text(related_entities, paths, llm_context_text)
 
     return {
         "graph_context": graph_context,
@@ -140,50 +189,24 @@ async def expand_with_sector_graph(
     }
 
 
-def _map_entity_type(entity_type: str) -> str:
-    """Map extraction entity types to FalkorDB entity_type values."""
-    mapping = {
-        "persona": "person",
-        "person": "person",
-        "ley": "law",
-        "law": "law",
-        "sentencia": "ruling",
-        "ruling": "ruling",
-        "articulo": "article",
-        "article": "article",
-        "boe": "law",
-        "expediente": "case",
-        "case": "case",
-        "cie10": "medical_code",
-        "farmaco": "drug",
-        "procedimiento": "procedure",
-        "paciente": "patient",
-        "nif": "person",
-        "importe": "amount",
-        "referencia": "reference",
-        "fecha": "date",
-    }
-    return mapping.get(entity_type.lower(), "person")
-
-
 def _build_context_text(
-    related_entities: List[Dict[str, Any]],
+    related_entities: List[str],
     paths: List[str],
+    llm_context: str,
 ) -> str:
     """Build human-readable context from graph results."""
-    if not related_entities and not paths:
+    if not related_entities and not paths and not llm_context:
         return ""
 
     parts: List[str] = []
 
+    if llm_context:
+        parts.append(llm_context.strip())
+
     if related_entities:
-        parts.append("Contexto del grafo de conocimiento:")
-        seen = set()
-        for entity in related_entities[:15]:
-            desc = str(entity)
-            if desc not in seen:
-                parts.append(f"  - {desc}")
-                seen.add(desc)
+        parts.append("Entidades relacionadas encontradas en el grafo:")
+        for uri in related_entities[:15]:
+            parts.append(f"  - {uri}")
 
     if paths:
         parts.append("Relaciones encontradas:")

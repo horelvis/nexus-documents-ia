@@ -21,10 +21,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MICROSERVICES_API_KEY")
     )
     
-    # LLM configuration - vLLM is the primary provider
-    llm_provider: str = os.getenv("LLM_PROVIDER", "vllm").lower()
-    vllm_base_url: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1")
-    vllm_model: str = os.getenv("VLLM_MODEL", "Qwen/Qwen3-8B")
+    # LLM configuration - SGLang is the primary provider
+    # Normalize "vllm" → "sglang" for backward compatibility
+    llm_provider: str = (lambda p: "sglang" if p == "vllm" else p)(os.getenv("LLM_PROVIDER", "sglang").lower())
+    sglang_base_url: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1"))
+    sglang_model: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "Qwen/Qwen3-8B"))
     llm_model: str = os.getenv("LLM_MODEL", "Qwen/Qwen3-8B")  # Default model
     # Legacy Ollama config (DEPRECATED)
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")

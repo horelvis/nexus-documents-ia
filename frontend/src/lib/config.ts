@@ -50,6 +50,7 @@ export const API_CONFIG = {
     DOCUMENTS: '/documents',
     DOCUMENT_SUMMARY: (id: string) => `/documents/${id}/summary`,
     DOCUMENT_STREAM: (id: string) => `/documents/${id}/stream`,
+    DOCUMENT_CONVERTED_PDF: (id: string) => `/documents/${id}/converted-pdf`,
     DOCUMENT_CONTENT: (id: string) => `/documents/${id}/content`,
 
     // Search

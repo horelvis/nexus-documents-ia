@@ -56,11 +56,8 @@ class VerifiedGenerationTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Genera un documento verificado claim-by-claim a partir de documentos fuente. "
-            "Cada afirmación se verifica contra las fuentes originales y evidencia externa. "
-            "Usa esta herramienta cuando el usuario pida generar un informe verificado, "
-            "un documento académico, o cualquier texto que requiera verificación factual. "
-            "Requiere documentos fuente (subidos por el usuario o IDs de documentos indexados)."
+            "Genera documento verificado claim-by-claim contra fuentes originales. "
+            "Para informes verificados o textos que requieran comprobación factual."
         )
 
     @property

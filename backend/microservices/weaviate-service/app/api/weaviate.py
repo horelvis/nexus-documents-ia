@@ -567,7 +567,7 @@ MIME_TO_EXTENSION = {
     "text/xml": ".xml",
 }
 
-# Valid file extensions that textextract-service supports
+# Valid file extensions that intelligence-docs-service supports
 VALID_EXTENSIONS = {
     ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
     ".txt", ".html", ".htm", ".csv", ".rtf", ".xml",
@@ -1382,6 +1382,133 @@ async def backfill_semantic_types(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/collections/{collection_name}/backfill-embeddings")
+async def backfill_embeddings(
+    collection_name: str,
+    batch_size: int = Query(default=32, ge=1, le=128, description="Batch size for embedding generation"),
+    dry_run: bool = Query(default=False, description="Only count objects missing vectors, don't fix"),
+    _: bool = Depends(verify_api_key),
+):
+    """
+    Backfill vector embeddings for objects that were indexed without vectors.
+
+    This happens when intelligence-docs-service was unavailable during indexing.
+    Iterates all objects, detects those missing vectors, generates embeddings
+    via intelligence-docs-service, and updates them in-place.
+    """
+    from app.services.weaviate_service import generate_embedding_batch, generate_embedding
+
+    try:
+        await weaviate_service.initialize()
+
+        if not weaviate_service.client.collections.exists(collection_name):
+            raise HTTPException(status_code=404, detail=f"Collection {collection_name} not found")
+
+        collection = weaviate_service.client.collections.get(collection_name)
+
+        missing = 0
+        fixed = 0
+        already_has_vector = 0
+        errors = 0
+
+        # Collect objects missing vectors in batches
+        pending_batch: list[dict] = []  # [{uuid, text}]
+
+        async def flush_batch():
+            nonlocal fixed, errors
+            if not pending_batch:
+                return
+            texts = [item["text"] for item in pending_batch]
+            try:
+                embeddings = await generate_embedding_batch(texts)
+                if embeddings and len(embeddings) == len(pending_batch):
+                    for item, vector in zip(pending_batch, embeddings):
+                        try:
+                            collection.data.update(
+                                uuid=item["uuid"],
+                                vector=vector,
+                            )
+                            fixed += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to update vector for {item['uuid']}: {e}")
+                            errors += 1
+                else:
+                    # Batch failed — try one by one
+                    for item in pending_batch:
+                        try:
+                            vector = await generate_embedding(item["text"])
+                            if vector:
+                                collection.data.update(
+                                    uuid=item["uuid"],
+                                    vector=vector,
+                                )
+                                fixed += 1
+                            else:
+                                errors += 1
+                        except Exception as e:
+                            logger.warning(f"Single embed failed for {item['uuid']}: {e}")
+                            errors += 1
+            except Exception as e:
+                logger.error(f"Batch embedding failed: {e}")
+                errors += len(pending_batch)
+            pending_batch.clear()
+
+        for item in collection.iterator(
+            include_vector=True,
+            return_properties=["title", "content"],
+        ):
+            # Check if object has a vector
+            has_vector = (
+                item.vector
+                and isinstance(item.vector, dict)
+                and "default" in item.vector
+                and len(item.vector["default"]) > 0
+            ) if isinstance(item.vector, dict) else bool(item.vector)
+
+            if has_vector:
+                already_has_vector += 1
+                continue
+
+            missing += 1
+
+            if dry_run:
+                continue
+
+            title = item.properties.get("title", "") or ""
+            content = item.properties.get("content", "") or ""
+            text_to_embed = f"{title} {content}".strip()
+
+            if not text_to_embed:
+                errors += 1
+                continue
+
+            pending_batch.append({"uuid": item.uuid, "text": text_to_embed})
+
+            if len(pending_batch) >= batch_size:
+                await flush_batch()
+
+        # Flush remaining
+        await flush_batch()
+
+        result = {
+            "collection": collection_name,
+            "total_scanned": already_has_vector + missing,
+            "already_has_vector": already_has_vector,
+            "missing_vectors": missing,
+            "fixed": fixed,
+            "errors": errors,
+            "dry_run": dry_run,
+        }
+        logger.info(f"Embedding backfill complete: {result}")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Embedding backfill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ========================================
 # Emma Agent Service Endpoints
 # ========================================
@@ -1646,7 +1773,7 @@ async def get_collection_stats(
         return {
             "tenant_id": tenant_id,
             "collection": collection,
-            "document_count": info.object_count if info else 0,
+            "document_count": info.objects_count if info else 0,
             "status": "active" if info else "not_found",
         }
 
@@ -1657,3 +1784,203 @@ async def get_collection_stats(
             "error": str(e),
             "status": "error",
         }
+
+
+# ============================================================================
+# TrustGraph Entity Embeddings — Graph RAG Phase 2
+# ============================================================================
+
+class EntitySearchRequest(BaseModel):
+    """Search TrustGraphEntities by text query (embedding generated server-side)."""
+    query: str
+    tenant_id: str
+    collection: Optional[str] = None
+    limit: int = 50
+
+
+class EntitySearchByEmbeddingRequest(BaseModel):
+    """Search TrustGraphEntities by pre-computed embedding."""
+    query_embedding: List[float]
+    tenant_id: str
+    collection: Optional[str] = None
+    limit: int = 50
+
+
+class EntityBatchUpsertRequest(BaseModel):
+    """Batch upsert entities with their embeddings."""
+    entities: List[Dict[str, Any]]
+    embeddings: List[List[float]]
+    tenant_id: str
+
+
+@router.post("/entities/search")
+async def search_entities(
+    request: EntitySearchRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Search TrustGraphEntities by text query.
+
+    Embeds the query using intelligence-docs-service (BGE-M3) and performs
+    cosine similarity search over the TrustGraphEntities collection.
+    """
+    try:
+        from app.services.weaviate_service import generate_embedding
+
+        query_embedding = await generate_embedding(request.query, task="retrieval.query")
+        if not query_embedding:
+            raise HTTPException(status_code=503, detail="Embedding service unavailable")
+
+        entities = await weaviate_service.search_trustgraph_entities(
+            query_embedding=query_embedding,
+            tenant_id=request.tenant_id,
+            collection=request.collection,
+            limit=request.limit,
+        )
+        return {"entities": entities, "count": len(entities)}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Entity search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/entities/search-by-embedding")
+async def search_entities_by_embedding(
+    request: EntitySearchByEmbeddingRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Search TrustGraphEntities by pre-computed embedding.
+
+    Skips the embedding step — caller supplies the vector directly.
+    Useful when the query has already been embedded upstream.
+    """
+    try:
+        entities = await weaviate_service.search_trustgraph_entities(
+            query_embedding=request.query_embedding,
+            tenant_id=request.tenant_id,
+            collection=request.collection,
+            limit=request.limit,
+        )
+        return {"entities": entities, "count": len(entities)}
+
+    except Exception as e:
+        logger.error(f"Entity search-by-embedding failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/entities/batch-upsert")
+async def batch_upsert_entities(
+    request: EntityBatchUpsertRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Batch upsert TrustGraph entity embeddings.
+
+    Inserts or replaces entity vectors in the TrustGraphEntities collection.
+    Each entity in the list must have a parallel embedding vector at the same
+    index.
+    """
+    try:
+        if len(request.entities) != len(request.embeddings):
+            raise HTTPException(
+                status_code=422,
+                detail="entities and embeddings must have the same length",
+            )
+
+        count = await weaviate_service.upsert_trustgraph_entities_batch(
+            entities=request.entities,
+            embeddings=request.embeddings,
+            tenant_id=request.tenant_id,
+        )
+        return {"count": count}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Entity batch-upsert failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/entities/delete")
+async def delete_entities(
+    tenant_id: str = Query(..., description="Tenant whose entities should be deleted"),
+    _: bool = Depends(verify_api_key),
+):
+    """Delete all TrustGraphEntities for a tenant.
+
+    Used by the reindex pipeline before re-embedding all entities from scratch.
+    """
+    try:
+        deleted = await weaviate_service.delete_trustgraph_entities(tenant_id=tenant_id)
+        return {"deleted": deleted}
+
+    except Exception as e:
+        logger.error(f"Entity delete failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# OntologyTerms — Ontology RAG Phase 3a
+# ============================================================================
+
+class OntologyTermSearchRequest(BaseModel):
+    """Search OntologyTerms by pre-computed embedding."""
+    embedding: List[float]
+    limit: int = 3
+    namespace: Optional[str] = None
+
+
+class OntologyTermUpsertRequest(BaseModel):
+    """Insert a single OntologyTerm."""
+    predicate_name: str
+    namespace: str
+    description: str
+    domain_type: str
+    range_type: str
+    embed_text: str
+    embedding: List[float]
+
+
+@router.post("/trustgraph/ensure-ontology-terms")
+async def ensure_ontology_terms(
+    _: bool = Depends(verify_api_key),
+):
+    """Ensure OntologyTerms collection exists."""
+    ok = await weaviate_service.ensure_ontology_terms_collection()
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to create OntologyTerms collection")
+    return {"status": "ok"}
+
+
+@router.post("/trustgraph/ontology-terms/search")
+async def search_ontology_terms(
+    request: OntologyTermSearchRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Vector search over OntologyTerms."""
+    results = await weaviate_service.search_ontology_terms(
+        query_embedding=request.embedding,
+        limit=request.limit,
+        namespace=request.namespace,
+    )
+    return {"results": results}
+
+
+@router.post("/trustgraph/ontology-terms")
+async def upsert_ontology_term(
+    request: OntologyTermUpsertRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Insert a single OntologyTerm with embedding."""
+    ok = await weaviate_service.upsert_ontology_term(
+        predicate_name=request.predicate_name,
+        namespace=request.namespace,
+        description=request.description,
+        domain_type=request.domain_type,
+        range_type=request.range_type,
+        embed_text=request.embed_text,
+        embedding=request.embedding,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to upsert OntologyTerm")
+    return {"status": "ok"}

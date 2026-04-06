@@ -10,7 +10,7 @@
 #   - weaviate: Vector database for embeddings
 #   - weaviate-service: RAG pipeline (vector search and retrieval)
 #   - emma-agent-service: AI agent orchestration (Emma v2 + LangGraph)
-#   - vllm: SGLang GPU inference — Chat (Qwen3.5-9B) + Planner (Qwen3.5-4B)
+#   - sglang: SGLang GPU inference — Chat (Qwen3.5-9B) + Planner (Qwen3.5-4B)
 #   - background-worker: Async task processing (Celery) for verification
 #   - api: Main backend API (optional, for UI integration)
 
@@ -87,34 +87,29 @@ services:
     restart: unless-stopped
 
   # =============================================================================
-  # SGLang — Dual-Model Architecture (Qwen3.5)
+  # vLLM — Qwen3.5-27B AWQ (Single-Model Architecture)
   # =============================================================================
-  # Two SGLang instances sharing one GPU (RTX 4090 24GB):
+  # One vLLM instance on GPU (RTX 3090 24GB):
   #
-  #   Modelo          VRAM (AWQ INT4)    Funcion
-  #   ─────────────   ──────────────     ──────────────────────────
-  #   Qwen3.5-9B      ~8-10 GB           Chat, reasoning, synthesis
-  #   Qwen3.5-4B      ~3-4  GB           Planner, tool routing, clues
-  #   BGE-M3          ~2.7  GB           Embeddings (weaviate-service)
-  #   ─────────────   ──────────────
-  #   Total           ~14-17 GB          Leaves ~7-10 GB for KV cache
+  #   Modelo                    VRAM (AWQ Q4)      Funcion
+  #   ─────────────────────     ──────────────     ──────────────────────────
+  #   Qwen3.5-27B-AWQ           ~19.8 GB           Chat + Planner (single model)
+  #   BGE-M3                    CPU                Embeddings (EMBEDDING_DEVICE=cpu)
+  #   ─────────────────────     ──────────────
+  #   Total GPU                 ~19.8 GB           Leaves ~2.5 GB for KV cache (128K ctx via DeltaNet)
   #
-  # Single-model mode (VLLM_DUAL_MODEL=false):
-  #   Only 'vllm' service runs. Both PLANNER and CHAT roles use same model.
-  #   mem-fraction-static: 0.80 (full GPU minus BGE-M3 headroom).
+  # Single-model dual-phase:
+  #   Both PLANNER (temp=0.3) and CHAT (temp=0.6) phases use same 27B model.
+  #   gpu-memory-utilization: 0.95, enforce-eager (no CUDA graphs).
   #
-  # Dual-model mode (VLLM_DUAL_MODEL=true):
-  #   Both 'vllm' + 'vllm-planner' run. GPU partitioned via mem-fraction-static.
-  #   Enable with: docker compose --profile dual-model up -d
-  #   mem-fraction: 0.55 (chat) + 0.18 (planner) = 0.73 total, ~6.5GB for BGE-M3 + buffer.
-  #
-  # NOTE: Service names kept as 'vllm' for backward compatibility with internal URLs.
-  #       SGLang exposes an OpenAI-compatible API at /v1 — same as vLLM.
+  # vLLM v0.18.0: AWQ Marlin auto-detect, kv-cache-dtype fp8, prefix caching.
+  # GPTQ-Int4 tested but uses ~23 GB (too large) — AWQ is more VRAM-efficient.
   # =============================================================================
 
-  # ── Chat Model (Qwen3.5-9B) — Quality generation, final responses ──
-  vllm:
-    image: lmsysorg/sglang:v0.5.9
+  # ── Qwen3.5-27B AWQ — Quality generation + tool calling ──
+  # Service name kept as 'sglang' for backwards compat with SGLANG_BASE_URL refs
+  sglang:
+    image: vllm/vllm-openai:v0.18.0-cu130
     ports:
       - "8001:8000"
     networks:
@@ -125,18 +120,21 @@ services:
       - HF_TOKEN=${HF_TOKEN}
       - NVIDIA_DISABLE_REQUIRE=1
       - CUDA_VISIBLE_DEVICES=0
+      - VLLM_ALLOW_LONG_MAX_MODEL_LEN=1
     command: >
-      python -m sglang.launch_server
-      --model-path ${VLLM_MODEL:-Qwen/Qwen3.5-9B}
-      --served-model-name ${VLLM_MODEL:-Qwen/Qwen3.5-9B}
+      --model ${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
+      --served-model-name ${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       --port 8000
       --host 0.0.0.0
-      --context-length ${VLLM_MAX_MODEL_LEN:-16384}
-      --mem-fraction-static ${VLLM_GPU_UTIL:-0.75}
-      --quantization fp8
+      --max-model-len ${SGLANG_MAX_MODEL_LEN:-131072}
+      --gpu-memory-utilization ${SGLANG_GPU_UTIL:-0.95}
+      --dtype bfloat16
+      --kv-cache-dtype fp8
       --trust-remote-code
-      --tool-call-parser ${VLLM_TOOL_PARSER:-qwen3_coder}
-      --reasoning-parser qwen3
+      --enforce-eager
+      --enable-auto-tool-choice
+      --tool-call-parser ${SGLANG_TOOL_PARSER:-qwen3_coder}
+      --enable-prefix-caching
     deploy:
       resources:
         reservations:
@@ -148,53 +146,9 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
-      retries: 5
-      start_period: 180s
+      retries: 10
+      start_period: 600s
     restart: unless-stopped
-
-  # ── Planner Model (Qwen3.5-4B) — Fast tool calling, routing, clue generation ──
-  # Only used when VLLM_DUAL_MODEL=true. Enable with: --profile dual-model
-  # Shares the GPU with vllm via mem-fraction-static partitioning.
-  vllm-planner:
-    image: lmsysorg/sglang:v0.5.9
-    ports:
-      - "8003:8000"
-    networks:
-      - backend-network
-    volumes:
-      - vllm_cache:/root/.cache/huggingface
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - NVIDIA_DISABLE_REQUIRE=1
-      - CUDA_VISIBLE_DEVICES=0
-    command: >
-      python -m sglang.launch_server
-      --model-path ${VLLM_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
-      --served-model-name ${VLLM_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
-      --port 8000
-      --host 0.0.0.0
-      --context-length ${VLLM_PLANNER_MAX_MODEL_LEN:-8192}
-      --mem-fraction-static ${VLLM_PLANNER_GPU_UTIL:-0.18}
-      --quantization fp8
-      --trust-remote-code
-      --tool-call-parser ${VLLM_PLANNER_TOOL_PARSER:-qwen3_coder}
-      --reasoning-parser qwen3
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 180s
-    restart: unless-stopped
-    profiles:
-      - dual-model
 
 
   # =============================================================================
@@ -213,13 +167,114 @@ services:
     restart: unless-stopped
 
   # =============================================================================
+  # Gotenberg - Document Conversion (DOCX/XLSX/PPTX → PDF)
+  # =============================================================================
+  # LibreOffice-based converter for document preview. Used by /converted-pdf endpoint.
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    networks:
+      - backend-network
+    restart: unless-stopped
+
+  # =============================================================================
+  # GLM-OCR — VLM-based OCR for scanned documents and images (0.9B params)
+  # =============================================================================
+  # State-of-the-art document understanding: OCR, tables, formulas, seals.
+  # Served via SGLang dev (needs latest transformers for glm_ocr architecture).
+  # Concurrent requests supported via RadixAttention. ~2 GB VRAM.
+  glm-ocr:
+    build:
+      context: .
+      dockerfile: Dockerfile.glm-ocr
+    networks:
+      - backend-network
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - NVIDIA_DISABLE_REQUIRE=1
+      - CUDA_VISIBLE_DEVICES=0
+    command: >
+      python -m sglang.launch_server
+      --model-path ${GLM_OCR_MODEL:-zai-org/GLM-OCR}
+      --served-model-name ${GLM_OCR_MODEL:-zai-org/GLM-OCR}
+      --port 8000
+      --host 0.0.0.0
+      --mem-fraction-static ${GLM_OCR_GPU_UTIL:-0.18}
+      --trust-remote-code
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    restart: unless-stopped
+
+  # =============================================================================
+  # Intelligence Docs Service — Unified extraction + embedding + NER
+  # =============================================================================
+  # Replaces textextract-service + langextract-service + embedding code in weaviate-service.
+  # Provider registry with automatic fallback. On-premise first, cloud opt-in.
+  intelligence-docs-service:
+    build:
+      context: ../microservices/intelligence-docs-service
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8012:8000"
+    volumes:
+      - vllm_cache:/root/.cache/huggingface
+      - ../microservices/intelligence-docs-service/app:/app/app:ro
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
+    environment:
+      - EXTRACTION_PROVIDERS=${EXTRACTION_PROVIDERS:-docling,glm-ocr}
+      - EMBEDDING_PROVIDERS=${EMBEDDING_PROVIDERS:-sentence-transformers}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
+      - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
+      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cpu}
+      - ENTITY_PROVIDERS=${ENTITY_PROVIDERS:-langextract}
+      - DOCLING_URL=http://docling:5001
+      - TIKA_URL=http://tika:9998
+      - GLM_OCR_URL=${GLM_OCR_URL:-http://glm-ocr:8000/v1}
+      - GLM_OCR_MODEL=${GLM_OCR_MODEL:-zai-org/GLM-OCR}
+      - SGLANG_BASE_URL=http://sglang:8000/v1
+      - SGLANG_MODEL=${SGLANG_MODEL:-}
+      # Langfuse (NER prompts — versioned externally)
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3000}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+    networks:
+      - backend-network
+    # GPU reservation removed: embeddings on CPU (EMBEDDING_DEVICE=cpu)
+    # to free VRAM for Qwen3.5-27B. Re-enable if reverting to EMBEDDING_DEVICE=cuda:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+
+  # =============================================================================
   # Docling - AI Document Understanding (opt-in via --profile docling)
   # =============================================================================
   # IBM Docling extracts structured Markdown from documents, preserving
   # headers, tables, lists, and reading order with 97.9% table accuracy.
-  # CPU-only image (GPU reserved for vLLM). ~4.4GB image, ~8GB RAM.
+  # CPU-only image (GPU reserved for SGLang). ~4.4GB image, ~8GB RAM.
   # Start with: docker compose --profile docling up -d
-  # Then set EXTRACTION_BACKEND=docling in .env and restart textextract-service
   docling:
     image: ghcr.io/docling-project/docling-serve-cpu:latest
     environment:
@@ -243,75 +298,11 @@ services:
     profiles:
       - docling
 
-  # =============================================================================
-  # TextExtract Service - Text Extraction API
-  # =============================================================================
-  textextract-service:
-    build:
-      context: ../microservices/textextract-service
-      dockerfile: Dockerfile
-    deploy:
-      resources:
-        limits:
-          memory: 10g
-    depends_on:
-      - tika
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - TIKA_URL=http://tika:9998
-      # Extraction backend: "tika" (default) or "docling" (AI document understanding)
-      # Docling requires: docker compose --profile docling up -d
-      - EXTRACTION_BACKEND=${EXTRACTION_BACKEND:-tika}
-      - DOCLING_URL=${DOCLING_URL:-http://docling:5001}
-      - EXTRACTION_FALLBACK_ENABLED=${EXTRACTION_FALLBACK_ENABLED:-true}
-    volumes:
-      - ../microservices/textextract-service/app:/app/app:ro
-      - easyocr_models:/root/.EasyOCR
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
-
-  # =============================================================================
-  # LangExtract Service - Entity Extraction (LLM-powered NER)
-  # =============================================================================
-  # Extracts named entities from documents during indexing:
-  #   - PERSON, ORGANIZATION, DATE, AMOUNT, LOCATION (via LLM)
-  #   - DNI, NIE, CIF (via regex, always local)
-  # Used by weaviate-service indexing pipeline to populate Knowledge Graph.
-  langextract-service:
-    build:
-      context: ../microservices/langextract-service
-      dockerfile: Dockerfile
-    depends_on:
-      vllm:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      # Override LLM provider to use local vLLM (reuses Qwen3-14B already in the stack)
-      - LLM_PROVIDER=vllm
-      - LLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - LLM_API_BASE=http://vllm:8000/v1
-    volumes:
-      - ../microservices/langextract-service/app:/app/app:ro
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    restart: unless-stopped
+  # textextract-service: REMOVED — replaced by intelligence-docs-service.
+  # Text extraction now uses Docling/GLM-OCR providers inside intelligence-docs-service.
+  # langextract-service: REMOVED — consolidated into intelligence-docs-service.
+  # Entity extraction (LangExtract few-shot + regex guardrail) now runs inside
+  # intelligence-docs-service via LangExtractProvider + SpanishIdValidator.
 
   # =============================================================================
   # Weaviate Service - RAG Pipeline
@@ -324,13 +315,11 @@ services:
     depends_on:
       weaviate:
         condition: service_healthy
-      vllm:
+      sglang:
         condition: service_healthy
       db:
         condition: service_healthy
-      textextract-service:
-        condition: service_started
-      langextract-service:
+      intelligence-docs-service:
         condition: service_healthy
       storage-service:
         condition: service_healthy
@@ -343,22 +332,17 @@ services:
       - WEAVIATE_URL=http://weaviate:8080
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
-      - TEXT_EXTRACTION_SERVICE_URL=http://textextract-service:8000
-      - LANGEXTRACT_SERVICE_URL=http://langextract-service:8000
+      - INTELLIGENCE_DOCS_SERVICE_URL=http://intelligence-docs-service:8000
       - STORAGE_SERVICE_URL=http://storage-service:8010
-      # OCR: disabled during bulk indexing (Tika handles text extraction)
-      - ENHANCED_OCR_ENABLED=false
-      # vLLM Configuration (Qwen2.5-7B-Instruct-AWQ)
-      - VLLM_ENABLED=${VLLM_ENABLED:-true}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
-      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
-      # Embedding Configuration (Jina v3 local — 5 LoRA task adapters)
-      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-sentence-transformers}
+      # SGLang Configuration
+      - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
+      - SGLANG_ENABLE_THINKING=${SGLANG_ENABLE_THINKING:-false}
+      - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
+      # Embedding: delegated to intelligence-docs-service (no local GPU model)
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-BAAI/bge-m3}
       - EMBEDDING_DIMENSIONS=${EMBEDDING_DIMENSIONS:-1024}
-      - EMBEDDING_DEVICE=${EMBEDDING_DEVICE:-cuda}
       - MULTIMODAL_EMBEDDING_ENABLED=${MULTIMODAL_EMBEDDING_ENABLED:-false}
       # Parent-Child Chunking (search small, retrieve large)
       - PARENT_CHILD_CHUNKING_ENABLED=${PARENT_CHILD_CHUNKING_ENABLED:-false}
@@ -379,15 +363,8 @@ services:
       - ../microservices/weaviate-service/app:/app/app:ro
       - ../microservices/weaviate-service/config:/app/config:ro
       - ../microservices/weaviate-service/scripts:/app/scripts:ro
-      - huggingface_cache:/root/.cache/huggingface
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    # No GPU needed — embeddings delegated to intelligence-docs-service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -402,6 +379,12 @@ services:
   # protocol with native OpenCypher support and sub-millisecond queries.
   falkordb:
     image: falkordb/falkordb:v4.2.0
+    command: >
+      redis-server
+      --appendonly yes
+      --save "60 1"
+      --save "300 100"
+      --loadmodule /FalkorDB/bin/src/falkordb.so
     ports:
       - "6380:6379"   # Redis-compatible protocol (offset to avoid clash with Redis)
       - "3003:3000"   # FalkorDB Browser UI
@@ -445,9 +428,19 @@ services:
       - FALKORDB_PORT=${FALKORDB_PORT:-6379}
       - FALKORDB_GRAPH_NAME=${FALKORDB_GRAPH_NAME:-knowledge_graph}
       - FALKORDB_PASSWORD=${FALKORDB_PASSWORD:-}
+      # SGLang (LLM extraction)
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-Qwen/Qwen3-8B}
+      # Langfuse (prompt management)
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-pk-lf-local}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-sk-lf-local}
+      - LANGFUSE_HOST=${LANGFUSE_HOST:-http://langfuse:3002}
+      # Weaviate (reindexation pipeline)
+      - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
     volumes:
       - ../microservices/knowledge-tree-service/app:/app/app:ro
       - ../microservices/knowledge-tree-service/config:/app/config:ro
+      - ../microservices/knowledge-tree-service/scripts:/app/scripts:ro
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8011", "--reload", "--reload-dir", "/app/app"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
@@ -480,7 +473,7 @@ services:
         condition: service_healthy
       knowledge-tree-service:
         condition: service_healthy
-      vllm:
+      sglang:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -500,20 +493,20 @@ services:
       # Knowledge Tree Service (structural context)
       - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
       - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
-      # Multi-Pipeline RAG Sector
-      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
-      # vLLM Configuration — Dual-Model Architecture
-      # Set VLLM_DUAL_MODEL=true + docker compose --profile dual-model to enable
-      - VLLM_ENABLED=${VLLM_ENABLED:-true}
-      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
+      # Intelligence Docs Service (embeddings for graph_rag concept search)
+      - INTELLIGENCE_DOCS_SERVICE_URL=http://intelligence-docs-service:8000
+      # SGLang Configuration — Dual-Model Architecture
+      # Set SGLANG_DUAL_MODEL=true + docker compose --profile dual-model to enable
+      - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
+      - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
       # Chat model (9B quality generation)
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - VLLM_ENABLE_THINKING=${VLLM_ENABLE_THINKING:-false}
-      # Planner model (4B fast tool calling) — only active when VLLM_DUAL_MODEL=true
-      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
-      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
-      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
+      - SGLANG_ENABLE_THINKING=${SGLANG_ENABLE_THINKING:-false}
+      # Planner model (4B fast tool calling) — only active when SGLANG_DUAL_MODEL=true
+      - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
+      - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
       # Redis for sessions
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -611,9 +604,9 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL_NAME=${VLLM_MODEL:-Qwen/Qwen3.5-9B}
-      - GOTENBERG_SERVICE_URL=${GOTENBERG_SERVICE_URL:-http://gotenberg-service:8005}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL_NAME=${SGLANG_MODEL:-Qwen/Qwen3.5-9B}
+      - GOTENBERG_SERVICE_URL=${GOTENBERG_SERVICE_URL:-http://gotenberg:3000}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - MAIN_API_URL=${MAIN_API_URL:-http://main-api:8000}
       - FORGE_SESSION_TTL=${FORGE_SESSION_TTL:-1800}
@@ -650,12 +643,12 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       # Dual-model architecture
-      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
-      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
-      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
+      - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
+      - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Web Search (DuckDuckGo)
@@ -713,14 +706,14 @@ services:
       - EVENT_CONSUMER_GROUP=emma_reactive
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
-      - VLLM_ENABLED=${VLLM_ENABLED:-true}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
+      - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
+      - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
+      - SGLANG_MODEL=${SGLANG_MODEL:-QuantTrio/Qwen3.5-27B-AWQ}
       # Dual-model architecture
-      - VLLM_DUAL_MODEL=${VLLM_DUAL_MODEL:-false}
-      - VLLM_PLANNER_URL=${VLLM_PLANNER_URL:-http://vllm-planner:8000/v1}
-      - VLLM_PLANNER_MODEL=${VLLM_PLANNER_MODEL:-cyankiwi/Qwen3.5-4B-AWQ-4bit}
-      - LLM_PROVIDER=${LLM_PROVIDER:-vllm}
+      - SGLANG_DUAL_MODEL=${SGLANG_DUAL_MODEL:-false}
+      - SGLANG_PLANNER_URL=${SGLANG_PLANNER_URL:-http://sglang-planner:8000/v1}
+      - SGLANG_PLANNER_MODEL=${SGLANG_PLANNER_MODEL:-Qwen/Qwen3.5-4B}
+      - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
       - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
@@ -1147,48 +1140,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # =============================================================================
-  # NouxCube Presentation Service - PowerPoint Generation
-  # =============================================================================
-  presentation-service:
-    build:
-      context: ../microservices/presentation-service
-      dockerfile: Dockerfile
-    depends_on:
-      redis:
-        condition: service_healthy
-      vllm:
-        condition: service_healthy
-      storage-service:
-        condition: service_healthy
-    networks:
-      - backend-network
-    env_file:
-      - .env
-    environment:
-      - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - PRESENTATION_API_KEY=${MICROSERVICES_API_KEY}
-      - PRESENTATION_VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - PRESENTATION_VLLM_MODEL=${VLLM_MODEL:-cyankiwi/Qwen3.5-9B-AWQ-4bit}
-      - PRESENTATION_STORAGE_SERVICE_URL=http://storage-service:8010
-      - PRESENTATION_MAIN_API_URL=${MAIN_API_URL:-http://api:8000}
-      - PRESENTATION_PUBLIC_API_URL=${PUBLIC_API_URL:-https://nouxcubeai.ddns.net:8000}
-      - PRESENTATION_LOCAL_STORAGE_PATH=/app/storage
-      - DEFAULT_LANGUAGE=${PRESENTATION_DEFAULT_LANGUAGE:-es-ES}
-      - DEFAULT_TEMPLATE=${PRESENTATION_DEFAULT_TEMPLATE:-corporate}
-      - DEFAULT_MAX_SLIDES=${PRESENTATION_DEFAULT_MAX_SLIDES:-10}
-    volumes:
-      - ../microservices/presentation-service/app:/app/app:ro
-      - ../microservices/presentation-service/templates:/app/templates:ro
-      - local_storage_data:/app/storage
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/app"]
-    healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/ping').raise_for_status()"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    restart: unless-stopped
+  # presentation-service: REMOVED — directory no longer exists
 
   # =============================================================================
   # Langfuse - LLM Observability & Prompt Management
@@ -1243,13 +1195,12 @@ volumes:
   postgres_data:
   redis_data:
   weaviate_data:
-  vllm_cache:
+  vllm_cache:  # kept as-is to preserve existing cached models
   huggingface_cache:
   fastembed_cache:
   keycloak_data:
   local_storage_data:
   minio_data:
-  easyocr_models:
   falkordb_data:
   certbot_conf:
   certbot_webroot:

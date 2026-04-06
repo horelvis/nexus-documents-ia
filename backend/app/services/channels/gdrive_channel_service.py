@@ -379,7 +379,7 @@ class GoogleDriveChannelService:
         mime_type: str,
     ) -> Optional[str]:
         """
-        Extract text from file using textextract-service.
+        Extract text from file using intelligence-docs-service.
 
         Args:
             file_content: File bytes
@@ -396,7 +396,7 @@ class GoogleDriveChannelService:
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    "http://textextract-service:8004/extract",
+                    "http://intelligence-docs-service:8000/extract",
                     files={"file": (file_name, file_content, mime_type)},
                     timeout=60.0,
                 )

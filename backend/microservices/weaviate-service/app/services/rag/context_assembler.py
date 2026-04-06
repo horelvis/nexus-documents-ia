@@ -32,7 +32,7 @@ STRUCTURAL_CONTEXT_MAX_TOKENS = 500  # Reserve for structural context header
 # Token budgets per model type
 # Reserve ~4K tokens for system prompt, query, and response generation
 TOKEN_BUDGETS = {
-    "vllm": 12000,       # vLLM default (adjust based on model's max_model_len)
+    "sglang": 12000,     # SGLang default (adjust based on model's max_model_len)
     "openai": 12000,     # GPT-4o-mini and above (128K context available)
     "anthropic": 12000,  # Claude models (200K context available)
     "ollama": 4000,      # Legacy/conservative for local models
@@ -78,7 +78,7 @@ class ContextAssembler:
         query_analysis: QueryAnalysis,
         documents: List[RetrievedDocument],
         max_tokens: Optional[int] = None,
-        model_type: str = "vllm",
+        model_type: str = "sglang",
         soft_weights: Optional[Dict[str, float]] = None,
         selection_metadata: Optional[Dict[str, Any]] = None,
         structural_context: Optional[str] = None,
@@ -90,7 +90,7 @@ class ContextAssembler:
             query_analysis: Analyzed query from Layer 1
             documents: Retrieved documents from Layer 2
             max_tokens: Override token budget
-            model_type: Type of model (vllm, openai, anthropic)
+            model_type: Type of model (sglang, openai, anthropic)
             soft_weights: Soft selection weights for proportional allocation
             selection_metadata: Metadata from soft selection (diversity, coverage)
             structural_context: Optional pre-computed structural context from SIL

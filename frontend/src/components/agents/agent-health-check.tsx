@@ -6,14 +6,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle, 
-  Loader2, 
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  Loader2,
   RefreshCw,
   Activity,
   Server,
-  Database,
   Cpu,
   Clock
 } from 'lucide-react'
@@ -38,10 +37,6 @@ export function AgentHealthCheck() {
     },
     {
       name: 'Ollama LLM',
-      status: 'unknown',
-    },
-    {
-      name: 'Qdrant Vector DB',
       status: 'unknown',
     },
     {
@@ -77,12 +72,6 @@ export function AgentHealthCheck() {
         {
           name: 'Ollama LLM',
           status: cagHealth.checks?.llm || cagHealth.checks?.cag_engine ? 'healthy' : 'unhealthy',
-          response_time: cagHealth.response_time,
-          last_check: new Date().toISOString(),
-        },
-        {
-          name: 'Qdrant Vector DB',
-          status: cagHealth.checks?.qdrant || cagHealth.checks?.embeddings ? 'healthy' : 'unhealthy',
           response_time: cagHealth.response_time,
           last_check: new Date().toISOString(),
         },
@@ -132,7 +121,6 @@ export function AgentHealthCheck() {
         checks: {
           llm: checks.llm || false,
           embeddings: checks.embeddings || false,
-          qdrant: checks.qdrant || false,
           cag_engine: checks.cag_engine || false
         }
       }
@@ -193,8 +181,6 @@ export function AgentHealthCheck() {
         return <Activity className="h-4 w-4" />
       case 'Ollama LLM':
         return <Cpu className="h-4 w-4" />
-      case 'Qdrant Vector DB':
-        return <Database className="h-4 w-4" />
       case 'Backend API':
         return <Server className="h-4 w-4" />
       default:

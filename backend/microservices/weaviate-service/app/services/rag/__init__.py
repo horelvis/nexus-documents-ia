@@ -48,7 +48,6 @@ from .document_intelligence import (
     document_intelligence,
 )
 from .indexing_pipeline import IndexingPipeline, IndexingResult, indexing_pipeline
-from .textextract_client import TextExtractClient, TextExtractResult, textextract_client
 
 __all__ = [
     # Models
@@ -95,8 +94,4 @@ __all__ = [
     "IndexingPipeline",
     "IndexingResult",
     "indexing_pipeline",
-    # TextExtract Client
-    "TextExtractClient",
-    "TextExtractResult",
-    "textextract_client",
 ]

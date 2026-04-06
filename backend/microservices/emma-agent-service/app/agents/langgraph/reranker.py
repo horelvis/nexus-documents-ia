@@ -7,13 +7,17 @@ pairs jointly with full cross-attention, achieving much higher precision than
 bi-encoders or heuristic scoring.
 
 Architecture decision: FlashRank on CPU (~5ms/passage) because GPU memory is
-fully allocated to vLLM (18.5GB) + BGE-M3/Jina embeddings (2.7GB) = 21.2GB
+fully allocated to SGLang (18.5GB) + BGE-M3/Jina embeddings (2.7GB) = 21.2GB
 of 24GB RTX 4090. FlashRank uses ONNX quantized models that run efficiently
 on CPU without competing for GPU resources.
 
+Model: ms-marco-MultiBERT-L-12 (multilingual) is required for Spanish legal
+text. The default ms-marco-MiniLM-L-12-v2 is English-only (MS MARCO dataset)
+and produces unreliable scores for non-English queries.
+
 Pipeline integration:
     SmartSearch._rerank_results() (5-signal, ~1ms)
-    → CrossEncoderReranker.rerank() (neural, ~50-100ms for 50 passages)
+    → CrossEncoderReranker.rerank() (neural, ~50-150ms for 50 passages)
     → Final combined score: 0.6 * cross_encoder + 0.4 * heuristic
 
 Usage:
@@ -24,6 +28,7 @@ Usage:
 """
 
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -31,15 +36,19 @@ logger = logging.getLogger(__name__)
 # Singleton
 _reranker_instance: Optional["CrossEncoderReranker"] = None
 
+# Default to multilingual model for Spanish legal text
+_DEFAULT_MODEL = "ms-marco-MultiBERT-L-12"
+
 
 class CrossEncoderReranker:
     """Cross-encoder reranker using FlashRank (CPU-optimized ONNX).
 
-    FlashRank loads ms-marco-MiniLM-L-12-v2 (~33MB ONNX) on first use.
-    Subsequent calls reuse the cached model. Scores are normalized to [0, 1].
+    Uses ms-marco-MultiBERT-L-12 (multilingual, ~400MB ONNX) by default
+    for Spanish legal text. Loads on first use, reuses the cached model.
+    Scores are normalized to [0, 1].
     """
 
-    def __init__(self, model_name: str = "ms-marco-MiniLM-L-12-v2"):
+    def __init__(self, model_name: str = _DEFAULT_MODEL):
         self._model_name = model_name
         self._ranker = None
         self._available = True
@@ -53,8 +62,10 @@ class CrossEncoderReranker:
 
         try:
             from flashrank import Ranker, RerankRequest
+            t0 = time.perf_counter()
             self._ranker = Ranker(model_name=self._model_name)
-            logger.info(f"✅ CrossEncoderReranker loaded: {self._model_name}")
+            load_ms = (time.perf_counter() - t0) * 1000
+            logger.info(f"✅ CrossEncoderReranker loaded: {self._model_name} ({load_ms:.0f}ms)")
             return True
         except ImportError:
             logger.warning(
@@ -92,6 +103,8 @@ class CrossEncoderReranker:
         if not self._ensure_loaded():
             # Fallback: return as-is (heuristic-only)
             return results[:top_k]
+
+        t0 = time.perf_counter()
 
         try:
             from flashrank import RerankRequest
@@ -138,20 +151,22 @@ class CrossEncoderReranker:
             # Sort by combined score
             results.sort(key=lambda r: r.get("_combined_score", 0), reverse=True)
 
+            elapsed_ms = (time.perf_counter() - t0) * 1000
             logger.info(
                 f"🔀 Cross-encoder reranked {len(results)} results → top {top_k} "
-                f"(CE weight={ce_weight:.1f}, heuristic={heuristic_weight:.1f})"
+                f"in {elapsed_ms:.0f}ms (CE weight={ce_weight:.1f}, heuristic={heuristic_weight:.1f})"
             )
 
             return results[:top_k]
 
         except Exception as e:
-            logger.error(f"Cross-encoder reranking failed (fallback to heuristic): {e}")
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            logger.error(f"Cross-encoder reranking failed in {elapsed_ms:.0f}ms (fallback to heuristic): {e}")
             return results[:top_k]
 
 
 def get_reranker(
-    model_name: str = "ms-marco-MiniLM-L-12-v2",
+    model_name: str = _DEFAULT_MODEL,
 ) -> CrossEncoderReranker:
     """Get or create the singleton reranker instance."""
     global _reranker_instance

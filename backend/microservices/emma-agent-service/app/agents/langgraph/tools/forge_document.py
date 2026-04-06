@@ -81,17 +81,8 @@ class ForgeDocumentTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "HERRAMIENTA PRINCIPAL para modificar documentos existentes. "
-            "Preserva el formato original (tablas, estilos, firmas, imagenes) "
-            "cambiando solo los campos necesarios. "
-            "Usa esto SIEMPRE que el usuario quiera: renovar un contrato, "
-            "cambiar una fecha, actualizar datos personales, modificar importes, "
-            "o cualquier cambio en un documento que ya existe. "
-            "Flujo: 1) smart_search para encontrar el documento, "
-            "2) forge_document(action='analyze', document_id=...) para detectar campos, "
-            "3) preguntar al usuario qué valores cambiar, "
-            "4) forge_document(action='render', session_id=..., field_values={...}) "
-            "para generar el documento modificado."
+            "Modifica documentos existentes preservando formato (tablas, estilos, firmas). "
+            "Usa para renovar contratos, cambiar fechas, actualizar datos en documentos."
         )
 
     @property

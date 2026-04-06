@@ -262,11 +262,8 @@ async def _memory_recall_inner(state: ReActState) -> Dict[str, Any]:
     if not query or not tenant_id:
         return {}
 
-    # Step 1: Determine domain from sector config
+    # Domain is no longer sector-derived — MemoRAG uses general domain
     domain = None
-    sector_config = state.get("sector_config")
-    if sector_config:
-        domain = sector_config.get("men_domain")
 
     memories = []
     memorag_used = False

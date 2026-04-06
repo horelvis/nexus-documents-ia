@@ -28,6 +28,15 @@ export interface Citation {
   relevance?: number
 }
 
+export interface SourceEvidenceItem {
+  document_id: string
+  document_title: string
+  chunk_offset: number
+  relationship: string
+  confidence?: number
+  chunk_text?: string
+}
+
 export interface DocumentInfo {
   name: string
   id?: string
@@ -339,6 +348,21 @@ export interface ForgeMetadata {
   weaviate_indexed?: boolean
 }
 
+export interface ReportTrustSummary {
+  avg_confidence: number
+  min_confidence: number
+  total_facts: number
+  total_sources: number
+}
+
+export interface ReportMetadata {
+  report_id: string
+  entity_label: string
+  report_type: string
+  trust_summary: ReportTrustSummary
+  source_count: number
+}
+
 export interface EmmaMessage {
   id: string
   type: EmmaMessageType
@@ -348,6 +372,7 @@ export interface EmmaMessage {
   predictive?: PredictiveAnalysisMetadata
   docgen?: DocGenMetadata
   forge?: ForgeMetadata
+  report?: ReportMetadata
   metadata?: {
     confidence_score?: number
     decision_path?: string[]
@@ -385,6 +410,10 @@ export interface EmmaMessage {
     explanation?: string
     // Raw reasoning steps for ActivityTimeline
     rawReasoningSteps?: Array<{ type: string; content: string; source?: string }>
+    // Entity tags extracted from graph_rag tool results
+    entityTags?: Array<{ uri: string; label: string; type: string }>
+    // Source evidence from graph_rag provenance
+    sourceEvidence?: SourceEvidenceItem[]
   }
   suggestions?: string[]
   isStreaming?: boolean

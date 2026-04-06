@@ -166,9 +166,9 @@ Responde SOLO una palabra:"""
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    f"{agent_config.vllm_base_url}/chat/completions",
+                    f"{agent_config.sglang_base_url}/chat/completions",
                     json={
-                        "model": agent_config.vllm_model,
+                        "model": agent_config.sglang_model,
                         "messages": [
                             {"role": "system", "content": system_msg},
                             {"role": "user", "content": classification_prompt}

@@ -298,16 +298,16 @@ async def initialize_ollama_model(
     current_user: User = Depends(get_current_active_superuser_async),
 ):
     """
-    DEPRECATED: Ollama microservice was removed in favor of vLLM.
+    DEPRECATED: Ollama microservice was removed in favor of SGLang.
 
-    vLLM loads the model at process startup (via container args/env),
+    SGLang loads the model at process startup (via container args/env),
     so there is no runtime "pull model" API equivalent.
     """
     raise HTTPException(
         status_code=410,
         detail=(
-            "Ollama was removed. Configure vLLM via VLLM_MODEL/VLLM_BASE_URL "
-            "and restart the vLLM service to load a model."
+            "Ollama was removed. Configure SGLang via SGLANG_MODEL/SGLANG_BASE_URL "
+            "and restart the SGLang service to load a model."
         ),
     )
 

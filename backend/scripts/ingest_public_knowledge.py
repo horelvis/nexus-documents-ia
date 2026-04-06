@@ -272,12 +272,12 @@ class EURLexIngester:
 class LocalFileIngester:
     """Ingests documents from local files"""
 
-    def __init__(self, ingester: PublicKnowledgeIngester, textextract_url: str = None):
+    def __init__(self, ingester: PublicKnowledgeIngester, intelligence_docs_url: str = None):
         self.ingester = ingester
-        self.textextract_url = textextract_url or "http://textextract-service:8000"
+        self.intelligence_docs_url = intelligence_docs_url or "http://intelligence-docs-service:8000"
 
     async def extract_text(self, file_path: str) -> Optional[str]:
-        """Extract text from file using textextract service"""
+        """Extract text from file using intelligence-docs-service."""
         path = Path(file_path)
         if not path.exists():
             print(f"File not found: {file_path}")
@@ -289,12 +289,12 @@ class LocalFileIngester:
         if suffix in [".txt", ".md"]:
             return path.read_text(encoding="utf-8", errors="ignore")
 
-        # Use textextract service for PDF, DOCX, etc.
+        # Use intelligence-docs-service for PDF, DOCX, etc.
         async with httpx.AsyncClient(timeout=120.0) as client:
             with open(file_path, "rb") as f:
                 files = {"file": (path.name, f, "application/octet-stream")}
                 response = await client.post(
-                    f"{self.textextract_url}/extract",
+                    f"{self.intelligence_docs_url}/extract",
                     files=files
                 )
                 if response.status_code == 200:

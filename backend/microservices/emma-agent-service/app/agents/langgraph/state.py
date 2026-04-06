@@ -269,6 +269,7 @@ class RAGState(TypedDict, total=False):
     metadata: Annotated[Dict[str, Any], merge_dicts]
 
 
+# DEPRECATED: Only used by rlm_processor. Will be removed when rlm_processor migrates to ReActState.
 def create_initial_state(
     query: str,
     tenant_id: str,
@@ -311,30 +312,19 @@ def create_initial_state(
 
     normalized_context = request_context or {}
 
-    # Load active sector config (singleton, cached)
-    sector_name = None
+    # Load unified config (singleton)
     sector_config_dict = None
     try:
         from .sectors import get_active_sector_config
         sc = get_active_sector_config()
         if sc is not None:
-            sector_name = sc.sector.value
             sector_config_dict = {
-                "name": sc.name,
-                "sector": sc.sector.value,
-                "agents": sc.agents,
-                "default_agent": sc.default_agent,
                 "hybrid_alpha": sc.hybrid_alpha,
                 "top_k": sc.top_k,
                 "rerank_enabled": sc.rerank_enabled,
-                "chunk_strategy": sc.chunk_strategy,
-                "chunk_size": sc.chunk_size,
-                "chunk_overlap": sc.chunk_overlap,
                 "entity_patterns": sc.entity_patterns,
-                "graph_name": sc.graph_name,
-                "graph_schema": sc.graph_schema,
-                "system_prompt_key": sc.system_prompt_key,
-                "men_domain": sc.men_domain,
+                "rerank_weights": sc.rerank_weights,
+                "graph_search_properties": sc.graph_search_properties,
             }
     except Exception:
         pass
@@ -383,8 +373,8 @@ def create_initial_state(
         knowledge_source=None,
         knowledge_source_confidence=0.0,
 
-        # Sector
-        sector=sector_name,
+        # Config (unified — knowledge graph provides dynamic context)
+        sector=None,
         sector_config=sector_config_dict,
 
         # Graph Expansion (populated by graph_expand node)
@@ -648,24 +638,19 @@ async def create_initial_react_state(
 
     normalized_context = request_context or {}
 
-    # Load active sector
-    sector_name = None
+    # Load unified config (singleton)
     sector_config_dict = None
     try:
         from .sectors import get_active_sector_config
         sc = get_active_sector_config()
         if sc is not None:
-            sector_name = sc.sector.value
             sector_config_dict = {
-                "name": sc.name,
-                "sector": sc.sector.value,
-                "agents": sc.agents,
-                "default_agent": sc.default_agent,
                 "hybrid_alpha": sc.hybrid_alpha,
                 "top_k": sc.top_k,
                 "rerank_enabled": sc.rerank_enabled,
-                "chunk_strategy": sc.chunk_strategy,
-                "system_prompt_key": sc.system_prompt_key,
+                "entity_patterns": sc.entity_patterns,
+                "rerank_weights": sc.rerank_weights,
+                "graph_search_properties": sc.graph_search_properties,
             }
     except Exception:
         pass
@@ -704,8 +689,8 @@ async def create_initial_react_state(
         user_role_ids=user_role_ids or [],
         is_admin=is_admin,
 
-        # Sector
-        sector=sector_name,
+        # Config (unified — knowledge graph provides dynamic context)
+        sector=None,
         sector_config=sector_config_dict,
 
         # ReAct control
@@ -723,6 +708,7 @@ async def create_initial_react_state(
         sources=[],
         success=False,
         explanation=None,
+        guardrail_metadata={},
 
         # Observability
         reasoning_steps=[],

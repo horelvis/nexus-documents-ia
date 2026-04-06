@@ -411,6 +411,12 @@ async def stream_react_query(
                 final_answer = event["final_answer"]
                 event_metadata = event.get("metadata", {})
 
+                # Extract unique tool names from tool_calls_history
+                agents_used = list(dict.fromkeys(
+                    tc.get("name", "") for tc in event.get("tool_calls_history", [])
+                    if tc.get("name") and tc.get("name") != "terminate"
+                ))
+
                 # Emit complete
                 yield {
                     "type": "complete",
@@ -426,6 +432,7 @@ async def stream_react_query(
                         "metadata": event_metadata,
                         "guardrail_metadata": event.get("guardrail_metadata"),
                         "explanation": event.get("explanation"),
+                        "agents_used": agents_used,
                     },
                 }
                 break

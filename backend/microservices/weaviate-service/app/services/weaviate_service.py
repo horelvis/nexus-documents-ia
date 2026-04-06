@@ -1,8 +1,9 @@
-"""Weaviate service implementation with Sentence Transformers embeddings"""
+"""Weaviate service implementation — embeddings via intelligence-docs-service"""
 import weaviate
 import logging
 import asyncio
-from typing import List, Dict, Any, Optional
+import time
+from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import uuid
 from functools import lru_cache
@@ -14,120 +15,57 @@ from app.schemas.weaviate import (
     CollectionInfo, VectorQuery
 )
 from weaviate.exceptions import UnexpectedStatusCodeException
+from app.clients import intelligence_client
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Embedding with short-lived TTL cache (deduplicates parallel queries)
+# ---------------------------------------------------------------------------
+# SmartSearch sends the same query to documents + legislation in parallel.
+# Both generate the same embedding independently. This cache (~5s TTL)
+# ensures the second call returns instantly from cache.
 
-# Singleton for embedding model (avoid reloading on each request)
-_embedding_model = None
-_embedding_model_lock = asyncio.Lock()
-_tei_client = None
-
-
-async def get_tei_embedding(texts: list[str]) -> list[list[float]]:
-    """Generate embeddings using TEI (Text Embeddings Inference) server"""
-    global _tei_client
-    import httpx
-
-    if _tei_client is None:
-        _tei_client = httpx.AsyncClient(timeout=30.0)
-
-    try:
-        response = await _tei_client.post(
-            f"{settings.tei_url}/embed",
-            json={"inputs": texts}
-        )
-        if response.status_code == 200:
-            return response.json()
-        else:
-            logger.error(f"❌ TEI error: {response.status_code} - {response.text}")
-            return None
-    except Exception as e:
-        logger.error(f"❌ TEI request failed: {e}")
-        return None
+_EMBED_CACHE_TTL = 5.0  # seconds
+_embed_cache: Dict[Tuple[str, str], Tuple[float, list[float]]] = {}
+_EMBED_CACHE_MAX = 64
 
 
-async def get_embedding_model():
-    """Get or initialize the embedding model based on provider (TEI or Sentence Transformers)"""
-    global _embedding_model
-
-    # For TEI, we don't need a local model
-    if settings.embedding_provider == "tei":
-        return "tei"
-
-    if _embedding_model is not None:
-        return _embedding_model
-
-    async with _embedding_model_lock:
-        # Double-check after acquiring lock
-        if _embedding_model is not None:
-            return _embedding_model
-
-        try:
-            from sentence_transformers import SentenceTransformer
-            import torch
-
-            # Determine device
-            device = settings.embedding_device
-            if device == "auto":
-                device = "cuda" if torch.cuda.is_available() else "cpu"
-            elif device == "cuda" and not torch.cuda.is_available():
-                logger.warning("⚠️ CUDA requested but not available, falling back to CPU")
-                device = "cpu"
-
-            # Load model
-            model_name = settings.embedding_model
-            logger.info(f"🔄 Loading embedding model: {model_name} on {device}")
-
-            _embedding_model = SentenceTransformer(
-                model_name, device=device, trust_remote_code=True,
-            )
-
-            # Verify dimensions match config
-            test_embedding = _embedding_model.encode("test", convert_to_numpy=True)
-            actual_dims = len(test_embedding)
-
-            if actual_dims != settings.embedding_dimensions:
-                logger.warning(
-                    f"⚠️ Embedding dimensions mismatch: config={settings.embedding_dimensions}, "
-                    f"actual={actual_dims}. Using actual dimensions."
-                )
-
-            logger.info(f"✅ Loaded embedding model: {model_name} ({actual_dims} dims) on {device}")
-            return _embedding_model
-
-        except Exception as e:
-            logger.error(f"❌ Failed to load embedding model: {e}")
-            return None
+def _prune_embed_cache() -> None:
+    """Remove expired entries when cache grows beyond max."""
+    if len(_embed_cache) <= _EMBED_CACHE_MAX:
+        return
+    now = time.monotonic()
+    expired = [k for k, (ts, _) in _embed_cache.items() if now - ts > _EMBED_CACHE_TTL]
+    for k in expired:
+        del _embed_cache[k]
 
 
 async def generate_embedding(text: str, task: str = "") -> list[float] | None:
-    """Generate embedding for a single text using configured provider.
+    """Generate embedding via intelligence-docs-service (with TTL dedup cache).
 
     Args:
         text: Text to embed.
-        task: Jina v3 LoRA task adapter name (e.g., "retrieval.query", "retrieval.passage").
-              Ignored by models that don't support prompt_name (e.g., BGE-M3).
+        task: Task adapter name (e.g., "retrieval.query", "retrieval.passage").
     """
-    if settings.embedding_provider == "tei":
-        embeddings = await get_tei_embedding([text])
-        return embeddings[0] if embeddings else None
-    else:
-        model = await get_embedding_model()
-        if model is None or model == "tei":
-            return None
-        loop = asyncio.get_event_loop()
+    key = (text, task)
+    cached = _embed_cache.get(key)
+    if cached is not None:
+        ts, vec = cached
+        if time.monotonic() - ts < _EMBED_CACHE_TTL:
+            return vec
+        del _embed_cache[key]
 
-        def _encode():
-            kwargs = {"convert_to_numpy": True}
-            if task:
-                try:
-                    return model.encode(text, prompt_name=task, **kwargs).tolist()
-                except (TypeError, ValueError, KeyError):
-                    pass  # Model doesn't support this prompt_name/task adapter
-            return model.encode(text, **kwargs).tolist()
+    result = await intelligence_client.embed(text, task=task)
+    if result is not None:
+        _prune_embed_cache()
+        _embed_cache[key] = (time.monotonic(), result)
+    return result
 
-        return await loop.run_in_executor(None, _encode)
+
+async def generate_embedding_batch(texts: list[str], task: str = "") -> list[list[float]] | None:
+    """Generate embeddings for multiple texts via intelligence-docs-service."""
+    return await intelligence_client.embed_batch(texts, task=task)
 
 
 class WeaviateService:
@@ -136,6 +74,7 @@ class WeaviateService:
     def __init__(self):
         self.client = None
         self.embedding_model = None
+        self._embedding_checked = False  # True after first successful embed check
         self._initialized = False
 
     def _build_property_filter(self, key: str, value: Any):
@@ -345,28 +284,8 @@ class WeaviateService:
             else:
                 raise Exception("Weaviate not ready")
 
-            # Initialize embedding model based on provider
-            if settings.embedding_provider == "tei":
-                # Test TEI connection
-                try:
-                    test_embedding = await generate_embedding("test connection")
-                    if test_embedding:
-                        self.embedding_model = "tei"
-                        logger.info(f"✅ Using TEI embeddings: {settings.embedding_model} ({len(test_embedding)} dims)")
-                    else:
-                        logger.warning("⚠️ TEI not responding, falling back to BM25 only")
-                        self.embedding_model = None
-                except Exception as e:
-                    logger.warning(f"⚠️ TEI connection failed: {e}, falling back to BM25 only")
-                    self.embedding_model = None
-            else:
-                model = await get_embedding_model()
-                if model is not None:
-                    self.embedding_model = "sentence-transformers"
-                    logger.info(f"✅ Using Sentence Transformers: {settings.embedding_model}")
-                else:
-                    logger.warning("⚠️ Embedding model not available, falling back to BM25 only")
-                    self.embedding_model = None
+            # Test embedding via intelligence-docs-service (non-blocking)
+            await self._check_embedding_service()
 
             self._initialized = True
 
@@ -375,6 +294,29 @@ class WeaviateService:
             self._initialized = False
             raise
     
+    async def _check_embedding_service(self) -> bool:
+        """Check if intelligence-docs-service is available for embeddings.
+
+        Called at init (non-fatal) and lazily before each embedding attempt
+        if not yet confirmed. Once confirmed, skips further checks.
+        """
+        if self._embedding_checked:
+            return True
+        try:
+            test_embedding = await generate_embedding("test connection")
+            if test_embedding:
+                self.embedding_model = "intelligence-docs-service"
+                self._embedding_checked = True
+                dims = len(test_embedding)
+                logger.info(f"✅ Using intelligence-docs-service embeddings ({dims} dims)")
+                return True
+            else:
+                logger.warning("⚠️ intelligence-docs-service returned empty embedding")
+                return False
+        except Exception as e:
+            logger.warning(f"⚠️ intelligence-docs-service not available: {e}")
+            return False
+
     async def cleanup(self):
         """Cleanup connections"""
         if self.client:
@@ -386,60 +328,12 @@ class WeaviateService:
     async def create_collection(self, collection_name: str, schema: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Create a new Weaviate collection"""
         try:
-            # Default schema for document collections
-            if not schema:
-                schema = {
-                    "class": collection_name,
-                    "description": f"Collection for documents: {collection_name}",
-                    "properties": [
-                        {
-                            "name": "title",
-                            "dataType": ["text"],
-                            "description": "Document title"
-                        },
-                        {
-                            "name": "content", 
-                            "dataType": ["text"],
-                            "description": "Document content"
-                        },
-                        {
-                            "name": "metadata",
-                            "dataType": ["object"],
-                            "description": "Document metadata"
-                        },
-                        {
-                            "name": "tenant_id",
-                            "dataType": ["text"],
-                            "description": "Tenant identifier"
-                        },
-                        {
-                            "name": "document_type",
-                            "dataType": ["text"],
-                            "description": "Type of document"
-                        },
-                        {
-                            "name": "tags",
-                            "dataType": ["text[]"],
-                            "description": "Document tags"
-                        },
-                        {
-                            "name": "created_at",
-                            "dataType": ["date"],
-                            "description": "Creation timestamp"
-                        },
-                        {
-                            "name": "updated_at",
-                            "dataType": ["date"],
-                            "description": "Last update timestamp"
-                        }
-                    ],
-                    "vectorizer": "text2vec-transformers" if not self.embedding_model else "none"
-                }
-            
+            description = (schema or {}).get("description", f"Collection for documents: {collection_name}")
+
             # Create the collection using v4 API with explicit vector index
             collection = self.client.collections.create(
                 name=collection_name,
-                description=schema.get("description", f"Collection for documents: {collection_name}"),
+                description=description,
                 vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
                 vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
                     distance_metric=weaviate.classes.config.VectorDistances.COSINE,
@@ -1674,14 +1568,14 @@ class WeaviateService:
                         "chunk_context": chunk_metadata.get("chunk_context", ""),
                     }
 
-                    # Generate embedding for chunk
+                    # Generate embedding for chunk (lazy-check embedding service)
                     embedding_vector = None
-                    if self.embedding_model:
-                        try:
-                            text_to_embed = f"{document.title} {chunk_content}"
-                            embedding_vector = await generate_embedding(text_to_embed)
-                        except Exception as e:
-                            logger.warning(f"⚠️ Could not generate chunk embedding: {e}")
+                    await self._check_embedding_service()
+                    try:
+                        text_to_embed = f"{document.title} {chunk_content}"
+                        embedding_vector = await generate_embedding(text_to_embed)
+                    except Exception as e:
+                        logger.warning(f"⚠️ Could not generate chunk embedding: {e}")
 
                     if embedding_vector:
                         batch_objects.append(weaviate.classes.data.DataObject(
@@ -1731,16 +1625,16 @@ class WeaviateService:
                     "content": document.content,
                 }
 
-                # Generate embedding for document
+                # Generate embedding for document (lazy-check embedding service)
                 embedding_vector = None
-                if self.embedding_model:
-                    try:
-                        text_to_embed = f"{document.title} {document.content}"
-                        embedding_vector = await generate_embedding(text_to_embed)
-                        if embedding_vector:
-                            logger.info(f"🧮 Generated embedding vector of size {len(embedding_vector)}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not generate embedding: {e}")
+                await self._check_embedding_service()
+                try:
+                    text_to_embed = f"{document.title} {document.content}"
+                    embedding_vector = await generate_embedding(text_to_embed)
+                    if embedding_vector:
+                        logger.info(f"🧮 Generated embedding vector of size {len(embedding_vector)}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not generate embedding: {e}")
 
                 # Insert document; if it exists already, replace it
                 try:
@@ -1833,6 +1727,47 @@ class WeaviateService:
         except Exception as e:
             logger.warning(f"⚠️ Could not delete existing chunks for {document_id}: {e}")
             return 0
+
+    async def get_document_chunks(
+        self,
+        collection_name: str,
+        document_id: str,
+        offset: int = 0,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all chunks for a document, ordered by chunk_index.
+
+        Returns list of dicts with content, chunk_index, title, document_id.
+        """
+        await self.initialize()
+
+        if not self.client.collections.exists(collection_name):
+            return []
+
+        collection = self.client.collections.get(collection_name)
+        Filter = weaviate.classes.query.Filter
+        doc_filter = Filter.by_property("document_id").equal(document_id)
+
+        response = collection.query.fetch_objects(
+            filters=doc_filter,
+            offset=offset,
+            limit=limit,
+            return_properties=["content", "chunk_index", "document_id", "title"],
+        )
+
+        chunks = []
+        for obj in response.objects:
+            chunks.append({
+                "content": obj.properties.get("content", ""),
+                "chunk_index": obj.properties.get("chunk_index", 0),
+                "document_id": obj.properties.get("document_id", ""),
+                "title": obj.properties.get("title", ""),
+            })
+
+        # Sort by chunk_index for ordered text
+        chunks.sort(key=lambda c: c.get("chunk_index", 0))
+        return chunks
 
     async def delete_document(self, collection_name: str, document_id: str) -> bool:
         """
@@ -2030,21 +1965,36 @@ class WeaviateService:
                 except ValueError:
                     logger.warning(f"⚠️ Invalid date_to format: {date_to}")
 
+            # Pagination offset (Weaviate v4 supports offset on all query types)
+            _offset = getattr(search_request, 'offset', 0) or 0
+
             # Execute search based on type using v4 API
-            if search_request.search_type == "vector":
-                # Generate embedding for query using configured provider
+            # Empty-query shortcut: BM25 requires terms to match — use fetch_objects instead
+            _query_is_empty = not search_request.query or not search_request.query.strip()
+
+            if _query_is_empty and search_request.search_type in ("keyword", "hybrid"):
+                # No query text — skip BM25/hybrid and use filter-only fetch
+                response = collection.query.fetch_objects(
+                    limit=search_request.limit,
+                    offset=_offset,
+                    filters=combined_filters,
+                    return_metadata=weaviate.classes.query.MetadataQuery(creation_time=True),
+                )
+            elif search_request.search_type == "vector":
+                # Generate embedding for query (lazy-check embedding service)
                 query_embedding = None
-                if self.embedding_model:
-                    try:
-                        query_embedding = await generate_embedding(search_request.query)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not generate query embedding: {e}")
-                
+                await self._check_embedding_service()
+                try:
+                    query_embedding = await generate_embedding(search_request.query)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not generate query embedding: {e}")
+
                 if query_embedding:
                     # Vector search with near_vector using generated embedding
                     response = collection.query.near_vector(
                         near_vector=query_embedding,
                         limit=search_request.limit,
+                        offset=_offset,
                         return_metadata=weaviate.classes.query.MetadataQuery(certainty=True, score=True),
                         filters=combined_filters
                     )
@@ -2053,6 +2003,7 @@ class WeaviateService:
                     response = collection.query.bm25(
                         query=search_request.query,
                         limit=search_request.limit,
+                        offset=_offset,
                         return_metadata=weaviate.classes.query.MetadataQuery(score=True),
                         filters=combined_filters
                     )
@@ -2061,6 +2012,7 @@ class WeaviateService:
                 response = collection.query.bm25(
                     query=search_request.query,
                     limit=search_request.limit,
+                    offset=_offset,
                     return_metadata=weaviate.classes.query.MetadataQuery(score=True),
                     filters=combined_filters
                 )
@@ -2072,7 +2024,8 @@ class WeaviateService:
 
                 # Hybrid search requires both vector and keyword
                 query_embedding = None
-                if _has_vectors and self.embedding_model:
+                if _has_vectors:
+                    await self._check_embedding_service()
                     try:
                         query_embedding = await generate_embedding(search_request.query)
                     except Exception as e:
@@ -2084,6 +2037,7 @@ class WeaviateService:
                         query=search_request.query,
                         vector=query_embedding,
                         limit=search_request.limit,
+                        offset=_offset,
                         alpha=effective_alpha,
                         return_metadata=weaviate.classes.query.MetadataQuery(score=True, explain_score=True),
                         filters=combined_filters
@@ -2093,6 +2047,7 @@ class WeaviateService:
                     response = collection.query.bm25(
                         query=search_request.query,
                         limit=search_request.limit,
+                        offset=_offset,
                         return_metadata=weaviate.classes.query.MetadataQuery(score=True),
                         filters=combined_filters
                     )
@@ -2112,6 +2067,7 @@ class WeaviateService:
                 logger.info("🔄 BM25 returned 0 with enrichment filters — retrying with filter-only fetch")
                 response = collection.query.fetch_objects(
                     limit=search_request.limit,
+                    offset=_offset,
                     filters=combined_filters,
                     return_metadata=weaviate.classes.query.MetadataQuery(creation_time=True),
                 )
@@ -2156,6 +2112,9 @@ class WeaviateService:
                     folder_path=item.properties.get("folder_path", ""),
                     folder_hierarchy=item.properties.get("folder_hierarchy", []),
                     connector_id=item.properties.get("connector_id", ""),
+                    # Chunk-level source attribution (page_start is 1-indexed from chunker)
+                    chunk_index=item.properties.get("chunk_index"),
+                    page_number=item.properties.get("page_start"),
                     # Enrichment properties for multi-signal retrieval
                     domain=item.properties.get("domain", ""),
                     semantic_type=item.properties.get("semantic_type", ""),
@@ -2624,7 +2583,7 @@ class WeaviateService:
             config = collection.config.get()
             schema = {
                 "description": config.description or "",
-                "properties": [prop.name for prop in config.properties] if config.properties else [],
+                "properties": [{"name": prop.name, "data_type": str(prop.data_type)} for prop in config.properties] if config.properties else [],
                 "vectorizer": str(config.vectorizer) if config.vectorizer else None
             }
             
@@ -2960,14 +2919,14 @@ class WeaviateService:
                     "acl_everyone": getattr(document, 'acl_everyone', True),
                 }
                 
-                # Generate embeddings using configured provider (TEI or Sentence Transformers)
+                # Generate embeddings (lazy-check embedding service)
                 embedding_vector = None
-                if self.embedding_model:
-                    try:
-                        text_to_embed = f"{document.title} {document.content}"
-                        embedding_vector = await generate_embedding(text_to_embed)
-                    except Exception as e:
-                        logger.warning(f"⚠️ Could not generate batch embedding: {e}")
+                await self._check_embedding_service()
+                try:
+                    text_to_embed = f"{document.title} {document.content}"
+                    embedding_vector = await generate_embedding(text_to_embed)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not generate batch embedding: {e}")
                 
                 if embedding_vector:
                     batch_objects.append(weaviate.classes.data.DataObject(
@@ -3217,6 +3176,351 @@ class WeaviateService:
 
         return await self.search_documents(collection_name, search_request)
 
+    # =========================================================================
+    # TrustGraph Entities Collection — entity embeddings for Graph RAG
+    # =========================================================================
+
+    TRUSTGRAPH_ENTITIES_COLLECTION = "TrustGraphEntities"
+
+    async def ensure_trustgraph_entities_collection(self) -> bool:
+        """Create TrustGraphEntities collection if it does not already exist.
+
+        Returns True if the collection is available (created or pre-existing).
+        """
+        collection_name = self.TRUSTGRAPH_ENTITIES_COLLECTION
+        try:
+            existing = self.client.collections.list_all()
+            if collection_name in existing:
+                logger.info(f"Collection {collection_name} already exists")
+                return True
+
+            dims = getattr(settings, "embedding_dimensions", 1024)
+
+            self.client.collections.create(
+                name=collection_name,
+                description="Entity embeddings for TrustGraph Graph RAG (Phase 2)",
+                vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
+                vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
+                    distance_metric=weaviate.classes.config.VectorDistances.COSINE,
+                ),
+                properties=[
+                    weaviate.classes.config.Property(
+                        name="entity_uri",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="FalkorDB URI (e.g. nouxcube://entity/…)",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="label",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Human-readable entity label",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="definition",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Definition or description of the entity",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="entity_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Entity type / class (Person, Organization, …)",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="tenant_id",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Tenant that owns this entity embedding",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="collection",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Source Weaviate collection the entity was extracted from",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="embed_text",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Raw text that was embedded (label + definition)",
+                    ),
+                ],
+            )
+            logger.info(f"Created collection {collection_name} ({dims} dims, cosine HNSW)")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to ensure {collection_name} collection: {e}")
+            return False
+
+    ONTOLOGY_TERMS_COLLECTION = "OntologyTerms"
+
+    async def ensure_ontology_terms_collection(self) -> bool:
+        """Create OntologyTerms collection if it does not already exist."""
+        collection_name = self.ONTOLOGY_TERMS_COLLECTION
+        try:
+            existing = self.client.collections.list_all()
+            if collection_name in existing:
+                logger.info(f"Collection {collection_name} already exists")
+                return True
+
+            dims = getattr(settings, "embedding_dimensions", 1024)
+
+            self.client.collections.create(
+                name=collection_name,
+                description="Vectorized predicate definitions for Ontology RAG (Phase 3a)",
+                vectorizer_config=weaviate.classes.config.Configure.Vectorizer.none(),
+                vector_index_config=weaviate.classes.config.Configure.VectorIndex.hnsw(
+                    distance_metric=weaviate.classes.config.VectorDistances.COSINE,
+                ),
+                properties=[
+                    weaviate.classes.config.Property(
+                        name="predicate_name",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Predicate name (e.g. empleado-de)",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="namespace",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Ontology namespace (core, legal, trust, medical, documental)",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="description",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Human-readable description of the predicate",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="domain_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Expected subject type",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="range_type",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Expected object type",
+                    ),
+                    weaviate.classes.config.Property(
+                        name="embed_text",
+                        data_type=weaviate.classes.config.DataType.TEXT,
+                        description="Text that was embedded (name + description)",
+                    ),
+                ],
+            )
+            logger.info(f"Created collection {collection_name} ({dims} dims, cosine HNSW)")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to ensure {collection_name} collection: {e}")
+            return False
+
+    async def search_ontology_terms(
+        self,
+        query_embedding: list[float],
+        limit: int = 3,
+        namespace: str | None = None,
+    ) -> list[dict]:
+        """Vector similarity search over OntologyTerms."""
+        try:
+            await self.ensure_ontology_terms_collection()
+            col = self.client.collections.get(self.ONTOLOGY_TERMS_COLLECTION)
+
+            filters = None
+            if namespace:
+                filters = weaviate.classes.query.Filter.by_property("namespace").equal(namespace)
+
+            response = col.query.near_vector(
+                near_vector=query_embedding,
+                limit=limit,
+                filters=filters,
+                return_metadata=weaviate.classes.query.MetadataQuery(distance=True),
+            )
+
+            results = []
+            for obj in response.objects:
+                score = 1.0 - (obj.metadata.distance or 0.0)
+                results.append({
+                    "predicate_name": obj.properties.get("predicate_name", ""),
+                    "namespace": obj.properties.get("namespace", ""),
+                    "description": obj.properties.get("description", ""),
+                    "score": round(score, 4),
+                })
+            return results
+
+        except Exception as e:
+            logger.error(f"OntologyTerms search failed: {e}")
+            return []
+
+    async def upsert_ontology_term(
+        self,
+        predicate_name: str,
+        namespace: str,
+        description: str,
+        domain_type: str,
+        range_type: str,
+        embed_text: str,
+        embedding: list[float],
+    ) -> bool:
+        """Insert a single OntologyTerm with pre-computed embedding."""
+        try:
+            await self.ensure_ontology_terms_collection()
+            col = self.client.collections.get(self.ONTOLOGY_TERMS_COLLECTION)
+
+            col.data.insert(
+                properties={
+                    "predicate_name": predicate_name,
+                    "namespace": namespace,
+                    "description": description,
+                    "domain_type": domain_type,
+                    "range_type": range_type,
+                    "embed_text": embed_text,
+                },
+                vector=embedding,
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"OntologyTerm upsert failed for {namespace}/{predicate_name}: {e}")
+            return False
+
+    async def search_trustgraph_entities(
+        self,
+        query_embedding: List[float],
+        tenant_id: str,
+        collection: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Vector similarity search over TrustGraphEntities.
+
+        Args:
+            query_embedding: Pre-computed query vector.
+            tenant_id: Tenant scope for the search.
+            collection: Optional Weaviate collection filter.
+            limit: Maximum number of results.
+
+        Returns:
+            List of entity dicts with score = 1.0 - cosine_distance.
+        """
+        try:
+            col = self.client.collections.get(self.TRUSTGRAPH_ENTITIES_COLLECTION)
+
+            # Build filter
+            tenant_filter = weaviate.classes.query.Filter.by_property("tenant_id").equal(tenant_id)
+            combined_filter = tenant_filter
+            if collection:
+                col_filter = weaviate.classes.query.Filter.by_property("collection").equal(collection)
+                combined_filter = tenant_filter & col_filter
+
+            response = col.query.near_vector(
+                near_vector=query_embedding,
+                limit=limit,
+                filters=combined_filter,
+                return_metadata=weaviate.classes.query.MetadataQuery(distance=True),
+            )
+
+            results = []
+            for obj in response.objects:
+                distance = obj.metadata.distance if obj.metadata else None
+                score = (1.0 - distance) if distance is not None else None
+                results.append(
+                    {
+                        "entity_uri": obj.properties.get("entity_uri"),
+                        "label": obj.properties.get("label"),
+                        "definition": obj.properties.get("definition"),
+                        "entity_type": obj.properties.get("entity_type"),
+                        "score": score,
+                    }
+                )
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to search TrustGraphEntities: {e}")
+            return []
+
+    async def upsert_trustgraph_entities_batch(
+        self,
+        entities: List[Dict[str, Any]],
+        embeddings: List[List[float]],
+        tenant_id: str,
+    ) -> int:
+        """Batch upsert entity embeddings into TrustGraphEntities.
+
+        Args:
+            entities: List of entity dicts (entity_uri, label, definition,
+                      entity_type, collection).
+            embeddings: Parallel list of embedding vectors.
+            tenant_id: Tenant identifier.
+
+        Returns:
+            Number of objects successfully inserted.
+        """
+        try:
+            await self.ensure_trustgraph_entities_collection()
+            col = self.client.collections.get(self.TRUSTGRAPH_ENTITIES_COLLECTION)
+
+            batch_objects = []
+            for entity, vector in zip(entities, embeddings):
+                embed_text = f"{entity.get('label', '')} {entity.get('definition', '')}".strip()
+                props = {
+                    "entity_uri": entity.get("entity_uri", ""),
+                    "label": entity.get("label", ""),
+                    "definition": entity.get("definition", ""),
+                    "entity_type": entity.get("entity_type", ""),
+                    "tenant_id": tenant_id,
+                    "collection": entity.get("collection", ""),
+                    "embed_text": embed_text,
+                }
+                obj_uuid = str(uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"{tenant_id}:{entity.get('entity_uri', embed_text)}",
+                ))
+                batch_objects.append(
+                    weaviate.classes.data.DataObject(
+                        properties=props,
+                        uuid=obj_uuid,
+                        vector=vector,
+                    )
+                )
+
+            if not batch_objects:
+                return 0
+
+            col.data.insert_many(batch_objects)
+            logger.info(
+                f"Upserted {len(batch_objects)} TrustGraphEntities for tenant {tenant_id}"
+            )
+            return len(batch_objects)
+
+        except Exception as e:
+            logger.error(f"Failed to batch-upsert TrustGraphEntities: {e}")
+            raise
+
+    async def delete_trustgraph_entities(self, tenant_id: str) -> int:
+        """Delete all TrustGraphEntities for a given tenant.
+
+        Args:
+            tenant_id: Tenant whose entities should be removed.
+
+        Returns:
+            Number of deleted objects.
+        """
+        try:
+            col = self.client.collections.get(self.TRUSTGRAPH_ENTITIES_COLLECTION)
+
+            response = col.query.fetch_objects(
+                filters=weaviate.classes.query.Filter.by_property("tenant_id").equal(tenant_id),
+                limit=10_000,
+            )
+
+            deleted = 0
+            for obj in response.objects:
+                col.data.delete_by_id(obj.uuid)
+                deleted += 1
+
+            logger.info(
+                f"Deleted {deleted} TrustGraphEntities for tenant {tenant_id}"
+            )
+            return deleted
+
+        except Exception as e:
+            logger.error(f"Failed to delete TrustGraphEntities for tenant {tenant_id}: {e}")
+            raise
+
     async def health_check(self) -> Dict[str, Any]:
         """Check Weaviate service health"""
         try:
@@ -3227,22 +3531,12 @@ class WeaviateService:
             is_live = self.client.is_live()
 
             # Check embedding model status
-            embedding_info = None
-            if self.embedding_model:
-                if settings.embedding_provider == "tei":
-                    embedding_info = {
-                        "provider": "tei",
-                        "model": settings.embedding_model,
-                        "dimensions": settings.embedding_dimensions,
-                        "url": settings.tei_url
-                    }
-                else:
-                    embedding_info = {
-                        "provider": "sentence-transformers",
-                        "model": settings.embedding_model,
-                        "dimensions": settings.embedding_dimensions,
-                        "device": settings.embedding_device
-                    }
+            embedding_info = {
+                "provider": "intelligence-docs-service",
+                "model": settings.embedding_model,
+                "dimensions": settings.embedding_dimensions,
+                "confirmed": self._embedding_checked,
+            }
 
             return {
                 "status": "healthy" if is_ready and is_live else "unhealthy",

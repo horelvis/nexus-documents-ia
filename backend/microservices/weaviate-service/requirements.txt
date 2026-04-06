@@ -46,7 +46,7 @@ python-multipart>=0.0.9
 structlog>=23.2.0
 loguru>=0.7.0
 
-# OpenAI client for vLLM compatibility layer
+# OpenAI client for SGLang compatibility layer
 openai>=1.0.0
 
 # Development

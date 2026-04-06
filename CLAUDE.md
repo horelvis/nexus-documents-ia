@@ -7,19 +7,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Docker Compose (IMPORTANT)
 - The **active compose** for on-premise is `docker-compose.onpremise.yml`, which **overrides** `docker-compose.yml`
 - Both files are loaded together: `docker compose` auto-detects them via `docker-compose.yml` + `docker-compose.onpremise.yml`
-- **Always edit `docker-compose.onpremise.yml`** for on-premise changes (vLLM config, services, etc.)
+- **Always edit `docker-compose.onpremise.yml`** for on-premise changes (vLLM/LLM config, services, etc.)
 - `docker-compose.yml` is the base; `docker-compose.onpremise.yml` overrides/extends it
-- vLLM config (model, quantization, GPU settings) lives in `docker-compose.onpremise.yml`
+- LLM config (model, quantization, GPU settings) lives in `docker-compose.onpremise.yml`
 
 ### Backend
-- **Start dev (RECOMMENDED)**: `cd backend/docker && ./start-dev.sh`
-- **Start prod**: `cd backend/docker && ./start-prod.sh`
+- **Start dev**: `cd backend/docker && docker compose up -d`
+- **Start dev (build first)**: `cd backend/docker && docker compose up -d --build`
 - **Local API (no Docker)**: `cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
 - **Init database**: `cd backend && python -m scripts.init_db`
 - **Migrations**: `cd backend && alembic upgrade head`
 - **Run tests**: `cd backend/tests && ./run_tests.sh`
 - **Tests (real GCS)**: `cd backend/docker && docker compose -f docker-compose.test.yml up`
-- **Clean rebuild**: `./clean_and_rebuild.sh`
+- **Stop**: `cd backend/docker && docker compose down`
 
 ### Frontend
 - **Requires**: Node.js 18+ (`nvm use 18` or `nvm use 20`)
@@ -37,8 +37,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Compose override**: `docker-compose.onboarding.yml` (Docling GPU + disable RAG hierarchical)
 
 ### Full Stack
-- Backend services: `cd backend/docker && ./start-dev.sh` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
-- Frontend: `cd frontend && npm run dev:on-premise` (on-premise only, port 3001)
+- Backend services: `cd backend/docker && docker compose up -d` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
+- Frontend: `cd frontend && npm run dev` (port 3001)
 - API docs: `http://localhost:8000/docs`
 
 ## Architecture Overview
@@ -47,26 +47,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Backend**: FastAPI (Python 3.9+), async/await throughout
 - **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
-- **Database**: PostgreSQL 15 (Apache AGE + pgvector) + Weaviate (vectors) + Elasticsearch (full-text)
+- **Database**: PostgreSQL 15 + Weaviate (vectors) + FalkorDB (graph) + Elasticsearch (full-text)
 - **Storage**: Google Cloud Storage
-- **AI/ML**: vLLM (dual-model: Qwen3.5-4B planner + Qwen3.5-9B chat) + LangGraph multi-agent orchestration
+- **AI/ML**: vLLM v0.18.0 (single-model: Qwen3.5-27B-AWQ, dual-phase PLANNER/CHAT) + LangGraph multi-agent orchestration
 
-### PostgreSQL Extensions
+### PostgreSQL
 
-The `db` service uses a custom Docker image (`Dockerfile.postgres`) based on `apache/age:release_PG15_1.6.0` with two extensions:
-
-| Extension | Version | Purpose | Init Script |
-|-----------|---------|---------|-------------|
-| **Apache AGE** | 1.6.0 | Cypher graph queries for knowledge graph (entity expansion, structural queries) | `init-scripts/01-init-age.sql` |
-| **pgvector** | 0.8.0 | Vector similarity search for MemoRAG embeddings and few-shot retrieval | `init-scripts/00-init-pgvector.sql` |
-
-**Key files**:
-- `backend/docker/Dockerfile.postgres` — Custom image build (AGE base + pgvector compiled from source)
-- `backend/docker/init-scripts/00-init-pgvector.sql` — Creates pgvector extension on first startup
-- `backend/docker/init-scripts/01-init-age.sql` — Apache AGE + knowledge graph schema
-- `backend/docker/init-scripts/02-init-langfuse.sql` — Langfuse observability database
-
-**Rebuild after changes**: `cd backend/docker && docker compose build db`
+The `db` service uses vanilla `postgres:15`. Knowledge graph operations use **FalkorDB** (Redis-based, port 6380). Langfuse database is initialized via `init-scripts/02-init-langfuse.sql`.
 
 ### Microservices
 
@@ -74,13 +61,13 @@ The `db` service uses a custom Docker image (`Dockerfile.postgres`) based on `ap
 |---------|------|---------|
 | Main API | 8000 | Core business logic, auth, document management |
 | Emma Agent Service | 8009 | LangGraph multi-agent RAG, Verified Generation |
-| Weaviate Service | 8007 | Vector search, RAG pipeline, embedding (BGE-M3) |
-| Knowledge Tree Service | 8011 | Apache AGE graph queries for entity expansion |
+| Weaviate Service | 8007 | Vector search, RAG pipeline (embeddings via intelligence-docs) |
+| Intelligence Docs Service | 8012 | Text extraction (Docling/GLM-OCR), embedding (BGE-M3), entity extraction |
+| Knowledge Tree Service | 8011 | TrustGraph triple store (:Node/:Literal/:Rel), 4 LLM extractors, PROV-O provenance |
 | Elasticsearch Service | 8008 | Full-text search, hybrid search |
 | Background Worker | 8100 | Celery async task processing |
 | Emma Reactive Worker | — | Event listener + trigger engine (Redis Streams consumer) |
-| vLLM Chat | internal | GPU inference — quality generation (Qwen3.5-9B) |
-| vLLM Planner | internal | GPU inference — fast tool calling (Qwen3.5-4B, dual-model only) |
+| vLLM | internal | GPU inference — Qwen3.5-27B-AWQ (single-model, dual-phase PLANNER/CHAT) |
 
 ### Deployment Mode (On-Premise Only)
 
@@ -145,21 +132,21 @@ MemoRAG-inspired dual-model routing where a fast planner model handles tool call
 
 **Architecture**:
 ```
-                    ┌─────────────────────────────────────┐
-                    │            LLMRouter                │
-                    │                                     │
-User Query ──────►  │  role=PLANNER → vLLM (4B, fast)    │
-                    │  role=CHAT    → vLLM (9B, quality)  │
-                    │                                     │
-                    │  Fallback chain per role+provider    │
-                    └─────────────────────────────────────┘
+                    ┌──────────────────────────────────────────┐
+                    │            LLMRouter                     │
+                    │                                          │
+User Query ──────►  │  role=PLANNER → vLLM (27B, temp=0.3)    │
+                    │  role=CHAT    → vLLM (27B, temp=0.6)     │
+                    │                                          │
+                    │  Fallback chain per role+provider         │
+                    └──────────────────────────────────────────┘
 ```
 
 **Role Assignment**:
 | Role | Model | Used By | Purpose |
 |------|-------|---------|---------|
-| `PLANNER` | Qwen3.5-4B-AWQ (~3-4GB) | classify, memory_recall, react_loop, decompose, swarm_worker, intent_router, verified eval, heartbeat, fact_extractor | Tool calling, JSON extraction, routing |
-| `CHAT` | Qwen3.5-9B-AWQ (~8-10GB) | synthesize, synthesize_swarm, rlm_processor, writer_agent, specialists, prediction_synthesizer | User-facing text generation |
+| `PLANNER` | Qwen3.5-27B-AWQ (temp=0.3) | classify, memory_recall, react_loop, decompose, swarm_worker, intent_router, verified eval, heartbeat, fact_extractor | Tool calling, JSON extraction, routing |
+| `CHAT` | Qwen3.5-27B-AWQ (temp=0.6) | synthesize, synthesize_swarm, rlm_processor, writer_agent, specialists, prediction_synthesizer | User-facing text generation |
 
 **Usage**:
 ```python
@@ -173,27 +160,54 @@ response = await router.chat(messages, tools=tools, role=ModelRole.PLANNER)
 response = await router.chat(messages, role=ModelRole.CHAT)
 ```
 
-**Backwards Compatible**: `VLLM_DUAL_MODEL=false` (default) — both roles use the same model/endpoint. All existing callers default to `ModelRole.CHAT`.
+**Backwards Compatible**: `SGLANG_DUAL_MODEL=false` (default) — both roles use the same model/endpoint. All existing callers default to `ModelRole.CHAT`. Legacy `VLLM_*` env vars are accepted as fallback.
 
-**Activation**: Set `VLLM_DUAL_MODEL=true` in `.env` and start with `docker compose --profile dual-model up -d`.
+**Activation**: Set `SGLANG_DUAL_MODEL=true` in `.env` and start with `docker compose --profile dual-model up -d`.
 
 **Environment Variables**:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VLLM_DUAL_MODEL` | `false` | Enable dual-model routing |
-| `VLLM_PLANNER_URL` | `VLLM_BASE_URL` | Planner vLLM endpoint |
-| `VLLM_PLANNER_MODEL` | `Qwen/Qwen3.5-4B-AWQ` | Planner model name |
-| `VLLM_PLANNER_MAX_TOKENS` | `4096` | Planner max output tokens |
-| `VLLM_PLANNER_TEMPERATURE` | `0.3` | Planner temperature |
-| `VLLM_PLANNER_GPU_UTIL` | `0.20` | Planner GPU memory fraction |
-| `VLLM_PLANNER_TOOL_PARSER` | `qwen3_coder` | Planner tool call parser (Qwen3.5 uses XML) |
+| `SGLANG_DUAL_MODEL` | `false` | Enable dual-model routing |
+| `SGLANG_PLANNER_URL` | `SGLANG_BASE_URL` | Planner SGLang endpoint |
+| `SGLANG_PLANNER_MODEL` | `Qwen/Qwen3.5-4B` | Planner model name |
+| `SGLANG_PLANNER_MAX_TOKENS` | `4096` | Planner max output tokens |
+| `SGLANG_PLANNER_TEMPERATURE` | `0.3` | Planner temperature |
+| `SGLANG_PLANNER_GPU_UTIL` | `0.18` | Planner GPU memory fraction |
+| `SGLANG_TOOL_PARSER` | `qwen3_coder` | Tool call parser (Qwen3.5 uses XML) |
 
 **Key files**:
 - `emma-agent-service/app/agents/llm_router.py` — LLMRouter with `(provider, role)` client pool
 - `emma-agent-service/app/agents/llm_client.py` — `ModelRole` enum, `create_llm_config_for_provider(role=)`
-- `emma-agent-service/app/core/config.py` — Dual-model settings
-- `docker-compose.onpremise.yml` — `vllm-planner` service (profiles: [dual-model])
+- `emma-agent-service/app/core/config.py` — Dual-model settings (`sglang_*` attrs, `VLLM_*` fallback)
+- `docker-compose.onpremise.yml` — `sglang-planner` service (profiles: [dual-model])
+
+### TrustGraph — Knowledge Graph Triple Store
+
+> **Full docs**: [`docs/architecture/TRUSTGRAPH.md`](docs/architecture/TRUSTGRAPH.md)
+
+The knowledge graph uses a **TrustGraph-model RDF-style triple store** (`:Node`/`:Literal`/`:Rel`) on FalkorDB. Documents are processed by 4 parallel LLM extractors (definitions, relationships, objects, topics) producing semantic triples with PROV-O provenance and automatic contradiction detection.
+
+**Schema**: Everything is a `:Node` (entities, documents, folders) or `:Literal` (values), connected by `:Rel` edges carrying URI predicates (e.g., `nouxcube://predicate/legal/empleado-de`). 72 predicates seeded across `core/`, `legal/`, `trust/`, `medical/`, `documental/`, `prov/` namespaces.
+
+**Pipeline**: `weaviate-service` → `POST /extract/triples` → `ExtractionCoordinator` → 4 extractors in parallel via `asyncio.gather` → dedup → blacklist filter → entity linking → FalkorDB MERGE → PROV-O → contradiction detection → consensus scoring.
+
+**Key files**:
+- `knowledge-tree-service/app/services/triple_store.py` — CRUD (MERGE Node/Literal, CREATE Rel)
+- `knowledge-tree-service/app/services/triple_query.py` — 8 SPO query patterns + `build_context()`
+- `knowledge-tree-service/app/services/extractors/coordinator.py` — Orchestrates 4 extractors + blacklist + consensus
+- `knowledge-tree-service/app/services/provenance.py` — PROV-O triples per extraction
+- `knowledge-tree-service/app/services/contradiction.py` — Batch contradiction detection
+- `knowledge-tree-service/app/services/consensus.py` — Cross-source agreement counting
+- `knowledge-tree-service/app/services/entity_blacklist.py` — Filter generic concepts from extraction
+- `knowledge-tree-service/app/services/ontology_search.py` — Semantic predicate resolution via Weaviate OntologyTerms
+- `knowledge-tree-service/app/services/template_executor.py` — Cypher template registry + execution
+- `knowledge-tree-service/app/services/graph_assembler.py` — Assemble graph data for reports (KPIs, sources, trust)
+- `knowledge-tree-service/scripts/reindex_trustgraph.py` — Full graph rebuild
+
+**graph_rag pipeline** (8 stages): Entity retrieval → BFS subgraph → **LLM-guided expansion** → Label resolution → Semantic pre-filter with **composite 5-signal scoring** (semantic + confidence + authority + consensus + recency) → LLM edge scoring → Context formatting with **chain-of-thought paths** → Source provenance.
+
+**Phases**: Phase 1 (Automated Ingest) — COMPLETE. Phase 2 (Semantic Similarity Retrieval) — COMPLETE. Phase 3a (Clean Graph) — COMPLETE. Phase 3b (Smart Traversal) — COMPLETE. Phase 3c (Knowledge Expert) — COMPLETE.
 
 ### SmartSearch — Unified Multi-Store Search
 
@@ -211,7 +225,7 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 |-------|------|-----|
 | Weaviate | Tenant documents (hybrid search) | `WeaviateClient.hybrid_search()` with enrichment filters |
 | PublicKnowledge | BOE legislation (hybrid search) | `WeaviateClient.search_public_knowledge()` |
-| Apache AGE | Entity relationships (knowledge graph) | `KnowledgeTreeClient.get_documents_by_person()` |
+| FalkorDB | Entity relationships (TrustGraph triples) | `KnowledgeTreeClient.query_triples()` via graph_expander |
 
 **Enrichment Properties** (first-class Weaviate properties, not JSONB):
 - `domain` — Business domain (legal, fiscal, medical)
@@ -235,19 +249,26 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 - `emma-agent-service/app/agents/langgraph/tools/registry.py` — Tool registration
 - `emma-agent-service/app/agents/langgraph/sectors/config.py` — `rerank_weights` per sector
 - `weaviate-service/app/services/weaviate_service.py` — Enrichment properties + filters
-- `knowledge-tree-service/app/api/tree.py` — `/graph/documents-by-entity` endpoint
+- `knowledge-tree-service/app/api/triples.py` — `/triples/query` endpoint (graph expansion)
 
-**ReAct Agent Tools** (9 total):
+**ReAct Agent Tools** (16 total):
 | Tool | Purpose |
 |------|---------|
 | `smart_search` | Unified document + legislation search (auto-detects scope) |
+| `graph_rag` | Knowledge graph retrieval with 8-stage pipeline (entity → BFS → guided expansion → scoring → provenance) |
 | `get_document_content` | Read full document by ID |
-| `structural_query` | Count, list, filter via Apache AGE graph |
+| `structural_query` | Count, list, filter via FalkorDB TrustGraph |
 | `analyze_domain` | Specialist domain analysis |
 | `web_search` | Internet search (Tavily primary, DuckDuckGo fallback) |
 | `search_jurisprudence` | CENDOJ jurisprudence search |
 | `list_sources` | Discover available data sources |
 | `query_connector` | Query external connectors (SharePoint, etc.) |
+| `generate_document` | Generate document from template |
+| `forge_document` | Create PDF documents |
+| `send_email` | Send email notifications |
+| `verified_generation` | Claim-by-claim verification sub-graph |
+| `predictive_analysis` | Predictive analysis sub-graph |
+| `generate_knowledge_report` | Generate structured reports with KPIs and verified citations from knowledge graph |
 | `terminate` | Signal completion with response |
 
 ### Prompt Management System

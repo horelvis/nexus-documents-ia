@@ -13,11 +13,9 @@ from app.db.models import Document, Tag
 from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.storage_factory import StorageServiceFactory
-from app.services.embedding_service import EmbeddingService
 from app.services.weaviate_client import weaviate_client
 from app.services.text_extraction_client import TextExtractionClient
 from app.services.elasticsearch_client import elasticsearch_client  # Added Elasticsearch Client
-from app.services.langextract_client import langextract_client
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +58,6 @@ class DocumentService:
                 db.close()
             
         self.user_id = user_id
-        self.embedding_service = EmbeddingService(self.tenant_id)
         self.collection_name = f"Nouxcube_{self.tenant_id.replace('-', '_')}_documents"
         self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
 
@@ -214,25 +211,7 @@ class DocumentService:
         current_metadata["text_extraction"] = extraction_metadata
         db_document.document_metadata = current_metadata
 
-        # Extract entities using LangExtract microservice
-        try:
-            entities_result = await langextract_client.extract_entities(
-                text=document_text,
-                document_type=db_document.category or "general",
-                filename=db_document.filename,
-            )
-            if entities_result.get("success"):
-                db_document.extracted_entities = entities_result.get("extractions", [])
-                logger.info(
-                    "Extracted %s entities from document %s",
-                    len(db_document.extracted_entities or []),
-                    db_document.id,
-                )
-            else:
-                db_document.extracted_entities = []
-        except Exception as exc:  # pylint: disable=broad-except
-            logger.error("Failed to extract entities from document %s: %s", db_document.id, exc)
-            db_document.extracted_entities = []
+        # Entity extraction handled by indexing pipeline (intelligence-docs-service → Weaviate/FalkorDB)
 
         # Prepare metadata for downstream services
         document_metadata = {

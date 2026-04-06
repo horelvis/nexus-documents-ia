@@ -2,13 +2,13 @@
 Document Indexing Pipeline
 
 Complete RAG preprocessing pipeline:
-- Text Extraction: Call textextract-service for PDF/DOCX/etc.
+- Text Extraction: Call intelligence-docs-service for PDF/DOCX/etc.
 - Layer 0: DocumentIntelligence (quality assessment, cleaning)
 - Layer 1: SemanticChunker (structure-aware chunking)
 - Layer 2: VisualExtractor (multimodal content for images/tables/diagrams)
 
 This pipeline prepares documents for vector indexing with:
-1. Text extraction from binary files via textextract-service
+1. Text extraction from binary files via intelligence-docs-service
 2. Quality analysis of extracted text
 3. Automatic cleaning if needed
 4. Intelligent chunking based on document structure
@@ -72,9 +72,14 @@ from .hierarchical_indexer import (
     DocumentSummary,
     hierarchical_indexer,
 )
-from .textextract_client import TextExtractClient, TextExtractResult, textextract_client
-from .langextract_client import LangExtractClient, LangExtractResult, langextract_client
-from .ocr_client import OCRClient, OCRResult, ocr_client
+from app.clients.intelligence_client import (
+    IntelligenceExtractClient,
+    TextExtractResult,
+    LangExtractResult,
+    OCRResult,
+    intelligence_extract_client,
+)
+from app.clients import intelligence_client
 from app.services.text_alignment_service import (
     TextAlignmentService,
     AlignedBlock,
@@ -226,7 +231,7 @@ class IndexingPipeline:
     Complete document indexing pipeline.
 
     Pipeline stages:
-    1. Extract text (textextract-service) - for binary files
+    1. Extract text (intelligence-docs-service) - for binary files
     2. Analyze quality (DocumentIntelligence)
     2.5. Enhanced OCR fallback (if quality < threshold)
     3. Clean text if needed
@@ -238,19 +243,16 @@ class IndexingPipeline:
 
     def __init__(
         self,
-        extractor: Optional[TextExtractClient] = None,
+        extractor: Optional[IntelligenceExtractClient] = None,
         intelligence: Optional[DocumentIntelligence] = None,
         chunker: Optional[SemanticChunker] = None,
         knowledge_extractor: Optional[KnowledgeExtractionService] = None,
-        ocr_client_instance: Optional[OCRClient] = None,
     ):
-        self.extractor = extractor or textextract_client
+        self.extractor = extractor or intelligence_extract_client
         self.intelligence = intelligence or document_intelligence
         self.chunker = chunker or semantic_chunker
         self.knowledge_extractor = knowledge_extractor or get_knowledge_service()
         self._knowledge_extraction_enabled = True
-        # OCR client for enhanced OCR fallback
-        self._ocr_client = ocr_client_instance or ocr_client
         # Visual extractor for multimodal support
         self._visual_extractor = visual_extractor if MULTIMODAL_AVAILABLE else None
         self._embedding_service = multimodal_embedding_service if MULTIMODAL_AVAILABLE else None
@@ -290,7 +292,7 @@ class IndexingPipeline:
             IndexingResult with chunks ready for embedding
 
         Note: MIME type is automatically detected from file content (magic bytes)
-        by the textextract-service, NOT from the filename extension.
+        by the intelligence-docs-service, NOT from the filename extension.
         """
         start_time = time.time()
         errors = []
@@ -398,7 +400,7 @@ class IndexingPipeline:
                     # Parse languages from config
                     ocr_languages = settings.enhanced_ocr_languages.split(",")
 
-                    ocr_result = await self._ocr_client.extract_with_ocr(
+                    ocr_result = await self.extractor.extract_with_ocr(
                         file_bytes=file_bytes,
                         languages=ocr_languages,
                         use_hybrid=settings.enhanced_ocr_use_hybrid or ocr_config.get("use_hybrid", False),
@@ -849,7 +851,7 @@ class IndexingPipeline:
 
             try:
                 # Call LangExtract client for entity extraction
-                langextract_result = await langextract_client.extract_entities(
+                langextract_result = await intelligence_client.extract_entities(
                     text=text_for_chunking,
                     document_type=metadata.get("document_type", "general"),
                     filename=metadata.get("filename"),
@@ -1367,6 +1369,12 @@ class IndexingPipeline:
                     "filename": metadata.get("filename", ""),
                     "chunks_count": len(result.chunks),
                     "tags": metadata.get("tags", []),
+                    # Enrichment for FalkorDB auto-index
+                    "file_path": metadata.get("external_path", ""),
+                    "domain": result.contextual_domain or "",
+                    "semantic_type": metadata.get("document_type", ""),
+                    "connector_id": metadata.get("connector_id", ""),
+                    "connector_type": metadata.get("connector_type", ""),
                 },
             )
         except Exception as e:

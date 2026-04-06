@@ -201,16 +201,15 @@ async def _get_reference_embeddings() -> Dict[str, np.ndarray]:
         if _reference_embeddings is not None:
             return _reference_embeddings
 
-        from app.services.weaviate_service import generate_embedding
+        from app.clients import intelligence_client
 
         logger.info("🏷️ Computing reference embeddings for semantic type classifier...")
         embeddings = {}
 
         for type_name, description in _SEMANTIC_TYPE_DESCRIPTIONS.items():
-            # Use classification task adapter for Jina v3 (ignored by BGE-M3)
             from app.core.config import settings as ws_settings
             task = getattr(ws_settings, "embedding_task_classification", "")
-            emb = await generate_embedding(description, task=task)
+            emb = await intelligence_client.embed(description, task=task)
             if emb:
                 embeddings[type_name] = np.array(emb, dtype=np.float32)
 
@@ -263,7 +262,7 @@ async def classify_semantic_type(
     if not reference_embs:
         return None
 
-    from app.services.weaviate_service import generate_embedding
+    from app.clients import intelligence_client
 
     # Clean the text preview: strip [CONTEXTO] prefix that biases the embedding
     cleaned_text = _clean_text_preview(text_preview)
@@ -275,7 +274,7 @@ async def classify_semantic_type(
 
     from app.core.config import settings as ws_settings
     task = getattr(ws_settings, "embedding_task_classification", "")
-    doc_embedding = await generate_embedding(doc_text, task=task)
+    doc_embedding = await intelligence_client.embed(doc_text, task=task)
     if not doc_embedding:
         return None
 

@@ -9,7 +9,7 @@
 
 ## Overview
 
-NouxCubeIA On-Premise is designed for organizations that require complete control over their data and infrastructure. With local GPU inference via vLLM and Qwen3 models, you get enterprise-grade AI capabilities without sending data to external providers.
+NouxCubeIA On-Premise is designed for organizations that require complete control over their data and infrastructure. With local GPU inference via SGLang and Qwen3.5 models, you get enterprise-grade AI capabilities without sending data to external providers.
 
 ### Key Benefits
 
@@ -390,17 +390,19 @@ Usuario ──▶ API ──▶ weaviate-service
 | Service | Internal Port | External Port | Description |
 |---------|---------------|---------------|-------------|
 | api | 8000 | 8000 | Main FastAPI gateway |
-| weaviate-service | 8000 | 8007 | RAG + Emma AI |
-| langextract-service | 8000 | 8009 | Entity extraction |
+| emma-agent-service | 8009 | 8009 | LangGraph multi-agent RAG |
+| weaviate-service | 8000 | 8007 | Vector search, RAG pipeline |
+| intelligence-docs-service | 8000 | 8012 | Text extraction, embeddings (BGE-M3), entity extraction |
+| knowledge-tree-service | 8011 | 8011 | FalkorDB graph queries |
 | storage-service | 8010 | 8010 | File storage (FastAPI + MinIO SDK) |
 | minio | 9000 | 9000 | S3-compatible object storage (API) |
-| minio-console | 9001 | 9001 | MinIO web console |
 | background-worker | 8100 | - | Celery async tasks |
-| vllm | 8000 | - | LLM inference (internal) |
-| qwen3-vl-embedding | 8001 | - | Embedding (internal) |
+| sglang | 8000 | 8001 | GPU LLM inference (Qwen3.5-9B FP8) |
+| glm-ocr | 8000 | - | GPU OCR for scanned docs (on-demand) |
 | db (PostgreSQL) | 5432 | 5432 | Database |
 | redis | 6379 | 6379 | Cache |
 | weaviate | 8080 | 8080 | Vector database |
+| falkordb | 6379 | 6380 | Graph database (knowledge graph) |
 | keycloak | 8080 | 8081 | SSO (optional) |
 
 ---

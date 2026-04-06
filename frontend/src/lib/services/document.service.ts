@@ -141,6 +141,28 @@ export class DocumentService {
       return { error: error instanceof Error ? error.message : 'Download failed' }
     }
   }
+
+  /**
+   * Download a Gotenberg-converted PDF for non-PDF documents (DOCX, etc.).
+   * Falls back to the raw stream if conversion is not available.
+   */
+  async downloadConvertedPdf(id: string): Promise<{ blob: Blob; filename: string } | { error: string }> {
+    try {
+      const endpoint = API_CONFIG.ENDPOINTS.DOCUMENT_CONVERTED_PDF(id)
+      const { blob, error } = await this.apiClient.downloadBlob(endpoint)
+
+      if (error || !blob) {
+        return { error: error || 'Converted PDF not available' }
+      }
+
+      const docResponse = await this.getDocument(id)
+      const filename = (docResponse.data?.title || 'document').replace(/\.[^.]+$/, '.pdf')
+
+      return { blob, filename }
+    } catch {
+      return { error: 'Converted PDF not available' }
+    }
+  }
 }
 
 /**

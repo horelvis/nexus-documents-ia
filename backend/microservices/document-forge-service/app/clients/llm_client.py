@@ -1,4 +1,4 @@
-"""Lightweight LLM client for direct vLLM/SGLang communication (OpenAI-compatible)."""
+"""Lightweight LLM client for direct SGLang communication (OpenAI-compatible)."""
 
 import json
 import logging
@@ -12,15 +12,15 @@ logger = logging.getLogger(__name__)
 
 
 class ForgeLLMClient:
-    """Direct HTTP client to vLLM/SGLang for field analysis.
+    """Direct HTTP client to SGLang for field analysis.
 
     Uses PLANNER-like parameters: low temperature, no thinking, structured JSON output.
     """
 
     def __init__(self):
         settings = get_settings()
-        self.base_url = settings.vllm_base_url
-        self.model = settings.vllm_model_name
+        self.base_url = settings.sglang_base_url
+        self.model = settings.sglang_model_name
         self.default_temperature = settings.llm_temperature
         self.default_max_tokens = settings.llm_max_tokens
 

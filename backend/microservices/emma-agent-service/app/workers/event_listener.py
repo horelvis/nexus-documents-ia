@@ -14,12 +14,17 @@ import os
 import signal
 import sys
 
+import httpx
+
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
 from app.core.config import settings
 from app.services.event_bus import event_bus
 from app.schemas.events import EmmaEvent
+
+KTS_URL = os.getenv("KNOWLEDGE_TREE_SERVICE_URL", "http://knowledge-tree-service:8011")
+KTS_API_KEY = getattr(settings, "microservices_api_key", "") or os.getenv("MICROSERVICES_API_KEY", "")
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -34,9 +39,63 @@ CONSUMER_NAME = os.getenv("EVENT_CONSUMER_NAME", f"worker-{os.getpid()}")
 _shutdown = asyncio.Event()
 
 
+async def _auto_index_to_falkordb(event: EmmaEvent):
+    """Index document to FalkorDB knowledge graph via KTS.
+
+    Called for every document.indexed event. Fire-and-forget: failures
+    are logged but never block the event pipeline.
+    """
+    payload = event.payload
+    doc_id = payload.get("doc_id", "")
+    if not doc_id:
+        return
+
+    kts_payload = {
+        "document_id": doc_id,
+        "tenant_id": event.tenant_id,
+        "file_path": payload.get("file_path", ""),
+        "connector_metadata": {
+            "title": payload.get("title", ""),
+            "domain": payload.get("domain", ""),
+            "semantic_type": payload.get("semantic_type", ""),
+        },
+        "connector_id": payload.get("connector_id") or None,
+        "connector_type": payload.get("connector_type") or None,
+    }
+
+    headers = {"Content-Type": "application/json"}
+    if KTS_API_KEY:
+        headers["X-API-Key"] = KTS_API_KEY
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+            response = await client.post(
+                f"{KTS_URL}/tree/index",
+                headers=headers,
+                json=kts_payload,
+            )
+            if response.status_code == 200:
+                result = response.json()
+                logger.info(
+                    f"Auto-indexed {payload.get('title', doc_id)} to FalkorDB "
+                    f"(success={result.get('success')})"
+                )
+            else:
+                logger.warning(
+                    f"KTS auto-index returned {response.status_code} for {doc_id}: "
+                    f"{response.text[:200]}"
+                )
+    except Exception as e:
+        logger.warning(f"KTS auto-index failed for {doc_id}: {e}")
+
+
 async def handle_event(event: EmmaEvent, msg_id: str):
     """Process a single event through the trigger engine."""
     logger.info(f"Processing event: {event.event_type} [{event.tenant_id}] id={msg_id}")
+
+    # Auto-index to FalkorDB on document.indexed (before triggers)
+    if event.event_type == "document.indexed":
+        await _auto_index_to_falkordb(event)
 
     try:
         # Import trigger engine lazily to avoid circular imports

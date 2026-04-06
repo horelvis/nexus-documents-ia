@@ -75,11 +75,15 @@ def extract_entities(
     """
     results: Dict[str, List[str]] = {}
 
+    # Types that rely on capitalization for accuracy (must NOT use IGNORECASE)
+    _CASE_SENSITIVE_TYPES = {"persona"}
+
     for entity_type, regex_list in patterns.items():
         matches: List[str] = []
         for pattern_str in regex_list:
             try:
-                compiled = re.compile(pattern_str, re.IGNORECASE)
+                flags = 0 if entity_type in _CASE_SENSITIVE_TYPES else re.IGNORECASE
+                compiled = re.compile(pattern_str, flags)
                 for match in compiled.finditer(query):
                     matched_text = match.group(0).strip()
                     if entity_type == "persona" and not _is_valid_person_candidate(matched_text):

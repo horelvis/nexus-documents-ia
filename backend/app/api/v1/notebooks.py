@@ -47,8 +47,9 @@ from app.schemas.general import SuccessResponse
 logger = logging.getLogger(__name__)
 
 # Configuration
-PODCAST_SERVICE_URL = os.getenv("PODCAST_SERVICE_URL", "http://podcast-service:8000")
-PRESENTATION_SERVICE_URL = os.getenv("PRESENTATION_SERVICE_URL", "http://presentation-service:8000")
+# podcast-service and presentation-service removed — features disabled
+PODCAST_SERVICE_URL = os.getenv("PODCAST_SERVICE_URL", "")
+PRESENTATION_SERVICE_URL = os.getenv("PRESENTATION_SERVICE_URL", "")
 WEAVIATE_SERVICE_URL = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
 MICROSERVICES_API_KEY = os.getenv("MICROSERVICES_API_KEY", "")
 LOCAL_STORAGE_PATH = os.getenv("LOCAL_STORAGE_PATH", "/app/storage")

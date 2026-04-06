@@ -8,7 +8,7 @@ calling format (Hermes, OpenAI, Anthropic, etc.).
 Architecture:
     ┌─────────────────────────────────────────────────────────────┐
     │                    LLM Provider                              │
-    │  (vLLM/Qwen3, OpenAI GPT-4, Anthropic Claude, etc.)         │
+    │  (SGLang/Qwen3, OpenAI GPT-4, Anthropic Claude, etc.)        │
     └────────────────────────┬────────────────────────────────────┘
                              │ Provider-specific format
                              ▼

@@ -224,13 +224,12 @@ async def explain_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "is_complete": True,
             }
 
-        # Get sector guidance
+        # Get guidance from unified config
         sector_config = get_active_sector_config()
-        sector = state.get("sector", "general")
         sector_guidance = (
             sector_config.explain_guidance
             if sector_config
-            else "Usa lenguaje accesible. Describe los documentos consultados."
+            else "Usa lenguaje accesible. Cita fuentes por nombre completo."
         )
 
         # Format facts for LLM
@@ -242,7 +241,7 @@ async def explain_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 facts_formatted=facts_formatted,
                 tools_human_names=tools_human_names,
                 source_names=source_names,
-                sector=sector,
+                sector="general",
                 sector_guidance=sector_guidance,
             )
         except Exception as e:

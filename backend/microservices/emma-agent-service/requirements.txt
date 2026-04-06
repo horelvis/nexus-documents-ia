@@ -37,6 +37,11 @@ psycopg-binary>=3.2.0  # Bundled libpq — avoids needing libpq-dev in Docker im
 semantic-router>=0.0.50
 fastembed>=0.4.0
 
+# SECURITY: Pin litellm (transitive dep of semantic-router) to safe versions.
+# Versions 1.82.7-1.82.8 were compromised in supply chain attack (SNYK-PYTHON-LITELLM-15762713).
+# CVE-2024-6825 RCE bypass (NSIDE-SA-2026-002) remains unpatched — never use post_call_rules.
+litellm>=1.82.0,<1.82.7
+
 # NLP for domain routing
 spacy>=3.7.0
 rapidfuzz>=3.5.0

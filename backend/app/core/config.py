@@ -18,14 +18,6 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", str(60 * 24 * 8)))
     SERVER_NAME: str = "Document Management API"
     SERVER_HOST: AnyHttpUrl = "http://localhost:8000"
-    STRIPE_SECRET_KEY: Optional[str] = os.getenv("STRIPE_SECRET_KEY")
-    STRIPE_PUBLIC_KEY: Optional[str] = os.getenv("STRIPE_PUBLIC_KEY")
-    STRIPE_WEBHOOK_SECRET: Optional[str] = os.getenv("STRIPE_WEBHOOK_SECRET")
-    STRIPE_PORTAL_CONFIGURATION_ID: Optional[str] = None
-    STRIPE_BASIC_PRICE_ID: Optional[str] = os.getenv("STRIPE_BASIC_PRICE_ID")
-    STRIPE_PRO_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_PRICE_ID")
-    STRIPE_PRO_YEARLY_PRICE_ID: Optional[str] = os.getenv("STRIPE_PRO_YEARLY_PRICE_ID")
-    STRIPE_ENTERPRISE_PRICE_ID: Optional[str] = os.getenv("STRIPE_ENTERPRISE_PRICE_ID")
     FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
     API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8000")
     
@@ -188,8 +180,8 @@ class Settings(BaseSettings):
     # Emma Agent Service (AI orchestration)
     EMMA_SERVICE_URL: str = os.getenv("EMMA_SERVICE_URL", "http://emma-agent-service:8009")
 
-    # Text extraction microservice
-    TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://textextract-service:8000")
+    # Intelligence Docs Service (text extraction)
+    TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://intelligence-docs-service:8000")
     TEXT_EXTRACTION_DEFAULT_STRATEGY: str = os.getenv("TEXT_EXTRACTION_DEFAULT_STRATEGY", "auto")
 
     # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)
@@ -201,8 +193,8 @@ class Settings(BaseSettings):
     # CAG Microservice (Contextual Augmented Generation)
     CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://weaviate-service:8000")
     
-    # LangExtract Service (Entity Extraction)
-    LANGEXTRACT_SERVICE_URL: str = os.getenv("LANGEXTRACT_SERVICE_URL", "http://langextract-service:8009")
+    # Intelligence Docs Service (entity extraction, classification, embeddings, OCR)
+    INTELLIGENCE_DOCS_SERVICE_URL: str = os.getenv("INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000")
     BACKGROUND_TASKS_URL: str = os.getenv("BACKGROUND_TASKS_URL", "http://background-worker:8100")
     MCP_ALFRESCO_URL: str = os.getenv("MCP_ALFRESCO_URL", "http://mcp-alfresco:8000")
     MCP_GOOGLE_DRIVE_URL: str = os.getenv("MCP_GOOGLE_DRIVE_URL", "http://mcp-google-drive:8000")
@@ -224,10 +216,10 @@ class Settings(BaseSettings):
     DOCUMENT_FORGE_ENABLED: bool = os.getenv("DOCUMENT_FORGE_ENABLED", "true").lower() == "true"
 
     # LLM / AI providers
-    # NOTE: Ollama was removed; vLLM is the default local provider.
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "vllm").lower()
-    VLLM_BASE_URL: str = os.getenv("VLLM_BASE_URL", "http://vllm:8000/v1").rstrip("/")
-    VLLM_MODEL: str = os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b")
+    # NOTE: Ollama was removed; SGLang is the default local provider.
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "sglang").lower()
+    SGLANG_BASE_URL: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1")).rstrip("/")
+    SGLANG_MODEL: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b"))
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
@@ -265,16 +257,8 @@ class Settings(BaseSettings):
     # Unified API Key for all microservices (required)
     MICROSERVICES_API_KEY: str
     
-    # Clerk Configuration
-    CLERK_API_URL: str = os.getenv("CLERK_API_URL", "https://api.clerk.com/v1")
-    CLERK_SECRET_KEY: Optional[str] = os.getenv("CLERK_SECRET_KEY")
-    CLERK_PUBLISHABLE_KEY: Optional[str] = os.getenv("CLERK_PUBLISHABLE_KEY")
-    CLERK_JWT_VERIFICATION_KEY: Optional[str] = os.getenv("CLERK_JWT_VERIFICATION_KEY")
-    
     # Microservices URLs
     STORAGE_SERVICE_URL: str = os.getenv("STORAGE_SERVICE_URL", "http://storage-service:8010")
-    CAMUNDA_SERVICE_URL: str = os.getenv("CAMUNDA_SERVICE_URL", "http://camunda-service:8000")
-    TTS_SERVICE_URL: str = os.getenv("TTS_SERVICE_URL", "http://tts-service:8000")
     
     # Email Configuration
     MAIL_USERNAME: str = os.getenv("MAIL_USERNAME", "")

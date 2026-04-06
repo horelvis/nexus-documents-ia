@@ -72,6 +72,22 @@ def _detect_email_action(query: str) -> Tuple[bool, str]:
     return False, ""
 
 
+# ── Relationship query detection (→ graph_rag hint) ───────────────────
+_RELATIONSHIP_PATTERNS = re.compile(
+    r"\b(represent[ae]|vinculad[oa]s?|relacion(es|ados?)?|conect[ae]|"
+    r"trabaja.*(para|en)|emplea(do|da)|pertenece|asociad[oa]|"
+    r"regula(do)?|aplica(ble)?|qué ley|qué normativa|"
+    r"quién.*(representa|trabaja|dirige|gestiona)|"
+    r"relación entre|conexión entre|vínculo)\b",
+    re.IGNORECASE,
+)
+
+
+def _detect_relationship_query(query: str) -> bool:
+    """Detect if the query asks about relationships between entities."""
+    return bool(_RELATIONSHIP_PATTERNS.search(query))
+
+
 async def _build_system_message(state: ReActState) -> SystemMessage:
     """Build the system message with tools description and sector context."""
     registry = get_tool_registry()
@@ -85,10 +101,6 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
     prompt = await _load_react_system_prompt()
     prompt = prompt.replace("{tools_description}", tools_desc)
     prompt = prompt.replace("{current_date}", date.today().isoformat())
-
-    sector = state.get("sector", "")
-    if sector:
-        prompt += f"\n\nSector activo: {sector}"
 
     # Forward classify intent to system prompt
     intent = (state.get("metadata") or {}).get("classify_intent", "")
@@ -107,12 +119,12 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
 
     # Inject memory recall clues (MemoRAG — document memory scan results)
     memory_clues = state.get("memory_clues")
-    if memory_clues:
+    if memory_clues and memory_clues.strip():
         prompt += f"\n\n## Pistas de memoria documental\nBasándote en los documentos del usuario, estas pistas pueden ayudarte a buscar mejor:\n{memory_clues}"
 
     # Inject structural graph context (knowledge graph grounding)
     graph_context = state.get("graph_context")
-    if graph_context:
+    if graph_context and graph_context.strip():
         prompt += f"\n\n{graph_context}"
 
     # Detect email-sending action and inject strong hint for small models
@@ -129,12 +141,23 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
             f"incluye su attachment_id."
         )
 
+    # Detect relationship queries → force graph_rag as first tool
+    if _detect_relationship_query(query):
+        prompt += (
+            "\n\n## CONSULTA DE RELACIONES DETECTADA"
+            "\nEl usuario pregunta sobre relaciones entre entidades (personas, "
+            "empresas, leyes, conceptos)."
+            "\nUSA `graph_rag` como PRIMERA herramienta para buscar en el grafo "
+            "de conocimiento. NO uses smart_search primero."
+            "\nSi graph_rag no devuelve resultados suficientes, complementa con smart_search."
+        )
+
     return SystemMessage(content=prompt)
 
 
-def _build_tool_context(state: ReActState) -> Dict[str, Any]:
+def _build_tool_context(state: ReActState, emit_sse=None) -> Dict[str, Any]:
     """Build minimal context dict for tool execution (avoids copying full state)."""
-    return {
+    ctx = {
         "tenant_id": state.get("tenant_id", ""),
         "user_id": state.get("user_id"),
         "user_role_ids": state.get("user_role_ids"),
@@ -145,6 +168,9 @@ def _build_tool_context(state: ReActState) -> Dict[str, Any]:
         "thread_id": state.get("thread_id", ""),
         "metadata": state.get("metadata"),
     }
+    if emit_sse is not None:
+        ctx["emit_sse"] = emit_sse
+    return ctx
 
 
 def _parse_thinking(content: str) -> tuple:
@@ -279,6 +305,14 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     max_steps = state.get("max_steps", 10)
     tool_calls_history = list(state.get("tool_calls_history", []))
 
+    # Obtain stream writer for real-time SSE from tools (report.*, claim_*, etc.)
+    _stream_writer = None
+    try:
+        from langgraph.config import get_stream_writer
+        _stream_writer = get_stream_writer()
+    except Exception:
+        pass
+
     # Safety: max steps reached
     if step >= max_steps:
         logger.warning(f"ReAct loop: max steps ({max_steps}) reached, forcing exit")
@@ -389,7 +423,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     # This replaces the old message-count window, which could still overflow
     # when tool observations (e.g., get_document_content) are large.
     # Reserve tokens for: system prompt overhead, completion, and safety margin.
-    MODEL_CONTEXT_BUDGET = int(os.getenv("VLLM_MAX_MODEL_LEN", "32768"))
+    MODEL_CONTEXT_BUDGET = int(os.getenv("SGLANG_MAX_MODEL_LEN", os.getenv("VLLM_MAX_MODEL_LEN", "32768")))
     # Leave room for completion tokens + safety margin
     input_token_budget = MODEL_CONTEXT_BUDGET - settings.react_max_completion_tokens - 512
     llm_messages = trim_messages_to_token_budget(
@@ -404,7 +438,7 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     #
     # Dynamic max_tokens: estimate input tokens and cap completion to avoid
     # exceeding the 16K context. PLANNER needs ~500 tokens max for tool calls.
-    MODEL_CONTEXT_LIMIT = int(os.getenv("VLLM_MAX_MODEL_LEN", "32768"))
+    MODEL_CONTEXT_LIMIT = int(os.getenv("SGLANG_MAX_MODEL_LEN", os.getenv("VLLM_MAX_MODEL_LEN", "32768")))
     # Count ALL content: message content + tool_calls JSON structures + overhead
     _est_chars = 0
     for m in llm_messages:
@@ -489,6 +523,18 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         if tool_schemas:
             model = model.bind_tools(tool_schemas)
         model = model.bind(max_tokens=effective_max_tokens)
+
+        tool_names = [t["function"]["name"] for t in tool_schemas] if tool_schemas else []
+        logger.info(
+            f"ReAct step {step}: {len(llm_messages)} msgs, {len(tool_schemas)} tools "
+            f"({', '.join(tool_names[:5])}{'...' if len(tool_names) > 5 else ''}), "
+            f"max_tokens={effective_max_tokens}"
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            for i, m in enumerate(llm_messages):
+                role = m.get("role", "?")
+                content = (m.get("content") or "")[:150]
+                logger.debug(f"  msg[{i}] role={role}: {content!r}")
 
         per_request_thinking = state.get("enable_thinking")
         if per_request_thinking:
@@ -628,10 +674,14 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             logger.warning(
                 f"⚠️ ReAct step 0 — NO tool calls for intent '{intent}'. "
                 f"LLM responded directly without searching. "
-                f"Query: '{state.get('query', '')[:80]}'"
+                f"Query: '{state.get('query', '')[:80]}'. "
+                f"Response preview: '{content[:200]}'"
             )
         else:
-            logger.info(f"ReAct loop: step {step} — no tool calls, completing")
+            logger.info(
+                f"ReAct loop: step {step} — no tool calls, completing. "
+                f"Response preview: '{content[:200]}'"
+            )
 
         # Clean content of any raw tool_call tags from small models
         content = re.sub(r"</?tool_call>", "", content).strip()
@@ -687,7 +737,12 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
         else:
             regular_tcs.append(tc)
 
-    tool_context = _build_tool_context(state)
+    def _emit_sse_via_writer(event: dict):
+        """Bridge: tool emit_sse callback -> LangGraph stream writer."""
+        if _stream_writer:
+            _stream_writer({"type": event.get("event_type", "custom_event"), "data": event.get("payload", event)})
+
+    tool_context = _build_tool_context(state, emit_sse=_emit_sse_via_writer if _stream_writer else None)
     registry = get_tool_registry()
 
     # If terminate found, execute it and return immediately
@@ -821,6 +876,14 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
             "source": tc_name,
             "summary": _humanize_tool_result(tc_name, tc["args"], result),
         })
+
+        # Emit source_evidence from graph_rag
+        if tc_name == "graph_rag" and result.data and result.data.get("source_evidence"):
+            reasoning_steps.append({
+                "type": "source_evidence",
+                "content": json.dumps(result.data["source_evidence"], ensure_ascii=False),
+                "source": "graph_rag",
+            })
 
     # ─── HITL: Email confirmation interrupt ────────────────────────────
     # When send_email returns a preview, pause the graph and show
@@ -998,6 +1061,7 @@ _TOOL_CALL_LABELS = {
     "generate_document": lambda args: "Generando documento...",
     "forge_document": lambda args: "Creando documento PDF...",
     "send_email": lambda args: f"Enviando email a {args.get('to', '...')}...",
+    "generate_knowledge_report": lambda args: f"Generando informe de {args.get('entity_uri', '').split('/')[-1].replace('-', ' ')}...",
 }
 
 
@@ -1058,5 +1122,9 @@ def _humanize_tool_result(name: str, args: Dict[str, Any], result) -> str:
 
     if name == "forge_document":
         return "PDF creado"
+
+    if name == "generate_knowledge_report":
+        entity = args.get("entity_uri", "").split("/")[-1].replace("-", " ").title()
+        return f"Informe generado: {entity}" if entity else "Informe de conocimiento generado"
 
     return "Paso completado"
