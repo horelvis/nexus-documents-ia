@@ -56,7 +56,7 @@ cmd_start() {
     $DC_NORMAL up -d --no-recreate 2>/dev/null || true
     sleep 5
 
-    step "2/5 Stopping SGLang to free GPU (~22GB VRAM)..."
+    step "2/5 Stopping vLLM to free GPU (~22GB VRAM)..."
     $DC_NORMAL stop sglang 2>/dev/null || true
     sleep 3
 

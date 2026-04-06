@@ -38,7 +38,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Full Stack
 - Backend services: `cd backend/docker && docker compose up -d` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
-- Frontend: `cd frontend && npm run dev:on-premise` (on-premise only, port 3001)
+- Frontend: `cd frontend && npm run dev` (port 3001)
 - API docs: `http://localhost:8000/docs`
 
 ## Architecture Overview
