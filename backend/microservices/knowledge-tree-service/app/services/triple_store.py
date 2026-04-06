@@ -214,6 +214,15 @@ class TripleStore:
 
         return subject_uri
 
+    # Predicates where at most one Literal should exist per subject :Node.
+    # Prevents cross-chunk duplicate definitions like
+    # "Código de Comercio (BOE-A-1885-6627)" vs
+    # "Código de Comercio, con referencia BOE-A-1885-6627".
+    _UNIQUE_PREDICATES = {
+        "nouxcube://predicate/core/definition",
+        "nouxcube://predicate/core/label",
+    }
+
     async def batch_store_triples(
         self, triples: list, user: str, collection: str
     ) -> int:
@@ -231,6 +240,21 @@ class TripleStore:
         node_triples = [t for t in triples if t.get("object_is_entity")]
         literal_triples = [t for t in triples if not t.get("object_is_entity")]
 
+        # Split literals into unique-per-entity vs regular
+        unique_lits = [t for t in literal_triples if t["p_uri"] in self._UNIQUE_PREDICATES]
+        regular_lits = [t for t in literal_triples if t["p_uri"] not in self._UNIQUE_PREDICATES]
+
+        # Deduplicate unique literals within this batch: one per (subject, predicate)
+        if unique_lits:
+            seen_unique: set = set()
+            deduped: list = []
+            for t in unique_lits:
+                ukey = (t["s_uri"], t["p_uri"])
+                if ukey not in seen_unique:
+                    seen_unique.add(ukey)
+                    deduped.append(t)
+            unique_lits = deduped
+
         stored = 0
 
         if node_triples:
@@ -246,7 +270,24 @@ class TripleStore:
             )
             stored += len(node_triples)
 
-        if literal_triples:
+        # Unique-per-entity literals: skip if a Rel with this predicate already
+        # exists from the subject to any Literal (cross-chunk dedup).
+        if unique_lits:
+            await self._client.execute_cypher(
+                "UNWIND $triples AS t "
+                "MERGE (s:Node {uri: t.s_uri, user: $user, collection: $col}) "
+                "ON CREATE SET s.created_at = timestamp() "
+                "WITH s, t "
+                "OPTIONAL MATCH (s)-[ex:Rel {uri: t.p_uri, user: $user, collection: $col}]->(:Literal) "
+                "WITH s, t, ex WHERE ex IS NULL "
+                "MERGE (o:Literal {value: t.o_val, user: $user, collection: $col}) "
+                "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
+                "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk, r.confidence = t.confidence",
+                {"triples": unique_lits, "user": user, "col": collection},
+            )
+            stored += len(unique_lits)
+
+        if regular_lits:
             await self._client.execute_cypher(
                 "UNWIND $triples AS t "
                 "MERGE (s:Node {uri: t.s_uri, user: $user, collection: $col}) "
@@ -254,9 +295,9 @@ class TripleStore:
                 "MERGE (o:Literal {value: t.o_val, user: $user, collection: $col}) "
                 "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
                 "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk, r.confidence = t.confidence",
-                {"triples": literal_triples, "user": user, "col": collection},
+                {"triples": regular_lits, "user": user, "col": collection},
             )
-            stored += len(literal_triples)
+            stored += len(regular_lits)
 
         return stored
 
