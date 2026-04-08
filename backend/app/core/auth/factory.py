@@ -1,23 +1,21 @@
 """
 Authentication Provider Factory.
 
-Manages provider instances and selects the appropriate provider
-based on tenant configuration or deployment mode.
+Manages provider instances based on deployment mode.
+
+Single-tenant deployment: there is one auth provider configured via env
+vars (OIDC for on-premise, Clerk for the deprecated SaaS mode). The
+previous multi-tenant `get_for_tenant()` and the `TenantAuthConfig`
+table-backed loader were removed during the multi-tenancy refactor.
 
 Usage:
     from app.core.auth.factory import AuthProviderFactory
 
-    # Get provider for a specific tenant
-    provider = await AuthProviderFactory.get_for_tenant(tenant_id, db)
-
-    # Get the default provider (based on deployment mode)
     provider = await AuthProviderFactory.get_default()
 """
 
 import logging
 from typing import Dict, Type, Optional, Any
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 from app.core.features import Feature, FeatureFlags, is_on_premise_mode
 from app.core.auth.base import (
@@ -31,18 +29,16 @@ logger = logging.getLogger(__name__)
 
 class AuthProviderFactory:
     """
-    Factory for creating and managing authentication providers.
+    Factory for creating and managing the deployment's auth provider.
 
-    Providers are cached per-tenant for efficiency.
+    There is exactly one provider per deployment, cached as
+    _default_instance.
     """
 
     # Registry of provider classes
     _providers: Dict[AuthProviderType, Type[AuthProvider]] = {}
 
-    # Cache of provider instances (tenant_id -> provider)
-    _instances: Dict[str, AuthProvider] = {}
-
-    # Default provider instance (for non-tenant requests)
+    # Default provider instance (single-tenant deployment)
     _default_instance: Optional[AuthProvider] = None
 
     @classmethod
@@ -56,50 +52,6 @@ class AuthProviderFactory:
         """
         cls._providers[provider_type] = provider_class
         logger.info(f"Registered auth provider: {provider_type.value}")
-
-    @classmethod
-    async def get_for_tenant(
-        cls,
-        tenant_id: str,
-        db: AsyncSession,
-    ) -> AuthProvider:
-        """
-        Get the authentication provider configured for a tenant.
-
-        Args:
-            tenant_id: The tenant identifier
-            db: Database session for loading config
-
-        Returns:
-            Configured AuthProvider instance
-
-        Raises:
-            ProviderNotConfiguredError: If provider cannot be created
-        """
-        # Check cache first
-        cache_key = tenant_id
-        if cache_key in cls._instances:
-            return cls._instances[cache_key]
-
-        # Load tenant auth config from database
-        config = await cls._load_tenant_auth_config(tenant_id, db)
-
-        if not config:
-            # No tenant-specific config, use default
-            tenant_display = tenant_id[:8] if tenant_id else "None"
-            logger.debug(f"No auth config for tenant {tenant_display}..., using default")
-            return await cls.get_default()
-
-        # Create provider based on config
-        provider_type = AuthProviderType(config.get("provider", "clerk"))
-        provider = await cls._create_provider(provider_type, config)
-
-        # Cache it
-        cls._instances[cache_key] = provider
-        tenant_display = tenant_id[:8] if tenant_id else "None"
-        logger.info(f"Created {provider_type.value} provider for tenant {tenant_display}...")
-
-        return provider
 
     @classmethod
     async def get_default(cls) -> AuthProvider:
@@ -156,60 +108,6 @@ class AuthProviderFactory:
         return provider
 
     @classmethod
-    async def _load_tenant_auth_config(
-        cls,
-        tenant_id: str,
-        db: AsyncSession,
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Load authentication configuration for a tenant.
-
-        Args:
-            tenant_id: Tenant identifier
-            db: Database session
-
-        Returns:
-            Configuration dictionary or None if not configured
-        """
-        try:
-            # Try to load TenantAuthConfig if it exists
-            from app.db.models import TenantAuthConfig
-
-            result = await db.execute(
-                select(TenantAuthConfig).where(
-                    TenantAuthConfig.tenant_id == tenant_id
-                )
-            )
-            auth_config = result.scalar_one_or_none()
-
-            if not auth_config:
-                return None
-
-            # Build config dict from model
-            config = {
-                "provider": auth_config.provider,
-                "auto_provision_users": auth_config.auto_provision_users,
-                "group_role_mapping": auth_config.group_role_mapping or {},
-            }
-
-            # Add provider-specific config
-            if auth_config.provider == "oidc" and auth_config.oidc_config:
-                config.update(auth_config.oidc_config)
-            elif auth_config.provider == "saml" and auth_config.saml_config:
-                config.update(auth_config.saml_config)
-            elif auth_config.provider == "ldap" and auth_config.ldap_config:
-                config.update(auth_config.ldap_config)
-
-            return config
-
-        except Exception as e:
-            # TenantAuthConfig might not exist yet (migration not run)
-            # Rollback to clear the failed transaction state
-            await db.rollback()
-            logger.debug(f"Could not load tenant auth config: {e}")
-            return None
-
-    @classmethod
     def _get_default_clerk_config(cls) -> Dict[str, Any]:
         """Get default Clerk configuration from environment."""
         from app.core.config import settings
@@ -239,18 +137,9 @@ class AuthProviderFactory:
         }
 
     @classmethod
-    def clear_cache(cls, tenant_id: Optional[str] = None):
-        """
-        Clear cached provider instances.
-
-        Args:
-            tenant_id: Specific tenant to clear, or None for all
-        """
-        if tenant_id:
-            cls._instances.pop(tenant_id, None)
-        else:
-            cls._instances.clear()
-            cls._default_instance = None
+    def clear_cache(cls):
+        """Clear the cached default provider instance."""
+        cls._default_instance = None
 
     @classmethod
     def get_registered_providers(cls) -> list[str]:

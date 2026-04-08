@@ -1,6 +1,16 @@
 """
 Async dependencies for FastAPI endpoints.
 
+After the multi-tenancy removal refactor (Plan 2), `get_current_user_async`
+returns a `UserProfile` (a request-scoped immutable DTO carrying sub,
+email, name, and the canonical KeyCloak roles obtained via
+`AuthProvider.map_groups_to_roles()`). Endpoints that need the
+SQLAlchemy `User` row (e.g. for FK joins in their own queries) should
+look it up explicitly via the User table using `user.sub`.
+
+Tenant-related dependencies and the role-based admin checks were
+removed. Use `require_role` from `app.core.auth.acl` for admin gating.
+
 Authentication flow:
 - SaaS mode: Clerk JWT token validation
 - On-premise mode: OIDC/SAML/LDAP token validation via AuthProviderFactory
@@ -9,13 +19,13 @@ User lookup:
 - SaaS: by clerk_user_id
 - On-premise: by sso_external_id
 """
-from typing import Optional
+from typing import Optional, List
 import logging
 import os
 
 from fastapi import Depends, HTTPException, status, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, or_
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.async_database import get_async_db
@@ -30,8 +40,33 @@ from app.core.auth import (
     TokenInvalidError,
     ClerkConfigError,
 )
+from app.core.auth.base import UserProfile
 
 logger = logging.getLogger(__name__)
+
+
+def _build_profile(user: User, sso_roles: Optional[List[str]] = None) -> UserProfile:
+    """Build a UserProfile DTO from the SQLAlchemy User row.
+
+    `sso_roles` is the canonical role list from the SSO provider after
+    `map_groups_to_roles()`. If None (e.g. Clerk SaaS mode), the profile
+    falls back to `['ADMIN']` for superusers and `[]` otherwise.
+
+    The 'EVERYONE' wildcard is stripped defensively — it must never
+    appear in UserProfile.roles (it is for documents only).
+    """
+    if sso_roles is None:
+        roles = ["ADMIN"] if user.is_superuser else []
+    else:
+        roles = [r for r in sso_roles if r != "EVERYONE"]
+        if user.is_superuser and "ADMIN" not in roles:
+            roles.append("ADMIN")
+    return UserProfile(
+        sub=str(user.id),
+        email=user.email,
+        name=user.full_name,
+        roles=roles,
+    )
 
 
 async def get_current_user_async(
@@ -40,17 +75,19 @@ async def get_current_user_async(
     authorization: Optional[str] = Header(None, alias="Authorization"),
     x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
     x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
-) -> User:
+) -> UserProfile:
     """
-    Get current authenticated user (NO JIT provisioning).
+    Get current authenticated user as a UserProfile DTO.
 
     Flow:
-    1. Validate Clerk token via unified auth module
-    2. Find user by clerk_user_id
-    3. If not found → return 401 (user must register via SignUp)
-    4. Return user
+    1. Validate token via the deployment's AuthProvider (OIDC/SAML/LDAP
+       on-premise, Clerk in legacy SaaS mode).
+    2. Find User row by external id (sso_external_id or clerk_user_id).
+    3. If not found → 401 (user must register via SignUp).
+    4. Build UserProfile with roles derived from SSO groups.
 
-    User creation is handled by Clerk webhook on user.created event.
+    User creation is handled by Clerk webhook (SaaS) or the SSO login
+    endpoint (on-premise). No JIT provisioning here.
     """
     origin = request.headers.get("origin")
     referer = request.headers.get("referer")
@@ -59,7 +96,7 @@ async def get_current_user_async(
     # Development mode: Allow X-User-Id header for testing
     if x_user_id and os.getenv("ENVIRONMENT", "development") == "development":
         result = await db.execute(
-            select(User).where(User.clerk_user_id == x_user_id).options(selectinload(User.tenant))
+            select(User).where(User.clerk_user_id == x_user_id)
         )
         user = result.scalar_one_or_none()
         if user:
@@ -71,7 +108,8 @@ async def get_current_user_async(
                 client_host,
                 x_request_id,
             )
-            return user
+            sso_roles = list(user.sso_groups or [])
+            return _build_profile(user, sso_roles=sso_roles)
 
     # Require Authorization header
     if not authorization:
@@ -108,7 +146,8 @@ async def get_current_user_async(
     token = authorization.split(" ")[1]
 
     # Verify token based on deployment mode
-    user_external_id = None
+    user_external_id: Optional[str] = None
+    sso_role_list: Optional[List[str]] = None
     is_sso_mode = is_on_premise_mode()
 
     if is_sso_mode:
@@ -121,6 +160,8 @@ async def get_current_user_async(
             provider = await AuthProviderFactory.get_default()
             identity = await provider.verify_token(token)
             user_external_id = identity.external_id
+            # Map raw SSO groups to canonical role identifiers
+            sso_role_list = provider.map_groups_to_roles(identity.groups or [])
             logger.debug(f"SSO token verified for user: {user_external_id[:8]}...")
 
         except SSOTokenExpired:
@@ -197,18 +238,12 @@ async def get_current_user_async(
 
     # Find user based on deployment mode
     if is_sso_mode:
-        # On-premise: lookup by sso_external_id
         result = await db.execute(
-            select(User)
-            .options(selectinload(User.roles), selectinload(User.image))
-            .where(User.sso_external_id == user_external_id)
+            select(User).where(User.sso_external_id == user_external_id)
         )
     else:
-        # SaaS: lookup by clerk_user_id
         result = await db.execute(
-            select(User)
-            .options(selectinload(User.roles), selectinload(User.image))
-            .where(User.clerk_user_id == user_external_id)
+            select(User).where(User.clerk_user_id == user_external_id)
         )
     user = result.scalar_one_or_none()
 
@@ -229,60 +264,7 @@ async def get_current_user_async(
             headers={"WWW-Authenticate": "Bearer"}
         )
 
-    return user
-
-
-async def get_current_tenant_id_async(
-    current_user: User = Depends(get_current_user_async),
-    x_tenant_id: Optional[str] = Header(None)
-) -> str:
-    """
-    Get the current tenant ID.
-
-    Superusers can override via X-Tenant-ID header in multi-tenant mode.
-    """
-    if settings.MULTI_TENANT and x_tenant_id and current_user.is_superuser:
-        return x_tenant_id
-
-    return str(current_user.tenant_id)
-
-
-async def get_current_tenant_async(
-    current_user: User = Depends(get_current_user_async),
-    db: AsyncSession = Depends(get_async_db),
-    x_tenant_id: Optional[str] = Header(None)
-):
-    """
-    Get the current Tenant object.
-
-    Superusers can override via X-Tenant-ID header in multi-tenant mode.
-    """
-    from app.db.models import Tenant
-
-    if settings.MULTI_TENANT and x_tenant_id and current_user.is_superuser:
-        result = await db.execute(select(Tenant).where(Tenant.id == x_tenant_id))
-        tenant = result.scalar_one_or_none()
-        if not tenant:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Tenant not found"
-            )
-        return tenant
-
-    # Use tenant from current user's relationship if loaded
-    if current_user.tenant:
-        return current_user.tenant
-
-    # Fallback: query by tenant_id
-    result = await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))
-    tenant = result.scalar_one_or_none()
-    if not tenant:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User tenant not found"
-        )
-
-    return tenant
+    return _build_profile(user, sso_roles=sso_role_list)
 
 
 def require_microservice_api_key(
@@ -309,59 +291,43 @@ def require_microservice_api_key(
 
 
 async def get_current_active_user_async(
-    current_user: User = Depends(get_current_user_async)
-) -> User:
+    current_user: UserProfile = Depends(get_current_user_async),
+) -> UserProfile:
     """
-    Async version that ensures the current user is active
-    """
-    if not current_user.is_active:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inactive user")
-    return current_user
+    Pass-through after the multi-tenancy refactor.
 
-
-async def get_current_active_superuser_async(
-    current_user: User = Depends(get_current_active_user_async),
-) -> User:
+    The legacy `is_active` soft-delete flag is no longer enforced here:
+    KeyCloak handles user status. If the user authenticated successfully
+    they are active. This dependency exists only for callers that haven't
+    been migrated to depend directly on `get_current_user_async`.
     """
-    Async version that verifies superuser privileges
-    """
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="The user doesn't have enough privileges"
-        )
-    return current_user
-
-
-async def get_current_tenant_admin_async(
-    current_user: User = Depends(get_current_active_user_async),
-) -> User:
-    """
-    Async version that verifies tenant admin privileges
-    """
-    if current_user.is_team_member:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only team administrators can perform this action"
-        )
     return current_user
 
 
 async def require_document_upload_permission_async(
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
-) -> User:
+) -> UserProfile:
     """
-    Async version of document upload permission check
+    Async version of document upload permission check.
+
+    NOTE: SubscriptionServiceV2 still expects a SQLAlchemy User. Until
+    that service is migrated (Plan 2 Task 12), we look up the User row
+    by sub and pass it through.
     """
     from app.services.subscription_service_v2 import SubscriptionServiceV2
-    
-    # Now using async version of SubscriptionServiceV2 methods
-    can_upload, error_message = await SubscriptionServiceV2.check_document_permission(db, current_user)
-    
+
+    user_row = (
+        await db.execute(select(User).where(User.id == current_user.sub))
+    ).scalar_one_or_none()
+    if user_row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    can_upload, error_message = await SubscriptionServiceV2.check_document_permission(db, user_row)
+
     if not can_upload:
-        subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, current_user)
-        
+        subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, user_row)
+
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED if subscription_status["plan"] == "free" else status.HTTP_403_FORBIDDEN,
             detail={
@@ -371,24 +337,28 @@ async def require_document_upload_permission_async(
                 "limits": subscription_status.get("limits", {})
             }
         )
-    
+
     return current_user
 
 
 async def require_agent_permission_async(
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
-) -> User:
-    """
-    Async version of agent permission check
-    """
+) -> UserProfile:
+    """Async version of agent permission check (see SubscriptionServiceV2 note above)."""
     from app.services.subscription_service_v2 import SubscriptionServiceV2
-    
-    can_use_agents, error_message = await SubscriptionServiceV2.check_agent_permission(db, current_user)
-    
+
+    user_row = (
+        await db.execute(select(User).where(User.id == current_user.sub))
+    ).scalar_one_or_none()
+    if user_row is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    can_use_agents, error_message = await SubscriptionServiceV2.check_agent_permission(db, user_row)
+
     if not can_use_agents:
-        subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, current_user)
-        
+        subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, user_row)
+
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED if subscription_status["plan"] == "free" else status.HTTP_403_FORBIDDEN,
             detail={
@@ -398,27 +368,31 @@ async def require_agent_permission_async(
                 "limits": subscription_status.get("limits", {})
             }
         )
-    
+
     return current_user
 
 
 def require_subscription_permission_async(permission: str):
-    """
-    Async version of subscription permission dependency
-    """
+    """Async subscription permission dependency factory (see SubscriptionServiceV2 note above)."""
     async def permission_checker(
-        current_user: User = Depends(get_current_active_user_async),
+        current_user: UserProfile = Depends(get_current_active_user_async),
         db: AsyncSession = Depends(get_async_db)
-    ) -> User:
+    ) -> UserProfile:
         from app.services.subscription_service_v2 import SubscriptionServiceV2
-        
+
+        user_row = (
+            await db.execute(select(User).where(User.id == current_user.sub))
+        ).scalar_one_or_none()
+        if user_row is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
         can_perform, error_message = await SubscriptionServiceV2.can_user_perform_action(
-            db, current_user, permission
+            db, user_row, permission
         )
-        
+
         if not can_perform:
-            subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, current_user)
-            
+            subscription_status = await SubscriptionServiceV2.get_user_subscription_status(db, user_row)
+
             if subscription_status["plan"] == "free":
                 raise HTTPException(
                     status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -437,23 +411,26 @@ def require_subscription_permission_async(permission: str):
                         "action_required": "upgrade_plan"
                     }
                 )
-        
+
         return current_user
-    
+
     return permission_checker
 
 
 async def get_document_service(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
-    Dependency to get an instance of AsyncDocumentService
+    Dependency to get an instance of AsyncDocumentService.
+
+    NOTE: AsyncDocumentService.create() still has a tenant_id parameter.
+    Plan 2 Task 12 refactors that service to take a UserProfile instead.
+    Until then, we pass `user_id=current_user.sub` and a placeholder
+    tenant_id of None — the service will need to handle that gracefully.
     """
     from app.services.async_document_service import AsyncDocumentService
     return await AsyncDocumentService.create(
-        tenant_id=tenant_id,
-        user_id=str(current_user.id),
-        db=db
+        user_id=current_user.sub,
+        db=db,
     )
