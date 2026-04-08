@@ -940,7 +940,7 @@ services:
   frontend:
     build:
       context: ../../frontend
-      dockerfile: apps/on-premise/Dockerfile
+      dockerfile: Dockerfile.prod
       args:
         - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-https://nouxcubeai.ddns.net:8000/api/v1}
         - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-https://nouxcubeai.ddns.net:8000/api/v1}
@@ -956,7 +956,7 @@ services:
         - NEXT_PUBLIC_LANGFUSE_URL=${NEXT_PUBLIC_LANGFUSE_URL:-https://nouxcubeai.ddns.net:3002}
     volumes:
       # Override baked routes-manifest to proxy /api/v1/* → api:8000 (not localhost:8002)
-      - ./nginx/frontend-routes-manifest.json:/app/apps/on-premise/.next/routes-manifest.json:ro
+      - ./nginx/frontend-routes-manifest.json:/app/.next/routes-manifest.json:ro
     environment:
       # Server-side runtime var — overrides the baked-in NEXT_PUBLIC_BACKEND_URL
       # so Next.js rewrites() proxy to the correct Docker-internal API address.
@@ -974,6 +974,8 @@ services:
       retries: 3
       start_period: 15s
     restart: unless-stopped
+    profiles:
+      - prod  # Only starts with: docker compose --profile prod up
 
   # =============================================================================
   # TLS Proxy - HTTPS termination for browser-accessible services
