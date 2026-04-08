@@ -27,7 +27,7 @@ export FALKORDB_GRAPH_NAME="${FALKORDB_GRAPH_NAME:-test_knowledge_graph}"
 export RAG_KNOWLEDGE_GRAPH_ENABLED=true
 export ACTIVE_SECTOR=legal
 export LOG_LEVEL=WARNING
-export DATABASE_URL="${DATABASE_URL:-postgresql://nexus_user:nexus_password@localhost:5432/nexus_db}"
+export DATABASE_URL="${DATABASE_URL:-postgresql://nexus_user:nexus_password@localhost:5432/nouxcube}"
 
 echo "Running knowledge-tree-service tests..."
 echo "  FalkorDB: ${FALKORDB_HOST}:${FALKORDB_PORT} (graph: ${FALKORDB_GRAPH_NAME})"

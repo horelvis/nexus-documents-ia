@@ -215,7 +215,7 @@ Common failure reasons:
 To retry failed documents:
 ```bash
 # Reset retryable failures to pending
-docker exec docker-db-1 psql -U nexus_user -d nexus_db -c "
+docker exec docker-db-1 psql -U nexus_user -d nouxcube -c "
   UPDATE indexed_documents
   SET indexing_status = 'pending', indexing_error = NULL
   WHERE indexing_status = 'failed'
@@ -384,7 +384,7 @@ Google Drive OAuth tokens expire after ~1 hour. The MCP connectors now refresh t
 
 ```bash
 # Reset 401 failures to retry
-docker exec docker-db-1 psql -U nexus_user -d nexus_db -c "
+docker exec docker-db-1 psql -U nexus_user -d nouxcube -c "
   UPDATE indexed_documents
   SET indexing_status = 'pending', indexing_error = NULL
   WHERE indexing_status = 'failed'

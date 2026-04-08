@@ -99,20 +99,20 @@ http_response_size_bytes = Histogram(
 
 # Database connection pool metrics
 db_connections_active = Gauge(
-    'nexus_db_connections_active',
+    'nouxcube_db_connections_active',
     'Number of active database connections',
     registry=registry
 )
 
 db_connections_idle = Gauge(
-    'nexus_db_connections_idle',
+    'nouxcube_db_connections_idle',
     'Number of idle database connections',
     registry=registry
 )
 
 # Database query metrics
 db_query_duration_seconds = Histogram(
-    'nexus_db_query_duration_seconds',
+    'nouxcube_db_query_duration_seconds',
     'Database query duration in seconds',
     ['query_type', 'table'],
     buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
@@ -120,7 +120,7 @@ db_query_duration_seconds = Histogram(
 )
 
 db_query_errors_total = Counter(
-    'nexus_db_query_errors_total',
+    'nouxcube_db_query_errors_total',
     'Total number of database query errors',
     ['query_type', 'error_type'],
     registry=registry
@@ -276,7 +276,7 @@ high_memory_usage = Gauge(
 
 # Database connection issues
 db_connection_errors_total = Counter(
-    'nexus_db_connection_errors_total',
+    'nouxcube_db_connection_errors_total',
     'Total number of database connection errors',
     registry=registry
 )

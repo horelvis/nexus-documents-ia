@@ -14,7 +14,7 @@ NC='\033[0m'
 
 # Configuration
 DOCKER_COMPOSE="docker compose"
-DB_NAME="nexus_db"
+DB_NAME="nouxcube"
 DB_USER="postgres"
 BACKUP_DIR="./migration_backups"
 

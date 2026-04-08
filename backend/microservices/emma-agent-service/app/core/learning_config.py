@@ -20,7 +20,7 @@ class LearningSettings(BaseSettings):
     redis_port: int = int(os.getenv("REDIS_PORT", "6379"))
 
     # Database settings
-    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db")
+    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube")
 
     # Learning thresholds
     min_interactions_for_learning: int = 5

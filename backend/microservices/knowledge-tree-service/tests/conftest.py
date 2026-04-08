@@ -18,7 +18,7 @@ os.environ.setdefault("RAG_KNOWLEDGE_GRAPH_ENABLED", "true")
 os.environ.setdefault("ACTIVE_SECTOR", "legal")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 # Keep AGE settings to avoid import errors (not used in FalkorDB tests)
-os.environ.setdefault("DATABASE_URL", "postgresql://nexus_user:nexus_password@localhost:5432/nexus_db")
+os.environ.setdefault("DATABASE_URL", "postgresql://nexus_user:nexus_password@localhost:5432/nouxcube")
 
 
 @pytest_asyncio.fixture

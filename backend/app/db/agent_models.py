@@ -72,7 +72,6 @@ class AgentConfiguration(Base):
     __tablename__ = "agent_configurations"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     agent_definition_id = Column(UUID(as_uuid=True), ForeignKey("agent_definitions.id"), nullable=False)
     
     # Activation control
@@ -83,7 +82,7 @@ class AgentConfiguration(Base):
     # Per-tenant customization
     custom_name = Column(String(100), nullable=True)  # Override default name
     custom_description = Column(Text, nullable=True)
-    custom_settings = Column(JSONB, default={})  # Tenant-specific settings
+    custom_settings = Column(JSONB, default={})  # Customization settings
     
     # Execution overrides
     execution_mode_override = Column(SQLEnum(AgentExecutionMode), nullable=True)
@@ -110,7 +109,6 @@ class AgentExecution(Base):
     __tablename__ = "agent_executions"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     configuration_id = Column(UUID(as_uuid=True), ForeignKey("agent_configurations.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     

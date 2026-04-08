@@ -255,3 +255,22 @@ class ProviderNotConfiguredError(AuthProviderError):
 class ProviderInitializationError(AuthProviderError):
     """Failed to initialize provider."""
     pass
+
+
+@dataclass(frozen=True)
+class UserProfile:
+    """Request-scoped immutable view of an authenticated user.
+
+    Built once per request from the JWT (in Plan 2 of the multi-tenancy
+    removal refactor — currently dormant). Carries the canonical role
+    identifiers from `map_groups_to_roles()`, not raw KeyCloak group names.
+
+    The `roles` field is a list of strings (e.g. ['LEGAL', 'SALES']).
+    The reserved value 'EVERYONE' is NEVER present here — it is a wildcard
+    used only on the document side. See `app.core.auth.acl` for usage.
+    """
+
+    sub: str
+    email: str
+    name: Optional[str] = None
+    roles: List[str] = field(default_factory=list)

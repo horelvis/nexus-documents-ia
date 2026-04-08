@@ -59,7 +59,7 @@ def test_db():
     POSTGRES_SERVER = os.getenv("POSTGRES_SERVER", "localhost")
     POSTGRES_USER = os.getenv("POSTGRES_USER", "test_user")
     POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "test_password")
-    POSTGRES_DB = os.getenv("POSTGRES_DB", "test_db")
+    POSTGRES_DB = os.getenv("POSTGRES_DB", "nouxcube_test")
     POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
     
     DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_SERVER}:{POSTGRES_PORT}/{POSTGRES_DB}"

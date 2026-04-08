@@ -21,19 +21,7 @@ from app.db.agent_models import (
 # TABLAS DE ASOCIACIÓN (Many-to-Many)
 # =====================================
 
-user_roles = Table(
-    "user_roles",
-    Base.metadata,
-    Column("user_id", UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True),
-    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True)
-)
 
-role_permissions = Table(
-    "role_permissions",
-    Base.metadata,
-    Column("role_id", UUID(as_uuid=True), ForeignKey("roles.id"), primary_key=True),
-    Column("permission_id", UUID(as_uuid=True), ForeignKey("permissions.id"), primary_key=True)
-)
 
 document_tags = Table(
     "document_tags",
@@ -46,84 +34,10 @@ document_tags = Table(
 # TABLAS DE AUDITORÍA SEPARADAS
 # =====================================
 
-class RoleAssignmentAudit(Base):
-    """Auditoría de asignaciones/remociones de roles"""
-    __tablename__ = "role_assignment_audits"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
-    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    action = Column(String(20), nullable=False, index=True)  # 'assigned', 'removed'
-    assigned_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    reason = Column(Text, nullable=True)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
-    user = relationship("User", foreign_keys=[user_id])
-    role = relationship("Role")
-    assigner = relationship("User", foreign_keys=[assigned_by])
-    tenant = relationship("Tenant")
-    
-    __table_args__ = (
-        Index('idx_role_audits_user_action', 'user_id', 'action'),
-        Index('idx_role_audits_tenant_created', 'tenant_id', 'created_at'),
-    )
 
 
-class PermissionAssignmentAudit(Base):
-    """Auditoría de asignaciones/remociones de permisos a roles"""
-    __tablename__ = "permission_assignment_audits"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"), nullable=False, index=True)
-    permission_id = Column(UUID(as_uuid=True), ForeignKey("permissions.id"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)
-    action = Column(String(20), nullable=False, index=True)  # 'assigned', 'removed'
-    assigned_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    reason = Column(Text, nullable=True)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
-    role = relationship("Role")
-    permission = relationship("Permission")
-    assigner = relationship("User")
-    tenant = relationship("Tenant")
-    
-    __table_args__ = (
-        Index('idx_permission_audits_role_action', 'role_id', 'action'),
-        Index('idx_permission_audits_tenant_created', 'tenant_id', 'created_at'),
-    )
 
 
-class DocumentTagAudit(Base):
-    """Auditoría de asignaciones/remociones de tags a documentos"""
-    __tablename__ = "document_tag_audits"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False, index=True)
-    tag_id = Column(Integer, ForeignKey("tags.id"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    action = Column(String(20), nullable=False, index=True)  # 'tagged', 'untagged'
-    tagged_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    reason = Column(Text, nullable=True)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
-    document = relationship("Document")
-    tag = relationship("Tag")
-    tagger = relationship("User")
-    tenant = relationship("Tenant")
-    
-    __table_args__ = (
-        Index('idx_tag_audits_document_action', 'document_id', 'action'),
-        Index('idx_tag_audits_tenant_created', 'tenant_id', 'created_at'),
-    )
-
-
-# =====================================
-# MODELOS PRINCIPALES
-# =====================================
 
 class User(Base):
     __tablename__ = "users"
@@ -154,7 +68,6 @@ class User(Base):
     is_active = Column(Boolean(), default=True, nullable=False)
     is_superuser = Column(Boolean(), default=False, nullable=False)
     onboarding_completed = Column(Boolean(), default=False, nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     last_login_at = Column(DateTime, nullable=True)
     email_verified_at = Column(DateTime, nullable=True)
@@ -163,10 +76,8 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relaciones
-    tenant = relationship("Tenant", back_populates="users")
     image = relationship("UserImage", back_populates="user", uselist=False, cascade="all, delete-orphan")
     # profile eliminado - datos se obtienen de Clerk y Stripe
-    roles = relationship("Role", secondary=user_roles, back_populates="users")
     created_documents = relationship("Document", foreign_keys="Document.created_by", back_populates="creator")
     document_views = relationship("DocumentView", back_populates="user", cascade="all, delete-orphan")
 
@@ -179,33 +90,17 @@ class User(Base):
     notebooks = relationship("Notebook", back_populates="user", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index('idx_users_tenant_active', 'tenant_id', 'is_active'),
         Index('idx_users_email_active', 'email', 'is_active'),
     )
 
     @property
     def is_admin(self) -> bool:
-        """
-        Convenience flag used across the API to determine if the user
-        should be treated as a tenant administrator. By definition:
-        - Superusers are always admins
-        - Tenant owners (is_team_member == False) are admins
-        - Users with a role named 'admin' are admins
-        """
-        if self.is_superuser:
-            return True
-        if not self.is_team_member:
-            return True
-        try:
-            return any((role.name or "").lower() == "admin" for role in (self.roles or []))
-        except Exception:  # pragma: no cover - relationship issues should not block checks
-            return False
+        """Simplified: role-based admin check now lives in ACL layer (Plan 2)."""
+        return bool(self.is_superuser)
 
     @property
     def is_tenant_admin(self) -> bool:
-        """Alias used by some parts of the API."""
         return self.is_admin
-
 
 class UserImage(Base):
     __tablename__ = "user_images"
@@ -229,188 +124,14 @@ class UserImage(Base):
 # No necesitamos duplicar datos entre servicios externos y nuestra DB
 
 
-class Role(Base):
-    __tablename__ = "roles"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=True, index=True)
-    is_system_role = Column(Boolean, default=False, nullable=False)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    users = relationship("User", secondary=user_roles, back_populates="roles")
-    permissions = relationship("Permission", secondary=role_permissions, back_populates="roles")
-    tenant = relationship("Tenant")
-    
-    __table_args__ = (
-        UniqueConstraint('name', 'tenant_id', name='uq_role_name_tenant'),
-        Index('idx_roles_tenant_system', 'tenant_id', 'is_system_role'),
-    )
 
 
-class Permission(Base):
-    __tablename__ = "permissions"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    entity = Column(String(50), nullable=False)
-    action = Column(String(50), nullable=False)
-    access = Column(String(50), nullable=False)
-    resource_id = Column(String(255), nullable=True)
-    conditions = Column(JSONB, nullable=True)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    roles = relationship("Role", secondary=role_permissions, back_populates="permissions")
-
-    __table_args__ = (
-        UniqueConstraint('entity', 'action', 'access', 'resource_id', name='uq_permission_full'),
-        Index('idx_permissions_entity_action', 'entity', 'action'),
-    )
 
 
-class TeamInvitation(Base):
-    __tablename__ = "team_invitations"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    invited_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    invitation_code = Column(String(100), unique=True, nullable=False, index=True)
-    email = Column(String(255), nullable=True)  # Optional: specific email to invite
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    used = Column(Boolean(), default=False, nullable=False)
-    used_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    used_at = Column(DateTime(timezone=True), nullable=True)
-    
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    
-    # Relationships
-    tenant = relationship("Tenant", back_populates="team_invitations")
-    inviter = relationship("User", foreign_keys=[invited_by], backref="sent_invitations")
-    invited_user = relationship("User", foreign_keys=[used_by], backref="received_invitation")
-    
-    __table_args__ = (
-        Index('idx_invitation_code_expires', 'invitation_code', 'expires_at'),
-    )
 
 
-# Removed Team and TeamMember models - using tenant-based team structure instead
-# Each tenant represents one team, users are either admins (is_team_member=False) or team members (is_team_member=True)
 
 
-class Tenant(Base):
-    __tablename__ = "tenants"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name = Column(String(255), nullable=False, unique=True)
-    slug = Column(String(100), nullable=True, unique=True, index=True)  # URL-friendly identifier for Site portal
-    description = Column(Text, nullable=True)
-    bucket_name = Column(String(255), nullable=False, unique=True)
-    is_active = Column(Boolean(), default=True, nullable=False)
-    settings = Column(JSONB, nullable=True, default={})
-    max_users = Column(Integer, nullable=True)
-    max_storage_mb = Column(Integer, nullable=True)
-
-    # Auto-classification settings (RAG + LLM)
-    auto_classification_enabled = Column(Boolean, default=False, nullable=False)
-    auto_classification_k = Column(Integer, default=7, nullable=False)
-    auto_classification_min_confidence = Column(Float, default=0.6, nullable=False)
-
-    # Site Guest Portal settings
-    site_enabled = Column(Boolean, default=False, nullable=False)  # Enable external guest access
-    site_logo_url = Column(String(500), nullable=True)  # Custom logo for portal
-    site_welcome_message = Column(Text, nullable=True)  # Custom welcome message
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    users = relationship("User", back_populates="tenant")
-    documents = relationship("Document", back_populates="tenant")
-    tags = relationship("Tag", back_populates="tenant")
-    roles = relationship("Role", back_populates="tenant")
-    team_invitations = relationship("TeamInvitation", back_populates="tenant", cascade="all, delete-orphan")
-    site_guests = relationship("SiteGuest", back_populates="tenant", cascade="all, delete-orphan")
-
-    # Connector relationships (On-Premise / Emma)
-    connectors = relationship("Connector", back_populates="tenant", cascade="all, delete-orphan")
-
-    __table_args__ = (
-        Index('idx_tenants_active', 'is_active'),
-        Index('idx_tenants_slug', 'slug'),
-    )
-
-    # Relationship to auth config
-    auth_config = relationship("TenantAuthConfig", back_populates="tenant", uselist=False)
-
-
-class TenantAuthConfig(Base):
-    """
-    Authentication configuration per tenant.
-
-    Allows each tenant to use different authentication providers:
-    - clerk: Clerk.dev (default for SaaS)
-    - oidc: OpenID Connect (KeyCloak, Azure AD, Okta)
-    - saml: SAML 2.0 (ADFS, enterprise IdPs)
-    - ldap: Direct LDAP/Active Directory
-    """
-    __tablename__ = "tenant_auth_configs"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), unique=True, nullable=False)
-
-    # Provider type: clerk, oidc, saml, ldap
-    provider = Column(String(50), default="clerk", nullable=False)
-
-    # Common settings
-    auto_provision_users = Column(Boolean, default=True, nullable=False)
-    default_role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"), nullable=True)
-    group_role_mapping = Column(JSONB, nullable=True)  # {"AD-Admins": "admin", "AD-Users": "member"}
-
-    # OIDC configuration (KeyCloak, Azure AD, Okta, etc.)
-    oidc_config = Column(JSONB, nullable=True)
-    # Expected structure:
-    # {
-    #   "issuer": "https://keycloak.example.com/realms/myrealm",
-    #   "client_id": "my-app",
-    #   "client_secret": "encrypted-secret",
-    #   "scopes": ["openid", "profile", "email", "groups"]
-    # }
-
-    # SAML configuration (ADFS, Okta SAML, etc.)
-    saml_config = Column(JSONB, nullable=True)
-    # Expected structure:
-    # {
-    #   "entity_id": "https://myapp.example.com",
-    #   "sso_url": "https://idp.example.com/sso",
-    #   "certificate": "-----BEGIN CERTIFICATE-----...",
-    #   "attribute_mapping": {"email": "mail", "name": "displayName"}
-    # }
-
-    # LDAP configuration (Active Directory, OpenLDAP)
-    ldap_config = Column(JSONB, nullable=True)
-    # Expected structure:
-    # {
-    #   "server": "ldap://dc.example.com",
-    #   "base_dn": "DC=example,DC=com",
-    #   "bind_dn": "CN=service,OU=Users,DC=example,DC=com",
-    #   "bind_password": "encrypted-password",
-    #   "user_filter": "(sAMAccountName={username})",
-    #   "group_filter": "(member={dn})"
-    # }
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    # Relationships
-    tenant = relationship("Tenant", back_populates="auth_config")
-    default_role = relationship("Role", foreign_keys=[default_role_id])
-
-    __table_args__ = (
-        Index('idx_tenant_auth_configs_tenant', 'tenant_id'),
-    )
 
 
 class Document(Base):
@@ -427,7 +148,6 @@ class Document(Base):
     file_hash = Column(String(64), nullable=True, index=True)
     version = Column(Integer, default=1, nullable=False)
     
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
     
     # Categorization fields
@@ -449,27 +169,24 @@ class Document(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
-    tenant = relationship("Tenant", back_populates="documents")
     creator = relationship("User", foreign_keys=[created_by], back_populates="created_documents")
     tags = relationship("Tag", secondary=document_tags, back_populates="documents")
     metrics = relationship("DocumentMetrics", back_populates="document", uselist=False, cascade="all, delete-orphan")
     views = relationship("DocumentView", back_populates="document", cascade="all, delete-orphan")
-    shares = relationship("DocumentShare", back_populates="document", cascade="all, delete-orphan")
     analyses = relationship("DocumentAnalysis", back_populates="document", cascade="all, delete-orphan")
     
+    roles = Column(ARRAY(String), nullable=False, server_default="{EVERYONE}")
+
     __table_args__ = (
-        Index('idx_documents_tenant_created', 'tenant_id', 'created_at'),
         Index('idx_documents_creator_created', 'created_by', 'created_at'),
-        Index('idx_documents_type_tenant', 'file_type', 'tenant_id'),
         Index('idx_documents_indexed', 'indexed'),
         Index('idx_documents_category', 'category'),
-        Index('idx_documents_category_tenant', 'category', 'tenant_id'),
-        Index('idx_documents_folder_path', 'tenant_id', 'folder_path'),
+        Index('idx_documents_roles', 'roles', postgresql_using='gin'),
     )
     
     def increment_metric(self, metric_name: str, session, amount: int = 1):
         if not self.metrics:
-            self.metrics = DocumentMetrics(document_id=self.id, tenant_id=self.tenant_id)
+            self.metrics = DocumentMetrics(document_id=self.id)
             session.add(self.metrics)
         
         current_value = getattr(self.metrics, metric_name, 0)
@@ -517,17 +234,14 @@ class FolderMarker(Base):
     __tablename__ = "folder_markers"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     folder_path = Column(String(2000), nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    tenant = relationship("Tenant")
     creator = relationship("User")
 
     __table_args__ = (
-        UniqueConstraint('tenant_id', 'folder_path', name='uq_folder_marker_tenant_path'),
-        Index('idx_folder_markers_tenant_path', 'tenant_id', 'folder_path'),
+        UniqueConstraint('folder_path', name='uq_folder_marker_tenant_path'),
     )
 
 
@@ -537,7 +251,6 @@ class DocumentView(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     
     viewed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     view_duration_seconds = Column(Integer, nullable=True)
@@ -552,140 +265,15 @@ class DocumentView(Base):
     
     user = relationship("User", back_populates="document_views")
     document = relationship("Document", back_populates="views")
-    tenant = relationship("Tenant")
     
     __table_args__ = (
         Index('idx_document_views_doc_user', 'document_id', 'user_id'),
-        Index('idx_document_views_tenant_date', 'tenant_id', 'viewed_at'),
         Index('idx_document_views_user_date', 'user_id', 'viewed_at'),
     )
 
 
-class DocumentShare(Base):
-    __tablename__ = "document_shares"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    
-    # Share settings
-    share_token = Column(String(255), nullable=False, unique=True, index=True)
-    share_type = Column(String(50), nullable=False, default='view')  # view, download, edit
-    permissions = Column(JSONB, nullable=True)  # Additional permissions
-    
-    # Access control
-    password_hash = Column(String(255), nullable=True)  # Optional password protection
-    max_access_count = Column(Integer, nullable=True)  # Limit number of accesses
-    current_access_count = Column(Integer, nullable=False, default=0)
-    
-    # Expiration
-    expires_at = Column(DateTime(timezone=True), nullable=True)
-    is_active = Column(Boolean, nullable=False, default=True, index=True)
-    revoked_at = Column(DateTime(timezone=True), nullable=True)
-    revoked_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    
-    # Recipient info (optional)
-    recipient_email = Column(String(255), nullable=True)
-    recipient_name = Column(String(255), nullable=True)
-    share_message = Column(Text, nullable=True)
-    
-    # Tracking
-    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
-    first_accessed_at = Column(DateTime(timezone=True), nullable=True)
-    
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
-    # Relationships
-    document = relationship("Document", back_populates="shares")
-    tenant = relationship("Tenant")
-    creator = relationship("User", foreign_keys=[created_by])
-    revoker = relationship("User", foreign_keys=[revoked_by])
-    access_logs = relationship("DocumentShareAccessLog", back_populates="share", cascade="all, delete-orphan")
-    recipients = relationship("DocumentShareRecipient", back_populates="share", cascade="all, delete-orphan")
-    
-    __table_args__ = (
-        Index('idx_document_shares_document', 'document_id'),
-        Index('idx_document_shares_tenant', 'tenant_id'),
-        Index('idx_document_shares_expires', 'expires_at'),
-        Index('idx_document_shares_created_by', 'created_by'),
-    )
-    
-    def is_valid(self):
-        """Check if the share link is still valid"""
-        now = datetime.now(timezone.utc)
-        
-        # Check if active
-        if not self.is_active:
-            return False
-        
-        # Check if expired
-        if self.expires_at and self.expires_at < now:
-            return False
-        
-        # Check if revoked
-        if self.revoked_at:
-            return False
-        
-        # Check access count limit
-        if self.max_access_count and self.current_access_count >= self.max_access_count:
-            return False
-        
-        return True
-    
-    def increment_access_count(self):
-        """Increment the access count"""
-        self.current_access_count += 1
-        if not self.first_accessed_at:
-            self.first_accessed_at = datetime.now(timezone.utc)
-        self.last_accessed_at = datetime.now(timezone.utc)
 
 
-class DocumentShareAccessLog(Base):
-    __tablename__ = "document_share_access_logs"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    share_id = Column(UUID(as_uuid=True), ForeignKey("document_shares.id", ondelete="CASCADE"), nullable=False)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    
-    # Access details
-    accessed_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    ip_address = Column(String(45), nullable=True)
-    user_agent = Column(Text, nullable=True)
-    referrer = Column(Text, nullable=True)
-    
-    # Action performed
-    action = Column(String(50), nullable=False, default='view')  # view, download, print
-    success = Column(Boolean, nullable=False, default=True)
-    error_message = Column(Text, nullable=True)
-    
-    # Geographic info (optional)
-    country_code = Column(String(2), nullable=True)
-    city = Column(String(100), nullable=True)
-    
-    # Device info
-    device_type = Column(String(50), nullable=True)  # desktop, mobile, tablet
-    browser = Column(String(50), nullable=True)
-    os = Column(String(50), nullable=True)
-    
-    # User info if authenticated
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    
-    # Relationships
-    share = relationship("DocumentShare", back_populates="access_logs")
-    document = relationship("Document")
-    tenant = relationship("Tenant")
-    user = relationship("User")
-    
-    __table_args__ = (
-        Index('idx_share_access_logs_share', 'share_id'),
-        Index('idx_share_access_logs_document', 'document_id'),
-        Index('idx_share_access_logs_accessed', 'accessed_at'),
-        Index('idx_share_access_logs_tenant', 'tenant_id'),
-    )
 
 
 class GoogleDriveToken(Base):
@@ -694,7 +282,6 @@ class GoogleDriveToken(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     google_user_id = Column(String, nullable=False)
     google_email = Column(String, nullable=False)
     scopes = Column(JSONB, default=list)
@@ -705,45 +292,8 @@ class GoogleDriveToken(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user = relationship("User")
-    tenant = relationship("Tenant")
 
 
-class DocumentShareRecipient(Base):
-    __tablename__ = "document_share_recipients"
-    
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    share_id = Column(UUID(as_uuid=True), ForeignKey("document_shares.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
-    
-    # Recipient info
-    email = Column(String(255), nullable=False)
-    name = Column(String(255), nullable=True)
-    verification_code = Column(String(100), nullable=True)  # For email verification
-    verified_at = Column(DateTime(timezone=True), nullable=True)
-    
-    # Notification status
-    notified_at = Column(DateTime(timezone=True), nullable=True)
-    notification_error = Column(Text, nullable=True)
-    
-    # Access status
-    first_accessed_at = Column(DateTime(timezone=True), nullable=True)
-    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
-    access_count = Column(Integer, nullable=False, default=0)
-    
-    # Timestamps
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-    
-    # Relationships
-    share = relationship("DocumentShare", back_populates="recipients")
-    tenant = relationship("Tenant")
-    
-    __table_args__ = (
-        UniqueConstraint('share_id', 'email', name='uq_share_recipient_email'),
-        Index('idx_share_recipients_share', 'share_id'),
-        Index('idx_share_recipients_email', 'email'),
-        Index('idx_share_recipients_tenant', 'tenant_id'),
-    )
 
 
 class Tag(Base):
@@ -751,18 +301,15 @@ class Tag(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     color = Column(String(7), nullable=True)
     description = Column(Text, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
-    tenant = relationship("Tenant", back_populates="tags")
     documents = relationship("Document", secondary=document_tags, back_populates="tags")
     
     __table_args__ = (
-        UniqueConstraint('name', 'tenant_id', name='uq_tag_name_tenant'),
-        Index('idx_tags_tenant_name', 'tenant_id', 'name'),
+        UniqueConstraint('name', name='uq_tag_name_tenant'),
     )
 
 
@@ -771,7 +318,6 @@ class DocumentMetrics(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False, unique=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     view_count = Column(Integer, default=0, nullable=False)
     download_count = Column(Integer, default=0, nullable=False)
@@ -785,10 +331,8 @@ class DocumentMetrics(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     document = relationship("Document", back_populates="metrics")
-    tenant = relationship("Tenant")
     
     __table_args__ = (
-        Index('idx_document_metrics_tenant_relevance', 'tenant_id', 'relevance_score'),
         Index('idx_document_metrics_last_viewed', 'last_viewed_at'),
     )
 
@@ -801,7 +345,6 @@ class SignatureProvider(Base):
     __tablename__ = "signature_providers"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     provider_name = Column(String(50), nullable=False)
     display_name = Column(String(100), nullable=False)
     encrypted_credentials = Column(LargeBinary, nullable=False)
@@ -812,11 +355,10 @@ class SignatureProvider(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
-    tenant = relationship("Tenant")
     signature_requests = relationship("SignatureRequest", back_populates="provider")
     
     __table_args__ = (
-        UniqueConstraint('tenant_id', 'provider_name', name='uq_tenant_provider'),
+        UniqueConstraint('provider_name', name='uq_tenant_provider'),
     )
 
 
@@ -824,7 +366,6 @@ class SignatureRequest(Base):
     __tablename__ = "signature_requests"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     provider_id = Column(UUID(as_uuid=True), ForeignKey("signature_providers.id"), nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     external_id = Column(String(255), nullable=True)
@@ -845,7 +386,6 @@ class SignatureRequest(Base):
     completed_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=True)
     
-    tenant = relationship("Tenant")
     provider = relationship("SignatureProvider", back_populates="signature_requests")
     creator = relationship("User")
     signers = relationship("SignatureRequestSigner", back_populates="request")
@@ -896,7 +436,6 @@ class SignatureProviderAudit(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     provider_id = Column(UUID(as_uuid=True), ForeignKey("signature_providers.id"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     action = Column(String(20), nullable=False, index=True)  # 'created', 'updated', 'deleted', 'activated', 'deactivated', 'set_default'
     changed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     changes = Column(JSONB, nullable=False, default={})  # Cambios realizados (excepto credenciales)
@@ -904,12 +443,10 @@ class SignatureProviderAudit(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     
     provider = relationship("SignatureProvider")
-    tenant = relationship("Tenant")
     user = relationship("User")
     
     __table_args__ = (
         Index('idx_provider_audits_provider_action', 'provider_id', 'action'),
-        Index('idx_provider_audits_tenant_created', 'tenant_id', 'created_at'),
     )
 
 
@@ -922,7 +459,6 @@ class SignatureContact(Base):
     __tablename__ = "signature_contacts"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     
     # Contact information
@@ -946,13 +482,10 @@ class SignatureContact(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relationships
-    tenant = relationship("Tenant")
     creator = relationship("User")
     
     __table_args__ = (
-        UniqueConstraint('tenant_id', 'email', name='uq_signature_contact_tenant_email'),
-        Index('idx_signature_contacts_tenant_favorite', 'tenant_id', 'is_favorite'),
-        Index('idx_signature_contacts_tenant_usage', 'tenant_id', 'usage_count'),
+        UniqueConstraint('email', name='uq_signature_contact_tenant_email'),
         Index('idx_signature_contacts_email', 'email'),
         Index('idx_signature_contacts_name', 'name'),
     )
@@ -968,7 +501,6 @@ class SignatureFieldPlacement(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     
     field_type = Column(String(50), nullable=False)  # signature, date, text, etc.
@@ -991,7 +523,6 @@ class SignatureFieldPlacement(Base):
     
     # Relationships
     document = relationship("Document", backref="signature_placements")
-    tenant = relationship("Tenant")
     user = relationship("User")
 
 
@@ -1000,7 +531,6 @@ class DocumentTypeClassification(Base):
     __tablename__ = "document_type_classifications"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     
     name = Column(String(100), nullable=False)  # contract, agreement, form, etc.
     display_name = Column(String(200))
@@ -1019,10 +549,9 @@ class DocumentTypeClassification(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relationships
-    tenant = relationship("Tenant")
     
     __table_args__ = (
-        UniqueConstraint('tenant_id', 'name', name='uq_document_type_tenant_name'),
+        UniqueConstraint('name', name='uq_document_type_tenant_name'),
     )
 
 
@@ -1031,7 +560,6 @@ class SignaturePlacementPattern(Base):
     __tablename__ = "signature_placement_patterns"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
     document_type = Column(String(100), nullable=False)
     
     # Pattern configuration
@@ -1048,7 +576,6 @@ class SignaturePlacementPattern(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relationships
-    tenant = relationship("Tenant")
 
 
 # =====================================
@@ -1067,7 +594,6 @@ class DocumentAnalysis(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Analysis state
@@ -1112,14 +638,11 @@ class DocumentAnalysis(Base):
 
     # Relationships
     document = relationship("Document", back_populates="analyses")
-    tenant = relationship("Tenant")
     creator = relationship("User")
 
     __table_args__ = (
-        Index('idx_document_analyses_tenant_status', 'tenant_id', 'status'),
         Index('idx_document_analyses_document', 'document_id'),
         Index('idx_document_analyses_created', 'created_at'),
-        Index('idx_document_analyses_tenant_created', 'tenant_id', 'created_at'),
     )
 
     def mark_started(self):
@@ -1167,7 +690,6 @@ class InformationChannel(Base):
     __tablename__ = "information_channels"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Channel identification
@@ -1199,17 +721,14 @@ class InformationChannel(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
-    tenant = relationship("Tenant")
     creator = relationship("User")
     credential = relationship("ChannelCredential", back_populates="channel", uselist=False, cascade="all, delete-orphan")
     documents = relationship("ChannelDocument", back_populates="channel", cascade="all, delete-orphan")
     sync_logs = relationship("ChannelSyncLog", back_populates="channel", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index('idx_channels_tenant_type', 'tenant_id', 'channel_type'),
         Index('idx_channels_creator_visibility', 'created_by', 'visibility'),
         Index('idx_channels_next_sync', 'next_sync_at', 'is_active'),
-        Index('idx_channels_tenant_active', 'tenant_id', 'is_active'),
     )
 
 
@@ -1343,7 +862,6 @@ class LGPDDeletionAudit(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # Don't FK since user will be deleted
     user_email = Column(String(255), nullable=False)  # Keep for audit
     requested_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False)
 
     reason = Column(Text, nullable=True)
     status = Column(String(50), nullable=False, default="pending")  # pending, in_progress, completed, failed
@@ -1364,10 +882,8 @@ class LGPDDeletionAudit(Base):
 
     # Relationships
     requested_by_user = relationship("User")
-    tenant = relationship("Tenant")
 
     __table_args__ = (
-        Index('idx_lgpd_deletions_tenant_status', 'tenant_id', 'status'),
         Index('idx_lgpd_deletions_user_date', 'user_id', 'created_at'),
     )
 
@@ -1395,7 +911,6 @@ class DocumentACL(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Grantee: user, role, or everyone
     grantee_type = Column(String(20), nullable=False)  # 'user', 'role', 'everyone'
@@ -1418,13 +933,11 @@ class DocumentACL(Base):
 
     # Relationships
     document = relationship("Document", backref="acls")
-    tenant = relationship("Tenant")
     granter = relationship("User", foreign_keys=[granted_by])
     # Note: grantee relationship depends on grantee_type - use service layer to resolve
 
     __table_args__ = (
         UniqueConstraint('document_id', 'grantee_type', 'grantee_id', name='uq_document_acl_grantee'),
-        Index('idx_document_acls_tenant_grantee', 'tenant_id', 'grantee_type'),
         Index('idx_document_acls_document_view', 'document_id', 'can_view'),
     )
 
@@ -1456,7 +969,6 @@ class DocumentACLAudit(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # No FK - document may be deleted
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)  # No FK - for audit retention
     acl_id = Column(UUID(as_uuid=True), nullable=True)  # Reference to the ACL entry (may be deleted)
 
     # Action details
@@ -1479,7 +991,6 @@ class DocumentACLAudit(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     __table_args__ = (
-        Index('idx_acl_audits_tenant_created', 'tenant_id', 'created_at'),
         Index('idx_acl_audits_document_action', 'document_id', 'action'),
     )
 
@@ -1499,7 +1010,6 @@ class SiteGuest(Base):
     __tablename__ = "site_guests"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     email = Column(String(255), nullable=False)
     name = Column(String(255), nullable=True)
 
@@ -1526,7 +1036,6 @@ class SiteGuest(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
-    tenant = relationship("Tenant", back_populates="site_guests")
     inviter = relationship("User", foreign_keys=[invited_by_user_id])
     otp_codes = relationship("SiteGuestOTP", back_populates="guest", cascade="all, delete-orphan")
     sessions = relationship("SiteGuestSession", back_populates="guest", cascade="all, delete-orphan")
@@ -1535,8 +1044,7 @@ class SiteGuest(Base):
     shares = relationship("SiteGuestShare", back_populates="guest", cascade="all, delete-orphan")
 
     __table_args__ = (
-        UniqueConstraint('tenant_id', 'email', name='uq_site_guest_tenant_email'),
-        Index('idx_site_guests_tenant_active', 'tenant_id', 'is_active'),
+        UniqueConstraint('email', name='uq_site_guest_tenant_email'),
         Index('idx_site_guests_email', 'email'),
     )
 
@@ -1747,7 +1255,6 @@ class SiteGuestShare(Base):
     __tablename__ = "site_guest_shares"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     guest_id = Column(UUID(as_uuid=True), ForeignKey("site_guests.id", ondelete="CASCADE"), nullable=False, index=True)
 
     name = Column(String(255), nullable=False)  # "Proyecto ABC"
@@ -1761,14 +1268,12 @@ class SiteGuestShare(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
-    tenant = relationship("Tenant")
     guest = relationship("SiteGuest", back_populates="shares")
     documents = relationship("SiteGuestShareDocument", back_populates="share", cascade="all, delete-orphan")
     creator = relationship("User", foreign_keys=[created_by_user_id])
 
     __table_args__ = (
         Index('idx_site_guest_shares_guest', 'guest_id'),
-        Index('idx_site_guest_shares_tenant', 'tenant_id'),
     )
 
     def is_expired(self) -> bool:
@@ -1820,7 +1325,6 @@ class UserLearningProfile(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Preferencias explícitas (migradas de Redis)
     response_style = Column(String(50), default='balanced', nullable=False)  # concise, balanced, detailed
@@ -1849,12 +1353,10 @@ class UserLearningProfile(Base):
 
     # Relationships
     user = relationship("User")
-    tenant = relationship("Tenant")
 
     __table_args__ = (
-        UniqueConstraint('user_id', 'tenant_id', name='uq_user_learning_profile'),
+        UniqueConstraint('user_id', name='uq_user_learning_profile'),
         Index('idx_user_learning_profiles_user', 'user_id'),
-        Index('idx_user_learning_profiles_tenant', 'tenant_id'),
     )
 
 
@@ -1872,7 +1374,6 @@ class UserInteractionHistory(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Tipo de interacción
     interaction_type = Column(String(50), nullable=False, index=True)  # query, document_view, document_download, feedback
@@ -1905,12 +1406,10 @@ class UserInteractionHistory(Base):
 
     # Relationships
     user = relationship("User")
-    tenant = relationship("Tenant")
     document = relationship("Document")
 
     __table_args__ = (
         Index('idx_user_interactions_user_type', 'user_id', 'interaction_type'),
-        Index('idx_user_interactions_tenant_date', 'tenant_id', 'created_at'),
         Index('idx_user_interactions_session', 'session_id'),
     )
 
@@ -1925,7 +1424,6 @@ class KnowledgeEntity(Base):
     __tablename__ = "knowledge_entities"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Identificación de la entidad
     entity_type = Column(String(100), nullable=False, index=True)  # person, organization, clause, term, date, amount, location
@@ -1954,7 +1452,6 @@ class KnowledgeEntity(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
-    tenant = relationship("Tenant")
     source_document = relationship("Document")
 
     # Relaciones con otras entidades
@@ -1972,8 +1469,6 @@ class KnowledgeEntity(Base):
     )
 
     __table_args__ = (
-        Index('idx_knowledge_entities_tenant_type', 'tenant_id', 'entity_type'),
-        Index('idx_knowledge_entities_tenant_domain', 'tenant_id', 'domain'),
         Index('idx_knowledge_entities_source_doc', 'source_document_id'),
     )
 
@@ -1992,7 +1487,6 @@ class KnowledgeRelationship(Base):
     __tablename__ = "knowledge_relationships"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Entidades conectadas
     source_entity_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_entities.id", ondelete="CASCADE"), nullable=False)
@@ -2012,7 +1506,6 @@ class KnowledgeRelationship(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
-    tenant = relationship("Tenant")
     source_entity = relationship("KnowledgeEntity", foreign_keys=[source_entity_id], back_populates="outgoing_relationships")
     target_entity = relationship("KnowledgeEntity", foreign_keys=[target_entity_id], back_populates="incoming_relationships")
     source_document = relationship("Document")
@@ -2021,7 +1514,6 @@ class KnowledgeRelationship(Base):
         Index('idx_knowledge_rels_source', 'source_entity_id'),
         Index('idx_knowledge_rels_target', 'target_entity_id'),
         Index('idx_knowledge_rels_type', 'relationship_type'),
-        Index('idx_knowledge_rels_tenant', 'tenant_id'),
     )
 
 
@@ -2060,7 +1552,6 @@ class Connector(Base):
     __tablename__ = "connectors"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Connector identity
     name = Column(String(255), nullable=False)  # "SharePoint Corporativo"
@@ -2091,16 +1582,16 @@ class Connector(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    tenant = relationship("Tenant", back_populates="connectors")
     created_by = relationship("User", foreign_keys=[created_by_id])
     user_auths = relationship("UserConnectorAuth", back_populates="connector", cascade="all, delete-orphan")
     user_syncs = relationship("UserDocumentSync", back_populates="connector", cascade="all, delete-orphan")
     indexed_documents = relationship("IndexedDocument", back_populates="connector")
     content_models = relationship("ConnectorContentModel", cascade="all, delete-orphan", passive_deletes=True)
 
+    default_document_roles = Column(ARRAY(String), nullable=False, server_default="{EVERYONE}")
+
     __table_args__ = (
-        UniqueConstraint('tenant_id', 'connector_type', 'name', name='uq_connector_tenant_type_name'),
-        Index('idx_connector_tenant_active', 'tenant_id', 'is_active'),
+        UniqueConstraint('connector_type', 'name', name='uq_connector_tenant_type_name'),
     )
 
 
@@ -2233,7 +1724,6 @@ class IndexedDocument(Base):
     __tablename__ = "indexed_documents"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Source information
     connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="SET NULL"), nullable=True, index=True)
@@ -2305,17 +1795,18 @@ class IndexedDocument(Base):
     cached_path = Column(Text, nullable=True)
 
     # Relationships
-    tenant = relationship("Tenant")
     connector = relationship("Connector", back_populates="indexed_documents")
     owner = relationship("User", back_populates="indexed_documents")
     indexing_strategy = relationship("ConnectorIndexingStrategy")
     
+    roles = Column(ARRAY(String), nullable=False, server_default="{EVERYONE}")
+
     __table_args__ = (
         UniqueConstraint('connector_id', 'external_id', name='uq_indexed_doc_connector_external'),
         Index('idx_indexed_doc_owner', 'owner_id'),
-        Index('idx_indexed_doc_tenant_public', 'tenant_id', 'is_tenant_public'),
         Index('idx_indexed_doc_weaviate', 'weaviate_id'),
         Index('idx_indexed_doc_status', 'indexing_status'),
+        Index('idx_indexed_documents_roles', 'roles', postgresql_using='gin'),
     )
 
 
@@ -2331,7 +1822,6 @@ class Notebook(Base):
     __tablename__ = "notebooks"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Notebook info
@@ -2358,7 +1848,6 @@ class Notebook(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
-    tenant = relationship("Tenant")
     user = relationship("User", back_populates="notebooks")
     sources = relationship("NotebookSource", back_populates="notebook", cascade="all, delete-orphan")
     audios = relationship("NotebookAudio", back_populates="notebook", cascade="all, delete-orphan")
@@ -2366,7 +1855,6 @@ class Notebook(Base):
     presentations = relationship("NotebookPresentation", back_populates="notebook", cascade="all, delete-orphan")
 
     __table_args__ = (
-        Index('idx_notebooks_tenant_user', 'tenant_id', 'user_id'),
         Index('idx_notebooks_user_activity', 'user_id', 'last_activity_at'),
         Index('idx_notebooks_archived', 'is_archived'),
     )
@@ -2605,7 +2093,6 @@ class ConnectorContentModel(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Raw discovered model (connector-specific format)
     content_types = Column(JSONB, nullable=False, default=dict)
@@ -2638,11 +2125,9 @@ class ConnectorContentModel(Base):
 
     # Relationships
     connector = relationship("Connector", backref="content_model")
-    tenant = relationship("Tenant")
 
     __table_args__ = (
         Index('idx_ccm_connector', 'connector_id', unique=True),
-        Index('idx_ccm_tenant', 'tenant_id'),
     )
 
 
@@ -2663,7 +2148,6 @@ class LearnedFolderPattern(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Pattern definition
     path_pattern = Column(String(1000), nullable=False)
@@ -2692,11 +2176,9 @@ class LearnedFolderPattern(Base):
 
     # Relationships
     connector = relationship("Connector", backref="folder_patterns")
-    tenant = relationship("Tenant")
 
     __table_args__ = (
         Index('idx_lfp_connector', 'connector_id'),
-        Index('idx_lfp_tenant', 'tenant_id'),
         Index('idx_lfp_confidence', 'confidence'),
     )
 
@@ -2717,7 +2199,6 @@ class LearnedPropertyMapping(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Source property (connector-specific)
     source_property = Column(String(255), nullable=False)
@@ -2751,12 +2232,10 @@ class LearnedPropertyMapping(Base):
 
     # Relationships
     connector = relationship("Connector", backref="property_mappings")
-    tenant = relationship("Tenant")
 
     __table_args__ = (
         UniqueConstraint('connector_id', 'source_property', 'source_type', name='uq_lpm_connector_source_type'),
         Index('idx_lpm_connector', 'connector_id'),
-        Index('idx_lpm_tenant', 'tenant_id'),
         Index('idx_lpm_source', 'source_property'),
         Index('idx_lpm_target', 'target_field'),
     )
@@ -2776,7 +2255,6 @@ class LearnedRelationshipType(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Source relationship type (connector-specific)
     source_relationship = Column(String(255), nullable=False)
@@ -2805,12 +2283,10 @@ class LearnedRelationshipType(Base):
 
     # Relationships
     connector = relationship("Connector", backref="relationship_types")
-    tenant = relationship("Tenant")
 
     __table_args__ = (
         UniqueConstraint('connector_id', 'source_relationship', name='uq_lrt_connector_source'),
         Index('idx_lrt_connector', 'connector_id'),
-        Index('idx_lrt_tenant', 'tenant_id'),
         Index('idx_lrt_kg_edge', 'kg_edge_type'),
     )
 
@@ -2829,7 +2305,6 @@ class ConnectorIndexingStrategy(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Scope - which documents this strategy applies to
     document_type = Column(String(255), nullable=True)
@@ -2868,11 +2343,9 @@ class ConnectorIndexingStrategy(Base):
 
     # Relationships
     connector = relationship("Connector", backref="indexing_strategies")
-    tenant = relationship("Tenant")
 
     __table_args__ = (
         Index('idx_cis_connector', 'connector_id'),
-        Index('idx_cis_tenant', 'tenant_id'),
         Index('idx_cis_doc_type', 'document_type'),
         Index('idx_cis_priority', 'priority'),
     )
@@ -2914,7 +2387,6 @@ class DataLearningJob(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     connector_id = Column(UUID(as_uuid=True), ForeignKey("connectors.id", ondelete="CASCADE"), nullable=False)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False)
 
     # Job type
     job_type = Column(String(50), nullable=False)
@@ -2952,12 +2424,10 @@ class DataLearningJob(Base):
 
     # Relationships
     connector = relationship("Connector", backref="learning_jobs")
-    tenant = relationship("Tenant")
     triggered_by_user = relationship("User")
 
     __table_args__ = (
         Index('idx_dlj_connector', 'connector_id'),
-        Index('idx_dlj_tenant', 'tenant_id'),
         Index('idx_dlj_status', 'status'),
         Index('idx_dlj_job_type', 'job_type'),
         Index('idx_dlj_created', 'created_at'),
@@ -2985,7 +2455,6 @@ class EmmaSession(Base):
 
     # Multi-tenant ownership
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Session identifier (links to Redis thread_id)
     session_id = Column(String(255), nullable=False, unique=True, index=True)
@@ -3036,10 +2505,7 @@ class EmmaSession(Base):
 
     # Relationships
     user = relationship("User", backref="emma_sessions")
-    tenant = relationship("Tenant")
 
     __table_args__ = (
-        Index('idx_emma_sessions_user_tenant', 'user_id', 'tenant_id'),
         Index('idx_emma_sessions_user_last_message', 'user_id', 'last_message_at'),
-        Index('idx_emma_sessions_tenant_created', 'tenant_id', 'created_at'),
     )

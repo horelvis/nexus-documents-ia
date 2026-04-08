@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # Database URL (used by emma_persistence_service for session storage, NOT for graph)
     database_url: str = os.getenv(
         "DATABASE_URL",
-        "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db",
+        "postgresql+asyncpg://postgres:postgres@db:5432/nouxcube",
     )
 
     # FalkorDB (sole graph backend)

@@ -26,7 +26,6 @@ class TemplateEditSession(Base):
     __tablename__ = "edit_sessions"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    tenant_id = Column(String, nullable=False, index=True)
     template_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     template_name = Column(String, nullable=False)
     template_file_name = Column(String, nullable=True)

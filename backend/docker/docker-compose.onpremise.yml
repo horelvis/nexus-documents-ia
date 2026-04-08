@@ -29,7 +29,7 @@ services:
       POSTGRES_SERVER: db
       POSTGRES_USER: ${POSTGRES_USER:-nexus_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexus_password}
-      POSTGRES_DB: ${POSTGRES_DB:-nexus_db}
+      POSTGRES_DB: ${POSTGRES_DB:-nouxcube}
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
     networks:
       - backend-network
@@ -37,7 +37,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus_user} -d ${POSTGRES_DB:-nexus_db}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexus_user} -d ${POSTGRES_DB:-nouxcube}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -331,7 +331,7 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - WEAVIATE_URL=http://weaviate:8080
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       - INTELLIGENCE_DOCS_SERVICE_URL=http://intelligence-docs-service:8000
       - STORAGE_SERVICE_URL=http://storage-service:8010
       # SGLang Configuration
@@ -419,7 +419,7 @@ services:
       - .env
     environment:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       - RAG_KNOWLEDGE_GRAPH_ENABLED=${RAG_KNOWLEDGE_GRAPH_ENABLED:-true}
       - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -511,7 +511,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Database for persistence
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       # Agent settings
       - AGENTS_ENABLED=${AGENTS_ENABLED:-true}
       - DEFAULT_WORKFLOW=${DEFAULT_WORKFLOW:-auto}
@@ -704,7 +704,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - EVENT_CONSUMER_GROUP=emma_reactive
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       - WEAVIATE_SERVICE_URL=http://weaviate-service:8000
       - SGLANG_ENABLED=${SGLANG_ENABLED:-true}
       - SGLANG_BASE_URL=${SGLANG_BASE_URL:-http://sglang:8000/v1}
@@ -766,7 +766,7 @@ services:
     environment:
       - PORT=8000
       - DEBUG=${DEBUG:-false}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       - CONNECTOR_CACHE_TTL=${CONNECTOR_CACHE_TTL:-300}
       - WEAVIATE_SERVICE_URL=${WEAVIATE_SERVICE_URL:-http://weaviate-service:8000}
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
@@ -799,7 +799,7 @@ services:
     environment:
       - PORT=8000
       - DEBUG=${DEBUG:-false}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID}
       - GOOGLE_OAUTH_CLIENT_SECRET=${GOOGLE_OAUTH_CLIENT_SECRET}
       - GOOGLE_OAUTH_REDIRECT_URI=${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:8000/api/v1/connectors/oauth/callback}
@@ -836,7 +836,7 @@ services:
     environment:
       - PORT=8000
       - DEBUG=${DEBUG:-false}
-      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nexus_db}
+      - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       - MS_OAUTH_CLIENT_ID=${MS_OAUTH_CLIENT_ID}
       - MS_OAUTH_CLIENT_SECRET=${MS_OAUTH_CLIENT_SECRET}
       - MS_OAUTH_TENANT_ID=${MS_OAUTH_TENANT_ID:-common}

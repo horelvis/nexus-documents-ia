@@ -252,7 +252,7 @@ class Settings(BaseSettings):
     # PostgreSQL connection (used by session persistence, cached_path updates — NOT for graph)
     postgres_host: str = os.getenv("POSTGRES_SERVER", os.getenv("POSTGRES_HOST", "db"))
     postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
-    postgres_db: str = os.getenv("POSTGRES_DB", "nexus_db")
+    postgres_db: str = os.getenv("POSTGRES_DB", "nouxcube")
     postgres_user: str = os.getenv("POSTGRES_USER", "nexus_user")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "nexus_password")
 
@@ -314,7 +314,7 @@ class Settings(BaseSettings):
     api_url: str = os.getenv("API_URL", "http://api:8000")
 
     # Database (for metadata coordination)
-    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db")
+    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nouxcube")
 
     # Collection naming (tenant isolation)
     collection_prefix: str = "Nouxcube_"

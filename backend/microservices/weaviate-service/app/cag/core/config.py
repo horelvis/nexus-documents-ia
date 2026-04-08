@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379")
     
     # Database configuration
-    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db")
+    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nouxcube")
     
     # CAG configuration
     cag_max_iterations: int = 3
