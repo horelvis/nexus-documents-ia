@@ -20,13 +20,29 @@
 
 ---
 
-## Volume estimate (from grep against current codebase)
+## Volume estimate (from grep against current codebase, re-measured 2026-04-08)
 
-- 43 endpoint files contain `tenant_id` (1013 occurrences)
-- 50 service files contain `tenant_id` (719 occurrences)
+Top-level (`backend/app/api/v1/*.py` and `backend/app/services/*.py`):
+- 43 top-level endpoint files contain `tenant_id`
+- 42 top-level service files contain `tenant_id`
+
+Recursive (includes subdirectories):
+- **78** files under `backend/app/api/v1/` contain `tenant_id` (**1067** occurrences)
+- **130** files under `backend/app/services/` contain `tenant_id` (**886** occurrences)
 - ~5 endpoint files are pure tenant artifacts (deleted entirely)
 - ~3 service files are pure tenant artifacts (deleted entirely)
-- ~85 files net modified
+- **~200 files net modified** (originally estimated ~85 — the recount picked up subdirectories that were not visible in the original max-depth-1 scan)
+
+The subdirectories that were missed by the original estimate:
+
+```
+backend/app/services/connectors/   — alfresco.py, base.py, database.py, ...
+backend/app/services/channels/     — channel_service.py, gmail_channel_service.py, ...
+backend/app/services/ml/           — pattern_learner.py, poi_detector.py, ...
+backend/app/services/data_learning/ — relationship_learner.py, indexing_strategy_optimizer.py, ...
+```
+
+These subdirectories must be refactored alongside the top-level files. Task 10 ("Refactor the lower-density endpoint files") and Task 12 ("Refactor service files") generate the working list dynamically via `grep -rln`, so they will pick up the subdirectories automatically — but allow extra time for the refactor.
 
 ---
 

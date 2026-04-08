@@ -43,7 +43,7 @@
 - `backend/microservices/document-forge-service/app/core/config.py` — DB references
 - `backend/scripts/init_db.py` — DB name reference + `role_mapping.yaml` validation
 - `backend/tests/conftest.py` — test DB reference
-- `backend/app/db/models.py` — drop 12 tenant-related classes, drop `tenant_id` columns from ~25 surviving classes, add `roles` column to `Document`, add `default_document_roles` column to `Connector`
+- `backend/app/db/models.py` — drop 12 tenant-related classes, drop `tenant_id` columns from **~32 surviving classes** (re-measured 2026-04-08: 44 classes total currently touch `tenant_id`, minus the 12 to delete = 32 to modify), add `roles` column to `Document`, add `default_document_roles` column to `Connector`
 - `backend/app/db/emma_memory_models.py` — drop tenant_id
 - `backend/app/db/emma_reactive_models.py` — drop tenant_id
 - `backend/app/db/agent_models.py` — drop tenant_id
@@ -90,7 +90,7 @@ Expected: file exists. This plan references it.
 ## Task 2: Update environment file with `nouxcube` database name
 
 **Files:**
-- Modify: `backend/docker/.env` (lines 23-24)
+- Modify: `backend/docker/.env` (the `POSTGRES_DB` and `DATABASE_URL` lines)
 
 - [ ] **Step 1: Open the file**
 
@@ -882,7 +882,7 @@ touch backend/alembic/versions/_archived/.gitkeep
 git mv backend/alembic/versions/*.py backend/alembic/versions/_archived/
 ```
 
-Expected: all 38 migration files moved into `_archived/`. The `versions/` directory should now be empty except for `_archived/`.
+Expected: all 37 migration files moved into `_archived/`. The `versions/` directory should now be empty except for `_archived/`.
 
 - [ ] **Step 3: Verify**
 
@@ -891,7 +891,7 @@ ls backend/alembic/versions/
 ls backend/alembic/versions/_archived/ | wc -l
 ```
 
-Expected: `versions/` shows only `_archived/`. The count of files in `_archived/` is the original migration count (38).
+Expected: `versions/` shows only `_archived/`. The count of files in `_archived/` is the original migration count (37).
 
 - [ ] **Step 4: Update Alembic config to ignore the archive**
 
@@ -1159,7 +1159,7 @@ Implements Plan 1 of the multi-tenancy removal refactor.
   unique constraints with their global equivalents.
 - Add roles ARRAY(String) column to Document with GIN index.
 - Add default_document_roles ARRAY(String) column to Connector.
-- Archive 38 existing Alembic migrations into versions/_archived/.
+- Archive 37 existing Alembic migrations into versions/_archived/.
   Generate a single new initial migration matching the new schema.
 - Wire init_db.py to validate role_mapping.yaml at startup.
 
@@ -1181,7 +1181,7 @@ EOF
 git log -1 --stat
 ```
 
-Expected: shows the commit summary and the list of files changed. The file count should be ~50 files (the configs, the models, the 38 archived migrations, the new migration, the new files).
+Expected: shows the commit summary and the list of files changed. The file count should be ~50 files (the configs, the models, the 37 archived migrations, the new migration, the new files).
 
 ---
 
@@ -1196,7 +1196,7 @@ test -f backend/app/config/role_mapping.yaml && echo "yaml ok"
 test -f backend/app/core/auth/acl.py && echo "acl ok"
 test -f backend/docker/init-scripts/02-init-nouxcube.sql && echo "init script ok"
 ls backend/alembic/versions/ | grep -v _archived | wc -l   # expected: 1
-ls backend/alembic/versions/_archived/ | grep ".py$" | wc -l  # expected: 38
+ls backend/alembic/versions/_archived/ | grep ".py$" | wc -l  # expected: 37
 ```
 
 Expected: all four checks succeed.
