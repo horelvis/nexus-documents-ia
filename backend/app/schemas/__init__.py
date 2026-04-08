@@ -23,16 +23,7 @@ from .enums import IndexingStatus, ErrorCode
 # General
 from .general import Message, ErrorResponse, SuccessResponse, PaginatedResponse, ErrorDetail
 
-# RBAC
-from .rbac import (
-    PermissionBase, PermissionCreate, PermissionUpdate, Permission,
-    RoleBase, RoleCreate, RoleUpdate, Role
-)
-
-# Tenant
-from .tenant import (
-    TenantBase, TenantCreate, TenantUpdate, TenantResponse, TenantWithUsers, Tenant, TenantSettings
-)
+# RBAC and Tenant schemas removed — replaced by role-based ACL (see app.core.auth.acl)
 
 # User (UserCreate removed - users created via Clerk JIT)
 from .user import (
@@ -63,17 +54,7 @@ from .channel import (
     DBCredentialsCreate, TestConnectionResponse,
 )
 
-# Document ACL
-from .document_acl import (
-    GranteeType, ACLAction, ACLSource, Permission,
-    PermissionSet,
-    DocumentACLBase, DocumentACLCreate, DocumentACLUpdate, DocumentACLResponse, DocumentACLListResponse,
-    GrantPermissionRequest, GrantPermissionBatchRequest, RevokePermissionRequest,
-    EffectivePermissions, CheckPermissionRequest, CheckPermissionResponse,
-    DocumentACLAuditBase, DocumentACLAuditResponse, DocumentACLAuditListResponse,
-    BulkACLUpdateRequest, BulkACLUpdateResponse,
-    ShareLinkRequest, ShareLinkResponse,
-)
+# Document ACL schemas removed — replaced by role-based ACL (see app.core.auth.acl)
 
 # Site Guest (External Sharing)
 from .site_guest import (
@@ -177,25 +158,6 @@ __all__ = [
     "PaginatedResponse",
     "ErrorDetail",
     
-    # RBAC
-    "PermissionBase",
-    "PermissionCreate",
-    "PermissionUpdate",
-    "Permission",
-    "RoleBase",
-    "RoleCreate",
-    "RoleUpdate",
-    "Role",
-    
-    # Tenant
-    "TenantBase",
-    "TenantCreate",
-    "TenantUpdate",
-    "TenantResponse",
-    "TenantWithUsers",
-    "Tenant",
-    "TenantSettings",
-    
     # User
     "UserBase",
     "UserUpdate",
@@ -255,31 +217,6 @@ __all__ = [
     "SyncTriggerResponse",
     "DBCredentialsCreate",
     "TestConnectionResponse",
-
-    # Document ACL
-    "GranteeType",
-    "ACLAction",
-    "ACLSource",
-    "Permission",
-    "PermissionSet",
-    "DocumentACLBase",
-    "DocumentACLCreate",
-    "DocumentACLUpdate",
-    "DocumentACLResponse",
-    "DocumentACLListResponse",
-    "GrantPermissionRequest",
-    "GrantPermissionBatchRequest",
-    "RevokePermissionRequest",
-    "EffectivePermissions",
-    "CheckPermissionRequest",
-    "CheckPermissionResponse",
-    "DocumentACLAuditBase",
-    "DocumentACLAuditResponse",
-    "DocumentACLAuditListResponse",
-    "BulkACLUpdateRequest",
-    "BulkACLUpdateResponse",
-    "ShareLinkRequest",
-    "ShareLinkResponse",
 
     # Site Guest (External Sharing)
     "SiteGuestBase",

@@ -10,7 +10,7 @@ import logging
 
 from app.api.async_dependencies import get_current_user_async, get_async_db
 from app.services.lgpd_deletion_service import lgpd_deletion_service
-from app.db.models import User, LGPDDeletionAudit, Tenant
+from app.db.models import User, LGPDDeletionAudit
 from app.schemas.user import UserResponse
 from pydantic import BaseModel, Field, EmailStr
 
@@ -179,24 +179,8 @@ async def request_user_deletion(
                 detail=f"Confirmation text must be exactly: '{expected_confirmation}'"
             )
         
-        if deletion_request.delete_tenant:
-            if not current_user.is_admin:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only tenant administrators can delete the entire organization"
-                )
-            tenant_stmt = select(Tenant).where(Tenant.id == current_user.tenant_id)
-            tenant_result = await db.execute(tenant_stmt)
-            tenant_info = tenant_result.scalar_one_or_none()
-            if not tenant_info:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
-            if not deletion_request.tenant_confirmation or \
-                deletion_request.tenant_confirmation.strip() != tenant_info.name:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Tenant confirmation name does not match"
-                )
-        
+        # delete_tenant option is no longer supported (single-tenant deployment)
+
         # Execute LGPD deletion
         result = await lgpd_deletion_service.request_user_deletion(
             db=db,
