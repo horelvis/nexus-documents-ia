@@ -23,6 +23,9 @@
 **Files created in this plan:**
 - `backend/app/config/role_mapping.yaml` — KeyCloak group → application role mapping
 - `backend/app/core/auth/acl.py` — `filter_visible_to_user()` and `require_role()` helpers
+
+**File modified for the new dataclass (added 2026-04-08, see Task 8b):**
+- `backend/app/core/auth/base.py` — append a `UserProfile` frozen dataclass that `acl.py` and `test_acl.py` import. The legacy `UserProfile` ORM class was deleted in a previous refactor (see comment in `backend/app/db/models.py` near "UserProfile eliminado"); this new one is a request-scoped DTO carrying `sub`, `email`, `name`, `roles: List[str]`. It is **dormant in Plan 1**: no caller wires it up. Plan 2 refactors `get_current_user` to return it.
 - `backend/tests/test_acl.py` — tests for the ACL helpers
 - `backend/docker/init-scripts/02-init-nouxcube.sql` — Postgres init script for `nouxcube` database
 - `backend/alembic/versions/_archived/.gitkeep` — placeholder so the archive folder exists
@@ -372,6 +375,65 @@ python -c "import yaml; print(yaml.safe_load(open('backend/app/config/role_mappi
 ```
 
 Expected: prints a dict like `{'group_to_role': {'/Administradores': 'ADMIN', ...}}`.
+
+---
+
+## Task 8b: Define the `UserProfile` dataclass
+
+**Files:**
+- Modify: `backend/app/core/auth/base.py` (append a new dataclass)
+
+**Context:** The original Plan 1 assumed `UserProfile` already existed in `app.core.auth.base`, but a previous refactor deleted it (the only remaining reference is the comment `# UserProfile eliminado` in `backend/app/db/models.py`). The new `acl.py` and `test_acl.py` files in Tasks 9-10 import `UserProfile` from `app.core.auth.base`, so we need to (re)create it before those tasks. The dataclass is **dormant** during Plan 1: nothing constructs it at runtime. Plan 2 refactors `get_current_user` to return it.
+
+- [ ] **Step 1: Read the existing file**
+
+```bash
+head -30 backend/app/core/auth/base.py
+```
+
+Confirm it already imports `dataclass`, `field`, and `List` (from `typing`). If not, add the imports in Step 2.
+
+- [ ] **Step 2: Append the dataclass at the bottom of the file**
+
+Append this block to `backend/app/core/auth/base.py`:
+
+```python
+
+
+@dataclass(frozen=True)
+class UserProfile:
+    """Request-scoped immutable view of an authenticated user.
+
+    Built once per request from the JWT (in Plan 2 — currently dormant).
+    Carries the canonical role identifiers from `map_groups_to_roles()`,
+    not raw KeyCloak group names.
+
+    The `roles` field is a list of strings (e.g. ['LEGAL', 'SALES']).
+    The reserved value 'EVERYONE' is NEVER present here — it is a wildcard
+    used only on the document side. See `app.core.auth.acl` for usage.
+    """
+
+    sub: str
+    email: str
+    name: Optional[str] = None
+    roles: List[str] = field(default_factory=list)
+```
+
+`Optional`, `List`, `field`, and `dataclass` are already imported at the top of the file. If any is missing, add it to the existing import lines.
+
+- [ ] **Step 3: Verify the import works**
+
+```bash
+cd backend && python -c "from app.core.auth.base import UserProfile; u = UserProfile(sub='x', email='y@z'); print(u, u.roles)"
+```
+
+Expected: prints something like `UserProfile(sub='x', email='y@z', name=None, roles=[]) []`. No ImportError, no TypeError.
+
+- [ ] **Step 4: Defensive check for the EVERYONE wildcard**
+
+The spec Section 1 ("Wildcard semantics") says `EVERYONE` should never appear in `UserProfile.roles`. We don't enforce this at the dataclass level (it's a defensive check, not a hard invariant — invalid input could still construct one). The enforcement lives in Plan 2's refactored `get_current_user`, which will assert it after running `map_groups_to_roles`.
+
+For Plan 1 just leave a comment in the docstring (already done above).
 
 ---
 
@@ -1106,6 +1168,7 @@ git add backend/docker/init-scripts/02-init-nouxcube.sql
 git add backend/docker/onboarding.sh
 git add backend/app/config/role_mapping.yaml
 git add backend/app/core/auth/acl.py
+git add backend/app/core/auth/base.py
 git add backend/app/core/config.py
 git add backend/microservices/*/app/core/config.py
 git add backend/scripts/init_db.py
@@ -1195,6 +1258,7 @@ Expected: shows the commit summary and the list of files changed. The file count
 test -f backend/app/config/role_mapping.yaml && echo "yaml ok"
 test -f backend/app/core/auth/acl.py && echo "acl ok"
 test -f backend/docker/init-scripts/02-init-nouxcube.sql && echo "init script ok"
+python -c "from app.core.auth.base import UserProfile; UserProfile(sub='x', email='y')" && echo "UserProfile ok"
 ls backend/alembic/versions/ | grep -v _archived | wc -l   # expected: 1
 ls backend/alembic/versions/_archived/ | grep ".py$" | wc -l  # expected: 37
 ```
