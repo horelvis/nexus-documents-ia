@@ -11,7 +11,7 @@ Weaviate handles all search operations natively.
 Usage:
     from app.services.unified_search_service import UnifiedSearchService
 
-    service = UnifiedSearchService(tenant_id="...")
+    service = UnifiedSearchService()
     results = await service.search(query="...", search_type="hybrid")
 """
 
@@ -48,7 +48,6 @@ class SearchResult:
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     tags: List[str]
-    tenant_id: str
     matches: List[Dict[str, Any]]
     source: str  # "weaviate" or "elasticsearch"
 
@@ -65,7 +64,6 @@ class SearchResult:
                 "created_at": self.created_at.isoformat() if self.created_at else None,
                 "updated_at": self.updated_at.isoformat() if self.updated_at else None,
                 "tags": self.tags,
-                "tenant_id": self.tenant_id,
             },
             "score": self.score,
             "content_snippet": self.content_snippet,
@@ -80,22 +78,17 @@ class UnifiedSearchService:
 
     Uses Elasticsearch when Feature.ELASTICSEARCH_SEARCH is enabled,
     otherwise uses Weaviate's native hybrid search (BM25 + vector).
-
-    Args:
-        tenant_id: The tenant identifier for search scope
     """
 
-    def __init__(self, tenant_id: str):
-        self.tenant_id = tenant_id
+    def __init__(self):
         self._use_elasticsearch = FeatureFlags.is_enabled(
             Feature.ELASTICSEARCH_SEARCH,
-            tenant_id
         )
 
         if self._use_elasticsearch:
-            logger.debug(f"UnifiedSearchService using Elasticsearch | tenant={tenant_id[:8]}...")
+            logger.debug("UnifiedSearchService using Elasticsearch")
         else:
-            logger.debug(f"UnifiedSearchService using Weaviate hybrid | tenant={tenant_id[:8]}...")
+            logger.debug("UnifiedSearchService using Weaviate hybrid")
 
     async def search(
         self,
@@ -167,7 +160,6 @@ class UnifiedSearchService:
                 )
 
             results = await elasticsearch_client.hybrid_search(
-                tenant_id=self.tenant_id,
                 query=query,
                 limit=limit,
                 filters=filters or {},
@@ -223,7 +215,6 @@ class UnifiedSearchService:
             search_request = {
                 "query": query,
                 "limit": limit,
-                "tenant_id": self.tenant_id,
                 "search_type": "hybrid",
                 "alpha": search_alpha,
             }
@@ -245,7 +236,7 @@ class UnifiedSearchService:
                 search_request["role_ids"] = user_context.role_ids
                 search_request["is_admin"] = user_context.is_admin
 
-            # Get collection name for tenant
+            # Get collection name (single-tenant: fixed)
             collection_name = self._get_collection_name()
 
             # Execute search via Weaviate client
@@ -263,10 +254,8 @@ class UnifiedSearchService:
             return []
 
     def _get_collection_name(self) -> str:
-        """Get the Weaviate collection name for this tenant."""
-        # Sanitize tenant_id for collection name (Weaviate naming rules)
-        safe_tenant = self.tenant_id.replace("-", "_")
-        return f"documents_{safe_tenant}"
+        """Get the Weaviate collection name (single-tenant default)."""
+        return "documents_default"
 
     def _normalize_weaviate_results(
         self,
@@ -296,7 +285,6 @@ class UnifiedSearchService:
                         "created_at": properties.get("created_at"),
                         "updated_at": properties.get("updated_at"),
                         "indexed": "true",
-                        "tenant_id": self.tenant_id,
                         "tags": properties.get("tags", []),
                     },
                     "score": item.get("score", item.get("_additional", {}).get("score", 0.0)),
@@ -343,7 +331,6 @@ class UnifiedSearchService:
 
         stats = {
             "backend": backend,
-            "tenant_id": self.tenant_id,
             "features": {
                 "hybrid_search": True,
                 "semantic_search": True,
@@ -364,7 +351,6 @@ class UnifiedSearchService:
 
 # Convenience function for quick searches
 async def unified_search(
-    tenant_id: str,
     query: str,
     limit: int = 10,
     search_type: str = "hybrid",
@@ -378,12 +364,11 @@ async def unified_search(
         from app.services.unified_search_service import unified_search
 
         results = await unified_search(
-            tenant_id="...",
             query="contract terms",
             search_type="hybrid"
         )
     """
-    service = UnifiedSearchService(tenant_id)
+    service = UnifiedSearchService()
     return await service.search(
         query=query,
         limit=limit,

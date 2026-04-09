@@ -56,7 +56,6 @@ class ChannelService:
 
     async def create_channel(
         self,
-        tenant_id: UUID,
         user_id: UUID,
         channel_type: ChannelType,
         name: str,
@@ -69,12 +68,11 @@ class ChannelService:
         Create a new information channel.
 
         Args:
-            tenant_id: Tenant this channel belongs to
             user_id: User creating the channel
             channel_type: Type of channel (gmail, google_drive, external_db)
             name: Display name
             description: Optional description
-            visibility: personal or tenant-wide
+            visibility: personal or global
             configuration: Type-specific configuration
             sync_interval_minutes: Sync frequency (0 = manual only)
 
@@ -82,7 +80,6 @@ class ChannelService:
             The created InformationChannel
         """
         channel = InformationChannel(
-            tenant_id=tenant_id,
             created_by=user_id,
             name=name,
             description=description,
@@ -119,7 +116,6 @@ class ChannelService:
     async def get_channel(
         self,
         channel_id: UUID,
-        tenant_id: UUID,
         user_id: Optional[UUID] = None,
     ) -> Optional[InformationChannel]:
         """
@@ -127,7 +123,6 @@ class ChannelService:
 
         Args:
             channel_id: Channel UUID
-            tenant_id: Tenant UUID for isolation
             user_id: User ID for personal channel access check
 
         Returns:
@@ -136,10 +131,7 @@ class ChannelService:
         stmt = (
             select(InformationChannel)
             .options(selectinload(InformationChannel.credential))
-            .where(
-                InformationChannel.id == channel_id,
-                InformationChannel.tenant_id == tenant_id,
-            )
+            .where(InformationChannel.id == channel_id)
         )
         result = await self.db.execute(stmt)
         channel = result.scalar_one_or_none()
@@ -156,7 +148,6 @@ class ChannelService:
 
     async def list_channels(
         self,
-        tenant_id: UUID,
         user_id: UUID,
         channel_type: Optional[ChannelType] = None,
         is_active: Optional[bool] = None,
@@ -167,11 +158,10 @@ class ChannelService:
         List channels accessible to a user.
 
         Users can see:
-        - All tenant-wide channels
+        - All global channels
         - Personal channels they created
 
         Args:
-            tenant_id: Tenant UUID
             user_id: Requesting user ID
             channel_type: Filter by type
             is_active: Filter by active status
@@ -181,13 +171,10 @@ class ChannelService:
         Returns:
             Tuple of (channels list, total count)
         """
-        # Base filter: tenant + (tenant visibility OR owned by user)
-        access_filter = and_(
-            InformationChannel.tenant_id == tenant_id,
-            or_(
-                InformationChannel.visibility == "tenant",
-                InformationChannel.created_by == user_id,
-            ),
+        # Base filter: global visibility OR owned by user
+        access_filter = or_(
+            InformationChannel.visibility == "tenant",
+            InformationChannel.created_by == user_id,
         )
 
         # Build count query
@@ -222,7 +209,6 @@ class ChannelService:
     async def update_channel(
         self,
         channel_id: UUID,
-        tenant_id: UUID,
         user_id: UUID,
         update_data: ChannelUpdate,
     ) -> Optional[InformationChannel]:
@@ -233,14 +219,13 @@ class ChannelService:
 
         Args:
             channel_id: Channel to update
-            tenant_id: Tenant UUID
             user_id: User making the update
             update_data: Fields to update
 
         Returns:
             Updated channel or None if not found/unauthorized
         """
-        channel = await self.get_channel(channel_id, tenant_id, user_id)
+        channel = await self.get_channel(channel_id, user_id)
         if not channel:
             return None
 
@@ -275,7 +260,6 @@ class ChannelService:
     async def delete_channel(
         self,
         channel_id: UUID,
-        tenant_id: UUID,
         user_id: UUID,
     ) -> bool:
         """
@@ -289,13 +273,12 @@ class ChannelService:
 
         Args:
             channel_id: Channel to delete
-            tenant_id: Tenant UUID
             user_id: User requesting deletion
 
         Returns:
             True if deleted, False if not found/unauthorized
         """
-        channel = await self.get_channel(channel_id, tenant_id, user_id)
+        channel = await self.get_channel(channel_id, user_id)
         if not channel:
             return False
 
@@ -424,7 +407,6 @@ class ChannelService:
     async def get_sync_history(
         self,
         channel_id: UUID,
-        tenant_id: UUID,
         limit: int = 20,
     ) -> List[ChannelSyncLog]:
         """
@@ -432,16 +414,14 @@ class ChannelService:
 
         Args:
             channel_id: Channel UUID
-            tenant_id: Tenant UUID for access control
             limit: Max entries to return
 
         Returns:
             List of sync log entries, newest first
         """
-        # Verify channel access
+        # Verify channel exists
         channel_stmt = select(InformationChannel).where(
             InformationChannel.id == channel_id,
-            InformationChannel.tenant_id == tenant_id,
         )
         channel_result = await self.db.execute(channel_stmt)
         if not channel_result.scalar_one_or_none():
@@ -690,7 +670,6 @@ class ChannelService:
         """Convert channel model to response schema."""
         return ChannelResponse(
             id=channel.id,
-            tenant_id=channel.tenant_id,
             created_by=channel.created_by,
             name=channel.name,
             description=channel.description,

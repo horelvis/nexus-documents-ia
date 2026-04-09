@@ -13,6 +13,8 @@ from app.services.weaviate_client import weaviate_client
 from app.services.elasticsearch_client import elasticsearch_client, SearchUserContext
 from app.db.database import SessionLocal
 from app.db.models import Document
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import filter_visible_to_user
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +27,20 @@ class SearchService:
 
     def __init__(
         self,
-        tenant_id: str,
+        user: Optional[UserProfile] = None,
         user_id: str = None,
         role_ids: List[str] = None,
         is_admin: bool = False
     ):
-        self.tenant_id = tenant_id
-        self.user_id = user_id
-        self.role_ids = role_ids or []
+        self.user = user
+        self.user_id = user_id or (user.sub if user else None)
+        self.role_ids = role_ids or (list(user.roles) if user else [])
         self.is_admin = is_admin
-        self.collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
+        self.collection_name = "Nouxcube_documents"
         self._emma_timeout = 120.0  # 2 minutes for AI operations
         # Elasticsearch is now a microservice - no local initialization needed
 
-        logger.info(f"SearchService initialized for tenant: {tenant_id}, user: {user_id}")
+        logger.info(f"SearchService initialized for user: {self.user_id}")
         logger.info("Using hybrid architecture: Elasticsearch (primary) + Weaviate (semantic specialized)")
     
     async def chat_with_documents(
@@ -59,12 +61,11 @@ class SearchService:
         import httpx
 
         try:
-            logger.info(f"Chat query for tenant {self.tenant_id}: {query[:100]}...")
+            logger.info(f"Chat query: {query[:100]}...")
 
             payload = {
                 "query": query,
-                "tenant_id": self.tenant_id,
-                "session_id": f"search_chat_{self.tenant_id}",
+                "session_id": f"search_chat_{self.user_id or 'anon'}",
                 "context": {"service": "search_chat"}
             }
 
@@ -153,7 +154,6 @@ class SearchService:
                     )
 
                 results = await elasticsearch_client.hybrid_search(
-                    tenant_id=self.tenant_id,
                     query=query,
                     limit=limit,
                     filters=filters or {},
@@ -175,7 +175,6 @@ class SearchService:
                         self.collection_name,
                         query=query,
                         limit=limit,
-                        tenant_id=self.tenant_id
                     )
                 
                 # Enrich with complete document data
@@ -229,7 +228,6 @@ class SearchService:
                     joinedload(Document.tags)
                 ).filter(
                     Document.id.in_(doc_ids),
-                    Document.tenant_id == self.tenant_id
                 ).all()
             
             # Create enriched results
@@ -253,7 +251,6 @@ class SearchService:
                                 "created_at": doc.created_at.isoformat() if doc.created_at else None,
                                 "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
                                 "indexed": str(doc.indexed) if doc.indexed is not None else "unknown",
-                                "tenant_id": str(doc.tenant_id),
                                 "tags": [tag.name for tag in doc.tags] if doc.tags else []
                             },
                             "score": vector_result.get('score', 0.0),
@@ -582,14 +579,12 @@ Texto:
                         self.collection_name,
                         query=query,
                         limit=limit,
-                        tenant_id=self.tenant_id
                     )
             else:
                 results = await weaviate_client.search_similar(
                     self.collection_name,
                     query=query,
                     limit=limit,
-                    tenant_id=self.tenant_id
                 )
             
             # Formatear resultados para que coincidan con la estructura esperada por los tests
@@ -639,7 +634,6 @@ Texto:
         try:
             logger.info("📊 Fetching search analytics from Elasticsearch")
             analytics = await elasticsearch_client.get_analytics(
-                tenant_id=self.tenant_id,
                 date_from=date_from,
                 date_to=date_to
             )
