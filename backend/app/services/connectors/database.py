@@ -305,7 +305,7 @@ class DatabaseAdapter(ConnectorAdapter):
             return self._create_unified_document(
                 external_id=external_id,
                 filename=filename,
-                owner_id=self._owner_id or self.tenant_id,
+                owner_id=self._owner_id,
                 title=filename,
                 mime_type=mime_type,
                 size_bytes=size_bytes or 0,

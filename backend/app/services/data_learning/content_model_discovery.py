@@ -539,7 +539,6 @@ class ContentModelDiscoveryService:
             # Create new
             content_model = ConnectorContentModel(
                 connector_id=connector_id,
-                tenant_id=connector.tenant_id,
                 content_types=raw_model.get("content_types", {}),
                 aspects=raw_model.get("aspects", {}),
                 property_definitions=raw_model.get("property_definitions"),

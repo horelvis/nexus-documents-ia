@@ -62,7 +62,7 @@ class WebSocketManager:
         for ws in dead:
             connections.discard(ws)
 
-    async def broadcast_to_tenant(self, tenant_id: str, data: dict):
+    async def broadcast_to_all(self, data: dict):
         """Broadcast to all connected users (used for system notifications)."""
         for user_id, connections in self._connections.items():
             dead = set()
@@ -98,10 +98,7 @@ class WebSocketManager:
 
                     if user_id == "system":
                         # Broadcast to all connected users
-                        await self.broadcast_to_tenant(
-                            notification.get("tenant_id", ""),
-                            notification,
-                        )
+                        await self.broadcast_to_all(notification)
                     else:
                         await self.send_to_user(user_id, notification)
 

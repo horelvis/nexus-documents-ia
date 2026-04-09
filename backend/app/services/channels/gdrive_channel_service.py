@@ -428,10 +428,8 @@ class GoogleDriveChannelService:
             Weaviate object UUID, or None if failed
         """
         try:
-            # Build collection name following WeaviateService convention: nexus_{tenant_id}_documents
-            # Must match get_tenant_collection_name() in weaviate-service/app/core/security.py
-            tenant_str = str(channel.tenant_id).replace("-", "_")
-            collection_name = f"nexus_{tenant_str}_documents"
+            # Single-tenant: use the unified Nouxcube_documents collection.
+            collection_name = "Nouxcube_documents"
             weaviate_url = f"http://weaviate-service:8007/weaviate/collections/{collection_name}/documents"
 
             # Service-to-service auth uses X-API-Key
@@ -447,7 +445,6 @@ class GoogleDriveChannelService:
                     json={
                         "title": file_name,
                         "content": content,
-                        "tenant_id": str(channel.tenant_id),
                         "document_type": "google_drive",
                         "metadata": {
                             "external_id": document.external_id,

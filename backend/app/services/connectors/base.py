@@ -60,7 +60,6 @@ class ConnectorAdapter(ABC):
         self.connector = connector
         self.config = config
         self.connector_id = connector.id
-        self.tenant_id = connector.tenant_id
 
     @abstractmethod
     async def list_documents(
@@ -238,7 +237,6 @@ class ConnectorAdapter(ABC):
             connector_type=self.connector_type,
             external_id=external_id,
             filename=filename,
-            tenant_id=self.tenant_id,
             owner_id=owner_id,
             title=kwargs.get("title", filename),
             **{k: v for k, v in kwargs.items() if k != "title"},

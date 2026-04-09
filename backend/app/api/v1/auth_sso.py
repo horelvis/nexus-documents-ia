@@ -23,7 +23,7 @@ from app.db.async_database import get_async_db
 from app.core.auth.factory import AuthProviderFactory
 from app.core.auth.base import AuthProviderError
 from app.core.auth.exceptions import TokenExpiredError, TokenInvalidError
-from app.db.models import User, Tenant
+from app.db.models import User
 from app.core.config import settings
 from app.core.features import Feature, FeatureFlags
 
@@ -41,7 +41,6 @@ class SSOUserResponse(BaseModel):
     id: str
     email: str
     full_name: Optional[str]
-    tenant_id: str
     is_active: bool
     onboarding_completed: bool
     is_new_user: bool = False
@@ -92,20 +91,10 @@ class TokenRefreshResponse(BaseModel):
     expires_in: int = 3600
 
 
-async def _get_default_tenant(db: AsyncSession) -> Optional[Tenant]:
-    """
-    Get the default tenant for on-premise deployment.
-    In single-tenant mode, return the only tenant.
-    """
-    result = await db.execute(select(Tenant).limit(1))
-    return result.scalar_one_or_none()
-
-
 @router.get("/login-url", response_model=LoginURLResponse)
 async def get_login_url(
     request: Request,
     db: AsyncSession = Depends(get_async_db),
-    tenant_id: Optional[str] = None,
 ):
     """
     Get SSO login URL for the configured provider.
@@ -115,7 +104,7 @@ async def get_login_url(
     """
     try:
         # Get the auth provider for the tenant (or default)
-        provider = await AuthProviderFactory.get_for_tenant(tenant_id, db)
+        provider = await AuthProviderFactory.get_default()
 
         # Build redirect URI from request
         origin = request.headers.get("origin") or str(request.base_url).rstrip("/")
@@ -151,7 +140,6 @@ async def get_login_url(
 async def handle_callback(
     callback: TokenCallbackRequest,
     db: AsyncSession = Depends(get_async_db),
-    tenant_id: Optional[str] = None,
 ):
     """
     Handle OAuth callback and exchange code for tokens.
@@ -161,7 +149,7 @@ async def handle_callback(
     """
     try:
         # Get the auth provider
-        provider = await AuthProviderFactory.get_for_tenant(tenant_id, db)
+        provider = await AuthProviderFactory.get_default()
 
         # Check if provider supports code exchange
         if not hasattr(provider, "exchange_code"):
@@ -205,7 +193,6 @@ async def handle_callback(
 async def refresh_tokens(
     refresh_req: TokenRefreshRequest,
     db: AsyncSession = Depends(get_async_db),
-    tenant_id: Optional[str] = None,
 ):
     """
     Refresh access token using refresh token.
@@ -214,7 +201,7 @@ async def refresh_tokens(
     """
     try:
         # Get the auth provider
-        provider = await AuthProviderFactory.get_for_tenant(tenant_id, db)
+        provider = await AuthProviderFactory.get_default()
 
         # Check if provider supports token refresh
         if not provider.supports_token_refresh:
@@ -266,7 +253,6 @@ async def refresh_tokens(
 async def get_logout_url(
     request: Request,
     db: AsyncSession = Depends(get_async_db),
-    tenant_id: Optional[str] = None,
 ):
     """
     Get SSO logout URL.
@@ -276,7 +262,7 @@ async def get_logout_url(
     """
     try:
         # Get the auth provider
-        provider = await AuthProviderFactory.get_for_tenant(tenant_id, db)
+        provider = await AuthProviderFactory.get_default()
 
         # Build redirect URI for post-logout redirect
         origin = request.headers.get("origin") or str(request.base_url).rstrip("/")
@@ -302,7 +288,6 @@ async def get_logout_url(
 @router.get("/provider-info")
 async def get_provider_info(
     db: AsyncSession = Depends(get_async_db),
-    tenant_id: Optional[str] = None,
 ):
     """
     Get information about the configured SSO provider.
@@ -310,7 +295,7 @@ async def get_provider_info(
     Returns provider type and capabilities.
     """
     try:
-        provider = await AuthProviderFactory.get_for_tenant(tenant_id, db)
+        provider = await AuthProviderFactory.get_default()
 
         return {
             "provider_type": provider.provider_type.value,
@@ -360,7 +345,7 @@ async def sso_login(
 
     # 2. Get auth provider and validate token
     try:
-        provider = await AuthProviderFactory.get_for_tenant(None, db)
+        provider = await AuthProviderFactory.get_default()
 
         # Validate the access token and get user info
         # Check for verify_token first (OIDC provider uses this)
@@ -477,14 +462,6 @@ async def sso_login(
         # JIT Provisioning - Create new user
         is_new_user = True
 
-        # Get default tenant for on-premise (single tenant mode)
-        tenant = await _get_default_tenant(db)
-        if not tenant:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="No tenant configured. Contact administrator.",
-            )
-
         # Create new user
         from uuid import uuid4
         import secrets
@@ -499,7 +476,6 @@ async def sso_login(
             email=email,
             hashed_password=random_password_hash,  # Required by DB, but unused for SSO
             full_name=full_name if full_name else email.split("@")[0],
-            tenant_id=tenant.id,
             sso_external_id=sso_external_id,
             sso_provider=provider.provider_type.value,
             sso_groups=groups,
@@ -527,7 +503,6 @@ async def sso_login(
         id=str(user.id),
         email=user.email,
         full_name=user.full_name,
-        tenant_id=str(user.tenant_id),
         is_active=user.is_active,
         onboarding_completed=user.onboarding_completed,
         is_new_user=is_new_user,

@@ -606,12 +606,12 @@ class GmailChannelService:
             Weaviate object UUID, or None if failed
         """
         try:
-            # Build collection name using channel-specific format: nexus_{tenant_id}_channel_{channel_id}
-            # This allows separate collections per information channel (Gmail, Drive, etc.)
+            # Build channel-specific collection name. In single-tenant mode the
+            # tenant prefix collapses and each information channel gets its own
+            # Weaviate collection keyed only by the channel id.
             # Must match get_channel_collection_name() in weaviate-service/app/core/security.py
-            tenant_normalized = str(channel.tenant_id).lower().replace("-", "_")
             channel_normalized = str(channel.id).lower().replace("-", "_")
-            collection_name = f"nexus_{tenant_normalized}_channel_{channel_normalized}"
+            collection_name = f"Nouxcube_channel_{channel_normalized}"
             weaviate_url = f"{settings.WEAVIATE_SERVICE_URL}/weaviate/collections/{collection_name}/documents"
 
             # Service-to-service auth uses X-API-Key
@@ -626,7 +626,6 @@ class GmailChannelService:
                     json={
                         "title": subject,
                         "content": content,
-                        "tenant_id": str(channel.tenant_id),
                         "document_type": "email",
                         "metadata": {
                             "external_id": document.external_id,

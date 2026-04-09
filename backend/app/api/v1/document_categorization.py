@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import re
 
 from app.api.async_dependencies import get_current_active_user_async
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import filter_visible_to_user
 from app.db.async_database import get_async_db
-from app.db.models import User, Document
+from app.db.models import Document
 from app.core.config import settings
 import os
 import httpx
@@ -55,22 +57,20 @@ class CategoryStats(BaseModel):
 async def categorize_documents(
     request: CategorizeRequest,
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Categorize documents using LangGraph document analysis
-    
+
     - Can categorize specific documents by ID
     - Can categorize all pending documents
     - Optionally generates tags
     - Can force recategorization of already categorized documents
     """
     try:
-        # Get documents to categorize
-        query = select(Document).filter(
-            Document.tenant_id == current_user.tenant_id,
-        )
+        # Get documents to categorize (ACL-filtered)
+        query = filter_visible_to_user(select(Document), current_user)
         
         if request.document_ids:
             # Specific documents
@@ -239,34 +239,30 @@ async def categorize_documents(
 
 @router.get("/stats", response_model=CategoryStats)
 async def get_categorization_stats(
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
-    """Get categorization statistics for the tenant"""
+    """Get categorization statistics (deployment-wide, Pattern C aggregate)."""
     try:
-        # Total documents
-        total_query = select(func.count(Document.id)).filter(
-            Document.tenant_id == current_user.tenant_id,
-        )
+        # Total documents (aggregate, no ACL filter)
+        total_query = select(func.count(Document.id))
         total_result = await db.execute(total_query)
         total_documents = total_result.scalar() or 0
-        
+
         # Categorized documents
         categorized_query = select(func.count(Document.id)).filter(
-            Document.tenant_id == current_user.tenant_id,
             Document.category.isnot(None),
             Document.category != "",
             Document.category != "general"
         )
         categorized_result = await db.execute(categorized_query)
         categorized = categorized_result.scalar() or 0
-        
+
         # By category
         category_query = select(
             Document.category,
             func.count(Document.id)
         ).filter(
-            Document.tenant_id == current_user.tenant_id,
             Document.category.isnot(None),
             Document.category != ""
         ).group_by(Document.category)
@@ -297,20 +293,18 @@ async def get_categorization_stats(
 async def schedule_batch_categorization(
     background_tasks: BackgroundTasks,
     batch_size: int = Query(50, ge=1, le=500),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Schedule batch categorization as a background task"""
     background_tasks.add_task(
         process_categorization_batch,
-        tenant_id=str(current_user.tenant_id),
-        user_id=str(current_user.id),
+        user_id=current_user.sub,
         batch_size=batch_size
     )
-    
+
     return {
         "status": "scheduled",
         "message": f"Batch categorization scheduled for up to {batch_size} documents",
-        "tenant_id": str(current_user.tenant_id)
     }
 
 # =====================================
@@ -370,12 +364,11 @@ def _generate_tags_from_extractions(
     return sorted(list(tags))[:10]
 
 async def process_categorization_batch(
-    tenant_id: str,
     user_id: str,
     batch_size: int = 50
 ):
     """Process a batch of documents for categorization (background task)"""
-    logger.info(f"Starting batch categorization for tenant {tenant_id}")
+    logger.info(f"Starting batch categorization triggered by user {user_id}")
 
     try:
         # This would be implemented with proper database session management
@@ -386,7 +379,7 @@ async def process_categorization_batch(
         # Update database
         # Send notifications if needed
 
-        logger.info(f"Completed batch categorization for tenant {tenant_id}")
+        logger.info("Completed batch categorization")
 
     except Exception as e:
         logger.error(f"Batch categorization failed: {e}")
@@ -399,31 +392,30 @@ async def process_categorization_batch(
 async def update_document_category(
     document_id: str,
     category: str,
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """Manually update document category"""
-    # Get document
-    result = await db.execute(
-        select(Document).filter(
-            Document.id == document_id,
-            Document.tenant_id == current_user.tenant_id,
-        )
+    # Get document (ACL-filtered)
+    query = filter_visible_to_user(
+        select(Document).filter(Document.id == document_id),
+        current_user,
     )
+    result = await db.execute(query)
     document = result.scalar_one_or_none()
-    
+
     if not document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found"
         )
-    
+
     # Update category
     document.category = category
     document.document_metadata = document.document_metadata or {}
     document.document_metadata["manual_categorization"] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "user_id": str(current_user.id)
+        "user_id": current_user.sub
     }
     
     await db.commit()
@@ -438,31 +430,30 @@ async def update_document_category(
 async def update_document_tags(
     document_id: str,
     tags: List[str],
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """Manually update document tags"""
-    # Get document
-    result = await db.execute(
-        select(Document).filter(
-            Document.id == document_id,
-            Document.tenant_id == current_user.tenant_id,
-        )
+    # Get document (ACL-filtered)
+    query = filter_visible_to_user(
+        select(Document).filter(Document.id == document_id),
+        current_user,
     )
+    result = await db.execute(query)
     document = result.scalar_one_or_none()
-    
+
     if not document:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found"
         )
-    
+
     # Update tags
     document.tags_array = tags
     document.document_metadata = document.document_metadata or {}
     document.document_metadata["manual_tagging"] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "user_id": str(current_user.id)
+        "user_id": current_user.sub
     }
     
     await db.commit()

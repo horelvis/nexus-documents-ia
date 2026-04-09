@@ -189,7 +189,6 @@ class MetadataIntelligenceService:
             else:
                 mapping = LearnedPropertyMapping(
                     connector_id=connector_id,
-                    tenant_id=connector.tenant_id,
                     source_property=mapping_data["source_property"],
                     source_type=mapping_data.get("source_type"),
                     target_field=mapping_data["target_field"],
@@ -304,7 +303,6 @@ class MetadataIntelligenceService:
     async def update_weights_from_usage(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
     ) -> int:
         """
         Update property weights based on user search patterns.
@@ -314,7 +312,6 @@ class MetadataIntelligenceService:
 
         Args:
             connector_id: UUID of the connector
-            tenant_id: UUID of the tenant
 
         Returns:
             Number of mappings updated
@@ -322,7 +319,6 @@ class MetadataIntelligenceService:
         # Get interaction history for successful searches
         result = await self.db.execute(
             select(UserInteractionHistory)
-            .where(UserInteractionHistory.tenant_id == tenant_id)
             .where(UserInteractionHistory.interaction_type == "query")
             .where(UserInteractionHistory.results_clicked > 0)
             .order_by(UserInteractionHistory.created_at.desc())
