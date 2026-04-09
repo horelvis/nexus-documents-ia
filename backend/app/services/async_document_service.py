@@ -16,7 +16,9 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.orm import selectinload, joinedload
 
 from app.core.config import settings
-from app.db.models import Document, IndexedDocument, Tag, Tenant, DocumentView, FolderMarker
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import filter_visible_to_user, EVERYONE_ROLE
+from app.db.models import Document, IndexedDocument, Tag, DocumentView, FolderMarker
 from app.db.async_database import AsyncSessionLocal
 from app.schemas.enums import IndexingStatus
 from app.services.async_storage_factory import AsyncStorageServiceFactory
@@ -28,23 +30,24 @@ logger = logging.getLogger(__name__)
 
 
 class AsyncDocumentService:
-    """Async version of Document Service"""
-    
-    def __init__(self, tenant_id: str = None, user_id: str = None):
+    """Async version of Document Service (single-tenant, role-based ACL)."""
+
+    def __init__(self, user: Optional[UserProfile] = None):
         """
-        Initialize async document service
-        Note: The async init pattern requires using a factory method
+        Initialize async document service.
+
+        Note: The async init pattern requires using a factory method (`create`).
         """
-        self.tenant_id = tenant_id
-        self.user_id = user_id
+        self.user = user
+        self.user_id: Optional[str] = user.sub if user else None
+        self.user_roles: List[str] = list(user.roles) if user else []
         self.storage_service = None
-        self.collection_name = None  # Weaviate collection name
+        self.collection_name: Optional[str] = None  # Weaviate collection name
         self._initialized = False
 
     async def _call_cag_query(
         self,
         query: str,
-        tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         timeout: float = 45.0
@@ -55,17 +58,15 @@ class AsyncDocumentService:
         """
         import httpx
 
-        tenant = tenant_id or self.tenant_id or settings.DEFAULT_TENANT
         user = user_id or self.user_id or "system"
         payload = {
             "query": query,
-            "tenant_id": str(tenant),
             "user_id": str(user),
             "context": context or {}
         }
         headers = {
             "X-API-Key": settings.MICROSERVICES_API_KEY,
-            "X-Tenant-ID": str(tenant)
+            "X-User-Roles": ",".join(self.user_roles),
         }
 
         try:
@@ -82,8 +83,7 @@ class AsyncDocumentService:
                     return answer.strip()
         except Exception as exc:
             logger.warning(
-                "CAG query failed | tenant=%s user=%s error=%s",
-                tenant,
+                "CAG query failed | user=%s error=%s",
                 user,
                 exc
             )
@@ -131,62 +131,32 @@ class AsyncDocumentService:
         return None
     
     @classmethod
-    async def create(cls, tenant_id: str = None, user_id: str = None, db: AsyncSession = None):
+    async def create(cls, user: Optional[UserProfile] = None, db: AsyncSession = None):
         """
-        Factory method to create and initialize AsyncDocumentService
+        Factory method to create and initialize AsyncDocumentService.
         """
-        service = cls(tenant_id, user_id)
+        service = cls(user)
         await service._initialize(db)
         return service
-    
+
     async def _initialize(self, db: AsyncSession = None):
-        """Initialize the service with async operations"""
-        # If tenant_id is None or "default", get the real UUID
-        if not self.tenant_id or self.tenant_id == settings.DEFAULT_TENANT:
-            if db:
-                # Use provided session
-                stmt = select(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT)
-                result = await db.execute(stmt)
-                default_tenant = result.scalar_one_or_none()
-                
-                if default_tenant:
-                    self.tenant_id = str(default_tenant.id)
-                else:
-                    raise ValueError(f"Default tenant '{settings.DEFAULT_TENANT}' not found in database")
-                
-                # Create storage service using async factory
-                self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
-                    self.tenant_id, self.user_id, db
-                )
-            else:
-                # Create new session only if not provided
-                async with AsyncSessionLocal() as new_db:
-                    stmt = select(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT)
-                    result = await new_db.execute(stmt)
-                    default_tenant = result.scalar_one_or_none()
-                    
-                    if default_tenant:
-                        self.tenant_id = str(default_tenant.id)
-                    else:
-                        raise ValueError(f"Default tenant '{settings.DEFAULT_TENANT}' not found in database")
-                    
-                    # Create storage service using async factory
-                    self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
-                        self.tenant_id, self.user_id, new_db
-                    )
+        """Initialize the service with async operations."""
+        # Single-tenant deployment: storage factory still takes a legacy
+        # positional bucket-scope string (slated for Plan 2 storage cleanup).
+        storage_scope = settings.DEFAULT_TENANT_ID
+
+        if db:
+            self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
+                storage_scope, self.user_id, db
+            )
         else:
-            if db:
+            async with AsyncSessionLocal() as new_db:
                 self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
-                    self.tenant_id, self.user_id, db
+                    storage_scope, self.user_id, new_db
                 )
-            else:
-                async with AsyncSessionLocal() as new_db:
-                    self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
-                        self.tenant_id, self.user_id, new_db
-                    )
-        
-        self.collection_name = f"Nouxcube_{self.tenant_id.replace('-', '_')}_documents"
-        # Weaviate service URL for IndexingPipeline
+
+        # Single shared Weaviate collection for the deployment.
+        self.collection_name = "Nouxcube_documents"
         self.weaviate_service_url = getattr(settings, 'WEAVIATE_SERVICE_URL', 'http://weaviate-service:8000')
         self.microservices_api_key = getattr(settings, 'MICROSERVICES_API_KEY', '')
 
@@ -221,7 +191,7 @@ class AsyncDocumentService:
         headers = {
             "Content-Type": "application/json",
             "X-API-Key": self.microservices_api_key,
-            "X-Tenant-ID": str(self.tenant_id),
+            "X-User-Roles": ",".join(self.user_roles),
         }
 
         payload = {
@@ -229,7 +199,6 @@ class AsyncDocumentService:
             "file_bytes_base64": file_base64,
             "filename": filename,
             "mime_type": mime_type,
-            "tenant_id": str(self.tenant_id),
             "owner_id": str(self.user_id) if self.user_id else "",
             "metadata": metadata or {},
             "acl": {},  # ACL will be set later
@@ -295,13 +264,12 @@ class AsyncDocumentService:
         headers = {
             "Content-Type": "application/json",
             "X-API-Key": self.microservices_api_key,
-            "X-Tenant-ID": str(self.tenant_id),
+            "X-User-Roles": ",".join(self.user_roles),
         }
 
         payload = {
             "query": query,
             "limit": limit,
-            "tenant_id": str(self.tenant_id),
             "user_id": user_id,
             "user_role_ids": user_role_ids or [],
             "is_admin": is_admin,
@@ -469,7 +437,6 @@ class AsyncDocumentService:
                             "tags": res.get("tags", []),
                             "created_at": res.get("created_at"),
                             "updated_at": res.get("updated_at"),
-                            "tenant_id": res.get("tenant_id"),
                             "search_score": res.get("similarity_score", 0.0),
                             "source": "weaviate",  # Indicate source for frontend
                         }
@@ -487,10 +454,22 @@ class AsyncDocumentService:
             # SQL search when no search term or Weaviate fails
             logger.info("Using SQL-based document search (Document + IndexedDocument)")
 
-            # Base query with ACL filter for Document table
-            base_filters = [Document.tenant_id == self.tenant_id]
-            # Base filters for IndexedDocument table (uses UUID for tenant_id)
-            indexed_base_filters = [IndexedDocument.tenant_id == uuid.UUID(self.tenant_id)]
+            # Role-based ACL filters (applied via clauses below).
+            # Document: use shared helper.
+            # IndexedDocument: inline role overlap clause (helper is Document-only).
+            base_filters = []
+            if self.user:
+                from app.core.auth.acl import build_role_filter_clause
+                base_filters.append(build_role_filter_clause(self.user))
+
+            indexed_base_filters = [IndexedDocument.roles.contains([EVERYONE_ROLE])]
+            if self.user_roles:
+                indexed_base_filters = [
+                    or_(
+                        IndexedDocument.roles.contains([EVERYONE_ROLE]),
+                        IndexedDocument.roles.overlap(list(self.user_roles)),
+                    )
+                ]
 
             # ACL: Filter by accessible document IDs
             if document_ids is not None:
@@ -543,7 +522,6 @@ class AsyncDocumentService:
                             Document.folder_path,
                             func.count(Document.id).label("document_count")
                         )
-                        .where(Document.tenant_id == self.tenant_id)
                         .where(Document.folder_path.isnot(None))
                         .where(Document.folder_path.startswith(current_folder + "/"))
                         .group_by(Document.folder_path)
@@ -555,12 +533,13 @@ class AsyncDocumentService:
                             Document.folder_path,
                             func.count(Document.id).label("document_count")
                         )
-                        .where(Document.tenant_id == self.tenant_id)
                         .where(Document.folder_path.isnot(None))
                         .where(Document.folder_path != "")
                         .where(Document.folder_path != "/")
                         .group_by(Document.folder_path)
                     )
+                if self.user:
+                    subfolder_query = filter_visible_to_user(subfolder_query, self.user)
 
                 # === IndexedDocument table subfolders ===
                 if current_folder:
@@ -569,7 +548,6 @@ class AsyncDocumentService:
                             IndexedDocument.external_path,
                             func.count(IndexedDocument.id).label("document_count")
                         )
-                        .where(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))
                         .where(IndexedDocument.external_path.isnot(None))
                         .where(IndexedDocument.external_path.startswith(current_folder + "/"))
                         .group_by(IndexedDocument.external_path)
@@ -580,12 +558,13 @@ class AsyncDocumentService:
                             IndexedDocument.external_path,
                             func.count(IndexedDocument.id).label("document_count")
                         )
-                        .where(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))
                         .where(IndexedDocument.external_path.isnot(None))
                         .where(IndexedDocument.external_path != "")
                         .where(IndexedDocument.external_path != "/")
                         .group_by(IndexedDocument.external_path)
                     )
+                for _f in indexed_base_filters:
+                    indexed_subfolder_query = indexed_subfolder_query.where(_f)
 
                 # ACL: Filter subfolders by accessible document IDs
                 if document_ids is not None:
@@ -622,23 +601,25 @@ class AsyncDocumentService:
                         child_path = f"{current_folder}/{immediate_child}" if current_folder else f"/{immediate_child}"
 
                         # Count documents in this subfolder (recursively) from BOTH tables
-                        # Document table count
+                        # Document table count (ACL filtered)
                         doc_count_query = (
                             select(func.count(Document.id))
-                            .where(Document.tenant_id == self.tenant_id)
                             .where(Document.folder_path.startswith(child_path))
                         )
+                        if self.user:
+                            doc_count_query = filter_visible_to_user(doc_count_query, self.user)
                         if document_ids is not None:
                             doc_count_query = doc_count_query.where(Document.id.in_(document_ids))
                         doc_count_result = await db.execute(doc_count_query)
                         doc_count = doc_count_result.scalar() or 0
 
-                        # IndexedDocument table count
+                        # IndexedDocument table count (role-overlap)
                         indexed_count_query = (
                             select(func.count(IndexedDocument.id))
-                            .where(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))
                             .where(IndexedDocument.external_path.startswith(child_path))
                         )
+                        for _f in indexed_base_filters:
+                            indexed_count_query = indexed_count_query.where(_f)
                         if document_ids is not None:
                             indexed_count_query = indexed_count_query.where(IndexedDocument.id.in_(document_ids))
                         indexed_count_result = await db.execute(indexed_count_query)
@@ -669,14 +650,12 @@ class AsyncDocumentService:
                     # Find markers that start with current_folder/ but are one level deeper
                     marker_query = (
                         select(FolderMarker.folder_path, FolderMarker.created_at)
-                        .where(FolderMarker.tenant_id == self.tenant_id)
                         .where(FolderMarker.folder_path.startswith(current_folder + "/"))
                     )
                 else:
                     # Root: find all top-level folder markers
                     marker_query = (
                         select(FolderMarker.folder_path, FolderMarker.created_at)
-                        .where(FolderMarker.tenant_id == self.tenant_id)
                         .where(FolderMarker.folder_path != "")
                         .where(FolderMarker.folder_path != "/")
                     )
@@ -941,7 +920,8 @@ class AsyncDocumentService:
         cliente: Optional[str] = None,
         periodo: Optional[str] = None,
         tipo_documento: Optional[str] = None,
-        folder_path: Optional[str] = None
+        folder_path: Optional[str] = None,
+        roles: Optional[List[str]] = None,
     ) -> Document:
         """
         Upload a new document.
@@ -997,7 +977,7 @@ class AsyncDocumentService:
                 mime_type=file.content_type,
                 category=category,
                 document_metadata=document_metadata if document_metadata else None,
-                tenant_id=self.tenant_id,
+                roles=roles or [EVERYONE_ROLE],
                 created_by=self.user_id,
                 indexed=IndexingStatus.PROCESSING,  # Set initial status
                 auto_classified=False,  # Manual upload is never auto-classified
@@ -1022,21 +1002,14 @@ class AsyncDocumentService:
             if tags:
                 for tag_name in tags:
                     # Check if tag exists
-                    stmt = select(Tag).filter(
-                        Tag.name == tag_name,
-                        Tag.tenant_id == self.tenant_id
-                    )
+                    stmt = select(Tag).filter(Tag.name == tag_name)
                     result = await db.execute(stmt)
                     tag = result.scalar_one_or_none()
-                    
+
                     if not tag:
-                        tag = Tag(
-                            id=uuid.uuid4(),
-                            name=tag_name,
-                            tenant_id=self.tenant_id
-                        )
+                        tag = Tag(name=tag_name)
                         db.add(tag)
-                    
+
                     doc.tags.append(tag)
             
             await db.commit()
@@ -1056,8 +1029,7 @@ class AsyncDocumentService:
             doc_info = {
                 "id": str(doc.id),
                 "filename": doc.filename,
-                "tenant_id": self.tenant_id,
-                "user_id": self.user_id
+                "user_id": self.user_id,
             }
             task = asyncio.create_task(self._process_document_async(doc_info, contents, file_ext))
             # Add error handler for the background task
@@ -1177,7 +1149,6 @@ class AsyncDocumentService:
                 category = await self._auto_categorize_document(
                     doc_id,
                     text_content=text_preview,
-                    tenant_id=self.tenant_id,
                     user_id=self.user_id,
                     source="auto_ingest",
                 )
@@ -1221,13 +1192,12 @@ class AsyncDocumentService:
         Note: This method only searches the Document table (SaaS uploads).
         For connector documents, use get_indexed_document() or get_any_document().
         """
-        stmt = select(Document).filter(
-            Document.id == doc_id,
-            Document.tenant_id == self.tenant_id
-        ).options(
+        stmt = select(Document).filter(Document.id == doc_id).options(
             selectinload(Document.tags),
             selectinload(Document.creator)
         )
+        if self.user:
+            stmt = filter_visible_to_user(stmt, self.user)
 
         result = await db.execute(stmt)
         doc = result.scalar_one_or_none()
@@ -1239,10 +1209,16 @@ class AsyncDocumentService:
 
     async def get_indexed_document(self, db: AsyncSession, doc_id: str) -> IndexedDocument:
         """Get single document by ID from IndexedDocument table (connector documents)."""
-        stmt = select(IndexedDocument).filter(
-            IndexedDocument.id == uuid.UUID(doc_id),
-            IndexedDocument.tenant_id == uuid.UUID(self.tenant_id)
-        )
+        stmt = select(IndexedDocument).filter(IndexedDocument.id == uuid.UUID(doc_id))
+        if self.user_roles:
+            stmt = stmt.filter(
+                or_(
+                    IndexedDocument.roles.contains([EVERYONE_ROLE]),
+                    IndexedDocument.roles.overlap(list(self.user_roles)),
+                )
+            )
+        else:
+            stmt = stmt.filter(IndexedDocument.roles.contains([EVERYONE_ROLE]))
 
         result = await db.execute(stmt)
         doc = result.scalar_one_or_none()
@@ -1262,13 +1238,12 @@ class AsyncDocumentService:
             Dict with unified document format including 'source' field ('upload' or 'connector')
         """
         # First try Document table
-        doc_stmt = select(Document).filter(
-            Document.id == doc_id,
-            Document.tenant_id == self.tenant_id
-        ).options(
+        doc_stmt = select(Document).filter(Document.id == doc_id).options(
             selectinload(Document.tags),
             selectinload(Document.creator)
         )
+        if self.user:
+            doc_stmt = filter_visible_to_user(doc_stmt, self.user)
 
         doc_result = await db.execute(doc_stmt)
         doc = doc_result.scalar_one_or_none()
@@ -1281,9 +1256,17 @@ class AsyncDocumentService:
         # Try IndexedDocument table
         try:
             indexed_stmt = select(IndexedDocument).filter(
-                IndexedDocument.id == uuid.UUID(doc_id),
-                IndexedDocument.tenant_id == uuid.UUID(self.tenant_id)
+                IndexedDocument.id == uuid.UUID(doc_id)
             )
+            if self.user_roles:
+                indexed_stmt = indexed_stmt.filter(
+                    or_(
+                        IndexedDocument.roles.contains([EVERYONE_ROLE]),
+                        IndexedDocument.roles.overlap(list(self.user_roles)),
+                    )
+                )
+            else:
+                indexed_stmt = indexed_stmt.filter(IndexedDocument.roles.contains([EVERYONE_ROLE]))
 
             indexed_result = await db.execute(indexed_stmt)
             indexed_doc = indexed_result.scalar_one_or_none()
@@ -1326,7 +1309,6 @@ class AsyncDocumentService:
         doc_id: str,
         text_content: Optional[str] = None,
         *,
-        tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
         source: str = "auto",
         db: Optional[AsyncSession] = None,
@@ -1412,25 +1394,15 @@ class AsyncDocumentService:
 
         Returns the assigned folder path, or None if classification failed.
         """
+        # NOTE: In the multi-tenant era, auto_classification config lived on the
+        # Tenant row. Post-refactor the Tenant model is gone; until these knobs
+        # are moved into `settings`, we hardcode defaults (k=5, min_conf=0.6)
+        # and always attempt classification.
+        auto_classification_k = 5
+        auto_classification_min_confidence = 0.6
+
         async with AsyncSessionLocal() as session:
             try:
-                # Get tenant settings
-                stmt = select(Tenant).filter(Tenant.id == self.tenant_id)
-                result = await session.execute(stmt)
-                tenant = result.scalar_one_or_none()
-
-                if not tenant:
-                    logger.warning(f"Tenant {self.tenant_id} not found for folder classification")
-                    return None
-
-                # Check if auto-classification is enabled
-                if not tenant.auto_classification_enabled:
-                    logger.info(
-                        f"📁 Folder classification DISABLED for tenant {self.tenant_id}. "
-                        f"Document {doc_id} stays in /Sin Clasificar (Learn-First mode)"
-                    )
-                    return "/Sin Clasificar"
-
                 # Get document
                 stmt = select(Document).filter(Document.id == doc_id)
                 result = await session.execute(stmt)
@@ -1451,17 +1423,16 @@ class AsyncDocumentService:
                 # Run RAG + LLM classification
                 logger.info(f"🔍 Running RAG+LLM folder classification for document {doc_id}")
                 classification = await classify_document_folder(
-                    tenant_id=self.tenant_id,
                     documento=documento,
-                    k=tenant.auto_classification_k,
-                    min_confidence=tenant.auto_classification_min_confidence,
+                    k=auto_classification_k,
+                    min_confidence=auto_classification_min_confidence,
                 )
 
                 # Check confidence threshold
-                if classification.confianza < tenant.auto_classification_min_confidence:
+                if classification.confianza < auto_classification_min_confidence:
                     logger.info(
                         f"📁 Confidence ({classification.confianza:.2f}) below threshold "
-                        f"({tenant.auto_classification_min_confidence}). "
+                        f"({auto_classification_min_confidence}). "
                         f"Document {doc_id} goes to /Sin Clasificar"
                     )
                     assigned_folder = "/Sin Clasificar"
@@ -1494,7 +1465,6 @@ class AsyncDocumentService:
         doc_id: str,
         *,
         content_preview: Optional[str],
-        tenant_id: str,
         user_id: str,
         source: str = "manual",
     ) -> Dict[str, Any]:
@@ -1502,7 +1472,6 @@ class AsyncDocumentService:
         category = await self._auto_categorize_document(
             doc_id,
             text_content=content_preview,
-            tenant_id=tenant_id,
             user_id=user_id,
             source=source,
             db=db,
@@ -1550,7 +1519,6 @@ class AsyncDocumentService:
                     "Genera un resumen ejecutivo (máximo 200 palabras) del siguiente contenido.\n"
                     f"Documento: {document.filename}\n\n{source_text}"
                 ),
-                tenant_id=self.tenant_id,
                 user_id=self.user_id or str(document.created_by),
                 context={"task": "document_summary", "document_id": str(document.id)},
                 timeout=30.0,
@@ -1577,29 +1545,25 @@ class AsyncDocumentService:
     async def add_tag(self, db: AsyncSession, doc_id: str, tag_name: str) -> Dict[str, Any]:
         """Add a tag to a document"""
         try:
-            # Get document
-            stmt = select(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
-            ).options(selectinload(Document.tags))
-            
+            # Get document (ACL-filtered)
+            stmt = select(Document).filter(Document.id == doc_id).options(selectinload(Document.tags))
+            if self.user:
+                stmt = filter_visible_to_user(stmt, self.user)
+
             result = await db.execute(stmt)
             document = result.scalar_one_or_none()
-            
+
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
-            
+
             # Check if tag already exists
-            tag_stmt = select(Tag).filter(
-                Tag.name == tag_name,
-                Tag.tenant_id == self.tenant_id
-            )
+            tag_stmt = select(Tag).filter(Tag.name == tag_name)
             tag_result = await db.execute(tag_stmt)
             tag = tag_result.scalar_one_or_none()
-            
+
             if not tag:
                 # Create new tag
-                tag = Tag(name=tag_name, tenant_id=self.tenant_id)
+                tag = Tag(name=tag_name)
                 db.add(tag)
                 await db.flush()
             
@@ -1624,11 +1588,10 @@ class AsyncDocumentService:
     async def remove_tag(self, db: AsyncSession, doc_id: str, tag_name: str) -> Dict[str, Any]:
         """Remove a tag from a document"""
         try:
-            # Get document
-            stmt = select(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
-            ).options(selectinload(Document.tags))
+            # Get document (ACL-filtered)
+            stmt = select(Document).filter(Document.id == doc_id).options(selectinload(Document.tags))
+            if self.user:
+                stmt = filter_visible_to_user(stmt, self.user)
             
             result = await db.execute(stmt)
             document = result.scalar_one_or_none()
@@ -1684,11 +1647,10 @@ class AsyncDocumentService:
         """
         try:
             async with AsyncSessionLocal() as db:
-                # Check if document exists in Document table
-                doc_stmt = select(Document).filter(
-                    Document.id == document_id,
-                    Document.tenant_id == self.tenant_id
-                )
+                # Check if document exists in Document table (ACL-filtered)
+                doc_stmt = select(Document).filter(Document.id == document_id)
+                if self.user:
+                    doc_stmt = filter_visible_to_user(doc_stmt, self.user)
                 doc_result = await db.execute(doc_stmt)
                 document = doc_result.scalar_one_or_none()
 
@@ -1696,9 +1658,19 @@ class AsyncDocumentService:
                 if not document:
                     try:
                         indexed_stmt = select(IndexedDocument).filter(
-                            IndexedDocument.id == uuid.UUID(document_id),
-                            IndexedDocument.tenant_id == uuid.UUID(self.tenant_id)
+                            IndexedDocument.id == uuid.UUID(document_id)
                         )
+                        if self.user_roles:
+                            indexed_stmt = indexed_stmt.filter(
+                                or_(
+                                    IndexedDocument.roles.contains([EVERYONE_ROLE]),
+                                    IndexedDocument.roles.overlap(list(self.user_roles)),
+                                )
+                            )
+                        else:
+                            indexed_stmt = indexed_stmt.filter(
+                                IndexedDocument.roles.contains([EVERYONE_ROLE])
+                            )
                         indexed_result = await db.execute(indexed_stmt)
                         indexed_doc = indexed_result.scalar_one_or_none()
 
@@ -1714,7 +1686,6 @@ class AsyncDocumentService:
                 view_record = DocumentView(
                     user_id=self.user_id,
                     document_id=document_id,
-                    tenant_id=self.tenant_id,
                     viewed_at=func.now(),
                     view_duration_seconds=view_duration_seconds,
                     scroll_percentage=scroll_percentage
@@ -1741,16 +1712,16 @@ class AsyncDocumentService:
         """Get recently viewed documents for the user or tenant"""
         try:
             async with AsyncSessionLocal() as db:
-                # Base query with Document and DocumentView joined
+                # Base query with Document and DocumentView joined (ACL-filtered)
                 query = select(
                     Document,
                     func.max(DocumentView.viewed_at).label("last_viewed_at")
                 ).join(
                     DocumentView, Document.id == DocumentView.document_id
-                ).filter(
-                    Document.tenant_id == self.tenant_id
                 )
-                
+                if self.user:
+                    query = filter_visible_to_user(query, self.user)
+
                 # Filter by user if specified
                 if user_specific and self.user_id:
                     query = query.filter(DocumentView.user_id == self.user_id)
@@ -1779,7 +1750,6 @@ class AsyncDocumentService:
                         "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
                         "indexed": doc.indexed,
                         "category": doc.category,
-                        "tenant_id": str(doc.tenant_id),
                         "created_by": str(doc.created_by)
                     })
                 
@@ -1802,7 +1772,6 @@ class AsyncDocumentService:
                     f"Archivo: {filename}\n"
                     f"Contenido:\n{text_for_summary}"
                 ),
-                tenant_id=self.tenant_id or settings.DEFAULT_TENANT,
                 user_id=self.user_id or "system",
                 context={
                     "task": "document_summary",

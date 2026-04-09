@@ -46,7 +46,7 @@ from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
 from app.core.auth.acl import require_role
 from app.db.async_database import get_async_db
-from app.db.models import User, Connector, UserConnectorAuth, UserDocumentSync
+from app.db.models import Connector, UserConnectorAuth, UserDocumentSync
 from app.schemas.connector import (
     ConnectorCreate,
     ConnectorUpdate,
@@ -76,18 +76,6 @@ def _redact_sensitive_config(config: dict, connector_type: str) -> dict:
         else:
             redacted[key] = value
     return redacted
-
-
-async def _check_admin_permission(user: User, tenant_id: str) -> None:
-    """Verify user has admin permissions for the tenant."""
-    # For now, check if user is the tenant creator or has admin role
-    # This will be enhanced with proper RBAC later
-    if str(user.tenant_id) != tenant_id:
-        raise HTTPException(status_code=403, detail="Not authorized for this tenant")
-
-    # TODO: Check user has admin role in tenant
-    # For now, allow any authenticated user in the tenant to manage connectors
-    # In production, this should check user.roles for admin permission
 
 
 async def _connector_to_response(
@@ -128,7 +116,6 @@ async def _connector_to_response(
 
     return ConnectorResponse(
         id=connector.id,
-        tenant_id=connector.tenant_id,
         name=connector.name,
         description=connector.description,
         connector_type=ConnectorType(connector.connector_type),
@@ -164,17 +151,15 @@ async def list_connectors(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
-    List all connectors for the tenant (admin view).
+    List all connectors (admin view).
 
     Returns connectors with statistics on connected/syncing users.
     """
-    await _check_admin_permission(current_user, tenant_id)
-
     # Build query
-    query = select(Connector).where(Connector.tenant_id == UUID(tenant_id))
+    query = select(Connector)
 
     if connector_type:
         query = query.where(Connector.connector_type == connector_type.value)
@@ -208,19 +193,16 @@ async def list_connectors(
 async def create_connector(
     connector_data: ConnectorCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Create a new connector (admin only).
 
     After creating, users can authorize and start syncing their documents.
     """
-    await _check_admin_permission(current_user, tenant_id)
-
     # Check for duplicate name/type combination
     existing = await db.execute(
         select(Connector)
-        .where(Connector.tenant_id == UUID(tenant_id))
         .where(Connector.connector_type == connector_data.connector_type.value)
         .where(Connector.name == connector_data.name)
     )
@@ -232,7 +214,6 @@ async def create_connector(
 
     # Create connector
     connector = Connector(
-        tenant_id=UUID(tenant_id),
         name=connector_data.name,
         description=connector_data.description,
         connector_type=connector_data.connector_type.value,
@@ -242,14 +223,15 @@ async def create_connector(
         sync_interval_hours=connector_data.sync_interval_hours,
         is_active=True,
         health_status="unknown",
-        created_by_id=current_user.id,
+        created_by_id=UUID(current_user.sub),
+        default_document_roles=connector_data.default_document_roles or ["EVERYONE"],
     )
 
     db.add(connector)
     await db.commit()
     await db.refresh(connector)
 
-    logger.info(f"Created connector {connector.id} ({connector_data.connector_type}) for tenant {tenant_id}")
+    logger.info(f"Created connector {connector.id} ({connector_data.connector_type})")
 
     return await _connector_to_response(connector, db)
 
@@ -258,17 +240,13 @@ async def create_connector(
 async def get_connector(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Get details of a specific connector (admin only).
     """
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
-        select(Connector)
-        .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
+        select(Connector).where(Connector.id == connector_id)
     )
     connector = result.scalar_one_or_none()
 
@@ -283,17 +261,13 @@ async def update_connector(
     connector_id: UUID,
     connector_data: ConnectorUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Update a connector's configuration (admin only).
     """
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
-        select(Connector)
-        .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
+        select(Connector).where(Connector.id == connector_id)
     )
     connector = result.scalar_one_or_none()
 
@@ -323,7 +297,7 @@ async def update_connector(
 async def delete_connector(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Delete a connector (admin only).
@@ -334,12 +308,9 @@ async def delete_connector(
     - Stop all active syncs
     - Mark indexed documents as orphaned (cleanup separately)
     """
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -366,7 +337,7 @@ async def delete_connector(
 async def check_connector_health(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Check the health of a connector (admin only).
@@ -379,12 +350,9 @@ async def check_connector_health(
     from datetime import datetime, timezone
     from app.services.connector_health_service import get_connector_health_service
 
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -435,7 +403,7 @@ async def check_connector_health(
 async def get_connector_stats(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Get detailed statistics for a connector (admin only).
@@ -447,12 +415,9 @@ async def get_connector_stats(
     """
     from app.db.models import IndexedDocument
 
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -596,7 +561,7 @@ async def get_failed_documents(
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     error_filter: Optional[str] = Query(None, description="Filter by error message (partial match)"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     List failed documents for a connector with full details (admin only).
@@ -614,13 +579,10 @@ async def get_failed_documents(
     """
     from app.db.models import IndexedDocument
 
-    await _check_admin_permission(current_user, tenant_id)
-
     # Verify connector exists
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
     if not connector:
@@ -694,7 +656,7 @@ async def retry_failed_documents(
     document_ids: Optional[List[str]] = Body(None, description="Specific document IDs to retry, or null for all"),
     error_filter: Optional[str] = Body(None, description="Only retry documents matching this error"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Retry indexing for failed documents (admin only).
@@ -707,13 +669,10 @@ async def retry_failed_documents(
     from sqlalchemy import update as sql_update
     from app.db.models import IndexedDocument
 
-    await _check_admin_permission(current_user, tenant_id)
-
     # Verify connector exists
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
     if not connector:
@@ -782,7 +741,7 @@ async def retry_failed_documents(
 async def sync_content_model(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Discover and sync the content model (types, aspects, properties) from Alfresco.
@@ -802,12 +761,9 @@ async def sync_content_model(
     from datetime import datetime, timezone
     from app.db.models import ConnectorContentModel
 
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -852,7 +808,6 @@ async def sync_content_model(
             # Create new
             model_record = ConnectorContentModel(
                 connector_id=connector_id,
-                tenant_id=UUID(tenant_id),
                 content_types=types_dict,
                 aspects=aspects_dict,
                 property_definitions=content_model.get("properties", {}),
@@ -897,7 +852,7 @@ async def get_content_model(
     connector_id: UUID,
     include_properties: bool = Query(True, description="Include full property definitions"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Get the discovered content model for a connector.
@@ -907,12 +862,9 @@ async def get_content_model(
     """
     from app.db.models import ConnectorContentModel
 
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -962,7 +914,7 @@ async def sync_folders(
     root_node_id: str = Query("-root-", description="Root folder node ID to start from"),
     max_depth: int = Query(10, description="Maximum folder depth to crawl"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Sync folders with their properties from Alfresco.
@@ -973,12 +925,9 @@ async def sync_folders(
     Returns:
         List of folders with their properties
     """
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -1024,7 +973,7 @@ async def trigger_connector_sync(
     full_sync: bool = Query(False, description="Force full resync instead of incremental"),
     retry_failed: bool = Query(False, description="Also retry previously failed documents"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Trigger a manual sync for a connector (admin only).
@@ -1043,12 +992,9 @@ async def trigger_connector_sync(
     """
     from sqlalchemy import func, update
 
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -1175,7 +1121,7 @@ async def trigger_index_pending(
     max_documents: Optional[int] = Query(None, ge=1, description="Max documents to process"),
     retry_failed: bool = Query(False, description="Also retry previously failed documents"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Trigger indexing of pending documents for a connector (admin only).
@@ -1194,12 +1140,9 @@ async def trigger_index_pending(
     """
     from sqlalchemy import func, update
 
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -1308,7 +1251,7 @@ async def get_pending_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     List pending documents for a connector (admin only).
@@ -1318,12 +1261,9 @@ async def get_pending_documents(
     from app.db.models import IndexedDocument
     from app.schemas.connector import IndexedDocumentResponse, IndexedDocumentListResponse
 
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -1382,7 +1322,6 @@ async def get_pending_documents(
 
 @router.get("/indexed-documents")
 async def get_all_indexed_documents(
-    tenant_id: str = Query(..., description="Tenant ID"),
     status: Optional[str] = Query("indexed", description="Filter by indexing status"),
     limit: Optional[int] = Query(1000, ge=1, le=5000, description="Maximum documents to return"),
     connector_id: Optional[UUID] = Query(None, description="Filter by connector ID"),
@@ -1390,15 +1329,14 @@ async def get_all_indexed_documents(
     db: AsyncSession = Depends(get_async_db),
 ):
     """
-    Get all indexed documents for a tenant (internal API for SIL reindexing).
+    Get all indexed documents (internal API for SIL reindexing).
 
     This endpoint is used by the SIL (Structural Intelligence Layer) service
     to fetch documents that need to be indexed to the structural graph.
 
     Returns documents from IndexedDocument table (connector-sourced documents).
 
-    Authentication: Accepts either user auth (via middleware) or X-API-Key header
-    for internal microservice calls.
+    Authentication: Accepts X-API-Key header for internal microservice calls.
     """
     # Validate API key for internal service calls
     if x_api_key:
@@ -1409,10 +1347,7 @@ async def get_all_indexed_documents(
     from typing import List, Dict, Any
 
     # Build query for indexed documents
-    query = (
-        select(IndexedDocument)
-        .where(IndexedDocument.tenant_id == UUID(tenant_id))
-    )
+    query = select(IndexedDocument)
 
     # Filter by status if provided
     if status:
@@ -1452,7 +1387,6 @@ async def get_all_indexed_documents(
             for doc in documents
         ],
         "total": len(documents),
-        "tenant_id": tenant_id,
     }
 
 
@@ -1464,7 +1398,7 @@ async def get_all_indexed_documents(
 async def oauth_authorize(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Initiate OAuth2 flow for an OAuth connector (admin only).
@@ -1472,12 +1406,9 @@ async def oauth_authorize(
     Proxies the request to the appropriate MCP service which handles the
     OAuth flow and redirects the user to the consent screen.
     """
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -1498,7 +1429,6 @@ async def oauth_authorize(
                 f"{mcp_url}/oauth/authorize",
                 params={
                     "connector_id": str(connector_id),
-                    "tenant_id": tenant_id,
                 },
                 follow_redirects=False,
             )
@@ -1524,7 +1454,7 @@ async def oauth_callback_proxy(
 
     The OAuth provider redirects the browser here after authorization.
     We determine which MCP service to forward to by parsing the connector_id
-    from the state parameter (format: "connector_id:tenant_id") and looking
+    from the state parameter (format: "connector_id:<ignored>") and looking
     up the connector type in the database.
     """
     try:
@@ -1583,15 +1513,12 @@ button:hover{{background:#27272a}}</style></head>
 async def oauth_status(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """Check OAuth status for an OAuth connector (Google Drive, OneDrive)."""
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -1612,7 +1539,6 @@ async def oauth_status(
                 f"{mcp_url}/oauth/status",
                 params={
                     "connector_id": str(connector_id),
-                    "tenant_id": tenant_id,
                 },
             )
             response.raise_for_status()
@@ -1627,19 +1553,16 @@ async def list_drive_folders(
     connector_id: UUID,
     parent_id: str = Query("root", description="Parent folder ID"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     List folders for an OAuth connector (admin only).
 
     Proxies the request to the appropriate MCP service /folders endpoint.
     """
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -1660,7 +1583,6 @@ async def list_drive_folders(
                 f"{mcp_url}/folders",
                 params={
                     "connector_id": str(connector_id),
-                    "tenant_id": tenant_id,
                     "parent_id": parent_id,
                 },
             )
@@ -1679,15 +1601,12 @@ async def list_drive_folders(
 async def oauth_revoke(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """Revoke OAuth tokens for an OAuth connector (admin only)."""
-    await _check_admin_permission(current_user, tenant_id)
-
     result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
     )
     connector = result.scalar_one_or_none()
 
@@ -1708,7 +1627,6 @@ async def oauth_revoke(
                 f"{mcp_url}/oauth/revoke",
                 json={
                     "connector_id": str(connector_id),
-                    "tenant_id": tenant_id,
                 },
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
             )

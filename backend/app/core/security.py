@@ -15,6 +15,9 @@ def get_collection_name(collection_type: str = "documents") -> str:
     """Generate the Weaviate collection name for the deployment.
 
     In single-tenant mode the collection namespace collapses to a single
-    deployment-wide name keyed only by the collection type.
+    deployment-wide name keyed only by the collection type. Uses the
+    Weaviate v4 class-name convention (PascalCase-ish with an underscore
+    separator) matching the existing collection references in
+    weaviate-service (e.g., "Nouxcube_documents").
     """
-    return f"nouxcube_{collection_type}".lower()
+    return f"Nouxcube_{collection_type}"

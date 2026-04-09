@@ -84,11 +84,7 @@ async def mark_document_as_viewed(
 ):
     """Marca un documento como visto por el usuario actual"""
     try:
-        document_service = await AsyncDocumentService.create(
-            tenant_id=str(current_user.tenant_id),
-            user_id=str(current_user.id),
-            db=db,
-        )
+        document_service = await AsyncDocumentService.create(user=current_user, db=db)
 
         view_id = await document_service.mark_document_viewed(
             document_id=document_id,

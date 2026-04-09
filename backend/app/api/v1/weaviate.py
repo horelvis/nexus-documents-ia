@@ -12,7 +12,13 @@ import httpx
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
 from app.services.weaviate_client import weaviate_client
+
+
+def _require_admin(user: UserProfile) -> None:
+    if "ADMIN" not in (user.roles or []):
+        raise HTTPException(status_code=403, detail="Admin access required")
 from app.clients.exceptions import HTTPClientError, ServiceTimeoutError
 from app.core.config import settings
 
@@ -30,19 +36,16 @@ EMMA_SERVICE_URL = settings.EMMA_SERVICE_URL.rstrip("/")
 @router.post("/emma/query")
 async def emma_query(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Proxy Emma AI queries to Emma Agent Service with ACL context"""
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-
         # Extract ACL context from authenticated user
-        body["user_id"] = str(current_user.id)
-        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
-        body["is_admin"] = current_user.is_admin
+        body["user_id"] = current_user.sub
+        body["user_roles"] = current_user.roles
 
-        logger.debug(f"🔐 Emma query with ACL: user={current_user.id}, roles={len(body['user_role_ids'])}, admin={body['is_admin']}")
+        logger.debug(f"🔐 Emma query with ACL: user={current_user.sub}, roles={len(current_user.roles or [])}")
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
             response = await client.post(
@@ -70,7 +73,7 @@ async def emma_query(
 @router.post("/emma/query/stream")
 async def emma_query_stream(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Proxy Emma AI streaming queries to Emma Agent Service with ACL context.
@@ -79,12 +82,9 @@ async def emma_query_stream(
     """
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-
         # Extract ACL context from authenticated user
-        body["user_id"] = str(current_user.id)
-        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
-        body["is_admin"] = current_user.is_admin
+        body["user_id"] = current_user.sub
+        body["user_roles"] = current_user.roles
 
         async def stream_sse() -> AsyncGenerator[bytes, None]:
             """Stream SSE events from Emma Agent Service to client."""
@@ -136,7 +136,7 @@ async def emma_query_stream(
 @router.post("/emma/uploads/temp")
 async def emma_upload_temp(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Proxy temporary upload for non-indexed documents to Emma Agent Service."""
     try:
@@ -146,8 +146,7 @@ async def emma_upload_temp(
 
         headers = {
             "X-API-Key": settings.MICROSERVICES_API_KEY or "",
-            "X-Tenant-ID": tenant_id,
-            "X-User-ID": str(current_user.id),
+            "X-User-ID": current_user.sub,
         }
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
@@ -191,7 +190,7 @@ async def emma_health():
 @router.post("/emma/v2/query")
 async def emma_v2_query(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Proxy Emma v2 queries to Emma Agent Service with ACL context.
@@ -203,12 +202,10 @@ async def emma_v2_query(
     """
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
-        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
-        body["is_admin"] = current_user.is_admin
+        body["user_id"] = current_user.sub
+        body["user_roles"] = current_user.roles
 
-        logger.debug(f"🧠 Emma v2 query with ACL: user={current_user.id}, admin={body['is_admin']}")
+        logger.debug(f"🧠 Emma v2 query with ACL: user={current_user.sub}")
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
             response = await client.post(
@@ -236,7 +233,7 @@ async def emma_v2_query(
 @router.post("/emma/v2/query/stream")
 async def emma_v2_query_stream(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Proxy Emma v2 streaming queries to Emma Agent Service with ACL context.
@@ -246,10 +243,8 @@ async def emma_v2_query_stream(
     """
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
-        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
-        body["is_admin"] = current_user.is_admin
+        body["user_id"] = current_user.sub
+        body["user_roles"] = current_user.roles
 
         async def stream_sse() -> AsyncGenerator[bytes, None]:
             """Stream SSE events from Emma Agent Service to client."""
@@ -324,7 +319,6 @@ async def emma_feedback(
     """Submit feedback to Emma AI for learning"""
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
         return await weaviate_client.emma_feedback(body)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
@@ -403,7 +397,6 @@ async def emma_analyze_with_annotations(
 
         return await weaviate_client.emma_analyze_with_annotations(
             document_id=document_id,
-            tenant_id=tenant_id,
             analysis_type=analysis_type,
             file_content=file_content,
             filename=filename,
@@ -433,7 +426,6 @@ async def emma_analyze_with_annotations_stream(
     try:
         form_data = {
             "document_id": document_id,
-            "tenant_id": tenant_id,
             "analysis_type": analysis_type,
         }
 
@@ -560,15 +552,13 @@ async def public_knowledge_get_document(doc_id: str):
 @router.post("/knowledge/search")
 async def knowledge_search(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Search knowledge entities semantically with ACL filtering"""
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
-        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
-        body["is_admin"] = current_user.is_admin
+        body["user_id"] = current_user.sub
+        body["user_roles"] = current_user.roles
 
         return await weaviate_client.knowledge_search(body)
     except HTTPClientError as e:
@@ -587,7 +577,6 @@ async def knowledge_list_entities(
     """List knowledge entities for current tenant"""
     try:
         return await weaviate_client.knowledge_list_entities(
-            tenant_id=tenant_id,
             entity_type=entity_type,
             domain=domain,
             limit=limit
@@ -605,7 +594,7 @@ async def knowledge_get_entity(
 ):
     """Get a specific knowledge entity"""
     try:
-        return await weaviate_client.knowledge_get_entity(entity_id, tenant_id)
+        return await weaviate_client.knowledge_get_entity(entity_id)
     except HTTPClientError as e:
         if e.status_code == 404:
             raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
@@ -621,7 +610,7 @@ async def knowledge_delete_entity(
 ):
     """Delete a knowledge entity"""
     try:
-        return await weaviate_client.knowledge_delete_entity(entity_id, tenant_id)
+        return await weaviate_client.knowledge_delete_entity(entity_id)
     except HTTPClientError as e:
         if e.status_code == 404:
             raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
@@ -637,7 +626,7 @@ async def knowledge_delete_by_document(
 ):
     """Delete all knowledge entities from a document"""
     try:
-        return await weaviate_client.knowledge_delete_by_document(document_id, tenant_id)
+        return await weaviate_client.knowledge_delete_by_document(document_id)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -646,57 +635,10 @@ async def knowledge_delete_by_document(
 
 
 @router.get("/knowledge/stats")
-async def knowledge_stats(
-    include_public: bool = True
-):
-    """Get knowledge graph statistics for current tenant.
-
-    Combines tenant-specific entities with public_knowledge entities
-    which are extracted from public legislation/regulations.
-    """
+async def knowledge_stats():
+    """Get knowledge graph statistics."""
     try:
-        # Get tenant-specific stats
-        tenant_stats = await weaviate_client.knowledge_stats(tenant_id)
-
-        if not include_public:
-            return tenant_stats
-
-        # Also get public_knowledge stats (shared across all tenants)
-        try:
-            public_stats = await weaviate_client.knowledge_stats("public_knowledge")
-
-            # Merge stats - public entities are accessible to all tenants
-            combined_stats = {
-                "tenant_id": tenant_id,
-                "total_entities": (tenant_stats.get("total_entities", 0) +
-                                   public_stats.get("total_entities", 0)),
-                "entities_by_type": {},
-                "entities_by_domain": {},
-                "tenant_entities": tenant_stats.get("total_entities", 0),
-                "public_entities": public_stats.get("total_entities", 0),
-            }
-
-            # Merge by type
-            for entity_type, count in tenant_stats.get("entities_by_type", {}).items():
-                combined_stats["entities_by_type"][entity_type] = count
-            for entity_type, count in public_stats.get("entities_by_type", {}).items():
-                combined_stats["entities_by_type"][entity_type] = (
-                    combined_stats["entities_by_type"].get(entity_type, 0) + count
-                )
-
-            # Merge by domain
-            for domain, count in tenant_stats.get("entities_by_domain", {}).items():
-                combined_stats["entities_by_domain"][domain] = count
-            for domain, count in public_stats.get("entities_by_domain", {}).items():
-                combined_stats["entities_by_domain"][domain] = (
-                    combined_stats["entities_by_domain"].get(domain, 0) + count
-                )
-
-            return combined_stats
-        except Exception as public_err:
-            logger.warning(f"Could not fetch public_knowledge stats: {public_err}")
-            return tenant_stats
-
+        return await weaviate_client.knowledge_stats()
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -710,11 +652,11 @@ async def knowledge_stats(
 
 @router.get("/learning/profile")
 async def learning_get_profile(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get current user's learning profile"""
     try:
-        return await weaviate_client.learning_get_profile(tenant_id, str(current_user.id))
+        return await weaviate_client.learning_get_profile(current_user.sub)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -725,12 +667,12 @@ async def learning_get_profile(
 @router.put("/learning/profile")
 async def learning_update_profile(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Update current user's learning profile preferences"""
     try:
         body = await request.json()
-        return await weaviate_client.learning_update_profile(tenant_id, str(current_user.id), body)
+        return await weaviate_client.learning_update_profile(current_user.sub, body)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -741,12 +683,12 @@ async def learning_update_profile(
 @router.post("/learning/feedback")
 async def learning_record_feedback(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Record user feedback for learning"""
     try:
         body = await request.json()
-        return await weaviate_client.learning_record_feedback(tenant_id, str(current_user.id), body)
+        return await weaviate_client.learning_record_feedback(current_user.sub, body)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -757,12 +699,12 @@ async def learning_record_feedback(
 @router.post("/learning/document-view")
 async def learning_record_document_view(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Record document view for learning"""
     try:
         body = await request.json()
-        return await weaviate_client.learning_record_document_view(tenant_id, str(current_user.id), body)
+        return await weaviate_client.learning_record_document_view(current_user.sub, body)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -772,11 +714,11 @@ async def learning_record_document_view(
 
 @router.get("/learning/stats")
 async def learning_get_stats(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get learning statistics for current user"""
     try:
-        return await weaviate_client.learning_get_stats(tenant_id, str(current_user.id))
+        return await weaviate_client.learning_get_stats(current_user.sub)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -786,11 +728,11 @@ async def learning_get_stats(
 
 @router.get("/learning/context")
 async def learning_get_context(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get full user context for Emma"""
     try:
-        return await weaviate_client.learning_get_context(tenant_id, str(current_user.id))
+        return await weaviate_client.learning_get_context(current_user.sub)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -800,11 +742,11 @@ async def learning_get_context(
 
 @router.get("/learning/ranking-weights")
 async def learning_get_ranking_weights(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get personalized ranking weights for RAG"""
     try:
-        return await weaviate_client.learning_get_ranking_weights(tenant_id, str(current_user.id))
+        return await weaviate_client.learning_get_ranking_weights(current_user.sub)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -823,7 +765,7 @@ async def learning_get_ranking_weights(
 @router.post("/sil/query")
 async def sil_query(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Process a query through the Structural Intelligence Layer.
@@ -838,8 +780,7 @@ async def sil_query(
     """
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
+        body["user_id"] = current_user.sub
 
         return await weaviate_client.sil_query(body)
     except HTTPClientError as e:
@@ -858,7 +799,7 @@ async def sil_get_structure(
 ):
     """Get structural metadata for a specific document"""
     try:
-        return await weaviate_client.sil_get_structure(document_id, tenant_id)
+        return await weaviate_client.sil_get_structure(document_id)
     except HTTPClientError as e:
         if e.status_code == 404:
             raise HTTPException(status_code=404, detail=f"Document {document_id} not found in SIL")
@@ -877,7 +818,7 @@ async def sil_graph_stats(
     Returns total documents, folders, breakdown by semantic type, etc.
     """
     try:
-        return await weaviate_client.sil_graph_stats(tenant_id)
+        return await weaviate_client.sil_graph_stats()
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -901,7 +842,6 @@ async def sil_search_structural(
     try:
         return await weaviate_client.sil_search_structural(
             query=query,
-            tenant_id=tenant_id,
             limit=limit,
             semantic_type=semantic_type,
             domain=domain
@@ -922,7 +862,6 @@ async def sil_get_folder_contents(
     try:
         return await weaviate_client.sil_get_folder_contents(
             folder_path=folder_path,
-            tenant_id=tenant_id,
             include_subfolders=include_subfolders
         )
     except HTTPClientError as e:
@@ -942,7 +881,6 @@ async def sil_get_related_documents(
     try:
         return await weaviate_client.sil_get_related_documents(
             document_id=document_id,
-            tenant_id=tenant_id,
             relationship_type=relationship_type,
             max_depth=max_depth
         )
@@ -959,7 +897,7 @@ async def sil_get_document_ids(
 ):
     """Get list of document IDs already indexed in the SIL graph"""
     try:
-        return await weaviate_client.sil_get_document_ids(tenant_id=tenant_id, limit=limit)
+        return await weaviate_client.sil_get_document_ids(limit=limit)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -974,19 +912,17 @@ async def sil_get_document_ids(
 @router.post("/sil/index-structural")
 async def sil_index_structural(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Index structural metadata for a document.
 
     Admin endpoint - typically called during document indexing.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
         return await weaviate_client.sil_index_structural(body)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
@@ -998,14 +934,13 @@ async def sil_index_structural(
 @router.delete("/sil/structure/{document_id}")
 async def sil_mark_document_removed(
     document_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Mark a document as removed in the structural graph (admin only)"""
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
-        return await weaviate_client.sil_mark_document_removed(document_id, tenant_id)
+        return await weaviate_client.sil_mark_document_removed(document_id)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -1015,7 +950,7 @@ async def sil_mark_document_removed(
 
 @router.delete("/sil/graph/clear")
 async def sil_clear_graph(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Clear the structural graph for the current tenant.
@@ -1023,12 +958,11 @@ async def sil_clear_graph(
     WARNING: This is a destructive operation. All structural metadata will be deleted.
     Admin only.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
-        logger.warning(f"🚨 Admin {current_user.id} clearing SIL graph for tenant {tenant_id}")
-        return await weaviate_client.sil_clear_graph(tenant_id)
+        logger.warning(f"🚨 Admin {current_user.sub} clearing SIL graph")
+        return await weaviate_client.sil_clear_graph()
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
     except Exception as e:
@@ -1039,7 +973,7 @@ async def sil_clear_graph(
 @router.post("/sil/reindex")
 async def sil_reindex(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Re-index documents to the structural graph.
@@ -1050,16 +984,14 @@ async def sil_reindex(
 
     Admin only. For large datasets, this may take several minutes.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
 
         logger.info(
-            f"🔄 Admin {current_user.id} starting SIL reindex | "
-            f"tenant={tenant_id} full={body.get('full_reindex', False)}"
+            f"🔄 Admin {current_user.sub} starting SIL reindex | "
+            f"full={body.get('full_reindex', False)}"
         )
 
         return await weaviate_client.sil_reindex(body)
@@ -1148,14 +1080,13 @@ async def boe_get_all_legislation_ids():
 @router.post("/boe/download")
 async def boe_download_legislation(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Download and index a specific BOE legislation document.
     Admin only.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
         body = await request.json()
@@ -1165,7 +1096,7 @@ async def boe_download_legislation(
         if not boe_id:
             raise HTTPException(status_code=400, detail="boe_id is required")
 
-        logger.info(f"📥 Admin {current_user.id} downloading BOE legislation: {boe_id}")
+        logger.info(f"📥 Admin {current_user.sub} downloading BOE legislation: {boe_id}")
         return await weaviate_client.boe_download_legislation(boe_id, index=index)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
@@ -1179,15 +1110,14 @@ async def boe_download_legislation(
 @router.post("/boe/download/preset")
 async def boe_download_preset(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Download all legislation in a preset category.
     This can take a while for large presets.
     Admin only.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
         body = await request.json()
@@ -1197,7 +1127,7 @@ async def boe_download_preset(
         if not preset:
             raise HTTPException(status_code=400, detail="preset is required")
 
-        logger.info(f"📥 Admin {current_user.id} downloading BOE preset: {preset}")
+        logger.info(f"📥 Admin {current_user.sub} downloading BOE preset: {preset}")
         return await weaviate_client.boe_download_preset(preset, index=index)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
@@ -1212,17 +1142,16 @@ async def boe_download_preset(
 async def boe_sync_legislation(
     boe_id: str,
     force: bool = False,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Sync a specific legislation with BOE and detect article-level changes.
     Admin only.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
-        logger.info(f"🔄 Admin {current_user.id} syncing BOE legislation: {boe_id}")
+        logger.info(f"🔄 Admin {current_user.sub} syncing BOE legislation: {boe_id}")
         return await weaviate_client.boe_sync_legislation(boe_id, force=force)
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
@@ -1235,18 +1164,17 @@ async def boe_sync_legislation(
 
 @router.post("/boe/sync/all")
 async def boe_sync_all(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Sync all tracked legislation and detect changes.
     This can take a while if many laws are tracked.
     Admin only.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
-        logger.info(f"🔄 Admin {current_user.id} syncing all BOE legislation")
+        logger.info(f"🔄 Admin {current_user.sub} syncing all BOE legislation")
         return await weaviate_client.boe_sync_all()
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
@@ -1259,14 +1187,13 @@ async def boe_sync_all(
 
 @router.get("/boe/updates")
 async def boe_get_pending_updates(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Get list of legislation with pending updates from BOE.
     Admin only.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
         return await weaviate_client.boe_get_pending_updates()
@@ -1285,7 +1212,7 @@ async def boe_get_pending_updates(
 async def public_knowledge_extract_entities(
     limit: int = 100,
     category: Optional[str] = None,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Extract knowledge entities from public documents into the Knowledge Graph.
@@ -1304,12 +1231,11 @@ async def public_knowledge_extract_entities(
 
     Admin only. Can take several minutes for large document sets.
     """
-    if not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    _require_admin(current_user)
 
     try:
         logger.info(
-            f"🧠 Admin {current_user.id} extracting knowledge from public documents | "
+            f"🧠 Admin {current_user.sub} extracting knowledge from public documents | "
             f"limit={limit} category={category}"
         )
         return await weaviate_client.public_knowledge_extract_entities(
@@ -1384,7 +1310,6 @@ async def tree_stats(
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.get(
                 f"{KNOWLEDGE_TREE_SERVICE_URL}/tree/stats",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -1407,7 +1332,6 @@ async def tree_graph_structure(
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             response = await client.get(
                 f"{KNOWLEDGE_TREE_SERVICE_URL}/tree/graph/structure",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:

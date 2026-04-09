@@ -10,12 +10,16 @@ import httpx
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.db.models import User
 from app.core.config import settings
 from app.core.sse_proxy import proxy_sse_stream
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _require_admin(user: UserProfile) -> None:
+    if "ADMIN" not in (user.roles or []):
+        raise HTTPException(status_code=403, detail="Admin access required")
 
 # Emma Agent Service URL
 EMMA_SERVICE_URL = settings.EMMA_SERVICE_URL.rstrip("/")
@@ -24,7 +28,7 @@ EMMA_SERVICE_URL = settings.EMMA_SERVICE_URL.rstrip("/")
 @router.post("/query")
 async def emma_query(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Query Emma AI assistant.
@@ -33,14 +37,11 @@ async def emma_query(
     """
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-
         # Extract ACL context from authenticated user
-        body["user_id"] = str(current_user.id)
-        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
-        body["is_admin"] = current_user.is_admin
+        body["user_id"] = current_user.sub
+        body["user_roles"] = current_user.roles
 
-        logger.debug(f"🧠 Emma query with ACL: user={current_user.id}, roles={len(body['user_role_ids'])}, admin={body['is_admin']}")
+        logger.debug(f"🧠 Emma query with ACL: user={current_user.sub}, roles={len(current_user.roles or [])}")
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
             response = await client.post(
@@ -68,7 +69,7 @@ async def emma_query(
 @router.post("/query/stream")
 async def emma_query_stream(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Stream Emma AI responses with real-time progress updates.
@@ -83,12 +84,9 @@ async def emma_query_stream(
     """
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-
         # Extract ACL context from authenticated user
-        body["user_id"] = str(current_user.id)
-        body["user_role_ids"] = [str(role.id) for role in current_user.roles] if current_user.roles else []
-        body["is_admin"] = current_user.is_admin
+        body["user_id"] = current_user.sub
+        body["user_roles"] = current_user.roles
 
         return await proxy_sse_stream(
             f"{EMMA_SERVICE_URL}/emma/query/stream", body,
@@ -103,7 +101,7 @@ async def emma_query_stream(
 @router.post("/uploads/temp")
 async def emma_upload_temp(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Proxy temporary upload for non-indexed documents to Emma Agent Service."""
     try:
@@ -113,8 +111,7 @@ async def emma_upload_temp(
 
         headers = {
             "X-API-Key": settings.MICROSERVICES_API_KEY or "",
-            "X-Tenant-ID": tenant_id,
-            "X-User-ID": str(current_user.id),
+            "X-User-ID": current_user.sub,
         }
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
@@ -137,7 +134,7 @@ async def emma_upload_temp(
 @router.post("/verified/generate/stream")
 async def emma_verified_generate_stream(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Stream verified document generation with real-time claim-by-claim progress.
@@ -147,8 +144,7 @@ async def emma_verified_generate_stream(
     """
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
+        body["user_id"] = current_user.sub
 
         return await proxy_sse_stream(
             f"{EMMA_SERVICE_URL}/verified/generate/stream", body,
@@ -163,7 +159,7 @@ async def emma_verified_generate_stream(
 @router.post("/predictive/analyze/stream")
 async def emma_predictive_analyze_stream(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Stream predictive analysis with real-time factor extraction progress.
@@ -173,8 +169,7 @@ async def emma_predictive_analyze_stream(
     """
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
+        body["user_id"] = current_user.sub
 
         return await proxy_sse_stream(
             f"{EMMA_SERVICE_URL}/predictive/analyze/stream", body,
@@ -189,7 +184,7 @@ async def emma_predictive_analyze_stream(
 @router.get("/predictive/analysis/{session_id}/pdf")
 async def emma_predictive_analysis_pdf(
     session_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Export a predictive analysis session as PDF. Proxies to Emma Agent Service.
@@ -198,7 +193,6 @@ async def emma_predictive_analysis_pdf(
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/predictive/analysis/{session_id}/pdf",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -221,7 +215,7 @@ async def emma_predictive_analysis_pdf(
 @router.get("/predictive/analysis/{session_id}/docx")
 async def emma_predictive_analysis_docx(
     session_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Export a predictive analysis session as DOCX. Proxies to Emma Agent Service.
@@ -230,7 +224,6 @@ async def emma_predictive_analysis_docx(
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/predictive/analysis/{session_id}/docx",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -253,7 +246,7 @@ async def emma_predictive_analysis_docx(
 @router.get("/verified/session/{session_id}/claims")
 async def emma_verified_session_claims(
     session_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Get verified claims for a session. Proxies to Emma Agent Service.
@@ -262,7 +255,6 @@ async def emma_verified_session_claims(
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/verified/session/{session_id}/claims",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -279,7 +271,7 @@ async def emma_verified_session_claims(
 @router.get("/verified/session/{session_id}/docx")
 async def emma_verified_session_docx(
     session_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Export a verified session as DOCX. Proxies to Emma Agent Service.
@@ -288,7 +280,6 @@ async def emma_verified_session_docx(
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/verified/session/{session_id}/docx",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -311,7 +302,7 @@ async def emma_verified_session_docx(
 @router.get("/verified/session/{session_id}/pdf")
 async def emma_verified_session_pdf(
     session_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Export a verified session as PDF. Proxies to Emma Agent Service.
@@ -320,7 +311,6 @@ async def emma_verified_session_pdf(
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/verified/session/{session_id}/pdf",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -343,7 +333,7 @@ async def emma_verified_session_pdf(
 @router.get("/verified/session/{session_id}")
 async def emma_verified_session(
     session_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Get full session data for recovery. Proxies to Emma Agent Service.
@@ -354,7 +344,6 @@ async def emma_verified_session(
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/verified/session/{session_id}",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -374,7 +363,7 @@ async def emma_verified_session(
 
 @router.get("/training/status")
 async def emma_training_status(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get sector QA embedding training status."""
     try:
@@ -396,10 +385,10 @@ async def emma_training_status(
 @router.post("/training/start")
 async def emma_training_start(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Start sector QA embedding training."""
-    if not current_user.is_admin:
+    if "ADMIN" not in (current_user.roles or []):
         raise HTTPException(status_code=403, detail="Solo administradores pueden iniciar entrenamiento")
     try:
         body = await request.json()
@@ -424,7 +413,7 @@ async def emma_training_start(
 
 @router.get("/training/progress")
 async def emma_training_progress(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get current training progress."""
     try:
@@ -462,7 +451,7 @@ async def emma_health():
 
 @router.get("/tools")
 async def emma_tools(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get available Emma AI tools/capabilities"""
     try:
@@ -483,13 +472,12 @@ async def emma_tools(
 @router.post("/feedback")
 async def emma_feedback(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Submit feedback for Emma AI response quality"""
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
+        body["user_id"] = current_user.sub
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.post(
@@ -515,14 +503,13 @@ async def emma_feedback(
 
 @router.get("/heartbeat/config")
 async def emma_heartbeat_config(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get heartbeat configuration for the tenant."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/heartbeat/config",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -538,17 +525,16 @@ async def emma_heartbeat_config(
 @router.patch("/heartbeat/config")
 async def emma_heartbeat_config_update(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Update heartbeat configuration for the tenant."""
-    if not current_user.is_admin:
+    if "ADMIN" not in (current_user.roles or []):
         raise HTTPException(status_code=403, detail="Solo administradores pueden modificar la configuración")
     try:
         body = await request.json()
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.patch(
                 f"{EMMA_SERVICE_URL}/emma/heartbeat/config",
-                params={"tenant_id": tenant_id},
                 json=body,
                 headers={
                     "Content-Type": "application/json",
@@ -567,14 +553,13 @@ async def emma_heartbeat_config_update(
 
 @router.get("/heartbeat/status")
 async def emma_heartbeat_status(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get heartbeat status for the tenant."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/heartbeat/status",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -590,16 +575,16 @@ async def emma_heartbeat_status(
 @router.post("/heartbeat/run")
 async def emma_heartbeat_run(
     force: bool = False,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Manually trigger a heartbeat evaluation for the tenant."""
-    if not current_user.is_admin:
+    if "ADMIN" not in (current_user.roles or []):
         raise HTTPException(status_code=403, detail="Solo administradores pueden ejecutar el heartbeat")
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
             response = await client.post(
                 f"{EMMA_SERVICE_URL}/emma/heartbeat/run",
-                params={"tenant_id": tenant_id, "force": str(force).lower()},
+                params={"force": str(force).lower()},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -618,11 +603,11 @@ async def emma_heartbeat_insights(
     insight_type: str = None,
     limit: int = 20,
     page: int = 1,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """List proactive insights for the tenant."""
     try:
-        params = {"tenant_id": tenant_id, "limit": limit, "page": page}
+        params = {"limit": limit, "page": page}
         if status:
             params["status"] = status
         if insight_type:
@@ -647,14 +632,13 @@ async def emma_heartbeat_insights(
 @router.post("/heartbeat/insights/{insight_id}/dismiss")
 async def emma_heartbeat_dismiss(
     insight_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Dismiss a proactive insight."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.post(
                 f"{EMMA_SERVICE_URL}/emma/heartbeat/insights/{insight_id}/dismiss",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -670,14 +654,13 @@ async def emma_heartbeat_dismiss(
 @router.post("/heartbeat/insights/{insight_id}/acted")
 async def emma_heartbeat_acted(
     insight_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Mark a proactive insight as acted upon."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.post(
                 f"{EMMA_SERVICE_URL}/emma/heartbeat/insights/{insight_id}/acted",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -692,14 +675,13 @@ async def emma_heartbeat_acted(
 
 @router.get("/heartbeat/digest")
 async def emma_heartbeat_digest(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get daily digest of insights and activity."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/heartbeat/digest",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -718,7 +700,7 @@ async def emma_heartbeat_digest(
 
 @router.get("/cendoj/status")
 async def emma_cendoj_status(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get CENDOJ jurisprudence search status."""
     try:
@@ -743,7 +725,7 @@ async def emma_cendoj_status(
 
 @router.get("/welcome")
 async def emma_welcome(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Get a personalized, proactive welcome message for the current user.
@@ -752,13 +734,12 @@ async def emma_welcome(
     a contextual greeting like "Hola Horelvis, ¿seguimos con los contratos?"
     """
     try:
-        user_name = current_user.full_name or current_user.email.split("@")[0]
+        user_name = current_user.name or (current_user.email or "").split("@")[0]
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/welcome",
                 params={
-                    "tenant_id": tenant_id,
-                    "user_id": str(current_user.id),
+                    "user_id": current_user.sub,
                     "user_name": user_name,
                 },
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
@@ -782,7 +763,7 @@ async def emma_sessions_list(
     include_archived: bool = False,
     limit: int = 50,
     offset: int = 0,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List Emma chat sessions for the current user.
@@ -795,8 +776,7 @@ async def emma_sessions_list(
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/sessions",
                 params={
-                    "user_id": str(current_user.id),
-                    "tenant_id": tenant_id,
+                    "user_id": current_user.sub,
                     "include_archived": str(include_archived).lower(),
                     "limit": limit,
                     "offset": offset,
@@ -816,7 +796,7 @@ async def emma_sessions_list(
 @router.get("/sessions/{session_id}")
 async def emma_session_get(
     session_id: str,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get a full Emma session with all messages.
@@ -827,7 +807,6 @@ async def emma_session_get(
         async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -843,7 +822,7 @@ async def emma_session_get(
 @router.post("/sessions/{session_id}/continue")
 async def emma_session_continue(
     session_id: str,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Continue an old Emma session (SSE stream).
@@ -853,7 +832,7 @@ async def emma_session_continue(
     """
     try:
         return await proxy_sse_stream(
-            f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}/continue?tenant_id={tenant_id}",
+            f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}/continue",
             body={},
             timeout=30.0,
             log_prefix="Session continue",
@@ -867,7 +846,7 @@ async def emma_session_continue(
 async def emma_session_update(
     session_id: str,
     request: Request,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Update session properties (title, archived, pinned).
@@ -878,8 +857,7 @@ async def emma_session_update(
             response = await client.patch(
                 f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
                 params={
-                    "user_id": str(current_user.id),
-                    "tenant_id": tenant_id,
+                    "user_id": current_user.sub,
                 },
                 json=body,
                 headers={
@@ -900,7 +878,7 @@ async def emma_session_update(
 @router.delete("/sessions/{session_id}")
 async def emma_session_delete(
     session_id: str,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Permanently delete an Emma session.
@@ -913,8 +891,7 @@ async def emma_session_delete(
             response = await client.delete(
                 f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
                 params={
-                    "user_id": str(current_user.id),
-                    "tenant_id": tenant_id,
+                    "user_id": current_user.sub,
                 },
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
@@ -934,7 +911,7 @@ async def emma_session_delete(
 
 @router.get("/memory/facts")
 async def emma_memory_facts(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     List all memory facts Emma has learned about the current user.
@@ -945,7 +922,7 @@ async def emma_memory_facts(
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/memory/facts",
-                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                params={"user_id": current_user.sub},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -960,7 +937,7 @@ async def emma_memory_facts(
 
 @router.delete("/memory/facts")
 async def emma_memory_facts_clear(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Delete ALL memory facts for the current user (GDPR right-to-erasure).
@@ -971,7 +948,7 @@ async def emma_memory_facts_clear(
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.delete(
                 f"{EMMA_SERVICE_URL}/emma/memory/facts",
-                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                params={"user_id": current_user.sub},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -987,7 +964,7 @@ async def emma_memory_facts_clear(
 @router.delete("/memory/facts/{fact_id}")
 async def emma_memory_fact_delete(
     fact_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Delete a single memory fact by ID.
@@ -996,7 +973,7 @@ async def emma_memory_fact_delete(
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.delete(
                 f"{EMMA_SERVICE_URL}/emma/memory/facts/{fact_id}",
-                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                params={"user_id": current_user.sub},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -1016,7 +993,7 @@ async def emma_memory_fact_delete(
 @router.get("/notifications")
 async def emma_notifications_list(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """List recent notifications for the current user."""
     try:
@@ -1025,8 +1002,7 @@ async def emma_notifications_list(
                 f"{EMMA_SERVICE_URL}/emma/notifications",
                 params={
                     **dict(request.query_params),
-                    "tenant_id": tenant_id,
-                    "user_id": str(current_user.id),
+                    "user_id": current_user.sub,
                 },
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
@@ -1043,14 +1019,14 @@ async def emma_notifications_list(
 @router.patch("/notifications/{notification_id}/read")
 async def emma_notification_mark_read(
     notification_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Mark a single notification as read."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.patch(
                 f"{EMMA_SERVICE_URL}/emma/notifications/{notification_id}/read",
-                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                params={"user_id": current_user.sub},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -1065,14 +1041,14 @@ async def emma_notification_mark_read(
 
 @router.post("/notifications/read-all")
 async def emma_notifications_read_all(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Mark all notifications as read."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.post(
                 f"{EMMA_SERVICE_URL}/emma/notifications/read-all",
-                params={"tenant_id": tenant_id, "user_id": str(current_user.id)},
+                params={"user_id": current_user.sub},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -1088,10 +1064,10 @@ async def emma_notifications_read_all(
 @router.patch("/cendoj/status")
 async def emma_cendoj_status_update(
     request: Request,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Toggle CENDOJ jurisprudence search on/off."""
-    if not current_user.is_admin:
+    if "ADMIN" not in (current_user.roles or []):
         raise HTTPException(status_code=403, detail="Solo administradores pueden modificar CENDOJ")
     try:
         body = await request.json()
@@ -1121,7 +1097,7 @@ async def emma_cendoj_status_update(
 @router.get("/generated/{doc_id}/download")
 async def emma_generated_download(
     doc_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Download a DOCX document generated by the generate_document tool.
@@ -1153,7 +1129,7 @@ async def emma_generated_download(
 @router.get("/generated/{doc_id}/info")
 async def emma_generated_info(
     doc_id: str,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Get metadata about a generated document without downloading it."""
     try:
@@ -1185,7 +1161,6 @@ async def explainability_graph(
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/explainability/graph",
-                params={"tenant_id": tenant_id},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -1202,7 +1177,7 @@ async def explainability_graph(
 async def explainability_trace(
     thread_id: str,
     message_index: int,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Per-response reasoning trace for the ReasoningModal."""
     try:
@@ -1228,7 +1203,7 @@ async def explainability_trace(
 async def report_generate_document(
     report_id: str,
     request: Request,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Generate DOCX from a stored knowledge report. Proxies to Emma."""
     try:
@@ -1255,7 +1230,7 @@ async def report_generate_document(
 @router.get("/reports/{report_id}/download")
 async def report_download(
     report_id: str,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Download a generated report DOCX. Proxies to Emma."""
     try:

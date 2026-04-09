@@ -423,7 +423,4 @@ async def get_document_service(
 ):
     """Dependency to get an instance of AsyncDocumentService."""
     from app.services.async_document_service import AsyncDocumentService
-    return await AsyncDocumentService.create(
-        user_id=current_user.sub,
-        db=db,
-    )
+    return await AsyncDocumentService.create(user=current_user, db=db)

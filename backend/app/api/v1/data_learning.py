@@ -21,9 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
 from app.db.async_database import get_async_db
 from app.db.models import (
-    User,
     Connector,
     ConnectorContentModel,
     LearnedFolderPattern,
@@ -65,22 +65,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-async def _check_admin_permission(user: User, tenant_id: str) -> None:
-    """Verify user has admin permissions for the tenant."""
-    if str(user.tenant_id) != tenant_id:
-        raise HTTPException(status_code=403, detail="Not authorized for this tenant")
-
-
 async def _get_connector_or_404(
     connector_id: UUID,
-    tenant_id: str,
     db: AsyncSession,
 ) -> Connector:
     """Get connector by ID or raise 404."""
     result = await db.execute(
-        select(Connector)
-        .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
+        select(Connector).where(Connector.id == connector_id)
     )
     connector = result.scalar_one_or_none()
     if not connector:
@@ -96,7 +87,7 @@ async def _get_connector_or_404(
 async def get_learning_status(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get overall learning status for a connector.
@@ -108,8 +99,7 @@ async def get_learning_status(
     - Latest learning job status
     - Recommendations for improving learning
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     from app.services.data_learning import LearningOrchestrator
 
@@ -127,7 +117,7 @@ async def trigger_learning(
     connector_id: UUID,
     request: TriggerLearningRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Trigger a learning job for a connector.
@@ -142,8 +132,7 @@ async def trigger_learning(
 
     The job runs synchronously for now (will be async via Celery in production).
     """
-    await _check_admin_permission(current_user, tenant_id)
-    connector = await _get_connector_or_404(connector_id, tenant_id, db)
+    connector = await _get_connector_or_404(connector_id, db)
 
     if not connector.is_active:
         raise HTTPException(status_code=400, detail="Connector is not active")
@@ -156,7 +145,7 @@ async def trigger_learning(
         response = await orchestrator.trigger_learning(
             connector_id=connector_id,
             request=request,
-            user_id=current_user.id,
+            user_id=UUID(current_user.sub),
         )
         return response
     except ValueError as e:
@@ -174,7 +163,7 @@ async def trigger_learning(
 async def get_content_model(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get the discovered content model for a connector.
@@ -186,8 +175,7 @@ async def get_content_model(
     - type_semantics: LLM-enriched semantic understanding
     - property_semantics: Property importance and search weights
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     result = await db.execute(
         select(ConnectorContentModel)
@@ -205,15 +193,14 @@ async def get_content_model(
 async def get_content_model_summary(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get a summary of the discovered content model.
 
     Returns counts and key type names without full definitions.
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     from app.services.data_learning import ContentModelDiscoveryService
 
@@ -234,7 +221,7 @@ async def list_folder_patterns(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List learned folder patterns for a connector.
@@ -242,8 +229,7 @@ async def list_folder_patterns(
     Folder patterns map path levels to semantic meanings:
     - /Sites/{site}/RRHH/{year}/Expedientes → department=RRHH, year=2024, type=Expedientes
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     query = (
         select(LearnedFolderPattern)
@@ -281,11 +267,10 @@ async def get_folder_pattern(
     connector_id: UUID,
     pattern_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Get a specific folder pattern."""
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     result = await db.execute(
         select(LearnedFolderPattern)
@@ -306,7 +291,7 @@ async def update_folder_pattern(
     pattern_id: UUID,
     update: LearnedFolderPatternUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Update a folder pattern.
@@ -316,8 +301,7 @@ async def update_folder_pattern(
     - Adjust level semantics
     - Change priority
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     result = await db.execute(
         select(LearnedFolderPattern)
@@ -357,7 +341,7 @@ async def get_folder_context(
     connector_id: UUID,
     request: FolderContextRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get the semantic context for a folder path.
@@ -365,8 +349,7 @@ async def get_folder_context(
     Uses learned folder patterns to determine the semantic meaning of
     each level in the folder hierarchy (e.g., department, year, project).
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     from app.services.data_learning.folder_structure_analyzer import FolderStructureAnalyzer
 
@@ -404,7 +387,7 @@ async def list_property_mappings(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List property mappings for a connector.
@@ -415,8 +398,7 @@ async def list_property_mappings(
     - search_weight: Importance for search ranking (0.0-2.0)
     - include_in_embedding: Whether to include in vector embedding
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     query = (
         select(LearnedPropertyMapping)
@@ -459,11 +441,10 @@ async def get_property_mapping(
     connector_id: UUID,
     mapping_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Get a specific property mapping."""
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     result = await db.execute(
         select(LearnedPropertyMapping)
@@ -484,7 +465,7 @@ async def update_property_mapping(
     mapping_id: UUID,
     update: LearnedPropertyMappingUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Update a property mapping.
@@ -495,8 +476,7 @@ async def update_property_mapping(
     - Toggle include_in_embedding
     - Set is_filterable/is_facetable for search UI
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     from app.services.data_learning import MetadataIntelligenceService
 
@@ -520,7 +500,7 @@ async def list_relationship_types(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List learned relationship types for a connector.
@@ -529,8 +509,7 @@ async def list_relationship_types(
     - cm:references → references (bidirectional)
     - peer:related → relates_to (peer association)
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     query = (
         select(LearnedRelationshipType)
@@ -569,7 +548,7 @@ async def update_relationship_type(
     type_id: UUID,
     update: LearnedRelationshipTypeUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Update a relationship type mapping.
@@ -580,8 +559,7 @@ async def update_relationship_type(
     - Toggle include_in_retrieval
     - Modify expansion_depth
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     from app.services.data_learning import RelationshipLearner
 
@@ -605,7 +583,7 @@ async def list_indexing_strategies(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List indexing strategies for a connector.
@@ -616,8 +594,7 @@ async def list_indexing_strategies(
     - extract_entities: Whether to extract named entities
     - priority: Higher priority strategies match first
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     query = (
         select(ConnectorIndexingStrategy)
@@ -655,11 +632,10 @@ async def get_indexing_strategy(
     connector_id: UUID,
     strategy_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Get a specific indexing strategy."""
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     result = await db.execute(
         select(ConnectorIndexingStrategy)
@@ -679,15 +655,14 @@ async def create_indexing_strategy(
     connector_id: UUID,
     create: ConnectorIndexingStrategyCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Create a custom indexing strategy.
 
     Use this to define specific processing rules for document types or MIME types.
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     from app.services.data_learning import IndexingStrategyOptimizer
 
@@ -703,7 +678,7 @@ async def update_indexing_strategy(
     strategy_id: UUID,
     update: ConnectorIndexingStrategyUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Update an indexing strategy.
@@ -714,8 +689,7 @@ async def update_indexing_strategy(
     - Toggle entity extraction
     - Enable/disable the strategy
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     from app.services.data_learning import IndexingStrategyOptimizer
 
@@ -733,11 +707,10 @@ async def delete_indexing_strategy(
     connector_id: UUID,
     strategy_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Delete an indexing strategy."""
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     result = await db.execute(
         select(ConnectorIndexingStrategy)
@@ -766,15 +739,14 @@ async def list_learning_jobs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List learning jobs for a connector.
 
     Returns job history with status, progress, and results.
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     query = (
         select(DataLearningJob)
@@ -812,11 +784,10 @@ async def get_learning_job(
     connector_id: UUID,
     job_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """Get details of a specific learning job."""
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     result = await db.execute(
         select(DataLearningJob)
@@ -836,15 +807,14 @@ async def cancel_learning_job(
     connector_id: UUID,
     job_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Cancel a running learning job.
 
     Only jobs with status RUNNING or PENDING can be cancelled.
     """
-    await _check_admin_permission(current_user, tenant_id)
-    await _get_connector_or_404(connector_id, tenant_id, db)
+    await _get_connector_or_404(connector_id, db)
 
     from app.services.data_learning import LearningOrchestrator
 

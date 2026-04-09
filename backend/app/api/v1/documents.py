@@ -15,7 +15,6 @@ from sqlalchemy import select, or_
 
 from app.services.async_document_service import AsyncDocumentService
 from app.services.document_preview_service import DocumentPreviewService
-from app.services.document_acl_service import DocumentACLService
 from app.services.queue_service import queue_service
 from app.services.elasticsearch_client import elasticsearch_client
 from app.services.storage_service import StorageService
@@ -29,12 +28,11 @@ from app.api.async_dependencies import (
 )
 from app.core.auth.base import UserProfile
 from app.core.auth.acl import filter_visible_to_user
-from app.db.models import User, Document as DBDocument, Tag, IndexedDocument, Connector
+from app.db.models import Document as DBDocument, Tag, IndexedDocument, Connector
 from app.schemas.document import (
     Document, DocumentDetail,
     UploadRequest, DocumentUpdate
 )
-from app.schemas.document_acl import Permission
 from app.services.connectors import ConnectorAdapterFactory
 from app.schemas.unified_document import UnifiedDocument, ConnectorType
 
@@ -43,113 +41,31 @@ router = APIRouter()
 
 
 # ========================================
-# ACL CHECK HELPER
+# ACL — role-based access enforced via filter_visible_to_user
 # ========================================
 
-async def _check_document_permission(
+async def _load_visible_document(
     db: AsyncSession,
     doc_id: str,
-    permission: Permission,
-    current_user: User,
-    tenant_id: str,
-) -> None:
-    """
-    Check if user has the required permission on a document.
-
-    Supports two document types:
-    - Document (uploads): Uses DocumentACLService with DocumentACL table
-    - IndexedDocument (connectors): Uses JSONB ACL fields (is_tenant_public, shared_with_users)
-
-    Raises HTTPException 403 if permission is denied.
-    """
-    # First, try Document table with DocumentACLService
-    acl_service = DocumentACLService(tenant_id=tenant_id, user_id=str(current_user.id))
-    has_permission = await acl_service.check_permission(
-        db, UUID(doc_id), permission, current_user
+    user: UserProfile,
+) -> DBDocument:
+    """Load a Document enforcing role-based visibility or raise 403/404."""
+    query = filter_visible_to_user(
+        select(DBDocument).where(DBDocument.id == UUID(doc_id)),
+        user,
     )
-
-    if has_permission:
-        return  # Permission granted via Document ACL
-
-    # Check if document exists in IndexedDocument table (connectors)
-    indexed_doc_result = await db.execute(
-        select(IndexedDocument).filter(
-            IndexedDocument.id == UUID(doc_id),
-            IndexedDocument.tenant_id == tenant_id
-        )
-    )
-    indexed_doc = indexed_doc_result.scalar_one_or_none()
-
-    if indexed_doc:
-        # Check IndexedDocument ACL
-        has_indexed_permission = await _check_indexed_document_permission(
-            indexed_doc, permission, current_user
-        )
-        if has_indexed_permission:
-            return  # Permission granted via IndexedDocument ACL
-
-    # No permission found
-    permission_name = permission.value
-    raise HTTPException(
-        status_code=403,
-        detail=f"You don't have {permission_name} permission on this document"
-    )
-
-
-async def _check_indexed_document_permission(
-    doc: IndexedDocument,
-    permission: Permission,
-    user: User,
-) -> bool:
-    """
-    Check if user has permission on an IndexedDocument.
-
-    IndexedDocument ACL hierarchy:
-    1. Owner → all permissions
-    2. Admin → all permissions
-    3. is_tenant_public=True → VIEW permission for all tenant users
-    4. User in shared_with_users → VIEW permission
-    5. User's groups in shared_with_groups → VIEW permission (from SSO)
-    """
-    user_id_str = str(user.id)
-
-    # Check 1: Is user the owner?
-    if doc.owner_id and str(doc.owner_id) == user_id_str:
-        return True  # Owner has all permissions
-
-    # Check 2: Is user an admin?
-    if user.is_admin:
-        return True  # Admin has all permissions
-
-    # For VIEW permission, check additional ACL fields
-    if permission == Permission.VIEW:
-        # Check 3: Is document public to tenant?
-        if doc.is_tenant_public:
-            return True
-
-        # Check 4: Is user in shared_with_users?
-        shared_users = doc.shared_with_users or []
-        if user_id_str in shared_users or str(user.id) in shared_users:
-            return True
-
-        # Check 5: Are any of user's groups in shared_with_groups?
-        shared_groups = doc.shared_with_groups or []
-        if shared_groups:
-            # Get user's groups from SSO provider (sso_groups field)
-            user_groups = user.sso_groups or []
-            if any(group in shared_groups for group in user_groups):
-                return True
-
-    # For EDIT/DELETE/SHARE, only owner and admin have permission
-    # (already checked above)
-    return False
+    result = await db.execute(query)
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return doc
 
 
 @router.get("", response_model=dict)
 async def list_documents(
     db: AsyncSession = Depends(get_async_db),
     document_service: AsyncDocumentService = Depends(get_document_service),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     search: Optional[str] = Query(None),
@@ -173,18 +89,11 @@ async def list_documents(
     - If folder is "": Returns documents in root folder + subfolders as items
     - If folder is "/path": Returns documents in that folder + subfolders as items
     """
-    # When searching with Weaviate, let Weaviate handle ACL filtering directly
-    # (Weaviate receives user_id, user_role_ids, is_admin for filtering)
-    # Only do PostgreSQL ACL check for non-search requests
-    accessible_doc_ids = None
-    if not search or not search.strip():
-        acl_service = DocumentACLService(tenant_id=tenant_id, user_id=str(current_user.id))
-        accessible_doc_ids = await acl_service.get_documents_user_can_access(
-            db, permission=Permission.VIEW, user=current_user
-        )
-
+    # Role-based ACL filtering is applied by the service layer via
+    # filter_visible_to_user using current_user.roles.
     return await document_service.get_documents(
         db=db,
+        user=current_user,
         page=page,
         per_page=per_page,
         search=search,
@@ -192,7 +101,6 @@ async def list_documents(
         date_from=date_from,
         date_to=date_to,
         category=category,
-        document_ids=accessible_doc_ids,  # None for search (Weaviate handles ACL)
         folder=folder  # Filter by folder path
     )
 
@@ -208,12 +116,9 @@ async def create_document(
     periodo: Optional[str] = Form(None),
     tipo_documento: Optional[str] = Form(None),
     folder_path: Optional[str] = Form(None),  # Target folder for upload (Google Drive style)
+    roles: List[str] = Form(default=["EVERYONE"]),
     file: UploadFile = File(...),
-    current_user: User = Depends(require_document_upload_permission_async),
-    # Note: We manually create service here because require_document_upload_permission_async
-    # might consume the body stream if not handled carefully, but here we use Form/File
-    # We can use the factory manually or add a dependency that doesn't conflict.
-    # For safety with UploadFile, we'll construct it manually to ensure strict control.
+    current_user: UserProfile = Depends(require_document_upload_permission_async),
 ):
     """
     Sube un nuevo documento al sistema.
@@ -225,7 +130,7 @@ async def create_document(
     tag_list = tags.split(",") if tags else []
     tag_list = [tag.strip() for tag in tag_list if tag.strip()]
 
-    document_service = await AsyncDocumentService.create(tenant_id=tenant_id, user_id=str(current_user.id), db=db)
+    document_service = await AsyncDocumentService.create(user=current_user, db=db)
     new_doc = await document_service.upload_document(
         db=db,
         file=file,
@@ -236,15 +141,15 @@ async def create_document(
         cliente=cliente,
         periodo=periodo,
         tipo_documento=tipo_documento,
-        folder_path=folder_path  # Pass folder for manual classification
+        folder_path=folder_path,
+        roles=roles,
     )
-    
+
     # Proactive Preview Generation: Enqueue background task
     try:
         await queue_service.enqueue_preview_generation(
             document_id=str(new_doc.id),
-            tenant_id=tenant_id,
-            user_id=str(current_user.id),
+            user_id=current_user.sub,
             preview_type="all",
             priority="default"
         )
@@ -258,7 +163,7 @@ async def create_document(
 async def get_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -267,14 +172,14 @@ async def get_document(
     Requires: VIEW permission on the document.
     """
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     doc = await document_service.get_document(db=db, doc_id=doc_id)
     
     # Convert to DocumentDetail schema
     # Note: Tags are already loaded via selectinload in the service
     tags_list = [
-        Tag(id=tag.id, name=tag.name, tenant_id=tag.tenant_id, created_at=tag.created_at) 
+        Tag(id=tag.id, name=tag.name, created_at=tag.created_at)
         for tag in doc.tags
     ] if hasattr(doc, 'tags') else []
 
@@ -287,7 +192,6 @@ async def get_document(
         file_size=doc.file_size,
         mime_type=doc.mime_type,
         category=doc.category,
-        tenant_id=doc.tenant_id,
         created_by=doc.created_by,
         indexed=doc.indexed,
         created_at=doc.created_at,
@@ -302,7 +206,7 @@ async def get_document(
 async def stream_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -317,7 +221,7 @@ async def stream_document(
     import uuid as uuid_module
 
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     # 1. Intentar obtener de tabla Document (uploads)
     try:
@@ -328,10 +232,7 @@ async def stream_document(
 
         client = httpx.AsyncClient(timeout=60.0)
         try:
-            request = client.build_request(
-                "GET", storage_url,
-                params={"tenant_id": tenant_id},
-            )
+            request = client.build_request("GET", storage_url)
             response = await client.send(request, stream=True)
 
             if response.status_code == 404:
@@ -420,7 +321,6 @@ async def stream_document(
             async with _httpx.AsyncClient(timeout=30.0) as http_client:
                 cache_response = await http_client.get(
                     f"{_settings.STORAGE_SERVICE_URL}/files/{indexed_doc.cached_path}",
-                    params={"tenant_id": str(indexed_doc.tenant_id)},
                 )
                 if cache_response.status_code == 200:
                     content = cache_response.content
@@ -451,7 +351,6 @@ async def stream_document(
                 size_bytes=indexed_doc.size_bytes or 0,
                 source_created_at=indexed_doc.source_created_at,
                 source_modified_at=indexed_doc.source_modified_at,
-                tenant_id=indexed_doc.tenant_id,
                 owner_id=indexed_doc.owner_id,
             )
 
@@ -487,7 +386,7 @@ async def stream_document(
 async def serve_pdf(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -497,7 +396,7 @@ async def serve_pdf(
     Requires: VIEW permission on the document.
     """
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     # Obtener información del documento
     document = await document_service.get_document(db=db, doc_id=doc_id)
@@ -537,7 +436,7 @@ async def serve_pdf(
 async def serve_converted_pdf(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -546,9 +445,9 @@ async def serve_converted_pdf(
     Requires: VIEW permission on the document.
     """
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
-    preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
+    preview_service = DocumentPreviewService(user_id=current_user.sub)
     
     # Obtener información del documento
     document = await document_service.get_document(db=db, doc_id=doc_id)
@@ -601,7 +500,7 @@ async def update_document(
     doc_id: str,
     update_data: DocumentUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -610,7 +509,7 @@ async def update_document(
     Requires: EDIT permission on the document.
     """
     # ACL Check: Verify user has edit permission
-    await _check_document_permission(db, doc_id, Permission.EDIT, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     # Obtener el documento existente
     document = await document_service.get_document(db=db, doc_id=doc_id)
@@ -636,7 +535,7 @@ async def update_document(
 async def delete_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -645,7 +544,7 @@ async def delete_document(
     Requires: DELETE permission on the document.
     """
     # ACL Check: Verify user has delete permission
-    await _check_document_permission(db, doc_id, Permission.DELETE, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     return await document_service.delete_document(db=db, doc_id=doc_id)
 
@@ -654,7 +553,7 @@ async def delete_document(
 async def get_document_summary(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -663,7 +562,7 @@ async def get_document_summary(
     Requires: VIEW permission on the document.
     """
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     return await document_service.generate_summary(db=db, doc_id=doc_id)
 
@@ -673,7 +572,7 @@ async def add_document_tag(
     doc_id: str,
     tag: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -682,7 +581,7 @@ async def add_document_tag(
     Requires: EDIT permission on the document.
     """
     # ACL Check: Verify user has edit permission
-    await _check_document_permission(db, doc_id, Permission.EDIT, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     return await document_service.add_tag(db=db, doc_id=doc_id, tag_name=tag)
 
@@ -692,7 +591,7 @@ async def remove_document_tag(
     doc_id: str,
     tag_name: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -701,7 +600,7 @@ async def remove_document_tag(
     Requires: EDIT permission on the document.
     """
     # ACL Check: Verify user has edit permission
-    await _check_document_permission(db, doc_id, Permission.EDIT, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     return await document_service.remove_tag(db=db, doc_id=doc_id, tag_name=tag_name)
 
@@ -711,7 +610,7 @@ async def get_document_preview(
     doc_id: str,
     force_regenerate: bool = Query(False, description="Force regeneration of preview"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -720,9 +619,9 @@ async def get_document_preview(
     Requires: VIEW permission on the document.
     """
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
-    preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
+    preview_service = DocumentPreviewService(user_id=current_user.sub)
     
     try:
         # Obtener información del documento
@@ -808,7 +707,7 @@ async def get_document_preview(
 async def get_preview_info(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Obtiene información de preview existente sin regenerar.
@@ -816,9 +715,9 @@ async def get_preview_info(
     Requires: VIEW permission on the document.
     """
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
-    preview_service = DocumentPreviewService(tenant_id=tenant_id, user_id=str(current_user.id))
+    preview_service = DocumentPreviewService(user_id=current_user.sub)
     
     try:
         preview_info = await preview_service.get_preview_info(doc_id)
@@ -842,7 +741,7 @@ async def get_preview_info(
 async def get_document_agents(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -852,7 +751,7 @@ async def get_document_agents(
     Requires: VIEW permission on the document.
     """
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     try:
         return await document_service.get_document_agents(db, doc_id)
@@ -870,7 +769,7 @@ async def get_document_agents(
 async def recategorize_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -879,7 +778,7 @@ async def recategorize_document(
     Requires: EDIT permission on the document (categorization modifies metadata).
     """
     # ACL Check: Verify user has edit permission (recategorization modifies the document)
-    await _check_document_permission(db, doc_id, Permission.EDIT, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     doc = await document_service.get_document(db=db, doc_id=doc_id)
     
@@ -905,8 +804,7 @@ async def recategorize_document(
         db,
         doc_id,
         content_preview=content_preview,
-        tenant_id=tenant_id,
-        user_id=str(current_user.id),
+        user_id=current_user.sub,
         source="manual_api"
     )
     
@@ -927,30 +825,18 @@ async def recategorize_document(
 @router.post("/recategorize-all")
 async def recategorize_all_documents(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service),
     only_uncategorized: bool = Query(True),
     batch_size: int = Query(10, ge=1, le=50)
 ):
     """
-    Recategoriza todos los documentos del tenant.
-
-    Requires: EDIT permission on each document (only processes documents user can edit).
+    Recategoriza documentos visibles para el usuario.
     """
-    # ACL: Get documents user has EDIT permission on
-    acl_service = DocumentACLService(tenant_id=tenant_id, user_id=str(current_user.id))
-    editable_doc_ids = await acl_service.get_documents_user_can_access(
-        db, permission=Permission.EDIT, user=current_user
-    )
-
-    if not editable_doc_ids:
-        return {"total_documents": 0, "message": "No editable documents found"}
-
-    # Build query with ACL filter
-    query = select(DBDocument).filter(
-        DBDocument.tenant_id == tenant_id,
-        DBDocument.indexed > 0,
-        DBDocument.id.in_(editable_doc_ids)  # ACL filter
+    # Build query; role-based visibility applied via filter_visible_to_user
+    query = filter_visible_to_user(
+        select(DBDocument).filter(DBDocument.indexed > 0),
+        current_user,
     )
 
     if only_uncategorized:
@@ -993,8 +879,7 @@ async def recategorize_all_documents(
             db,
             str(doc.id),
             content_preview=content_preview,
-            tenant_id=tenant_id,
-            user_id=str(current_user.id),
+            user_id=current_user.sub,
             source="bulk_api",
         )
         if cat_result.get("success"):
@@ -1016,7 +901,7 @@ async def queue_preview_generation(
     preview_type: str = Query("all"),
     force_regenerate: bool = Query(False),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -1025,15 +910,14 @@ async def queue_preview_generation(
     Requires: VIEW permission on the document.
     """
     # ACL Check: Verify user has view permission
-    await _check_document_permission(db, doc_id, Permission.VIEW, current_user, tenant_id)
+    await _load_visible_document(db, doc_id, current_user)
 
     # Verify document exists via service
     await document_service.get_document(db=db, doc_id=doc_id)
     
     job_id = await queue_service.enqueue_preview_generation(
         document_id=doc_id,
-        tenant_id=tenant_id,
-        user_id=str(current_user.id),
+        user_id=current_user.sub,
         preview_type=preview_type,
         force_regenerate=force_regenerate,
         priority="high" if force_regenerate else "default"
@@ -1055,7 +939,7 @@ async def queue_batch_preview_generation(
     preview_type: str = Query("all"),
     batch_size: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -1064,28 +948,19 @@ async def queue_batch_preview_generation(
     Requires: VIEW permission on each document (checked per-document).
     """
     valid_ids = []
-    acl_service = DocumentACLService(tenant_id=tenant_id, user_id=str(current_user.id))
-
     for doc_id in document_ids:
         try:
-            # Verify document exists
-            await document_service.get_document(db=db, doc_id=doc_id)
-            # ACL Check: Verify user has view permission
-            has_permission = await acl_service.check_permission(
-                db, UUID(doc_id), Permission.VIEW, current_user
-            )
-            if has_permission:
-                valid_ids.append(doc_id)
-        except:
+            await _load_visible_document(db, doc_id, current_user)
+            valid_ids.append(doc_id)
+        except HTTPException:
             pass
 
     if not valid_ids:
         return {"status": "failed", "error": "No accessible documents found"}
-    
+
     job_id = await queue_service.enqueue_preview_batch(
         document_ids=valid_ids,
-        tenant_id=tenant_id,
-        user_id=str(current_user.id),
+        user_id=current_user.sub,
         preview_type=preview_type,
         batch_size=batch_size,
         priority="default"
@@ -1113,7 +988,6 @@ async def get_document_facets(
     """
     try:
         facets_data = await elasticsearch_client.get_facets(
-            tenant_id=tenant_id,
             query=query,
             filters=filters,
             facet_fields=facet_fields,
@@ -1157,7 +1031,7 @@ async def process_identity_document(
     purpose: str = Form(default="identity_verification", description="Purpose for processing"),
     retention_days: int = Form(default=90, ge=1, le=365, description="Days to retain extracted data"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Process an identity document (DNI, NIE, Passport, Driver's License) and extract structured data.
@@ -1201,15 +1075,14 @@ async def process_identity_document(
     file_size = len(contents)
 
     logger.info(
-        f"Identity document processing | user={current_user.id} tenant={tenant_id} "
+        f"Identity document processing | user={current_user.sub} "
         f"file={filename} size={file_size} type={document_type or 'auto'} purpose={purpose}"
     )
 
     # Audit log: PII access initiated
     audit_entry = {
         "action": "identity_extraction_started",
-        "user_id": str(current_user.id),
-        "tenant_id": tenant_id,
+        "user_id": current_user.sub,
         "timestamp": datetime.utcnow().isoformat(),
         "purpose": purpose,
         "filename": filename,
@@ -1230,7 +1103,6 @@ async def process_identity_document(
                 f"{intelligence_url}/identity/extract",
                 headers={
                     "X-API-Key": api_key,
-                    "X-Tenant-ID": tenant_id,
                 },
                 files={"file": (filename, contents)},
                 data={
@@ -1269,11 +1141,11 @@ async def process_identity_document(
                 # Insert into identity_document_extractions table
                 insert_sql = text("""
                     INSERT INTO identity_document_extractions (
-                        tenant_id, document_type, issuing_country,
+                        document_type, issuing_country,
                         extracted_data, confidence_score, ocr_engine,
                         retention_until, consent_purpose, created_by
                     ) VALUES (
-                        :tenant_id, :document_type, :issuing_country,
+                        :document_type, :issuing_country,
                         :extracted_data, :confidence_score, :ocr_engine,
                         :retention_until, :consent_purpose, :created_by
                     ) RETURNING id
@@ -1296,7 +1168,6 @@ async def process_identity_document(
                 db_result = await db.execute(
                     insert_sql,
                     {
-                        "tenant_id": tenant_id,
                         "document_type": result.get("document_type", "unknown"),
                         "issuing_country": result.get("issuing_country"),
                         "extracted_data": json.dumps(extracted_data),
@@ -1304,7 +1175,7 @@ async def process_identity_document(
                         "ocr_engine": result.get("ocr_engine", "doctr"),
                         "retention_until": retention_until,
                         "consent_purpose": purpose,
-                        "created_by": str(current_user.id),
+                        "created_by": current_user.sub,
                     }
                 )
                 await db.commit()
@@ -1320,8 +1191,7 @@ async def process_identity_document(
         # Audit log: PII extraction completed
         audit_complete = {
             "action": "identity_extraction_completed",
-            "user_id": str(current_user.id),
-            "tenant_id": tenant_id,
+            "user_id": current_user.sub,
             "timestamp": datetime.utcnow().isoformat(),
             "extraction_id": extraction_id,
             "document_type": result.get("document_type"),

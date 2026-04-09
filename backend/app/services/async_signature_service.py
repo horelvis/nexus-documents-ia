@@ -16,8 +16,8 @@ from sqlalchemy.orm import selectinload
 from cryptography.fernet import Fernet
 
 from app.db.models import (
-    SignatureProvider, SignatureRequest, SignatureRequestSigner, 
-    SignatureEvent, SignatureProviderAudit, Tenant, User, SignatureContact
+    SignatureProvider, SignatureRequest, SignatureRequestSigner,
+    SignatureEvent, SignatureProviderAudit, User, SignatureContact
 )
 from app.schemas.signature import (
     SignatureProviderCreate, SignatureProviderUpdate,
@@ -70,41 +70,34 @@ class AsyncSignatureService:
     # =====================================
     
     async def create_provider(
-        self, 
-        provider_data: SignatureProviderCreate, 
-        tenant_id: UUID,
+        self,
+        provider_data: SignatureProviderCreate,
         created_by: UUID
     ) -> SignatureProvider:
         """Crear un proveedor de firma"""
         try:
             # Verificar que el proveedor no exista ya
             stmt = select(SignatureProvider).filter(
-                and_(
-                    SignatureProvider.tenant_id == tenant_id,
-                    SignatureProvider.provider_name == provider_data.provider_name
-                )
+                SignatureProvider.provider_name == provider_data.provider_name
             )
             result = await self.db.execute(stmt)
             existing = result.scalar_one_or_none()
-            
+
             if existing:
-                raise ValueError(f"Provider {provider_data.provider_name} already exists for this tenant")
-            
+                raise ValueError(f"Provider {provider_data.provider_name} already exists")
+
             # Encriptar credenciales
             encrypted_creds = self._encrypt_credentials(provider_data.credentials)
-            
+
             # Si es el primer proveedor, marcarlo como default
             is_default = provider_data.is_default
             if not is_default:
-                count_stmt = select(func.count()).select_from(SignatureProvider).filter(
-                    SignatureProvider.tenant_id == tenant_id
-                )
+                count_stmt = select(func.count()).select_from(SignatureProvider)
                 result = await self.db.execute(count_stmt)
                 existing_providers = result.scalar()
                 is_default = existing_providers == 0
-            
+
             provider = SignatureProvider(
-                tenant_id=tenant_id,
                 provider_name=provider_data.provider_name,
                 display_name=provider_data.display_name,
                 encrypted_credentials=encrypted_creds,
@@ -112,14 +105,13 @@ class AsyncSignatureService:
                 is_active=provider_data.is_active,
                 is_default=is_default
             )
-            
+
             self.db.add(provider)
             await self.db.flush()  # Flush to get the provider ID
-            
+
             # Crear registro de auditoría
             audit = SignatureProviderAudit(
                 provider_id=provider.id,
-                tenant_id=tenant_id,
                 action='created',
                 changed_by=created_by,
                 changes={
@@ -130,11 +122,11 @@ class AsyncSignatureService:
                 }
             )
             self.db.add(audit)
-            
+
             await self.db.commit()
             await self.db.refresh(provider)
-            
-            logger.info(f"Created signature provider {provider.id} for tenant {tenant_id}")
+
+            logger.info(f"Created signature provider {provider.id}")
             return provider
             
         except Exception as e:
@@ -142,36 +134,28 @@ class AsyncSignatureService:
             logger.error(f"Error creating signature provider: {str(e)}")
             raise
     
-    async def get_provider(self, provider_id: UUID, tenant_id: UUID) -> Optional[SignatureProvider]:
+    async def get_provider(self, provider_id: UUID) -> Optional[SignatureProvider]:
         """Obtener un proveedor"""
-        stmt = select(SignatureProvider).filter(
-            and_(
-                SignatureProvider.id == provider_id,
-                SignatureProvider.tenant_id == tenant_id
-            )
-        )
+        stmt = select(SignatureProvider).filter(SignatureProvider.id == provider_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
-    async def get_providers(self, tenant_id: UUID, is_active: bool = True) -> List[SignatureProvider]:
-        """Obtener proveedores del tenant"""
-        stmt = select(SignatureProvider).filter(
-            SignatureProvider.tenant_id == tenant_id
-        )
-        
+
+    async def get_providers(self, is_active: bool = True) -> List[SignatureProvider]:
+        """Obtener proveedores"""
+        stmt = select(SignatureProvider)
+
         if is_active is not None:
             stmt = stmt.filter(SignatureProvider.is_active == is_active)
-        
+
         stmt = stmt.order_by(desc(SignatureProvider.is_default))
-        
+
         result = await self.db.execute(stmt)
         return result.scalars().all()
-    
-    async def get_default_provider(self, tenant_id: UUID) -> Optional[SignatureProvider]:
+
+    async def get_default_provider(self) -> Optional[SignatureProvider]:
         """Obtener proveedor por defecto"""
         stmt = select(SignatureProvider).filter(
             and_(
-                SignatureProvider.tenant_id == tenant_id,
                 SignatureProvider.is_active == True,
                 SignatureProvider.is_default == True
             )
@@ -184,49 +168,44 @@ class AsyncSignatureService:
     # =====================================
     
     async def create_signature_request(
-        self, 
-        request_data: SignatureRequestCreate, 
-        tenant_id: UUID, 
+        self,
+        request_data: SignatureRequestCreate,
         user_id: UUID
     ) -> SignatureRequest:
         """Crear solicitud de firma"""
         try:
             # Obtener proveedor
-            provider = await self.get_provider(request_data.provider_id, tenant_id)
+            provider = await self.get_provider(request_data.provider_id)
             if not provider or not provider.is_active:
                 raise ValueError("Invalid or inactive signature provider")
-            
+
             # Load document content if document_id is provided
             document_content = None
             document_name = request_data.document_name
-            
+
             if request_data.document_id:
                 # Import here to avoid circular imports
                 from app.db.models import Document
-                
-                # Load document
-                stmt = select(Document).filter(
-                    and_(
-                        Document.id == request_data.document_id,
-                        Document.tenant_id == tenant_id
-                    )
-                )
+
+                # Load document (ACL enforced at endpoint level)
+                stmt = select(Document).filter(Document.id == request_data.document_id)
                 result = await self.db.execute(stmt)
                 document = result.scalar_one_or_none()
-                
+
                 if not document:
                     raise ValueError("Document not found")
-                
+
                 # Get document content from storage if not in database
                 if document.file_path:
                     # Import storage service
                     from app.services.async_storage_service import AsyncStorageService
-                    
+
                     try:
-                        # Create storage service instance with proper parameters
+                        # Storage service retains legacy positional scope
+                        # (slated for Plan 2 storage cleanup).
                         storage_service = AsyncStorageService(
-                            tenant_id=str(tenant_id),
-                            user_id=str(user_id)
+                            settings.DEFAULT_TENANT_ID,
+                            str(user_id),
                         )
                         
                         # Download document from storage
@@ -253,7 +232,6 @@ class AsyncSignatureService:
             
             # Crear solicitud en base de datos
             signature_request = SignatureRequest(
-                tenant_id=tenant_id,
                 provider_id=request_data.provider_id,
                 created_by=user_id,
                 title=request_data.title,
@@ -289,7 +267,6 @@ class AsyncSignatureService:
                 
                 # Save or update signer as contact
                 await self._save_signer_as_contact(
-                    tenant_id=tenant_id,
                     user_id=user_id,
                     name=signer_data.name,
                     email=signer_data.email,
@@ -323,19 +300,14 @@ class AsyncSignatureService:
             logger.error(f"Error creating signature request: {str(e)}")
             raise
     
-    async def send_signature_request(self, request_id: UUID, tenant_id: UUID) -> bool:
+    async def send_signature_request(self, request_id: UUID) -> bool:
         """Enviar solicitud de firma al proveedor"""
         try:
             # Obtener solicitud con relaciones cargadas
             stmt = select(SignatureRequest).options(
                 selectinload(SignatureRequest.provider),
                 selectinload(SignatureRequest.signers)
-            ).filter(
-                and_(
-                    SignatureRequest.id == request_id,
-                    SignatureRequest.tenant_id == tenant_id
-                )
-            )
+            ).filter(SignatureRequest.id == request_id)
             result = await self.db.execute(stmt)
             request = result.scalar_one_or_none()
             
@@ -413,50 +385,38 @@ class AsyncSignatureService:
             raise
     
     async def get_signature_request(
-        self, 
-        request_id: UUID, 
-        tenant_id: UUID
+        self,
+        request_id: UUID
     ) -> Optional[SignatureRequest]:
         """Obtener solicitud de firma"""
         stmt = select(SignatureRequest).options(
             selectinload(SignatureRequest.signers),
             selectinload(SignatureRequest.provider)
-        ).filter(
-            and_(
-                SignatureRequest.id == request_id,
-                SignatureRequest.tenant_id == tenant_id
-            )
-        )
+        ).filter(SignatureRequest.id == request_id)
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
-    
+
     async def delete_signature_request(
         self,
-        request_id: UUID,
-        tenant_id: UUID
+        request_id: UUID
     ) -> bool:
         """Eliminar solicitud de firma"""
         try:
-            # Get the request first to verify it exists and belongs to tenant
-            request = await self.get_signature_request(request_id, tenant_id)
+            # Get the request first to verify it exists
+            request = await self.get_signature_request(request_id)
             if not request:
                 return False
-            
+
             # Delete signers first (due to foreign key constraints)
             await self.db.execute(
                 delete(SignatureRequestSigner).where(
                     SignatureRequestSigner.request_id == request_id
                 )
             )
-            
+
             # Delete the request
             result = await self.db.execute(
-                delete(SignatureRequest).where(
-                    and_(
-                        SignatureRequest.id == request_id,
-                        SignatureRequest.tenant_id == tenant_id
-                    )
-                )
+                delete(SignatureRequest).where(SignatureRequest.id == request_id)
             )
             
             await self.db.commit()
@@ -470,8 +430,7 @@ class AsyncSignatureService:
             raise
     
     async def get_signature_requests(
-        self, 
-        tenant_id: UUID,
+        self,
         user_id: Optional[UUID] = None,
         status: Optional[str] = None,
         limit: int = 50,
@@ -481,10 +440,8 @@ class AsyncSignatureService:
         stmt = select(SignatureRequest).options(
             selectinload(SignatureRequest.signers),
             selectinload(SignatureRequest.provider)
-        ).filter(
-            SignatureRequest.tenant_id == tenant_id
         )
-        
+
         if user_id:
             stmt = stmt.filter(SignatureRequest.created_by == user_id)
         
@@ -497,13 +454,12 @@ class AsyncSignatureService:
         return result.scalars().all()
     
     async def update_signature_status(
-        self, 
-        request_id: UUID, 
-        tenant_id: UUID
+        self,
+        request_id: UUID
     ) -> Optional[SignatureRequest]:
         """Actualizar estado desde el proveedor"""
         try:
-            request = await self.get_signature_request(request_id, tenant_id)
+            request = await self.get_signature_request(request_id)
             if not request or not request.external_id:
                 return None
             
@@ -548,31 +504,27 @@ class AsyncSignatureService:
     # =====================================
     
     async def handle_webhook(
-        self, 
-        provider_name: str, 
-        payload: Dict[str, Any], 
-        signature: str,
-        tenant_id: UUID
+        self,
+        provider_name: str,
+        payload: Dict[str, Any],
+        signature: str
     ) -> bool:
         """Manejar webhook de proveedor"""
         try:
             # Verificar firma del webhook
-            if not await self._verify_webhook_signature(provider_name, payload, signature, tenant_id):
+            if not await self._verify_webhook_signature(provider_name, payload, signature):
                 logger.warning(f"Invalid webhook signature from {provider_name}")
                 return False
-            
+
             # Procesar evento según el proveedor
             external_id = payload.get("external_id") or payload.get("envelope_id") or payload.get("id")
             if not external_id:
                 logger.warning("No external_id found in webhook payload")
                 return False
-            
+
             # Buscar solicitud
             stmt = select(SignatureRequest).filter(
-                and_(
-                    SignatureRequest.external_id == external_id,
-                    SignatureRequest.tenant_id == tenant_id
-                )
+                SignatureRequest.external_id == external_id
             )
             result = await self.db.execute(stmt)
             request = result.scalar_one_or_none()
@@ -609,20 +561,16 @@ class AsyncSignatureService:
             return False
     
     async def _verify_webhook_signature(
-        self, 
-        provider_name: str, 
-        payload: Dict[str, Any], 
-        signature: str,
-        tenant_id: UUID
+        self,
+        provider_name: str,
+        payload: Dict[str, Any],
+        signature: str
     ) -> bool:
         """Verificar firma HMAC del webhook"""
         try:
             # Obtener proveedor
             stmt = select(SignatureProvider).filter(
-                and_(
-                    SignatureProvider.tenant_id == tenant_id,
-                    SignatureProvider.provider_name == provider_name
-                )
+                SignatureProvider.provider_name == provider_name
             )
             result = await self.db.execute(stmt)
             provider = result.scalar_one_or_none()
@@ -673,13 +621,12 @@ class AsyncSignatureService:
         self.db.add(event)
     
     async def download_signed_document(
-        self, 
-        request_id: UUID, 
-        tenant_id: UUID
+        self,
+        request_id: UUID
     ) -> Optional[bytes]:
         """Descargar documento firmado"""
         try:
-            request = await self.get_signature_request(request_id, tenant_id)
+            request = await self.get_signature_request(request_id)
             if not request or request.status != 'completed':
                 return None
             
@@ -701,15 +648,13 @@ class AsyncSignatureService:
         self,
         provider_id: UUID,
         provider_data: SignatureProviderCreate,
-        tenant_id: UUID,
         updated_by: UUID
     ) -> Optional[SignatureProvider]:
         """Actualizar un proveedor de firma"""
         try:
             # Obtener el proveedor existente
             query = select(SignatureProvider).where(
-                SignatureProvider.id == provider_id,
-                SignatureProvider.tenant_id == tenant_id
+                SignatureProvider.id == provider_id
             )
             result = await self.db.execute(query)
             provider = result.scalar_one_or_none()
@@ -739,13 +684,12 @@ class AsyncSignatureService:
             
             # Si se está estableciendo como predeterminado, desactivar otros
             if provider_data.is_default:
-                await self._unset_other_defaults(tenant_id, provider_id)
-            
+                await self._unset_other_defaults(provider_id)
+
             # Crear registro de auditoría
             if changes:
                 audit = SignatureProviderAudit(
                     provider_id=provider_id,
-                    tenant_id=tenant_id,
                     action='updated',
                     changed_by=updated_by,
                     changes=changes
@@ -765,15 +709,13 @@ class AsyncSignatureService:
     async def delete_provider(
         self,
         provider_id: UUID,
-        tenant_id: UUID,
         deleted_by: UUID
     ) -> bool:
         """Eliminar un proveedor de firma"""
         try:
-            # Verificar que el proveedor existe y pertenece al tenant
+            # Verificar que el proveedor existe
             query = select(SignatureProvider).where(
-                SignatureProvider.id == provider_id,
-                SignatureProvider.tenant_id == tenant_id
+                SignatureProvider.id == provider_id
             )
             result = await self.db.execute(query)
             provider = result.scalar_one_or_none()
@@ -793,7 +735,6 @@ class AsyncSignatureService:
             # Crear registro de auditoría antes de eliminar
             audit = SignatureProviderAudit(
                 provider_id=provider_id,
-                tenant_id=tenant_id,
                 action='deleted',
                 changed_by=deleted_by,
                 changes={
@@ -816,15 +757,13 @@ class AsyncSignatureService:
     async def set_default_provider(
         self,
         provider_id: UUID,
-        tenant_id: UUID,
         set_by: UUID
     ) -> Optional[SignatureProvider]:
         """Establecer un proveedor como predeterminado"""
         try:
             # Obtener el proveedor
             query = select(SignatureProvider).where(
-                SignatureProvider.id == provider_id,
-                SignatureProvider.tenant_id == tenant_id
+                SignatureProvider.id == provider_id
             )
             result = await self.db.execute(query)
             provider = result.scalar_one_or_none()
@@ -833,16 +772,15 @@ class AsyncSignatureService:
                 return None
             
             # Desactivar todos los demás como predeterminados
-            await self._unset_other_defaults(tenant_id, provider_id)
-            
+            await self._unset_other_defaults(provider_id)
+
             # Establecer este como predeterminado
             provider.is_default = True
             provider.is_active = True  # Asegurar que esté activo
-            
+
             # Crear registro de auditoría
             audit = SignatureProviderAudit(
                 provider_id=provider_id,
-                tenant_id=tenant_id,
                 action='set_default',
                 changed_by=set_by,
                 changes={
@@ -862,27 +800,24 @@ class AsyncSignatureService:
             logger.error(f"Error setting default provider: {str(e)}")
             raise
     
-    async def _unset_other_defaults(self, tenant_id: UUID, except_provider_id: UUID):
+    async def _unset_other_defaults(self, except_provider_id: UUID):
         """Desactivar otros proveedores como predeterminados"""
         query = update(SignatureProvider).where(
-            SignatureProvider.tenant_id == tenant_id,
             SignatureProvider.id != except_provider_id,
             SignatureProvider.is_default == True
         ).values(is_default=False)
-        
+
         await self.db.execute(query)
-    
+
     async def test_provider_connection(
         self,
-        provider_id: UUID,
-        tenant_id: UUID
+        provider_id: UUID
     ) -> Dict[str, Any]:
         """Probar la conexión con un proveedor"""
         try:
             # Obtener el proveedor
             query = select(SignatureProvider).where(
-                SignatureProvider.id == provider_id,
-                SignatureProvider.tenant_id == tenant_id
+                SignatureProvider.id == provider_id
             )
             result = await self.db.execute(query)
             provider = result.scalar_one_or_none()
@@ -980,7 +915,6 @@ class AsyncSignatureService:
     
     async def _save_signer_as_contact(
         self,
-        tenant_id: UUID,
         user_id: UUID,
         name: str,
         email: str,
@@ -990,10 +924,7 @@ class AsyncSignatureService:
         try:
             # Check if contact already exists
             query = select(SignatureContact).where(
-                and_(
-                    SignatureContact.tenant_id == tenant_id,
-                    SignatureContact.email == email
-                )
+                SignatureContact.email == email
             )
             result = await self.db.execute(query)
             contact = result.scalar_one_or_none()
@@ -1011,7 +942,6 @@ class AsyncSignatureService:
             else:
                 # Create new contact
                 contact = SignatureContact(
-                    tenant_id=tenant_id,
                     created_by=user_id,
                     name=name,
                     email=email,
