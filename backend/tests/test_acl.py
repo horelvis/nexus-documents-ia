@@ -44,7 +44,10 @@ def test_filter_visible_to_user_includes_everyone():
     user = make_user(roles=[])
     from app.core.auth.acl import build_role_filter_clause
     clause = build_role_filter_clause(user)
-    assert "EVERYONE" in str(clause)
+    # Inline literal binds so the "EVERYONE" sentinel shows up in the
+    # compiled SQL string instead of being hidden behind :roles_1.
+    compiled = str(clause.compile(compile_kwargs={"literal_binds": True}))
+    assert "EVERYONE" in compiled
 
 
 def test_filter_visible_to_user_includes_user_roles():
@@ -52,9 +55,14 @@ def test_filter_visible_to_user_includes_user_roles():
     user = make_user(roles=["SALES"])
     from app.core.auth.acl import build_role_filter_clause
     clause = build_role_filter_clause(user)
-    clause_str = str(clause).upper()
-    assert "EVERYONE" in clause_str
-    assert "OVERLAP" in clause_str or "&&" in clause_str
+    compiled = str(clause.compile(compile_kwargs={"literal_binds": True}))
+    compiled_upper = compiled.upper()
+    # The EVERYONE branch is always present (the OR clause)
+    assert "EVERYONE" in compiled_upper
+    # The user's role must appear in the overlap operand
+    assert "SALES" in compiled_upper
+    # The array-overlap operator (&&) or "OVERLAP" name must appear
+    assert "&&" in compiled or "OVERLAP" in compiled_upper
 
 
 def test_require_role_passes_when_user_has_role():
