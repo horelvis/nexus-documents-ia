@@ -19,14 +19,13 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select
 
 from app.api.async_dependencies import (
     get_current_user_async,
-    get_current_tenant_id_async,
     get_async_db,
 )
-from app.db.models import User, Tenant
+from app.core.auth.base import UserProfile
 from app.services.folder_classification_service import (
     FolderClassificationService,
     ClassificationResult,
@@ -36,6 +35,17 @@ from app.services.folder_service import get_classification_stats
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+# =============================================================================
+# Hardcoded defaults (post multi-tenancy refactor — Tenant model removed)
+# =============================================================================
+# NOTE: In the multi-tenant era, auto_classification config lived on the
+# Tenant row. Post-refactor these knobs default to constants until they are
+# moved into app.core.config.settings.
+DEFAULT_AUTO_CLASSIFICATION_ENABLED = True
+DEFAULT_AUTO_CLASSIFICATION_K = 5
+DEFAULT_AUTO_CLASSIFICATION_MIN_CONFIDENCE = 0.6
 
 
 # =============================================================================
@@ -95,29 +105,13 @@ class ClassificationPreviewResponse(BaseModel):
 
 
 # =============================================================================
-# Helper Functions
-# =============================================================================
-
-async def get_tenant_settings(db: AsyncSession, tenant_id: str) -> Tenant:
-    """Get tenant with classification settings."""
-    result = await db.execute(
-        select(Tenant).where(Tenant.id == tenant_id)
-    )
-    tenant = result.scalar_one_or_none()
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
-    return tenant
-
-
-# =============================================================================
 # Endpoints
 # =============================================================================
 
 @router.get("/status", response_model=ClassificationStatusResponse)
 async def get_classification_status(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get the status of the auto-classification system.
@@ -134,14 +128,14 @@ async def get_classification_status(
     - System shows readiness once enough examples exist
     - User activates when ready
     """
-    tenant = await get_tenant_settings(db, tenant_id)
+    stats = await get_classification_stats(db)
 
-    # Get stats using sync session
-    sync_db = db.sync_session
-    stats = get_classification_stats(sync_db, tenant_id)
+    enabled = DEFAULT_AUTO_CLASSIFICATION_ENABLED
+    k = DEFAULT_AUTO_CLASSIFICATION_K
+    min_confidence = DEFAULT_AUTO_CLASSIFICATION_MIN_CONFIDENCE
 
     # Build message based on status
-    if tenant.auto_classification_enabled:
+    if enabled:
         message = (
             f"Auto-clasificación ACTIVA. "
             f"{stats.auto_classified_documents} documentos clasificados por IA."
@@ -160,9 +154,9 @@ async def get_classification_status(
             message = f"Crea {remaining} carpeta(s) más para activar."
 
     return ClassificationStatusResponse(
-        enabled=tenant.auto_classification_enabled,
-        k=tenant.auto_classification_k,
-        min_confidence=tenant.auto_classification_min_confidence,
+        enabled=enabled,
+        k=k,
+        min_confidence=min_confidence,
         total_documents=stats.total_documents,
         classified_documents=stats.classified_documents,
         unclassified_documents=stats.unclassified_documents,
@@ -177,72 +171,32 @@ async def get_classification_status(
 async def update_classification_settings(
     request: ClassificationSettingsRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
-    Update classification settings for the tenant.
+    Update classification settings.
 
-    Settings:
-    - k: Number of similar documents to retrieve (3-20, default 7)
-    - min_confidence: Minimum LLM confidence to auto-classify (0.1-1.0, default 0.6)
-
-    Higher k = more context but slower
-    Higher min_confidence = fewer auto-classifications but higher accuracy
+    NOTE: Post-refactor, classification settings are hardcoded constants until
+    they are moved into app.core.config.settings. This endpoint is a no-op.
     """
-    tenant = await get_tenant_settings(db, tenant_id)
-
-    # Update only provided fields
-    updates = {}
-    if request.k is not None:
-        updates["auto_classification_k"] = request.k
-    if request.min_confidence is not None:
-        updates["auto_classification_min_confidence"] = request.min_confidence
-
-    if updates:
-        await db.execute(
-            update(Tenant)
-            .where(Tenant.id == tenant_id)
-            .values(**updates)
-        )
-        await db.commit()
-        await db.refresh(tenant)
-
     return ClassificationSettingsResponse(
-        k=tenant.auto_classification_k,
-        min_confidence=tenant.auto_classification_min_confidence,
-        message="Configuración actualizada"
+        k=request.k or DEFAULT_AUTO_CLASSIFICATION_K,
+        min_confidence=request.min_confidence or DEFAULT_AUTO_CLASSIFICATION_MIN_CONFIDENCE,
+        message="Configuración actualizada (no-op post multi-tenancy refactor)"
     )
 
 
 @router.post("/activate", response_model=ActivateResponse)
 async def activate_classification(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
-    Activate auto-classification for the tenant.
+    Activate auto-classification.
 
-    Prerequisites (checked but not enforced):
-    - At least 20 classified documents
-    - At least 3 different folders
-
-    After activation:
-    - New documents will be auto-classified using RAG + LLM
-    - System uses existing classified documents as examples
-    - Classification happens during document upload
+    NOTE: Post-refactor, always enabled via hardcoded default.
     """
-    # Check if ready (but allow activation anyway for testing)
-    sync_db = db.sync_session
-    stats = get_classification_stats(sync_db, tenant_id)
-
-    await db.execute(
-        update(Tenant)
-        .where(Tenant.id == tenant_id)
-        .values(auto_classification_enabled=True)
-    )
-    await db.commit()
+    stats = await get_classification_stats(db)
 
     if not stats.ready_for_activation:
         message = (
@@ -261,28 +215,16 @@ async def activate_classification(
 @router.post("/deactivate", response_model=ActivateResponse)
 async def deactivate_classification(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
-    Deactivate auto-classification for the tenant.
+    Deactivate auto-classification.
 
-    After deactivation:
-    - New documents go to "/Sin Clasificar"
-    - User continues organizing manually
-    - System continues to learn from manual organization
-    - Can reactivate at any time
+    NOTE: Post-refactor, this is a no-op (setting lives as hardcoded default).
     """
-    await db.execute(
-        update(Tenant)
-        .where(Tenant.id == tenant_id)
-        .values(auto_classification_enabled=False)
-    )
-    await db.commit()
-
     return ActivateResponse(
         enabled=False,
-        message="Auto-clasificación DESACTIVADA. Los nuevos documentos irán a '/Sin Clasificar'."
+        message="Auto-clasificación DESACTIVADA (no-op post multi-tenancy refactor)."
     )
 
 
@@ -290,27 +232,11 @@ async def deactivate_classification(
 async def preview_classification(
     request: ClassificationPreviewRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Preview where a document would be classified (without actually moving it).
-
-    This is useful for:
-    - Testing classification before activation
-    - Seeing how the system would classify a document
-    - Understanding the reasoning behind classifications
-
-    The response includes:
-    - carpeta: Suggested folder path
-    - confianza: LLM confidence (0-1)
-    - razonamiento: Why this folder was chosen
-    - carpetas_alternativas: Other possible folders
-    - es_carpeta_nueva: True if suggesting a new folder
-    - would_auto_classify: True if confidence >= min_confidence
     """
-    tenant = await get_tenant_settings(db, tenant_id)
-
     # Build document dict for classification
     documento = {
         "doc_id": request.doc_id or "",
@@ -319,20 +245,22 @@ async def preview_classification(
         "content": request.content,
     }
 
+    k = DEFAULT_AUTO_CLASSIFICATION_K
+    min_confidence = DEFAULT_AUTO_CLASSIFICATION_MIN_CONFIDENCE
+
     # Run classification
     try:
         result = await classify_document(
-            tenant_id=tenant_id,
             documento=documento,
-            k=tenant.auto_classification_k,
-            min_confidence=tenant.auto_classification_min_confidence,
+            k=k,
+            min_confidence=min_confidence,
         )
     except Exception as e:
         logger.error(f"Classification preview failed: {e}")
         raise HTTPException(status_code=500, detail=f"Error en clasificación: {str(e)}")
 
     # Would this be auto-classified?
-    would_auto = result.confianza >= tenant.auto_classification_min_confidence
+    would_auto = result.confianza >= min_confidence
 
     # Build message
     if result.confianza == 0:
@@ -341,7 +269,7 @@ async def preview_classification(
         message = f"Se clasificaría automáticamente en '{result.carpeta}' ({result.confianza:.0%} confianza)."
     else:
         message = (
-            f"Confianza ({result.confianza:.0%}) menor al umbral ({tenant.auto_classification_min_confidence:.0%}). "
+            f"Confianza ({result.confianza:.0%}) menor al umbral ({min_confidence:.0%}). "
             f"Iría a '/Sin Clasificar'."
         )
 
@@ -361,37 +289,29 @@ async def classify_existing_document(
     document_id: str,
     apply: bool = Query(False, description="If True, move document to suggested folder"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Classify an existing document and optionally move it.
-
-    Use case: Re-classify documents that were uploaded before activation,
-    or re-run classification on documents that were put in /Sin Clasificar.
-
-    Args:
-        document_id: UUID of the document
-        apply: If True, move document to the suggested folder
-
-    Returns classification result. If apply=True, also moves the document.
     """
     from uuid import UUID
     from app.db.models import Document
+    from app.core.auth.acl import filter_visible_to_user
     from app.services.folder_service import FolderService
 
     # Get document
-    result = await db.execute(
-        select(Document)
-        .where(Document.id == UUID(document_id))
-        .where(Document.tenant_id == tenant_id)
+    query = filter_visible_to_user(
+        select(Document).where(Document.id == UUID(document_id)),
+        current_user,
     )
+    result = await db.execute(query)
     document = result.scalar_one_or_none()
 
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    tenant = await get_tenant_settings(db, tenant_id)
+    k = DEFAULT_AUTO_CLASSIFICATION_K
+    min_confidence = DEFAULT_AUTO_CLASSIFICATION_MIN_CONFIDENCE
 
     # Build document dict
     documento = {
@@ -403,10 +323,9 @@ async def classify_existing_document(
 
     # Run classification
     classification = await classify_document(
-        tenant_id=tenant_id,
         documento=documento,
-        k=tenant.auto_classification_k,
-        min_confidence=tenant.auto_classification_min_confidence,
+        k=k,
+        min_confidence=min_confidence,
     )
 
     response = {
@@ -421,9 +340,8 @@ async def classify_existing_document(
     }
 
     # Apply if requested and confidence is high enough
-    if apply and classification.confianza >= tenant.auto_classification_min_confidence:
-        sync_db = db.sync_session
-        service = FolderService(sync_db, tenant_id)
+    if apply and classification.confianza >= min_confidence:
+        service = FolderService(db)
         success = await service.move_document(document_id, classification.carpeta)
 
         if success:

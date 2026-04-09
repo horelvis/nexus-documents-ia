@@ -11,7 +11,8 @@ from sqlalchemy import select, and_, or_, func, desc
 from sqlalchemy.orm import selectinload
 
 from app.api.async_dependencies import get_async_db, get_current_active_user_async
-from app.db.models import User, SignatureContact
+from app.core.auth.base import UserProfile
+from app.db.models import SignatureContact
 from app.schemas.signature_contact import (
     SignatureContactCreate, SignatureContactUpdate, SignatureContact as SignatureContactSchema,
     SignatureContactList
@@ -26,31 +27,27 @@ router = APIRouter()
 async def create_signature_contact(
     contact_data: SignatureContactCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Create a new signature contact"""
     
     try:
         # Check if contact already exists
         stmt = select(SignatureContact).filter(
-            and_(
-                SignatureContact.tenant_id == current_user.tenant_id,
-                SignatureContact.email == contact_data.email
-            )
+            SignatureContact.email == contact_data.email
         )
         result = await db.execute(stmt)
         existing = result.scalar_one_or_none()
-        
+
         if existing:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Contact with this email already exists"
             )
-        
+
         # Create new contact
         contact = SignatureContact(
-            tenant_id=current_user.tenant_id,
-            created_by=current_user.id,
+            created_by=UUID(current_user.sub),
             name=contact_data.name,
             email=contact_data.email,
             phone=contact_data.phone,
@@ -65,7 +62,7 @@ async def create_signature_contact(
         await db.commit()
         await db.refresh(contact)
         
-        logger.info(f"Created signature contact {contact.id} for tenant {current_user.tenant_id}")
+        logger.info(f"Created signature contact {contact.id}")
         return contact
         
     except HTTPException:
@@ -88,16 +85,14 @@ async def get_signature_contacts(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Get signature contacts for the current tenant"""
     
     try:
         # Base query
-        stmt = select(SignatureContact).filter(
-            SignatureContact.tenant_id == current_user.tenant_id
-        )
-        
+        stmt = select(SignatureContact)
+
         # Apply filters
         if search:
             search_pattern = f"%{search.lower()}%"
@@ -134,10 +129,7 @@ async def get_signature_contacts(
         
         # Get favorites count
         favorites_stmt = select(func.count()).select_from(SignatureContact).filter(
-            and_(
-                SignatureContact.tenant_id == current_user.tenant_id,
-                SignatureContact.is_favorite == True
-            )
+            SignatureContact.is_favorite == True
         )
         favorites_result = await db.execute(favorites_stmt)
         favorites_count = favorites_result.scalar()
@@ -167,16 +159,13 @@ async def get_signature_contacts(
 async def get_frequently_used_contacts(
     limit: int = Query(10, ge=1, le=20),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Get frequently used signature contacts"""
     
     try:
         stmt = select(SignatureContact).filter(
-            and_(
-                SignatureContact.tenant_id == current_user.tenant_id,
-                SignatureContact.usage_count > 0
-            )
+            SignatureContact.usage_count > 0
         ).order_by(
             desc(SignatureContact.usage_count),
             desc(SignatureContact.last_used_at)
@@ -198,16 +187,13 @@ async def get_frequently_used_contacts(
 @router.get("/favorites", response_model=List[SignatureContactSchema])
 async def get_favorite_contacts(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Get favorite signature contacts"""
     
     try:
         stmt = select(SignatureContact).filter(
-            and_(
-                SignatureContact.tenant_id == current_user.tenant_id,
-                SignatureContact.is_favorite == True
-            )
+            SignatureContact.is_favorite == True
         ).order_by(SignatureContact.name)
         
         result = await db.execute(stmt)
@@ -227,16 +213,13 @@ async def get_favorite_contacts(
 async def get_signature_contact(
     contact_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Get a specific signature contact"""
     
     try:
         stmt = select(SignatureContact).filter(
-            and_(
-                SignatureContact.id == contact_id,
-                SignatureContact.tenant_id == current_user.tenant_id
-            )
+            SignatureContact.id == contact_id
         )
         result = await db.execute(stmt)
         contact = result.scalar_one_or_none()
@@ -264,16 +247,13 @@ async def update_signature_contact(
     contact_id: UUID,
     contact_data: SignatureContactUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Update a signature contact"""
     
     try:
         stmt = select(SignatureContact).filter(
-            and_(
-                SignatureContact.id == contact_id,
-                SignatureContact.tenant_id == current_user.tenant_id
-            )
+            SignatureContact.id == contact_id
         )
         result = await db.execute(stmt)
         contact = result.scalar_one_or_none()
@@ -310,16 +290,13 @@ async def update_signature_contact(
 async def toggle_favorite_contact(
     contact_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Toggle favorite status of a signature contact"""
     
     try:
         stmt = select(SignatureContact).filter(
-            and_(
-                SignatureContact.id == contact_id,
-                SignatureContact.tenant_id == current_user.tenant_id
-            )
+            SignatureContact.id == contact_id
         )
         result = await db.execute(stmt)
         contact = result.scalar_one_or_none()
@@ -354,16 +331,13 @@ async def toggle_favorite_contact(
 async def delete_signature_contact(
     contact_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Delete a signature contact"""
     
     try:
         stmt = select(SignatureContact).filter(
-            and_(
-                SignatureContact.id == contact_id,
-                SignatureContact.tenant_id == current_user.tenant_id
-            )
+            SignatureContact.id == contact_id
         )
         result = await db.execute(stmt)
         contact = result.scalar_one_or_none()
@@ -395,7 +369,7 @@ async def delete_signature_contact(
 async def import_signature_contacts(
     contacts: List[SignatureContactCreate],
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Import multiple signature contacts"""
     
@@ -405,19 +379,15 @@ async def import_signature_contacts(
         for contact_data in contacts:
             # Check if contact already exists
             stmt = select(SignatureContact).filter(
-                and_(
-                    SignatureContact.tenant_id == current_user.tenant_id,
-                    SignatureContact.email == contact_data.email
-                )
+                SignatureContact.email == contact_data.email
             )
             result = await db.execute(stmt)
             existing = result.scalar_one_or_none()
-            
+
             if not existing:
                 # Create new contact
                 contact = SignatureContact(
-                    tenant_id=current_user.tenant_id,
-                    created_by=current_user.id,
+                    created_by=UUID(current_user.sub),
                     name=contact_data.name,
                     email=contact_data.email,
                     phone=contact_data.phone,
@@ -436,7 +406,7 @@ async def import_signature_contacts(
         for contact in created_contacts:
             await db.refresh(contact)
         
-        logger.info(f"Imported {len(created_contacts)} signature contacts for tenant {current_user.tenant_id}")
+        logger.info(f"Imported {len(created_contacts)} signature contacts")
         return created_contacts
         
     except Exception as e:
@@ -452,7 +422,7 @@ async def import_signature_contacts(
 async def get_recent_signers(
     limit: int = Query(20, ge=1, le=50),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Get recent signers from signature requests that are not yet contacts"""
     
@@ -468,8 +438,6 @@ async def get_recent_signers(
         ).join(
             SignatureRequest,
             SignatureRequestSigner.request_id == SignatureRequest.id
-        ).filter(
-            SignatureRequest.tenant_id == current_user.tenant_id
         ).group_by(
             SignatureRequestSigner.email,
             SignatureRequestSigner.name,
@@ -482,9 +450,7 @@ async def get_recent_signers(
         recent_signers = result.all()
         
         # Get existing contact emails
-        contact_stmt = select(SignatureContact.email).filter(
-            SignatureContact.tenant_id == current_user.tenant_id
-        )
+        contact_stmt = select(SignatureContact.email)
         contact_result = await db.execute(contact_stmt)
         existing_emails = {row[0] for row in contact_result.all()}
         
@@ -517,7 +483,7 @@ async def get_recent_signers(
 async def import_contacts_from_recent_signers(
     emails: List[str],
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_active_user_async)
 ):
     """Import specific recent signers as contacts"""
     
@@ -535,10 +501,7 @@ async def import_contacts_from_recent_signers(
             SignatureRequest,
             SignatureRequestSigner.request_id == SignatureRequest.id
         ).filter(
-            and_(
-                SignatureRequest.tenant_id == current_user.tenant_id,
-                SignatureRequestSigner.email.in_(emails)
-            )
+            SignatureRequestSigner.email.in_(emails)
         ).distinct()
         
         result = await db.execute(stmt)
@@ -548,18 +511,14 @@ async def import_contacts_from_recent_signers(
         for signer in signers:
             # Check if contact already exists
             existing_stmt = select(SignatureContact).filter(
-                and_(
-                    SignatureContact.tenant_id == current_user.tenant_id,
-                    SignatureContact.email == signer.email
-                )
+                SignatureContact.email == signer.email
             )
             existing_result = await db.execute(existing_stmt)
             existing = existing_result.scalar_one_or_none()
-            
+
             if not existing:
                 contact = SignatureContact(
-                    tenant_id=current_user.tenant_id,
-                    created_by=current_user.id,
+                    created_by=UUID(current_user.sub),
                     name=signer.name,
                     email=signer.email,
                     phone=signer.phone,
@@ -575,7 +534,7 @@ async def import_contacts_from_recent_signers(
         for contact in created_contacts:
             await db.refresh(contact)
         
-        logger.info(f"Imported {len(created_contacts)} contacts from recent signers for tenant {current_user.tenant_id}")
+        logger.info(f"Imported {len(created_contacts)} contacts from recent signers")
         return created_contacts
         
     except Exception as e:

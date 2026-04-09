@@ -19,10 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.async_dependencies import (
     get_current_user_async,
-    get_current_tenant_id_async,
     get_async_db,
 )
-from app.db.models import User, FolderMarker
+from app.core.auth.base import UserProfile
+from app.db.models import FolderMarker
 from app.services.folder_service import (
     FolderService,
     FolderNode,
@@ -37,9 +37,9 @@ from uuid import UUID
 logger = logging.getLogger(__name__)
 
 
-async def get_storage_client(tenant_id: str, user_id: str) -> AsyncStorageClient:
-    """Create storage client for the tenant."""
-    return AsyncStorageClient(tenant_id=tenant_id, user_id=user_id)
+async def get_storage_client(user_id: str) -> AsyncStorageClient:
+    """Create storage client."""
+    return AsyncStorageClient(user_id=user_id)
 
 
 router = APIRouter()
@@ -172,11 +172,10 @@ def folder_node_to_dict(node: FolderNode) -> dict:
 @router.get("/tree", response_model=FolderTreeResponse)
 async def get_folders_tree(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
-    Get hierarchical folder tree for the tenant.
+    Get hierarchical folder tree.
 
     Returns a tree structure built from DISTINCT folder_path values in documents table.
     Each node includes document count and children.
@@ -184,7 +183,7 @@ async def get_folders_tree(
     Use this for rendering a folder navigation tree in the UI.
     """
     try:
-        root = await get_folder_tree(db, tenant_id)
+        root = await get_folder_tree(db)
 
         return FolderTreeResponse(
             root=FolderNodeResponse(**folder_node_to_dict(root))
@@ -197,8 +196,7 @@ async def get_folders_tree(
 @router.get("", response_model=FoldersListResponse)
 async def list_folders(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get flat list of all folders with document counts.
@@ -209,7 +207,7 @@ async def list_folders(
     Use this for folder selection dropdowns or simple listings.
     """
     try:
-        service = FolderService(db, tenant_id)
+        service = FolderService(db)
         folders = await service.get_folders_flat()
 
         return FoldersListResponse(
@@ -224,11 +222,10 @@ async def list_folders(
 @router.get("/stats", response_model=ClassificationStatsResponse)
 async def get_folder_stats(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
-    Get classification statistics for the tenant.
+    Get classification statistics.
 
     Returns counts of:
     - Total documents
@@ -243,7 +240,7 @@ async def get_folder_stats(
     - At least 3 different folders
     """
     try:
-        stats = await get_classification_stats(db, tenant_id)
+        stats = await get_classification_stats(db)
 
         # Build helpful message
         if stats.ready_for_activation:
@@ -285,8 +282,7 @@ async def get_documents_in_folder(
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get documents in a specific folder.
@@ -304,7 +300,7 @@ async def get_documents_in_folder(
         folder_path = "/" + folder_path
 
     try:
-        service = FolderService(db, tenant_id)
+        service = FolderService(db)
 
         offset = (page - 1) * per_page
         documents = await service.get_documents_in_folder(
@@ -344,8 +340,7 @@ async def move_document_to_folder(
     document_id: str,
     request: MoveDocumentRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Move a document to a new folder.
@@ -361,8 +356,8 @@ async def move_document_to_folder(
     """
     try:
         # Create storage client for GCS operations
-        storage_client = await get_storage_client(tenant_id, str(current_user.id))
-        service = FolderService(db, tenant_id, storage_service=storage_client)
+        storage_client = await get_storage_client(str(current_user.sub))
+        service = FolderService(db, storage_service=storage_client)
 
         # Get document's current folder before moving
         from sqlalchemy import select
@@ -372,7 +367,6 @@ async def move_document_to_folder(
         result = await db.execute(
             select(Document.folder_path)
             .where(Document.id == UUID(document_id))
-            .where(Document.tenant_id == tenant_id)
         )
         row = result.first()
         old_folder = row[0] if row else None
@@ -403,8 +397,7 @@ async def move_document_to_folder(
 async def bulk_move_documents(
     request: BulkMoveRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Move multiple documents to a new folder.
@@ -415,8 +408,8 @@ async def bulk_move_documents(
     Returns count of successful and failed moves with error details.
     """
     # Create storage client for GCS operations
-    storage_client = await get_storage_client(tenant_id, str(current_user.id))
-    service = FolderService(db, tenant_id, storage_service=storage_client)
+    storage_client = await get_storage_client(str(current_user.sub))
+    service = FolderService(db, storage_service=storage_client)
 
     moved = 0
     failed = 0
@@ -446,8 +439,7 @@ async def bulk_move_documents(
 async def create_folder(
     request: CreateFolderRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Create an empty folder.
@@ -466,7 +458,6 @@ async def create_folder(
         # Check if folder already exists (either as marker or with documents)
         existing_marker = await db.execute(
             select(FolderMarker)
-            .where(FolderMarker.tenant_id == UUID(tenant_id))
             .where(FolderMarker.folder_path == folder_path)
         )
         if existing_marker.scalar_one_or_none():
@@ -476,7 +467,7 @@ async def create_folder(
             )
 
         # Check if folder has documents (already exists implicitly)
-        service = FolderService(db, tenant_id)
+        service = FolderService(db)
         documents = await service.get_documents_in_folder(folder_path, include_subfolders=False, limit=1)
         if documents:
             raise HTTPException(
@@ -486,14 +477,13 @@ async def create_folder(
 
         # Create the folder marker
         folder_marker = FolderMarker(
-            tenant_id=UUID(tenant_id),
             folder_path=folder_path,
-            created_by=current_user.id
+            created_by=UUID(current_user.sub)
         )
         db.add(folder_marker)
         await db.commit()
 
-        logger.info(f"Created folder marker: {folder_path} for tenant {tenant_id}")
+        logger.info(f"Created folder marker: {folder_path}")
 
         return CreateFolderResponse(
             success=True,
@@ -512,8 +502,7 @@ async def create_folder(
 async def delete_folder(
     folder_path: str = Path(..., description="Folder path to delete"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Delete an empty folder.
@@ -525,7 +514,7 @@ async def delete_folder(
         folder_path = "/" + folder_path
 
     # Check if folder has documents
-    service = FolderService(db, tenant_id)
+    service = FolderService(db)
 
     documents = await service.get_documents_in_folder(folder_path, include_subfolders=True, limit=1)
 

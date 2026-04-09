@@ -2,7 +2,7 @@
 Site Guests API - Admin endpoints for managing external sharing.
 
 Provides CRUD operations for Site Guests, permissions, and access logs.
-Requires Clerk authentication (internal user).
+Requires internal user authentication. Guest creation restricted to ADMIN role.
 """
 import logging
 from typing import Optional
@@ -14,7 +14,9 @@ from sqlalchemy import select, func
 
 from app.db.async_database import get_async_db
 from app.api.async_dependencies import get_current_user_async
-from app.db.models import User, SiteGuestShareDocument
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
+from app.db.models import SiteGuestShareDocument
 from app.services.site_guest_service import SiteGuestService
 from app.schemas.site_guest import (
     SiteGuestCreate, SiteGuestUpdate, SiteGuestResponse, SiteGuestListResponse,
@@ -40,27 +42,27 @@ router = APIRouter()
 
 @router.get("/site/settings", response_model=TenantSiteSettingsResponse)
 async def get_site_settings(
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    Get the current tenant's site settings.
+    Get the site settings.
 
     Returns site configuration including slug, enabled status, and guest counts.
     """
-    tenant = await SiteGuestService.get_tenant_site_settings(db, current_user.tenant_id)
-    if not tenant:
-        raise HTTPException(status_code=404, detail="Tenant not found")
+    site = await SiteGuestService.get_tenant_site_settings(db)
+    if not site:
+        raise HTTPException(status_code=404, detail="Site settings not found")
 
     # Get guest counts
-    guests, total = await SiteGuestService.list_guests(db, current_user.tenant_id, include_inactive=True)
+    guests, total = await SiteGuestService.list_guests(db, include_inactive=True)
     active_count = sum(1 for g in guests if g.is_active)
 
     return TenantSiteSettingsResponse(
-        site_enabled=tenant.site_enabled or False,
-        site_logo_url=tenant.site_logo_url,
-        site_welcome_message=tenant.site_welcome_message,
-        slug=tenant.slug,
+        site_enabled=getattr(site, "site_enabled", False) or False,
+        site_logo_url=getattr(site, "site_logo_url", None),
+        site_welcome_message=getattr(site, "site_welcome_message", None),
+        slug=site.slug,
         guest_count=total,
         active_guest_count=active_count
     )
@@ -68,29 +70,27 @@ async def get_site_settings(
 
 @router.put("/site/settings", response_model=TenantSiteSettingsResponse)
 async def update_site_settings(
-    settings: TenantSiteSettingsUpdate,
-    current_user: User = Depends(get_current_user_async),
+    site_update: TenantSiteSettingsUpdate,
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    Update the current tenant's site settings.
+    Update the site settings.
 
-    Allows enabling/disabling the site, setting custom slug, logo, and welcome message.
+    NOTE: no-op in single-tenant on-premise mode.
     """
     try:
-        tenant = await SiteGuestService.update_tenant_site_settings(
-            db, current_user.tenant_id, settings
-        )
+        site = await SiteGuestService.update_tenant_site_settings(db, site_update)
 
         # Get guest counts
-        guests, total = await SiteGuestService.list_guests(db, current_user.tenant_id, include_inactive=True)
+        guests, total = await SiteGuestService.list_guests(db, include_inactive=True)
         active_count = sum(1 for g in guests if g.is_active)
 
         return TenantSiteSettingsResponse(
-            site_enabled=tenant.site_enabled or False,
-            site_logo_url=tenant.site_logo_url,
-            site_welcome_message=tenant.site_welcome_message,
-            slug=tenant.slug,
+            site_enabled=getattr(site, "site_enabled", False) or False,
+            site_logo_url=getattr(site, "site_logo_url", None),
+            site_welcome_message=getattr(site, "site_welcome_message", None),
+            slug=site.slug,
             guest_count=total,
             active_guest_count=active_count
         )
@@ -100,15 +100,15 @@ async def update_site_settings(
 
 @router.get("/site/statistics", response_model=SiteGuestStatistics)
 async def get_site_statistics(
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    Get statistics for the tenant's site guests.
+    Get statistics for site guests.
 
     Returns counts of guests, access metrics, and shared content.
     """
-    stats = await SiteGuestService.get_statistics(db, current_user.tenant_id)
+    stats = await SiteGuestService.get_statistics(db)
     return stats
 
 
@@ -119,21 +119,20 @@ async def get_site_statistics(
 @router.post("", response_model=SiteGuestResponse, status_code=status.HTTP_201_CREATED)
 async def create_guest(
     guest_data: SiteGuestCreate,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Create a new Site Guest.
 
-    Creates an external user who can access the tenant's portal via OTP authentication.
+    ADMIN-only. Creates an external user who can access the portal via OTP authentication.
     Optionally sends an invitation email immediately.
     """
     try:
         guest = await SiteGuestService.create_guest(
             db,
-            current_user.tenant_id,
             guest_data,
-            current_user.id
+            UUID(current_user.sub)
         )
         return _guest_to_response(guest)
     except ValueError as e:
@@ -145,16 +144,16 @@ async def list_guests(
     include_inactive: bool = Query(False, description="Include deactivated guests"),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    List all Site Guests for the current tenant.
+    List all Site Guests.
 
     Returns paginated list of guests with their status and permissions.
     """
     guests, total = await SiteGuestService.list_guests(
-        db, current_user.tenant_id, include_inactive, page, per_page
+        db, include_inactive, page, per_page
     )
 
     return SiteGuestListResponse(
@@ -168,14 +167,14 @@ async def list_guests(
 @router.get("/{guest_id}", response_model=SiteGuestResponse)
 async def get_guest(
     guest_id: UUID,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Get a specific Site Guest by ID.
     """
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     return _guest_to_response(guest)
@@ -185,17 +184,16 @@ async def get_guest(
 async def update_guest(
     guest_id: UUID,
     updates: SiteGuestUpdate,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Update a Site Guest.
 
-    Can modify name, active status, permissions, and expiration.
+    ADMIN-only. Can modify name, active status, permissions, and expiration.
     """
-    # Verify guest belongs to tenant
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     try:
@@ -208,18 +206,17 @@ async def update_guest(
 @router.delete("/{guest_id}", response_model=SuccessResponse)
 async def deactivate_guest(
     guest_id: UUID,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Deactivate a Site Guest (soft delete).
 
-    The guest will no longer be able to access the portal.
+    ADMIN-only. The guest will no longer be able to access the portal.
     All active sessions are revoked.
     """
-    # Verify guest belongs to tenant
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     try:
@@ -233,14 +230,16 @@ async def deactivate_guest(
 async def resend_invitation(
     guest_id: UUID,
     invite_request: Optional[SiteGuestInviteRequest] = None,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Resend invitation email to a Site Guest.
+
+    ADMIN-only.
     """
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     success = await SiteGuestService.send_invitation_email(db, guest)
@@ -257,41 +256,36 @@ async def resend_invitation(
 @router.post("/with-share", response_model=CreateGuestWithShareResponse, status_code=status.HTTP_201_CREATED)
 async def create_guest_with_share(
     request: CreateGuestWithShareRequest,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Create a guest and share documents with them in one operation.
 
-    This is the simplified flow from the Documents page:
+    ADMIN-only. This is the simplified flow from the Documents page:
     1. Creates guest if not exists (or reuses existing by email)
     2. Creates a share/collection with the specified documents
     3. Sends invitation email with portal link
-
-    The guest will see the shared documents as a virtual folder/collection
-    in the portal.
     """
     try:
         # Get or create guest (doesn't create duplicates)
         guest, is_new_guest = await SiteGuestService.get_or_create_guest(
             db=db,
-            tenant_id=current_user.tenant_id,
             email=request.email,
             name=request.name,
-            invited_by_user_id=current_user.id
+            invited_by_user_id=UUID(current_user.sub)
         )
 
         # Create share with documents
         share = await SiteGuestService.create_share(
             db=db,
-            tenant_id=current_user.tenant_id,
             guest_id=guest.id,
             name=request.share_name,
             document_ids=request.document_ids,
             permission_type=request.permission_type,
             description=request.share_description,
             expires_at=request.expires_at,
-            created_by_user_id=current_user.id
+            created_by_user_id=UUID(current_user.sub)
         )
 
         share_count = (
@@ -336,15 +330,14 @@ async def create_guest_with_share(
 @router.get("/{guest_id}/shares", response_model=SiteGuestShareListResponse)
 async def list_guest_shares(
     guest_id: UUID,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     List all shares/collections for a guest.
     """
-    # Verify guest belongs to tenant
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     shares = await SiteGuestService.list_guest_shares(db, guest_id)
@@ -373,15 +366,14 @@ async def list_guest_shares(
 @router.get("/{guest_id}/permissions", response_model=SiteGuestPermissionListResponse)
 async def list_guest_permissions(
     guest_id: UUID,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     List all permissions for a Site Guest.
     """
-    # Verify guest belongs to tenant
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     permissions = await SiteGuestService.list_guest_permissions(db, guest_id)
@@ -396,17 +388,16 @@ async def list_guest_permissions(
 async def grant_document_permission(
     guest_id: UUID,
     permission_data: SiteGuestDocumentPermissionCreate,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Grant document permission to a Site Guest.
 
-    permission_type must be one of: view, download, upload
+    ADMIN-only. permission_type must be one of: view, download, upload
     """
-    # Verify guest belongs to tenant
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     try:
@@ -415,7 +406,7 @@ async def grant_document_permission(
             guest_id,
             permission_data.document_id,
             permission_data.permission_type,
-            current_user.id,
+            UUID(current_user.sub),
             permission_data.expires_at
         )
         return _permission_to_response(permission)
@@ -427,18 +418,17 @@ async def grant_document_permission(
 async def grant_folder_permission(
     guest_id: UUID,
     permission_data: SiteGuestFolderPermissionCreate,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Grant folder permission to a Site Guest.
 
-    All documents within the folder path will be accessible.
+    ADMIN-only. All documents within the folder path will be accessible.
     permission_type must be one of: view, download, upload
     """
-    # Verify guest belongs to tenant
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     try:
@@ -447,7 +437,7 @@ async def grant_folder_permission(
             guest_id,
             permission_data.folder_path,
             permission_data.permission_type,
-            current_user.id,
+            UUID(current_user.sub),
             permission_data.expires_at
         )
         return _permission_to_response(permission)
@@ -459,15 +449,16 @@ async def grant_folder_permission(
 async def revoke_permission(
     guest_id: UUID,
     permission_id: UUID,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Revoke a permission from a Site Guest.
+
+    ADMIN-only.
     """
-    # Verify guest belongs to tenant
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     success = await SiteGuestService.revoke_permission(db, permission_id)
@@ -486,7 +477,7 @@ async def get_guest_access_logs(
     guest_id: UUID,
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=100),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -494,9 +485,8 @@ async def get_guest_access_logs(
 
     Returns audit trail of all guest actions including logins, views, and downloads.
     """
-    # Verify guest belongs to tenant
     guest = await SiteGuestService.get_guest(db, guest_id)
-    if not guest or guest.tenant_id != current_user.tenant_id:
+    if not guest:
         raise HTTPException(status_code=404, detail="Guest not found")
 
     logs, total = await SiteGuestService.get_guest_access_logs(db, guest_id, page, per_page)
@@ -517,7 +507,6 @@ def _guest_to_response(guest) -> SiteGuestResponse:
     """Convert SiteGuest model to response schema."""
     return SiteGuestResponse(
         id=guest.id,
-        tenant_id=guest.tenant_id,
         email=guest.email,
         name=guest.name,
         is_active=guest.is_active,

@@ -17,10 +17,11 @@ from sqlalchemy import select, func, and_, desc
 
 from app.api.async_dependencies import (
     get_current_user_async,
-    get_current_tenant_id_async,
     get_async_db
 )
-from app.db.models import User, Document as DBDocument, IndexedDocument, DocumentAnalysis
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import filter_visible_to_user
+from app.db.models import Document as DBDocument, IndexedDocument, DocumentAnalysis
 from app.schemas.analysis import (
     AnalysisStatus, AnalysisType,
     AnalysisQueueRequest, AnalysisBatchRequest,
@@ -40,8 +41,7 @@ router = APIRouter()
 async def queue_analysis(
     request: AnalysisQueueRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Queue a document for analysis.
@@ -49,27 +49,18 @@ async def queue_analysis(
     Creates a new analysis job in pending state.
     The analysis will be processed asynchronously.
     """
-    # Verify document exists and belongs to tenant
-    # First try Document table (SaaS uploads)
-    doc_result = await db.execute(
-        select(DBDocument).where(
-            and_(
-                DBDocument.id == request.document_id,
-                DBDocument.tenant_id == UUID(tenant_id)
-            )
-        )
+    # Verify document exists and is visible to current user (via ACL)
+    doc_query = filter_visible_to_user(
+        select(DBDocument).where(DBDocument.id == request.document_id),
+        current_user,
     )
+    doc_result = await db.execute(doc_query)
     document = doc_result.scalar_one_or_none()
 
     # If not found, try IndexedDocument table (connector documents)
     if not document:
         indexed_result = await db.execute(
-            select(IndexedDocument).where(
-                and_(
-                    IndexedDocument.id == request.document_id,
-                    IndexedDocument.tenant_id == UUID(tenant_id)
-                )
-            )
+            select(IndexedDocument).where(IndexedDocument.id == request.document_id)
         )
         indexed_doc = indexed_result.scalar_one_or_none()
         if indexed_doc:
@@ -104,8 +95,7 @@ async def queue_analysis(
     # Create new analysis job
     analysis = DocumentAnalysis(
         document_id=request.document_id,
-        tenant_id=UUID(tenant_id),
-        created_by=current_user.id,
+        created_by=UUID(current_user.sub),
         analysis_type=request.analysis_type.value,
         status="pending",
         progress=0
@@ -133,8 +123,7 @@ async def queue_analysis(
 async def queue_batch_analysis(
     request: AnalysisBatchRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Queue multiple documents for analysis.
@@ -142,15 +131,12 @@ async def queue_batch_analysis(
     Creates analysis jobs for each document in the batch.
     Returns list of created jobs (skips documents that already have pending analyses).
     """
-    # Verify all documents exist and belong to tenant
-    docs_result = await db.execute(
-        select(DBDocument).where(
-            and_(
-                DBDocument.id.in_(request.document_ids),
-                DBDocument.tenant_id == UUID(tenant_id)
-            )
-        )
+    # Verify all documents exist and are visible to current user (via ACL)
+    docs_query = filter_visible_to_user(
+        select(DBDocument).where(DBDocument.id.in_(request.document_ids)),
+        current_user,
     )
+    docs_result = await db.execute(docs_query)
     documents = docs_result.scalars().all()
     found_ids = {doc.id for doc in documents}
 
@@ -177,8 +163,7 @@ async def queue_batch_analysis(
 
         analysis = DocumentAnalysis(
             document_id=doc_id,
-            tenant_id=UUID(tenant_id),
-            created_by=current_user.id,
+            created_by=UUID(current_user.sub),
             analysis_type=request.analysis_type.value,
             status="pending",
             progress=0
@@ -212,19 +197,13 @@ async def queue_batch_analysis(
 async def get_analysis_status(
     job_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get the current status and progress of an analysis job.
     """
     result = await db.execute(
-        select(DocumentAnalysis).where(
-            and_(
-                DocumentAnalysis.id == job_id,
-                DocumentAnalysis.tenant_id == UUID(tenant_id)
-            )
-        )
+        select(DocumentAnalysis).where(DocumentAnalysis.id == job_id)
     )
     analysis = result.scalar_one_or_none()
 
@@ -256,8 +235,7 @@ async def get_analysis_status(
 async def get_analysis_result(
     job_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get the complete result of a completed analysis job.
@@ -266,12 +244,7 @@ async def get_analysis_result(
     annotations, and annotated PDF URL.
     """
     result = await db.execute(
-        select(DocumentAnalysis).where(
-            and_(
-                DocumentAnalysis.id == job_id,
-                DocumentAnalysis.tenant_id == UUID(tenant_id)
-            )
-        )
+        select(DocumentAnalysis).where(DocumentAnalysis.id == job_id)
     )
     analysis = result.scalar_one_or_none()
 
@@ -319,8 +292,7 @@ async def get_analysis_result(
 async def cancel_analysis(
     job_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Cancel a pending or processing analysis job.
@@ -329,12 +301,7 @@ async def cancel_analysis(
     Completed or failed jobs cannot be cancelled.
     """
     result = await db.execute(
-        select(DocumentAnalysis).where(
-            and_(
-                DocumentAnalysis.id == job_id,
-                DocumentAnalysis.tenant_id == UUID(tenant_id)
-            )
-        )
+        select(DocumentAnalysis).where(DocumentAnalysis.id == job_id)
     )
     analysis = result.scalar_one_or_none()
 
@@ -355,7 +322,7 @@ async def cancel_analysis(
     analysis.error_message = "Cancelled by user"
     await db.commit()
 
-    logger.info(f"Analysis job {job_id} cancelled by user {current_user.id}")
+    logger.info(f"Analysis job {job_id} cancelled by user {current_user.sub}")
 
     return {"message": "Analysis cancelled", "job_id": str(job_id)}
 
@@ -367,23 +334,20 @@ async def cancel_analysis(
 @router.get("", response_model=AnalysisQueueResponse)
 async def list_analyses(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     status: Optional[AnalysisStatus] = Query(None),
     document_id: Optional[UUID] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """
-    List analysis jobs for the tenant.
+    List analysis jobs.
 
     Supports filtering by status and document.
     Returns paginated results with queue statistics.
     """
     # Build query
-    query = select(DocumentAnalysis).where(
-        DocumentAnalysis.tenant_id == UUID(tenant_id)
-    )
+    query = select(DocumentAnalysis)
 
     if status:
         query = query.where(DocumentAnalysis.status == status.value)
@@ -392,9 +356,7 @@ async def list_analyses(
         query = query.where(DocumentAnalysis.document_id == document_id)
 
     # Count total
-    count_query = select(func.count(DocumentAnalysis.id)).where(
-        DocumentAnalysis.tenant_id == UUID(tenant_id)
-    )
+    count_query = select(func.count(DocumentAnalysis.id))
     if status:
         count_query = count_query.where(DocumentAnalysis.status == status.value)
     if document_id:
@@ -426,8 +388,6 @@ async def list_analyses(
     stats_query = select(
         DocumentAnalysis.status,
         func.count(DocumentAnalysis.id)
-    ).where(
-        DocumentAnalysis.tenant_id == UUID(tenant_id)
     ).group_by(DocumentAnalysis.status)
 
     stats_result = await db.execute(stats_query)
@@ -438,7 +398,6 @@ async def list_analyses(
         func.avg(DocumentAnalysis.execution_time_ms)
     ).where(
         and_(
-            DocumentAnalysis.tenant_id == UUID(tenant_id),
             DocumentAnalysis.status == "completed",
             DocumentAnalysis.execution_time_ms.isnot(None)
         )
@@ -489,8 +448,7 @@ async def list_analyses(
 async def get_document_analysis_history(
     document_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     limit: int = Query(10, ge=1, le=50),
 ):
     """
@@ -498,15 +456,12 @@ async def get_document_analysis_history(
 
     Returns the most recent analyses for the document.
     """
-    # Verify document exists and belongs to tenant
-    doc_result = await db.execute(
-        select(DBDocument).where(
-            and_(
-                DBDocument.id == document_id,
-                DBDocument.tenant_id == UUID(tenant_id)
-            )
-        )
+    # Verify document exists and is visible to current user (via ACL)
+    doc_query = filter_visible_to_user(
+        select(DBDocument).where(DBDocument.id == document_id),
+        current_user,
     )
+    doc_result = await db.execute(doc_query)
     document = doc_result.scalar_one_or_none()
 
     if not document:
@@ -516,12 +471,9 @@ async def get_document_analysis_history(
         )
 
     result = await db.execute(
-        select(DocumentAnalysis).where(
-            and_(
-                DocumentAnalysis.document_id == document_id,
-                DocumentAnalysis.tenant_id == UUID(tenant_id)
-            )
-        ).order_by(desc(DocumentAnalysis.created_at)).limit(limit)
+        select(DocumentAnalysis)
+        .where(DocumentAnalysis.document_id == document_id)
+        .order_by(desc(DocumentAnalysis.created_at)).limit(limit)
     )
     analyses = result.scalars().all()
 
