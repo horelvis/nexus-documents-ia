@@ -35,7 +35,7 @@ class GotenbergClient(BaseHTTPClient):
     and Chromium (HTML/Markdown) engines.
 
     Example:
-        client = GotenbergClient(tenant_id="t1", user_id="u1")
+        client = GotenbergClient(user_id="u1")
         pdf_bytes = await client.convert_office_to_pdf(
             file_content=docx_bytes,
             filename="document.docx"
@@ -75,21 +75,18 @@ class GotenbergClient(BaseHTTPClient):
 
     def __init__(
         self,
-        tenant_id: Optional[str] = None,
         user_id: Optional[str] = None
     ) -> None:
         """
         Initialize Gotenberg client.
 
         Args:
-            tenant_id: Tenant ID for context propagation
             user_id: User ID for context propagation
         """
         self.gotenberg_url = (settings.GOTENBERG_BASE_URL or "").rstrip("/")
         if not self.gotenberg_url:
             raise ValueError("GOTENBERG_BASE_URL is not configured")
 
-        self.tenant_id = tenant_id
         self.user_id = user_id
 
         super().__init__(
@@ -176,7 +173,6 @@ class GotenbergClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             "/forms/libreoffice/convert",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             files=files,
             data=data,
@@ -233,7 +229,6 @@ class GotenbergClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             "/forms/chromium/convert/html",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             files=files,
             data=data,
@@ -286,7 +281,6 @@ class GotenbergClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             "/forms/chromium/convert/markdown",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             files=files,
             data=data,

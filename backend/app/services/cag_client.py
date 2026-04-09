@@ -29,7 +29,6 @@ class CAGClient(BaseHTTPClient):
         self,
         *,
         query: str,
-        tenant_id: str,
         user_id: str,
         context: Optional[Dict[str, Any]] = None,
         model: Optional[str] = None,
@@ -40,7 +39,6 @@ class CAGClient(BaseHTTPClient):
         payload_context = context.copy() if context else {}
         payload = {
             "query": query,
-            "tenant_id": str(tenant_id),
             "user_id": str(user_id),
             "context": payload_context,
             "model": model or self.default_model,
@@ -52,7 +50,6 @@ class CAGClient(BaseHTTPClient):
             result = await self.post_json(
                 "/api/v1/cag/query",
                 json=payload,
-                tenant_id=str(tenant_id),
                 user_id=str(user_id),
             )
         except HTTPClientError as exc:
@@ -85,7 +82,6 @@ class CAGClient(BaseHTTPClient):
         """
         try:
             llm_model = settings.OPENAI_MODEL if settings.LLM_PROVIDER == "openai" else settings.SGLANG_MODEL
-            tenant_id = context.get("tenant_id") or settings.DEFAULT_TENANT
             user_id = context.get("user_id") or "virtual_assistant"
             agent_context = {
                 "conversation_id": context.get("conversation_id"),
@@ -104,7 +100,6 @@ class CAGClient(BaseHTTPClient):
 
             result = await self.query(
                 query=message,
-                tenant_id=tenant_id,
                 user_id=user_id,
                 context=agent_context,
                 model=llm_model,

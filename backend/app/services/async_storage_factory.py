@@ -12,57 +12,48 @@ class AsyncStorageServiceFactory:
     """Async version of StorageServiceFactory for use with async sessions"""
     
     @staticmethod
-    async def create_storage_service(tenant_id: str, user_id: Optional[str] = None, db: Optional[AsyncSession] = None):
+    async def create_storage_service(user_id: Optional[str] = None, db: Optional[AsyncSession] = None):
         """
         Creates the appropriate storage service instance asynchronously.
-        
+
         Priority:
         1. StorageService (microservice) - primary
         2. MockStorageService - only for testing
-        
+
         Args:
-            tenant_id: Tenant ID
             user_id: User ID (optional)
-            db: Async database session (optional)
-            
+            db: Async database session (optional, retained for API compatibility)
+
         Returns:
             Storage service instance
         """
-        
+        # db is retained in the signature for backwards compatibility with
+        # legacy callers; it is no longer used to look up a tenant row (the
+        # Tenant model was removed when single-tenant mode was adopted).
+        del db  # explicitly unused
+
         # In testing mode, check if we want to use mock
         if os.getenv("TESTING") == "true" and os.getenv("USE_MOCK_STORAGE") == "true":
             logger.info("Using MockStorageService for testing")
             from app.services.storage_factory import MockStorageService
-            return MockStorageService(tenant_id, user_id)
-        
+            return MockStorageService(user_id)
+
         # Check if in testing mode but credentials are not available
         testing_mode = os.getenv("TESTING") == "true"
         credentials_available = (
-            os.getenv("GCS_CREDENTIALS") and 
+            os.getenv("GCS_CREDENTIALS") and
             os.path.exists(os.getenv("GCS_CREDENTIALS", ""))
         ) or os.getenv("GCS_PROJECT_ID")
-        
-        # Get bucket_name from tenant if there's a DB session
-        bucket_name = None
-        if db:
-            from app.db.models import Tenant
-            # Use async query
-            result = await db.execute(
-                select(Tenant).filter(Tenant.id == tenant_id)
-            )
-            tenant = result.scalar_one_or_none()
-            if tenant and tenant.bucket_name:
-                bucket_name = tenant.bucket_name
-        
+
         # Use async storage service (microservice)
         try:
             from app.services.async_storage_service import AsyncStorageService
-            
+
             # Quick connectivity test
             if not testing_mode or credentials_available:
-                storage = AsyncStorageService(tenant_id, user_id, bucket_name)
+                storage = AsyncStorageService(user_id=user_id)
                 health = await storage.health_check()
-                
+
                 if health.get("status") == "healthy":
                     logger.info("Using AsyncStorageService (microservice)")
                     return storage
@@ -70,15 +61,15 @@ class AsyncStorageServiceFactory:
                     logger.warning("Storage microservice unhealthy")
             else:
                 logger.info("Testing mode without credentials, skipping microservice")
-                
+
         except Exception as e:
             logger.warning(f"Storage microservice unavailable: {e}")
-        
+
         # If we're in testing, use mock as last resort
         if testing_mode:
             logger.warning("Using MockStorageService as last resort for testing")
             from app.services.storage_factory import MockStorageService
-            return MockStorageService(tenant_id, user_id)
+            return MockStorageService(user_id)
         
         # In production, fail if no credentials
         error_msg = f"No storage service available and not in testing mode. "

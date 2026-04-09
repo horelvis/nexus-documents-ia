@@ -14,7 +14,7 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import User, Tenant
+from app.db.models import User
 from app.core.auth import (
     verify_clerk_token as _verify_clerk_token,
     AuthError,
@@ -60,7 +60,6 @@ class AuthService:
         password: str,
         full_name: Optional[str] = None,
         is_superuser: bool = False,
-        tenant_id: Optional[str] = None,
         clerk_user_id: Optional[str] = None
     ) -> User:
         """Crea un nuevo usuario."""
@@ -71,67 +70,21 @@ class AuthService:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Email already registered"
             )
-        
-        # Si no se proporciona tenant_id, usar el tenant por defecto
-        if not tenant_id:
-            default_tenant = db.query(Tenant).filter(
-                Tenant.name == settings.DEFAULT_TENANT
-            ).first()
-            if not default_tenant:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Default tenant not found"
-                )
-            tenant_id = str(default_tenant.id)
-        
-        # Verificar que el tenant existe
-        tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-        if not tenant:
-            raise HTTPException(
-                status_code=404,
-                detail="Tenant not found"
-            )
-        
-        # Crear usuario
+
+        # Crear usuario (single-tenant: no tenant row to reference)
         db_user = User(
             id=uuid4(),
             email=email,
             hashed_password=AuthService.get_password_hash(password),
             full_name=full_name,
             is_superuser=is_superuser,
-            tenant_id=tenant_id,
             clerk_user_id=clerk_user_id
         )
-        
+
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
         return db_user
-
-    @staticmethod
-    def create_tenant(
-        db: Session,
-        name: str,
-        description: Optional[str] = None,
-        settings: Optional[dict] = None
-    ) -> Tenant:
-        """Crea un nuevo tenant."""
-        # Generar bucket name único para el tenant (organización)
-        sanitized_name = name.lower().replace(' ', '-').replace('_', '-')
-        bucket_name = f"{sanitized_name}-{uuid4().hex[:8]}"
-        
-        db_tenant = Tenant(
-            id=uuid4(),
-            name=name,
-            description=description,
-            bucket_name=bucket_name,
-            settings=settings or {}
-        )
-        
-        db.add(db_tenant)
-        db.commit()
-        db.refresh(db_tenant)
-        return db_tenant
 
     @staticmethod
     def verify_clerk_token(token: str) -> dict:
@@ -220,40 +173,7 @@ class AuthService:
             logger.debug(f"Linked existing user by email: {str(user_by_email.id)[:8]}...")
             return user_by_email
 
-        # Get or create tenant based on deployment mode
-        from app.core.config import settings
-
-        if settings.SINGLE_TENANT_MODE:
-            # Single-tenant mode: use the default tenant
-            from uuid import UUID
-            default_tenant_id = UUID(settings.DEFAULT_TENANT_ID)
-            user_tenant = db.query(Tenant).filter(Tenant.id == default_tenant_id).first()
-
-            if not user_tenant:
-                # Create default tenant if it doesn't exist (first user registration)
-                user_tenant = Tenant(
-                    id=default_tenant_id,
-                    name=settings.DEFAULT_TENANT_NAME,
-                    slug=settings.DEFAULT_TENANT_SLUG,
-                    settings={"deployment_mode": "single_tenant"}
-                )
-                db.add(user_tenant)
-                db.flush()
-                logger.info(f"Created default tenant for single-tenant mode: {user_tenant.name}")
-
-            logger.debug(f"Single-tenant mode: assigning user to '{user_tenant.name}'")
-        else:
-            # Multi-tenant mode: create new tenant (organization) per user
-            user_email_prefix = email.split('@')[0].lower().replace('.', '-').replace('_', '-')
-            tenant_name = f"org-{user_email_prefix}-{uuid4().hex[:8]}"
-
-            user_tenant = AuthService.create_tenant(
-                db=db,
-                name=tenant_name,
-                description=f"Organization for {full_name or email}"
-            )
-
-        # Create user with 30-day trial
+        # Single-tenant mode: no tenant row to reference; create the user directly.
         trial_end_date = datetime.now(timezone.utc) + timedelta(days=30)
 
         new_user = User(
@@ -262,7 +182,6 @@ class AuthService:
             hashed_password=AuthService.get_password_hash("clerk_managed_auth"),
             full_name=full_name,
             is_superuser=False,
-            tenant_id=user_tenant.id,
             clerk_user_id=clerk_user_id,
             stripe_customer_id=stripe_customer_id,
             is_active=True,

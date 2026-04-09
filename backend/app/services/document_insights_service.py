@@ -29,8 +29,7 @@ def _indexed_doc_to_dict(doc: IndexedDocument) -> Dict[str, Any]:
     }
 
 class DocumentInsightsService:
-    def __init__(self, tenant_id, user_id=None):
-        self.tenant_id = tenant_id
+    def __init__(self, user_id=None):
         self.user_id = user_id
         self.db = SessionLocal()
     
@@ -45,10 +44,7 @@ class DocumentInsightsService:
         # Consulta para obtener documentos ordenados por relevance_score
         documents = self.db.query(Document, DocumentMetrics)\
             .join(DocumentMetrics, Document.id == DocumentMetrics.document_id)\
-            .filter(
-                Document.tenant_id == self.tenant_id,
-                DocumentMetrics.last_viewed_at >= cutoff_date
-            )\
+            .filter(DocumentMetrics.last_viewed_at >= cutoff_date)\
             .order_by(desc(DocumentMetrics.relevance_score))\
             .limit(limit)\
             .all()
@@ -82,9 +78,8 @@ class DocumentInsightsService:
                 Document,
                 func.max(DocumentView.viewed_at).label("last_viewed_at")
             )\
-            .join(DocumentView, Document.id == DocumentView.document_id)\
-            .filter(Document.tenant_id == self.tenant_id)
-        
+            .join(DocumentView, Document.id == DocumentView.document_id)
+
         # Filtrar por usuario si es necesario
         if user_specific and self.user_id:
             query = query.filter(DocumentView.user_id == self.user_id)
@@ -134,10 +129,7 @@ class DocumentInsightsService:
             # Obtener documentos populares no vistos por el usuario
             documents = self.db.query(Document, DocumentMetrics)\
                 .join(DocumentMetrics, Document.id == DocumentMetrics.document_id)\
-                .filter(
-                    Document.tenant_id == self.tenant_id,
-                    Document.id.notin_(user_viewed_docs)
-                )\
+                .filter(Document.id.notin_(user_viewed_docs))\
                 .order_by(desc(DocumentMetrics.relevance_score))\
                 .limit(limit)\
                 .all()
@@ -171,14 +163,10 @@ class DocumentInsightsService:
         """
         try:
             # Count from Document table
-            upload_count = self.db.query(func.count(Document.id))\
-                .filter(Document.tenant_id == self.tenant_id)\
-                .scalar() or 0
+            upload_count = self.db.query(func.count(Document.id)).scalar() or 0
 
             # Count from IndexedDocument table
-            connector_count = self.db.query(func.count(IndexedDocument.id))\
-                .filter(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))\
-                .scalar() or 0
+            connector_count = self.db.query(func.count(IndexedDocument.id)).scalar() or 0
 
             return {
                 "uploads": upload_count,
@@ -198,7 +186,6 @@ class DocumentInsightsService:
         """
         try:
             documents = self.db.query(IndexedDocument)\
-                .filter(IndexedDocument.tenant_id == uuid.UUID(self.tenant_id))\
                 .order_by(desc(IndexedDocument.created_at))\
                 .limit(limit)\
                 .all()

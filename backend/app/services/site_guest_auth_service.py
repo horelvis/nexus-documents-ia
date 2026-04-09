@@ -14,7 +14,7 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import (
     SiteGuest, SiteGuestOTP, SiteGuestSession, SiteGuestPermission,
-    SiteGuestAccessLog, Tenant, Document, SiteGuestShare, SiteGuestShareDocument
+    SiteGuestAccessLog, Document, SiteGuestShare, SiteGuestShareDocument
 )
 from app.services.email_service import EmailService
 from app.services.site_guest_service import SiteGuestService
@@ -55,7 +55,6 @@ class SiteGuestAuthService:
     @staticmethod
     async def request_otp(
         db: AsyncSession,
-        tenant_id: UUID,
         email: str,
         ip_address: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -65,7 +64,7 @@ class SiteGuestAuthService:
         Returns: {success, message, expires_in_seconds}
         """
         # Find guest by email
-        guest = await SiteGuestService.get_guest_by_email(db, tenant_id, email)
+        guest = await SiteGuestService.get_guest_by_email(db, email)
 
         if not guest:
             # Don't reveal if email exists or not (security)
@@ -148,12 +147,8 @@ class SiteGuestAuthService:
     @staticmethod
     async def _send_otp_email(db: AsyncSession, guest: SiteGuest, otp_code: str, language: str = "es") -> bool:
         """Send OTP code via email using dedicated OTP template."""
-        # Get tenant info
-        tenant = await db.execute(
-            select(Tenant).where(Tenant.id == guest.tenant_id)
-        )
-        tenant = tenant.scalar_one_or_none()
-        tenant_name = tenant.name if tenant else "Site Portal"
+        # Single-tenant: use the deployment's organization name.
+        tenant_name = getattr(settings, "DEFAULT_TENANT_NAME", "NouxCube")
 
         try:
             success = await EmailService.send_guest_otp(
@@ -172,7 +167,6 @@ class SiteGuestAuthService:
     @staticmethod
     async def verify_otp(
         db: AsyncSession,
-        tenant_id: UUID,
         email: str,
         otp_code: str,
         ip_address: Optional[str] = None,
@@ -184,7 +178,7 @@ class SiteGuestAuthService:
         Returns: {success, session_token, expires_at, guest, error}
         """
         # Find guest
-        guest = await SiteGuestService.get_guest_by_email(db, tenant_id, email)
+        guest = await SiteGuestService.get_guest_by_email(db, email)
 
         if not guest:
             return {
@@ -409,7 +403,6 @@ class SiteGuestAuthService:
             select(SiteGuestShare).where(
                 and_(
                     SiteGuestShare.guest_id == guest.id,
-                    SiteGuestShare.tenant_id == guest.tenant_id,
                     or_(
                         SiteGuestShare.expires_at.is_(None),
                         SiteGuestShare.expires_at > datetime.now(timezone.utc)
@@ -489,12 +482,7 @@ class SiteGuestAuthService:
 
         for folder_path in folder_paths:
             result = await db.execute(
-                select(Document).where(
-                    and_(
-                        Document.tenant_id == guest.tenant_id,
-                        Document.folder_path.startswith(folder_path)
-                    )
-                )
+                select(Document).where(Document.folder_path.startswith(folder_path))
             )
             folder_docs = result.scalars().all()
             for d in folder_docs:
@@ -568,7 +556,6 @@ class SiteGuestAuthService:
                 and_(
                     SiteGuestShare.id == share_id,
                     SiteGuestShare.guest_id == guest.id,
-                    SiteGuestShare.tenant_id == guest.tenant_id,
                     or_(
                         SiteGuestShare.expires_at.is_(None),
                         SiteGuestShare.expires_at > datetime.now(timezone.utc)
@@ -583,12 +570,7 @@ class SiteGuestAuthService:
         docs_result = await db.execute(
             select(Document)
             .join(SiteGuestShareDocument, SiteGuestShareDocument.document_id == Document.id)
-            .where(
-                and_(
-                    SiteGuestShareDocument.share_id == share_id,
-                    Document.tenant_id == guest.tenant_id
-                )
-            )
+            .where(SiteGuestShareDocument.share_id == share_id)
             .order_by(Document.updated_at.desc())
         )
         documents = docs_result.scalars().all()
@@ -621,7 +603,6 @@ class SiteGuestAuthService:
             ).where(
                 and_(
                     SiteGuestShare.guest_id == guest.id,
-                    SiteGuestShare.tenant_id == guest.tenant_id,
                     SiteGuestShareDocument.document_id == document_id,
                     or_(
                         SiteGuestShare.expires_at.is_(None),

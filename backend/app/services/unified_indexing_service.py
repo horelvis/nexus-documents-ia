@@ -472,9 +472,7 @@ class UnifiedIndexingService:
                 size_bytes=indexed_doc.size_bytes,
                 title=indexed_doc.title,
                 description=indexed_doc.description,
-                tenant_id=indexed_doc.tenant_id,
                 owner_id=indexed_doc.owner_id,
-                is_tenant_public=indexed_doc.is_tenant_public,
             )
 
             # Download with retry
@@ -519,7 +517,6 @@ class UnifiedIndexingService:
                 file_bytes=content,
                 filename=indexed_doc.title,
                 mime_type=indexed_doc.mime_type,
-                tenant_id=str(indexed_doc.tenant_id),
                 owner_id=str(indexed_doc.owner_id),
                 metadata={
                     "external_id": indexed_doc.external_id,
@@ -734,7 +731,6 @@ class UnifiedIndexingService:
         file_bytes: bytes,
         filename: str,
         mime_type: Optional[str],
-        tenant_id: str,
         owner_id: str,
         metadata: Dict[str, Any],
         acl: Dict[str, Any],
@@ -752,7 +748,6 @@ class UnifiedIndexingService:
             file_bytes: Raw file content
             filename: Original filename
             mime_type: MIME type
-            tenant_id: Tenant UUID
             owner_id: Owner UUID
             metadata: Additional metadata
             acl: Access control list
@@ -786,7 +781,6 @@ class UnifiedIndexingService:
             "file_bytes_base64": file_base64,
             "filename": filename,
             "mime_type": mime_type,
-            "tenant_id": tenant_id,
             "owner_id": owner_id,
             "metadata": metadata,
             "acl": acl,
@@ -844,7 +838,6 @@ class UnifiedIndexingService:
         try:
             payload = {
                 "document_id": str(indexed_doc.id),
-                "tenant_id": str(indexed_doc.tenant_id),
                 "file_path": indexed_doc.external_path or indexed_doc.title,
                 "connector_metadata": indexed_doc.source_metadata or {},
                 "learned_context": learned_context or {},
@@ -971,7 +964,6 @@ class UnifiedIndexingService:
 
                             payload = {
                                 "document_id": folder.get("id", ""),
-                                "tenant_id": str(connector.tenant_id),
                                 "file_path": folder.get("path", ""),
                                 "connector_metadata": connector_metadata,
                                 "learned_context": {},
@@ -1066,7 +1058,6 @@ class UnifiedIndexingService:
             folder_name = folder_path.rsplit("/", 1)[-1]
             payloads.append({
                 "document_id": f"folder:{folder_path}",
-                "tenant_id": str(connector.tenant_id),
                 "file_path": folder_path,
                 "connector_metadata": {
                     "is_folder": True,
@@ -1102,12 +1093,7 @@ class UnifiedIndexingService:
         # Fallback: find any admin user
         result = await db.execute(
             select(User)
-            .where(
-                and_(
-                    User.tenant_id == connector.tenant_id,
-                    User.is_active == True,
-                )
-            )
+            .where(User.is_active == True)
             .limit(1)
         )
         user = result.scalar_one_or_none()
@@ -1155,14 +1141,12 @@ class UnifiedIndexingService:
         else:
             # Create new
             new_doc = IndexedDocument(
-                tenant_id=connector.tenant_id,
                 connector_id=connector.id,
                 connector_type=document.connector_type.value if document.connector_type else None,
                 external_id=document.external_id,
                 external_url=document.external_url,
                 external_path=document.external_path,
                 owner_id=owner_id,
-                is_tenant_public=document.is_tenant_public,
                 title=document.title,
                 description=document.description,
                 mime_type=document.mime_type,
