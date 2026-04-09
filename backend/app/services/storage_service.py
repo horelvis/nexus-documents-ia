@@ -13,19 +13,17 @@ class StorageService:
     Proporciona interfaz para gestión de documentos via microservicio.
     """
     
-    def __init__(self, tenant_id: str, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
+    def __init__(self, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
         """
         Inicializa el servicio de almacenamiento usando el microservicio.
-        
+
         Args:
-            tenant_id: ID del tenant
             user_id: ID del usuario (opcional)
             bucket_name: Nombre del bucket (opcional)
         """
-        self.tenant_id = tenant_id
         self.user_id = user_id
-        self.bucket_name = bucket_name or f"storage-service-{tenant_id}"
-        self.client = StorageClient(tenant_id, user_id, self.bucket_name)
+        self.bucket_name = bucket_name or "storage-service"
+        self.client = StorageClient(user_id, self.bucket_name)
     
     def upload_file(
         self, 
@@ -74,23 +72,14 @@ class StorageService:
         """
         try:
             object_name = object_name.lstrip("/")
-            # Si el object_name incluye el prefijo del tenant, removerlo
-            # Formato esperado: tenant-{id}/user-{id}/filename o tenant-{id}/system/filename
             file_path = object_name
-            
-            # Remover prefijo tenant si está presente
-            if object_name.startswith(f"tenant-{self.tenant_id}/"):
-                # Remover "tenant-{id}/" del inicio
-                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
-                
-                # Si incluye user prefix, removerlo también
-                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
-                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
-                elif path_without_tenant.startswith("system/"):
-                    file_path = path_without_tenant[len("system/"):]
-                else:
-                    file_path = path_without_tenant
-            
+
+            # Si incluye user prefix, removerlo
+            if self.user_id and file_path.startswith(f"user-{self.user_id}/"):
+                file_path = file_path[len(f"user-{self.user_id}/"):]
+            elif file_path.startswith("system/"):
+                file_path = file_path[len("system/"):]
+
             content = self.client.download_file(file_path)
             
             # Fallback: si no se encuentra con el path completo, intentar solo con el filename
@@ -125,22 +114,13 @@ class StorageService:
         """
         try:
             object_name = object_name.lstrip("/")
-            # Si el object_name incluye el prefijo del tenant, removerlo
             file_path = object_name
-            
-            # Remover prefijo tenant si está presente
-            if object_name.startswith(f"tenant-{self.tenant_id}/"):
-                # Remover "tenant-{id}/" del inicio
-                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
-                
-                # Si incluye user prefix, removerlo también
-                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
-                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
-                elif path_without_tenant.startswith("system/"):
-                    file_path = path_without_tenant[len("system/"):]
-                else:
-                    file_path = path_without_tenant
-            
+
+            if self.user_id and file_path.startswith(f"user-{self.user_id}/"):
+                file_path = file_path[len(f"user-{self.user_id}/"):]
+            elif file_path.startswith("system/"):
+                file_path = file_path[len("system/"):]
+
             success = self.client.delete_file(file_path)
             
             # Fallback: si no se encuentra con el path completo, intentar solo con el filename
@@ -245,22 +225,13 @@ class StorageService:
         """
         try:
             object_name = object_name.lstrip("/")
-            # Si el object_name incluye el prefijo del tenant, removerlo
             file_path = object_name
-            
-            # Remover prefijo tenant si está presente
-            if object_name.startswith(f"tenant-{self.tenant_id}/"):
-                # Remover "tenant-{id}/" del inicio
-                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
-                
-                # Si incluye user prefix, removerlo también
-                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
-                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
-                elif path_without_tenant.startswith("system/"):
-                    file_path = path_without_tenant[len("system/"):]
-                else:
-                    file_path = path_without_tenant
-            
+
+            if self.user_id and file_path.startswith(f"user-{self.user_id}/"):
+                file_path = file_path[len(f"user-{self.user_id}/"):]
+            elif file_path.startswith("system/"):
+                file_path = file_path[len("system/"):]
+
             try:
                 url, expires_at = self.client.generate_download_signed_url(
                     file_path=file_path,

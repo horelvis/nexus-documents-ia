@@ -9,11 +9,11 @@ with legacy code that has not been migrated to async.
 
 Migration:
     # Before (sync - deprecated)
-    client = StorageClient(tenant_id, user_id)
+    client = StorageClient(user_id)
     result = client.upload_file(file, filename)
 
     # After (async - recommended)
-    client = AsyncStorageClient(tenant_id, user_id)
+    client = AsyncStorageClient(user_id)
     result = await client.upload_file(file, filename)
 """
 import warnings
@@ -47,24 +47,21 @@ class StorageClient:
     when used in async contexts and will be removed in a future version.
     """
 
-    def __init__(self, tenant_id: str, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
+    def __init__(self, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
         """
         Initialize the storage client.
 
         Args:
-            tenant_id: ID del tenant
             user_id: ID del usuario (opcional)
-            bucket_name: Nombre del bucket (opcional, se obtiene del tenant si no se proporciona)
+            bucket_name: Nombre del bucket (opcional)
         """
-        self.tenant_id = tenant_id
         self.user_id = user_id
         self.base_url = getattr(settings, 'STORAGE_SERVICE_URL', 'http://storage-service:8001')
         self.api_key = settings.STORAGE_API_KEY
-        
+
         # Headers comunes para todas las requests
         self.headers = {
             "X-API-Key": self.api_key,
-            "X-Tenant-ID": self.tenant_id,
         }
         
         if self.user_id:
