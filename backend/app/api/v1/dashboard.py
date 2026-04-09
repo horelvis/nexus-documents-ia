@@ -28,7 +28,7 @@ router = APIRouter()
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get aggregated dashboard statistics for the current tenant.
@@ -238,7 +238,7 @@ async def get_dashboard_stats(
 async def get_recent_activity(
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get recent activity logs for the tenant
@@ -336,7 +336,7 @@ async def get_recent_activity(
 async def get_analytics_trends(
     period: str = Query("7d", regex="^(7d|30d|90d)$"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get analytics trends for the specified period
@@ -490,7 +490,7 @@ async def get_analytics_trends(
 @router.get("/insights/ai", response_model=AIInsightsResponse)
 async def get_ai_insights(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get AI-powered insights and recommendations
