@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from app.core.config import settings as backend_settings
 from app.db.async_database import AsyncSessionLocal
-from app.db.models import DocumentShare, TeamInvitation, User
+from app.db.models import User
 from app.services.email_service import EmailService
 
 from worker_app.celery_app import celery_app
@@ -87,77 +87,28 @@ def send_user_invitation_task(
     )
 
 
-async def _send_team_invitation(invitation_id: str, tenant_id: str) -> Dict[str, Any]:
-    try:
-        async with AsyncSessionLocal() as db:
-            stmt = select(TeamInvitation).filter(
-                TeamInvitation.id == invitation_id,
-                TeamInvitation.tenant_id == tenant_id,
-            )
-            result = await db.execute(stmt)
-            invitation = result.scalar_one_or_none()
-            if not invitation:
-                return {"success": False, "error": f"Invitation {invitation_id} not found"}
-
-            stmt = select(User).filter(User.id == invitation.invited_by)
-            result = await db.execute(stmt)
-            inviter = result.scalar_one_or_none()
-            return await _send_email(
-                invitation.email,
-                "You've been invited to join a team",
-                "team_invitation",
-                {
-                    "invited_by": inviter.full_name if inviter else "A team member",
-                    "team_name": invitation.team_name,
-                    "role": invitation.role,
-                    "invitation_link": f"{backend_settings.FRONTEND_URL}/invitations/{invitation.token}",
-                },
-            )
-    except Exception as exc:
-        logger.error("Error sending team invitation %s: %s", invitation_id, exc)
-        return {"success": False, "error": str(exc)}
+# TeamInvitation and DocumentShare models were removed when multi-tenancy
+# was dropped. The corresponding email tasks are retained as no-ops so that
+# Celery's registered-task set stays stable for legacy producers.
 
 
 @celery_app.task(name="email.send_team_invitation")
-def send_team_invitation_task(invitation_id: str, tenant_id: str) -> Dict[str, Any]:
-    return _run_async(_send_team_invitation(invitation_id, tenant_id))
-
-
-async def _send_document_share_notification(share_id: str, tenant_id: str) -> Dict[str, Any]:
-    try:
-        async with AsyncSessionLocal() as db:
-            stmt = select(DocumentShare).filter(
-                DocumentShare.id == share_id,
-                DocumentShare.document.has(tenant_id=tenant_id),
-            )
-            result = await db.execute(stmt)
-            share = result.scalar_one_or_none()
-            if not share:
-                return {"success": False, "error": f"Share {share_id} not found"}
-
-            stmt = select(User).filter(User.id == share.shared_by)
-            result = await db.execute(stmt)
-            sharer = result.scalar_one_or_none()
-            return await _send_email(
-                share.shared_with_email,
-                f"Document shared with you: {share.document.title}",
-                "document_share",
-                {
-                    "shared_by": sharer.full_name if sharer else "Someone",
-                    "document_title": share.document.title,
-                    "permissions": share.permissions,
-                    "message": share.message,
-                    "access_link": f"{backend_settings.FRONTEND_URL}/shared/{share.share_token}",
-                },
-            )
-    except Exception as exc:
-        logger.error("Error sending document share notification %s: %s", share_id, exc)
-        return {"success": False, "error": str(exc)}
+def send_team_invitation_task(invitation_id: str) -> Dict[str, Any]:
+    logger.warning(
+        "send_team_invitation_task called for %s but the TeamInvitation "
+        "feature was removed in the multi-tenancy refactor.", invitation_id,
+    )
+    return {"success": False, "error": "team_invitation_feature_removed"}
 
 
 @celery_app.task(name="email.send_document_share_notification")
-def send_document_share_notification_task(share_id: str, tenant_id: str) -> Dict[str, Any]:
-    return _run_async(_send_document_share_notification(share_id, tenant_id))
+def send_document_share_notification_task(share_id: str) -> Dict[str, Any]:
+    logger.warning(
+        "send_document_share_notification_task called for %s but the "
+        "DocumentShare feature was removed in the multi-tenancy refactor.",
+        share_id,
+    )
+    return {"success": False, "error": "document_share_feature_removed"}
 
 
 @celery_app.task(name="email.send_password_reset")

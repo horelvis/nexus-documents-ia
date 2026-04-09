@@ -11,7 +11,7 @@ from uuid import UUID
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
 from app.db.async_database import get_async_db
-from app.db.models import User, Document, DocumentView, DocumentShare, IndexedDocument
+from app.db.models import User, Document, DocumentView, IndexedDocument
 from app.schemas.dashboard import (
     DashboardStats, 
     DocumentTrend, 
@@ -263,32 +263,11 @@ async def get_recent_activity(
             }
         ))
     
-    # Get recent document shares
-    recent_shares = await db.execute(
-        select(DocumentShare, Document, User)
-        .join(Document, DocumentShare.document_id == Document.id)
-        .join(User, DocumentShare.created_by == User.id)
-        .order_by(DocumentShare.created_at.desc())
-        .limit(limit // 3)
-    )
-    
-    for share, doc, user in recent_shares:
-        activities.append(ActivityLog(
-            id=str(share.id),
-            type="document_share",
-            title="Document shared",
-            description=doc.filename,
-            user_name=user.full_name or user.email,
-            user_email=user.email,
-            timestamp=share.created_at,
-            metadata={
-                "document_id": str(doc.id),
-                "filename": doc.filename,
-                "share_type": share.share_type,
-                "recipient": share.recipient_email
-            }
-        ))
-    
+    # Note: recent "document shares" activity dropped — the DocumentShare
+    # model was removed when multi-tenant sharing was replaced with the
+    # role-based ACL (`Document.roles`). Per-user sharing as an explicit
+    # feature no longer exists; ACL is implicit via KeyCloak roles.
+
     # Sort all activities by timestamp
     activities.sort(key=lambda x: x.timestamp, reverse=True)
     
@@ -498,30 +477,10 @@ async def get_ai_insights(
             action_text="Enable Feature"
         ))
     
-    # Check for expiring shared documents
-    expiring_shares = await db.execute(
-        select(func.count(DocumentShare.id))
-        .where(
-            and_(
-                DocumentShare.is_active == True,
-                DocumentShare.expires_at != None,
-                DocumentShare.expires_at <= datetime.utcnow() + timedelta(days=7),
-                DocumentShare.expires_at > datetime.utcnow()
-            )
-        )
-    )
-    expiring_count = expiring_shares.scalar() or 0
-    
-    if expiring_count > 0:
-        insights.append(AIInsight(
-            type="warning",
-            priority="high",
-            title=f"{expiring_count} shared links expiring soon",
-            description="Review and extend access for important shared documents",
-            action_url="/shared?filter=expiring",
-            action_text="Review Shares"
-        ))
-    
+    # Note: the expiring-shared-documents AI insight was dropped because
+    # DocumentShare is gone. Equivalent ACL insights (e.g. "N documents
+    # visible only to role X") could be reintroduced in a later feature.
+
     return AIInsightsResponse(
         insights=insights,
         generated_at=datetime.utcnow()

@@ -20,11 +20,9 @@ from sqlalchemy.orm import selectinload
 
 from app.db.models import (
     User, UserImage, Document, DocumentView,
-    RoleAssignmentAudit, DocumentTagAudit, LGPDDeletionAudit,
-    role_permissions, user_roles, document_tags,
-    Role, Tag, DocumentShare, DocumentShareAccessLog, DocumentShareRecipient,
+    LGPDDeletionAudit, document_tags, Tag,
     SignatureRequest, SignatureRequestSigner, SignatureEvent, SignatureContact,
-    GoogleDriveToken
+    GoogleDriveToken,
 )
 from app.db.agent_models import AgentExecution, AgentExecutionLog, AgentDefinition
 from app.services.async_storage_service import AsyncStorageService
@@ -246,26 +244,10 @@ class LGPDDeletionService:
             await db.delete(user.image)
             deleted_count += 1
 
-        # Remove user from roles
-        await db.execute(
-            delete(user_roles).where(user_roles.c.user_id == user.id)
-        )
-        deleted_count += 1
-
-        # Delete document shares and related records
-        await db.execute(
-            delete(DocumentShareAccessLog).where(DocumentShareAccessLog.share_id.in_(
-                select(DocumentShare.id).where(DocumentShare.created_by == user.id)
-            ))
-        )
-        await db.execute(
-            delete(DocumentShareRecipient).where(DocumentShareRecipient.share_id.in_(
-                select(DocumentShare.id).where(DocumentShare.created_by == user.id)
-            ))
-        )
-        await db.execute(
-            delete(DocumentShare).where(DocumentShare.created_by == user.id)
-        )
+        # Note: user_roles association table and DocumentShare/Recipient/
+        # AccessLog models were removed when the local RBAC + sharing layer
+        # was replaced by role-based ACL on Document.roles. There is no
+        # per-user data to cascade-delete at those tables anymore.
 
         # Delete signature-related records
         await db.execute(
@@ -307,35 +289,14 @@ class LGPDDeletionService:
         return deleted_count
 
     async def _anonymize_audit_records(self, db: AsyncSession, user_id: UUID) -> int:
-        """Anonymize audit records (LGPD requires keeping audit trail)."""
-        anonymized_count = 0
-        anonymous_id = "00000000-0000-0000-0000-000000000000"
+        """Anonymize audit records (LGPD requires keeping audit trail).
 
-        # Anonymize role assignment audits
-        result = await db.execute(
-            update(RoleAssignmentAudit)
-            .where(RoleAssignmentAudit.user_id == user_id)
-            .values(user_id=anonymous_id)
-        )
-        anonymized_count += result.rowcount
-
-        result = await db.execute(
-            update(RoleAssignmentAudit)
-            .where(RoleAssignmentAudit.assigned_by == user_id)
-            .values(assigned_by=anonymous_id)
-        )
-        anonymized_count += result.rowcount
-
-        # Anonymize document tag audits
-        result = await db.execute(
-            update(DocumentTagAudit)
-            .where(DocumentTagAudit.tagged_by == user_id)
-            .values(tagged_by=anonymous_id)
-        )
-        anonymized_count += result.rowcount
-
-        logger.info(f"Anonymized {anonymized_count} audit records for user {user_id}")
-        return anonymized_count
+        Note: the RoleAssignmentAudit and DocumentTagAudit tables were
+        removed with the legacy RBAC/sharing subsystem. Only the
+        LGPDDeletionAudit table remains and is append-only, so there is
+        nothing to anonymize in this pass.
+        """
+        return 0
 
     async def _delete_from_vector_services(self, user: User) -> Dict[str, Any]:
         """Delete user data from vector databases."""
@@ -455,11 +416,9 @@ class LGPDDeletionService:
             )
             views_total = views_count.scalar()
 
-            # Count role assignments
-            roles_count = await db.execute(
-                select(func.count(user_roles.c.user_id)).where(user_roles.c.user_id == user.id)
-            )
-            roles_total = roles_count.scalar()
+            # Role assignments no longer live in a local table; KeyCloak is
+            # the source of truth for user roles.
+            roles_total = 0
 
             return {
                 "user_id": user_id,

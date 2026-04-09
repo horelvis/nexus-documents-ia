@@ -6,13 +6,12 @@ Most auth logic is now in async_dependencies.py (JIT provisioning).
 This file only contains helpers that might be needed elsewhere.
 """
 from typing import Optional
-from uuid import uuid4
 import logging
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.db.models import User, Tenant
+from app.db.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -35,28 +34,3 @@ class AsyncAuthService:
             select(User).where(User.email == email)
         )
         return result.scalar_one_or_none()
-
-    @staticmethod
-    async def create_tenant(
-        db: AsyncSession,
-        name: str,
-        description: Optional[str] = None,
-        settings: Optional[dict] = None
-    ) -> Tenant:
-        """Create a new tenant."""
-        sanitized_name = name.lower().replace(' ', '-').replace('_', '-')
-        bucket_name = f"{sanitized_name}-{uuid4().hex[:8]}"
-
-        tenant = Tenant(
-            id=uuid4(),
-            name=name,
-            description=description,
-            bucket_name=bucket_name,
-            settings=settings or {},
-            is_active=True
-        )
-
-        db.add(tenant)
-        await db.commit()
-        await db.refresh(tenant)
-        return tenant
