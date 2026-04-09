@@ -10,9 +10,9 @@ import httpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 
-from app.api.async_dependencies import get_current_tenant_id_async, get_current_user_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.core.config import settings
-from app.db.models import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -31,8 +31,7 @@ def _check_enabled():
 
 @router.post("/analyze")
 async def forge_analyze(
-    tenant_id: str = Depends(get_current_tenant_id_async),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     document_id: Optional[str] = Form(None),
     user_intent: str = Form("modification"),
     max_fields: int = Form(30),
@@ -48,8 +47,7 @@ async def forge_analyze(
     try:
         # Build multipart form data for the forge service
         form_data = {
-            "tenant_id": tenant_id,
-            "user_id": str(current_user.id),
+            "user_id": current_user.sub,
             "user_intent": user_intent,
             "max_fields": str(max_fields),
         }
@@ -84,8 +82,7 @@ async def forge_analyze(
 @router.post("/render")
 async def forge_render(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Render a document with field values.
@@ -96,8 +93,7 @@ async def forge_render(
     _check_enabled()
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
+        body["user_id"] = current_user.sub
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
             response = await client.post(
@@ -134,8 +130,7 @@ async def forge_render(
 @router.post("/persist")
 async def forge_persist(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Persist a rendered document permanently to GCS and optionally index in Weaviate.
@@ -145,8 +140,7 @@ async def forge_persist(
     _check_enabled()
     try:
         body = await request.json()
-        body["tenant_id"] = tenant_id
-        body["user_id"] = str(current_user.id)
+        body["user_id"] = current_user.sub
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
             response = await client.post(
@@ -171,8 +165,7 @@ async def forge_persist(
 @router.get("/sessions/{session_id}/info")
 async def forge_session_info(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get session metadata (fields, status, timestamps).
@@ -201,8 +194,7 @@ async def forge_session_info(
 async def forge_session_download(
     session_id: str,
     format: str = "docx",
-    tenant_id: str = Depends(get_current_tenant_id_async),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Download a generated document (DOCX or PDF) from a forge session.

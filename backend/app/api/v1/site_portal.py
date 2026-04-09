@@ -117,11 +117,10 @@ async def get_tenant_by_slug(
         raise HTTPException(status_code=404, detail="Site not available")
 
     return TenantSiteInfo(
-        tenant_id=tenant.id,
         tenant_name=tenant.name,
         slug=tenant.slug or str(tenant.id),
         site_enabled=tenant.site_enabled,
-        logo_url=tenant.site_logo_url,
+        logo_url=getattr(tenant, "site_logo_url", None),
         welcome_message=tenant.site_welcome_message
     )
 
@@ -250,7 +249,7 @@ async def get_current_guest_info(
     Returns guest details and session information.
     """
     # Get tenant info
-    tenant = await SiteGuestService.get_tenant_site_settings(db, guest.tenant_id)
+    tenant = await SiteGuestService.get_tenant_site_settings(db)
     if not tenant:
         raise HTTPException(status_code=500, detail="Tenant not found")
 
@@ -261,7 +260,7 @@ async def get_current_guest_info(
     return GuestMeResponse(
         guest=_guest_to_response(guest),
         tenant_name=tenant.name,
-        tenant_logo_url=tenant.site_logo_url,
+        tenant_logo_url=getattr(tenant, "site_logo_url", None),
         session_expires_at=guest.last_access_at  # Approximate; actual is in session
     )
 
@@ -485,15 +484,8 @@ async def download_document(
 
     # Generate signed URL for download
     try:
-        # Get tenant for bucket name
-        tenant = await SiteGuestService.get_tenant_site_settings(db, guest.tenant_id)
-        if not tenant:
-            raise HTTPException(status_code=500, detail="Tenant not found")
-
         storage_client = AsyncStorageClient(
-            tenant_id=str(guest.tenant_id),
             user_id=str(document.created_by),
-            bucket_name=tenant.bucket_name
         )
         signed_url, expires_at = await storage_client.generate_download_signed_url(
             document.file_path,
@@ -549,11 +541,6 @@ async def view_document(
     )
 
     try:
-        # Get tenant for bucket name
-        tenant = await SiteGuestService.get_tenant_site_settings(db, guest.tenant_id)
-        if not tenant:
-            raise HTTPException(status_code=500, detail="Tenant not found")
-
         return {
             "view_url": f"/api/v1/site-portal/documents/{document_id}/preview-pdf",
             "content_type": "application/pdf",
@@ -587,17 +574,11 @@ async def view_document_preview_pdf(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    tenant = await SiteGuestService.get_tenant_site_settings(db, guest.tenant_id)
-    if not tenant:
-        raise HTTPException(status_code=500, detail="Tenant not found")
-
     storage_client = AsyncStorageClient(
-        tenant_id=str(guest.tenant_id),
         user_id=str(document.created_by),
-        bucket_name=tenant.bucket_name,
     )
 
-    preview_key = f"previews/{guest.tenant_id}/{document_id}/{document_id}_preview.pdf"
+    preview_key = f"previews/{document_id}/{document_id}_preview.pdf"
 
     # Generate preview if missing
     if not await storage_client.get_file_info(preview_key):
@@ -612,7 +593,6 @@ async def view_document_preview_pdf(
                 f.write(file_content)
 
             preview_service = DocumentPreviewService(
-                tenant_id=str(guest.tenant_id),
                 user_id=str(document.created_by),
             )
             try:
@@ -668,7 +648,6 @@ def _guest_to_response(guest) -> SiteGuestResponse:
     """Convert SiteGuest model to response schema."""
     return SiteGuestResponse(
         id=guest.id,
-        tenant_id=guest.tenant_id,
         email=guest.email,
         name=guest.name,
         is_active=guest.is_active,

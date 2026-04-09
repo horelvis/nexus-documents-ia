@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 import httpx
 
 from app.api.async_dependencies import get_current_user_async
-from app.db.models import User
+from app.core.auth.base import UserProfile
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,7 @@ Mantén las respuestas cortas y naturales para conversación de voz."""
 @router.post("/voice-session", response_model=VoiceSessionResponse)
 async def create_voice_session(
     request: VoiceSessionRequest = VoiceSessionRequest(),
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ) -> VoiceSessionResponse:
     """
     Create an ephemeral Gemini Live API session token.
@@ -103,10 +103,9 @@ async def create_voice_session(
     #         detail="Voice mode requires a paid subscription"
     #     )
 
-    # Build system prompt with tenant context (use tenant_id to avoid lazy loading)
+    # Build system prompt with organization context
     system_prompt = request.system_prompt or DEFAULT_EMMA_VOICE_PROMPT
-    if current_user.tenant_id:
-        system_prompt = f"{system_prompt}\n\nEstás asistiendo a un usuario de la organización."
+    system_prompt = f"{system_prompt}\n\nEstás asistiendo a un usuario de la organización."
 
     try:
         # Call Google's ephemeral token API (requires v1alpha!)
@@ -148,8 +147,7 @@ async def create_voice_session(
                 data = response.json()
 
                 logger.info(
-                    f"Created Gemini voice session for user {current_user.id} "
-                    f"(tenant: {current_user.tenant_id})"
+                    f"Created Gemini voice session for user {current_user.sub}"
                 )
 
                 return VoiceSessionResponse(
@@ -188,7 +186,7 @@ async def create_voice_session(
 
 @router.get("/voice-config", response_model=VoiceConfigResponse)
 async def get_voice_config(
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ) -> VoiceConfigResponse:
     """
     Get voice mode configuration.
@@ -196,10 +194,7 @@ async def get_voice_config(
     Returns the available voice providers and their configuration.
     Used by the frontend to determine which TTS options are available.
     """
-    # Build system prompt with tenant context (use tenant_id to avoid lazy loading)
-    system_prompt = DEFAULT_EMMA_VOICE_PROMPT
-    if current_user.tenant_id:
-        system_prompt = f"{system_prompt}\n\nEstás asistiendo a un usuario de la organización."
+    system_prompt = f"{DEFAULT_EMMA_VOICE_PROMPT}\n\nEstás asistiendo a un usuario de la organización."
 
     return VoiceConfigResponse(
         enabled=settings.GEMINI_VOICE_ENABLED,

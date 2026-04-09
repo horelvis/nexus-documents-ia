@@ -9,8 +9,10 @@ from typing import Dict, Any, Optional
 import logging
 
 from app.api.async_dependencies import get_current_user_async, get_async_db
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
 from app.services.lgpd_deletion_service import lgpd_deletion_service
-from app.db.models import User, LGPDDeletionAudit
+from app.db.models import LGPDDeletionAudit
 from app.schemas.user import UserResponse
 from pydantic import BaseModel, Field, EmailStr
 
@@ -24,20 +26,13 @@ class LGPDDeletionRequest(BaseModel):
     confirmation_email: EmailStr = Field(..., description="User email for confirmation")
     confirmation_text: str = Field(..., min_length=5, description="User must type confirmation text")
     reason: Optional[str] = Field(None, max_length=500, description="Optional reason for deletion")
-    delete_tenant: bool = Field(False, description="Also delete tenant data when user is an owner/admin")
-    tenant_confirmation: Optional[str] = Field(
-        None,
-        description="Tenant name confirmation (required when delete_tenant=true)"
-    )
-    
+
     class Config:
         json_schema_extra = {
             "example": {
                 "confirmation_email": "user@example.com",
                 "confirmation_text": "DELETE",
                 "reason": "No longer using the service",
-                "delete_tenant": False,
-                "tenant_confirmation": None
             }
         }
 
@@ -47,7 +42,6 @@ class LGPDDataSummaryResponse(BaseModel):
     user_id: str
     email: str
     full_name: Optional[str]
-    tenant: str
     created_at: str
     data_summary: Dict[str, Any]
     lgpd_rights: Dict[str, Any]
@@ -116,27 +110,27 @@ class LGPDDeletionResponse(BaseModel):
 
 @router.get("/data-summary", response_model=LGPDDataSummaryResponse)
 async def get_user_data_summary(
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Get comprehensive summary of user data for LGPD transparency
-    
+
     Shows what personal data will be deleted when user requests deletion.
     Required by LGPD Article 9 (Right to Information).
     """
     try:
-        logger.info(f"📊 LGPD Data Summary requested by user {current_user.id}")
-        
+        logger.info(f"📊 LGPD Data Summary requested by user {current_user.sub}")
+
         summary = await lgpd_deletion_service.get_user_data_summary(
             db=db,
-            user_id=str(current_user.id)
+            user_id=current_user.sub
         )
-        
+
         return LGPDDataSummaryResponse(**summary)
-        
+
     except Exception as e:
-        logger.error(f"❌ Failed to get LGPD data summary for user {current_user.id}: {e}")
+        logger.error(f"❌ Failed to get LGPD data summary for user {current_user.sub}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve data summary"
@@ -146,40 +140,38 @@ async def get_user_data_summary(
 @router.post("/request-deletion", response_model=LGPDDeletionResponse)
 async def request_user_deletion(
     deletion_request: LGPDDeletionRequest,
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Request complete user data deletion for LGPD compliance
-    
+
     Implements LGPD Article 18 (Right to Data Deletion).
     This action is IRREVERSIBLE and will delete ALL user data.
-    
+
     Security Requirements:
     - User must confirm their email address
     - User must type explicit confirmation text
     - Process is logged for compliance audit
     """
-    current_user_id = str(current_user.id)
+    current_user_id = current_user.sub
     current_user_email = current_user.email
     try:
         logger.warning(f"🔥 LGPD DELETION REQUEST by user {current_user_id}")
-        
+
         # Security validations
         if deletion_request.confirmation_email != current_user_email:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Confirmation email does not match your account email"
             )
-        
+
         expected_confirmation = "DELETE"
         if deletion_request.confirmation_text != expected_confirmation:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Confirmation text must be exactly: '{expected_confirmation}'"
             )
-        
-        # delete_tenant option is no longer supported (single-tenant deployment)
 
         # Execute LGPD deletion
         result = await lgpd_deletion_service.request_user_deletion(
@@ -188,11 +180,10 @@ async def request_user_deletion(
             requested_by_user_id=current_user_id,
             confirmation_token=deletion_request.confirmation_text,
             reason=deletion_request.reason,
-            delete_tenant=deletion_request.delete_tenant
         )
-        
+
         logger.warning(f"🔥 LGPD DELETION COMPLETED for user {current_user_id}")
-        
+
         return LGPDDeletionResponse(**result)
         
     except HTTPException:
@@ -209,34 +200,28 @@ async def request_user_deletion(
 async def admin_delete_user(
     user_id: str = Body(..., embed=True),
     reason: Optional[str] = Body(None, embed=True),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     Admin endpoint to delete user for LGPD compliance
-    
-    Only available to superusers within the same tenant.
+
+    Only available to admins.
     Used for cases where user cannot self-delete (e.g., deceased, incapacitated).
     """
     try:
-        if not current_user.is_superuser:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only superusers can delete other users"
-            )
-        
-        logger.warning(f"🔥 ADMIN LGPD DELETION - Admin {current_user.id} deleting user {user_id}")
-        
+        logger.warning(f"🔥 ADMIN LGPD DELETION - Admin {current_user.sub} deleting user {user_id}")
+
         result = await lgpd_deletion_service.request_user_deletion(
             db=db,
             user_id=user_id,
-            requested_by_user_id=str(current_user.id),
+            requested_by_user_id=current_user.sub,
             confirmation_token="ADMIN_DELETION",
             reason=reason or "Admin deletion for LGPD compliance"
         )
-        
-        logger.warning(f"🔥 ADMIN LGPD DELETION COMPLETED - User {user_id} deleted by admin {current_user.id}")
-        
+
+        logger.warning(f"🔥 ADMIN LGPD DELETION COMPLETED - User {user_id} deleted by admin {current_user.sub}")
+
         return LGPDDeletionResponse(**result)
         
     except HTTPException:
@@ -251,36 +236,26 @@ async def admin_delete_user(
 
 @router.get("/deletion-history")
 async def get_deletion_history(
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
-    Get LGPD deletion audit history for the tenant
-    
-    Only available to superusers. Shows deletion history for compliance reporting.
+    Get LGPD deletion audit history
+
+    Only available to admins. Shows deletion history for compliance reporting.
     """
     try:
-        if not current_user.is_superuser:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only superusers can view deletion history"
-            )
-        
         from sqlalchemy.future import select
         from sqlalchemy.orm import selectinload
-        
-        stmt = select(LGPDDeletionAudit).where(
-            LGPDDeletionAudit.tenant_id == current_user.tenant_id
-        ).options(
+
+        stmt = select(LGPDDeletionAudit).options(
             selectinload(LGPDDeletionAudit.requested_by_user),
-            selectinload(LGPDDeletionAudit.tenant)
         ).order_by(LGPDDeletionAudit.created_at.desc())
-        
+
         result = await db.execute(stmt)
         deletions = result.scalars().all()
-        
+
         return {
-            "tenant_id": str(current_user.tenant_id),
             "total_deletions": len(deletions),
             "deletions": [
                 {
@@ -304,11 +279,11 @@ async def get_deletion_history(
                 for deletion in deletions
             ]
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Failed to get deletion history for tenant {current_user.tenant_id}: {e}")
+        logger.error(f"❌ Failed to get deletion history: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve deletion history"

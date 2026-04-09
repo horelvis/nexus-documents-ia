@@ -1,9 +1,10 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async, get_current_active_superuser_async
-from app.db.models import User
-from app.schemas.document import UploadRequest
+
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
 from app.services.async_storage_service import AsyncStorageService
 
 router = APIRouter()
@@ -16,13 +17,12 @@ router = APIRouter()
 @router.get("/list", response_model=List[dict])
 async def list_files(
     prefix: str = Query("", description="Prefijo para filtrar archivos"),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
-    Lista los archivos en el almacenamiento del tenant.
+    Lista los archivos en el almacenamiento.
     """
-    storage_service = AsyncStorageService(tenant_id=tenant_id)
+    storage_service = AsyncStorageService()
 
     files = await storage_service.list_files(prefix=prefix)
 
@@ -32,16 +32,12 @@ async def list_files(
 @router.delete("/{object_name:path}", response_model=dict)
 async def delete_file(
     object_name: str,
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Elimina un archivo del almacenamiento.
     """
-    storage_service = AsyncStorageService(tenant_id=tenant_id)
-
-    # Validar que el usuario tenga acceso al objeto
-    # Aquí podría implementarse una verificación de acceso más detallada
+    storage_service = AsyncStorageService()
 
     success = await storage_service.delete_file(object_name=object_name)
 
@@ -53,18 +49,17 @@ async def delete_file(
 
 @router.get("/buckets", response_model=List[str])
 async def list_buckets(
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     Lista todos los buckets disponibles (solo administradores).
     """
     from google.cloud import storage
-    
-    # Esta funcionalidad solo está disponible para superusuarios
+
     try:
         storage_client = storage.Client()
         buckets = storage_client.list_buckets()
-        
+
         return [bucket.name for bucket in buckets]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al listar buckets: {str(e)}")

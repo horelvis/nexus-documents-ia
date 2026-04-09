@@ -4,12 +4,11 @@ Feature Flags API endpoints.
 Exposes feature flag state to the frontend for conditional UI rendering.
 """
 
-from fastapi import APIRouter, Depends
-from typing import Dict, Optional
+from fastapi import APIRouter
+from typing import Dict
 from pydantic import BaseModel
 
 from app.core.features import Feature, FeatureFlags
-from app.api.async_dependencies import get_current_tenant_id_async
 
 router = APIRouter(prefix="/features", tags=["features"])
 
@@ -31,28 +30,23 @@ class FeatureCheckResponse(BaseModel):
 
 
 @router.get("", response_model=FeatureFlagsResponse)
-async def get_features(
-    tenant_id: Optional[str] = Depends(get_current_tenant_id_async),
-) -> FeatureFlagsResponse:
+async def get_features() -> FeatureFlagsResponse:
     """
-    Get all feature flags for the current tenant.
+    Get all feature flags.
 
     Returns the deployment mode and state of all features.
     Used by frontend to conditionally render UI components.
     """
     return FeatureFlagsResponse(
         deployment_mode=FeatureFlags.get_deployment_mode(),
-        features=FeatureFlags.get_all(tenant_id),
-        enabled=FeatureFlags.get_enabled_features(tenant_id),
-        disabled=FeatureFlags.get_disabled_features(tenant_id),
+        features=FeatureFlags.get_all(),
+        enabled=FeatureFlags.get_enabled_features(),
+        disabled=FeatureFlags.get_disabled_features(),
     )
 
 
 @router.get("/{feature_name}", response_model=FeatureCheckResponse)
-async def check_feature(
-    feature_name: str,
-    tenant_id: Optional[str] = Depends(get_current_tenant_id_async),
-) -> FeatureCheckResponse:
+async def check_feature(feature_name: str) -> FeatureCheckResponse:
     """
     Check if a specific feature is enabled.
 
@@ -64,7 +58,7 @@ async def check_feature(
     """
     try:
         feature = Feature(feature_name)
-        enabled = FeatureFlags.is_enabled(feature, tenant_id)
+        enabled = FeatureFlags.is_enabled(feature)
     except ValueError:
         # Unknown feature, return as disabled
         enabled = False

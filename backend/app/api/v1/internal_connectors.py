@@ -34,7 +34,6 @@ async def verify_internal_api_key(
 
 @router.get("/indexed-documents")
 async def get_indexed_documents_internal(
-    tenant_id: str = Query(..., description="Tenant ID"),
     status: Optional[str] = Query("indexed", description="Filter by indexing status"),
     limit: Optional[int] = Query(1000, ge=1, le=5000, description="Maximum documents to return"),
     connector_id: Optional[str] = Query(None, description="Filter by connector ID"),
@@ -42,7 +41,7 @@ async def get_indexed_documents_internal(
     _api_key: str = Depends(verify_internal_api_key),
 ):
     """
-    Get all indexed documents for a tenant (internal API for SIL reindexing).
+    Get all indexed documents (internal API for SIL reindexing).
 
     This endpoint is used by the SIL (Structural Intelligence Layer) service
     to fetch documents that need to be indexed to the structural graph.
@@ -53,10 +52,7 @@ async def get_indexed_documents_internal(
     """
     try:
         # Build query for indexed documents
-        query = (
-            select(IndexedDocument)
-            .where(IndexedDocument.tenant_id == UUID(tenant_id))
-        )
+        query = select(IndexedDocument)
 
         # Filter by status if provided
         if status:
@@ -72,7 +68,7 @@ async def get_indexed_documents_internal(
         result = await db.execute(query)
         documents = result.scalars().all()
 
-        logger.info(f"Internal API: Returning {len(documents)} indexed documents for tenant {tenant_id}")
+        logger.info(f"Internal API: Returning {len(documents)} indexed documents")
 
         # Return in format expected by SIL service
         return {
@@ -98,7 +94,6 @@ async def get_indexed_documents_internal(
                 for doc in documents
             ],
             "total": len(documents),
-            "tenant_id": tenant_id,
         }
 
     except ValueError as e:
