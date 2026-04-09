@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, case
 from uuid import UUID
 
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.db.async_database import get_async_db
 from app.db.models import User, Document, DocumentView, DocumentShare, IndexedDocument
 from app.schemas.dashboard import (
@@ -28,7 +29,6 @@ router = APIRouter()
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get aggregated dashboard statistics for the current tenant.
@@ -239,7 +239,6 @@ async def get_recent_activity(
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get recent activity logs for the tenant
@@ -338,7 +337,6 @@ async def get_analytics_trends(
     period: str = Query("7d", regex="^(7d|30d|90d)$"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get analytics trends for the specified period
@@ -493,7 +491,6 @@ async def get_analytics_trends(
 async def get_ai_insights(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get AI-powered insights and recommendations

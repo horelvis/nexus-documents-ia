@@ -1715,11 +1715,16 @@ class IndexedDocument(Base):
     - Document location (where it came from)
     - Weaviate reference (where it's indexed)
     
-    Access control: A user can access a document if:
-    1. They are the owner (owner_id = user_id)
-    2. Document is public to tenant (is_tenant_public = True)
-    3. They are in shared_with_users
-    4. They belong to a group in shared_with_groups
+    Access control (single-tenant role-based ACL):
+    A user can access a document if any of:
+    1. The document's `roles` column contains "EVERYONE"
+    2. The document's `roles` column overlaps the user's KeyCloak roles
+    3. They are the owner (owner_id = user_id)
+
+    The legacy multi-tenant fields (is_tenant_public, shared_with_users,
+    shared_with_groups, acl_user_ids, acl_role_ids) remain on the table
+    as dead columns; new code paths only use `roles`. They will be dropped
+    by a Plan 5 follow-up migration.
     """
     __tablename__ = "indexed_documents"
     

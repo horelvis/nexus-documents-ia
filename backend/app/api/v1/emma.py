@@ -8,7 +8,8 @@ from fastapi.responses import Response
 import logging
 import httpx
 
-from app.api.async_dependencies import get_current_tenant_id_async, get_current_user_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.db.models import User
 from app.core.config import settings
 from app.core.sse_proxy import proxy_sse_stream
@@ -23,7 +24,6 @@ EMMA_SERVICE_URL = settings.EMMA_SERVICE_URL.rstrip("/")
 @router.post("/query")
 async def emma_query(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -68,7 +68,6 @@ async def emma_query(
 @router.post("/query/stream")
 async def emma_query_stream(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -104,7 +103,6 @@ async def emma_query_stream(
 @router.post("/uploads/temp")
 async def emma_upload_temp(
     file: UploadFile = File(...),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async),
 ):
     """Proxy temporary upload for non-indexed documents to Emma Agent Service."""
@@ -139,7 +137,6 @@ async def emma_upload_temp(
 @router.post("/verified/generate/stream")
 async def emma_verified_generate_stream(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -166,7 +163,6 @@ async def emma_verified_generate_stream(
 @router.post("/predictive/analyze/stream")
 async def emma_predictive_analyze_stream(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -193,7 +189,6 @@ async def emma_predictive_analyze_stream(
 @router.get("/predictive/analysis/{session_id}/pdf")
 async def emma_predictive_analysis_pdf(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -226,7 +221,6 @@ async def emma_predictive_analysis_pdf(
 @router.get("/predictive/analysis/{session_id}/docx")
 async def emma_predictive_analysis_docx(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -259,7 +253,6 @@ async def emma_predictive_analysis_docx(
 @router.get("/verified/session/{session_id}/claims")
 async def emma_verified_session_claims(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -286,7 +279,6 @@ async def emma_verified_session_claims(
 @router.get("/verified/session/{session_id}/docx")
 async def emma_verified_session_docx(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -319,7 +311,6 @@ async def emma_verified_session_docx(
 @router.get("/verified/session/{session_id}/pdf")
 async def emma_verified_session_pdf(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -352,7 +343,6 @@ async def emma_verified_session_pdf(
 @router.get("/verified/session/{session_id}")
 async def emma_verified_session(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -472,7 +462,6 @@ async def emma_health():
 
 @router.get("/tools")
 async def emma_tools(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Get available Emma AI tools/capabilities"""
@@ -494,7 +483,6 @@ async def emma_tools(
 @router.post("/feedback")
 async def emma_feedback(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Submit feedback for Emma AI response quality"""
@@ -527,7 +515,6 @@ async def emma_feedback(
 
 @router.get("/heartbeat/config")
 async def emma_heartbeat_config(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Get heartbeat configuration for the tenant."""
@@ -551,7 +538,6 @@ async def emma_heartbeat_config(
 @router.patch("/heartbeat/config")
 async def emma_heartbeat_config_update(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Update heartbeat configuration for the tenant."""
@@ -581,7 +567,6 @@ async def emma_heartbeat_config_update(
 
 @router.get("/heartbeat/status")
 async def emma_heartbeat_status(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Get heartbeat status for the tenant."""
@@ -605,7 +590,6 @@ async def emma_heartbeat_status(
 @router.post("/heartbeat/run")
 async def emma_heartbeat_run(
     force: bool = False,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Manually trigger a heartbeat evaluation for the tenant."""
@@ -634,7 +618,6 @@ async def emma_heartbeat_insights(
     insight_type: str = None,
     limit: int = 20,
     page: int = 1,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """List proactive insights for the tenant."""
@@ -664,7 +647,6 @@ async def emma_heartbeat_insights(
 @router.post("/heartbeat/insights/{insight_id}/dismiss")
 async def emma_heartbeat_dismiss(
     insight_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Dismiss a proactive insight."""
@@ -688,7 +670,6 @@ async def emma_heartbeat_dismiss(
 @router.post("/heartbeat/insights/{insight_id}/acted")
 async def emma_heartbeat_acted(
     insight_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Mark a proactive insight as acted upon."""
@@ -711,7 +692,6 @@ async def emma_heartbeat_acted(
 
 @router.get("/heartbeat/digest")
 async def emma_heartbeat_digest(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Get daily digest of insights and activity."""
@@ -763,7 +743,6 @@ async def emma_cendoj_status(
 
 @router.get("/welcome")
 async def emma_welcome(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -803,7 +782,6 @@ async def emma_sessions_list(
     include_archived: bool = False,
     limit: int = 50,
     offset: int = 0,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async),
 ):
     """
@@ -838,7 +816,6 @@ async def emma_sessions_list(
 @router.get("/sessions/{session_id}")
 async def emma_session_get(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async),
 ):
     """
@@ -866,7 +843,6 @@ async def emma_session_get(
 @router.post("/sessions/{session_id}/continue")
 async def emma_session_continue(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async),
 ):
     """
@@ -891,7 +867,6 @@ async def emma_session_continue(
 async def emma_session_update(
     session_id: str,
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async),
 ):
     """
@@ -925,7 +900,6 @@ async def emma_session_update(
 @router.delete("/sessions/{session_id}")
 async def emma_session_delete(
     session_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async),
 ):
     """
@@ -960,7 +934,6 @@ async def emma_session_delete(
 
 @router.get("/memory/facts")
 async def emma_memory_facts(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -987,7 +960,6 @@ async def emma_memory_facts(
 
 @router.delete("/memory/facts")
 async def emma_memory_facts_clear(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -1015,7 +987,6 @@ async def emma_memory_facts_clear(
 @router.delete("/memory/facts/{fact_id}")
 async def emma_memory_fact_delete(
     fact_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -1045,7 +1016,6 @@ async def emma_memory_fact_delete(
 @router.get("/notifications")
 async def emma_notifications_list(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """List recent notifications for the current user."""
@@ -1073,7 +1043,6 @@ async def emma_notifications_list(
 @router.patch("/notifications/{notification_id}/read")
 async def emma_notification_mark_read(
     notification_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Mark a single notification as read."""
@@ -1096,7 +1065,6 @@ async def emma_notification_mark_read(
 
 @router.post("/notifications/read-all")
 async def emma_notifications_read_all(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Mark all notifications as read."""
@@ -1211,7 +1179,6 @@ async def emma_generated_info(
 @router.get("/explainability/graph")
 async def explainability_graph(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Full tenant knowledge graph for 3D visualization."""
     try:

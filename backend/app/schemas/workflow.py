@@ -40,7 +40,6 @@ class DeploymentResponse(BaseModel):
     name: str
     deployment_time: Optional[datetime] = None
     source: Optional[str] = None
-    tenant_id: Optional[str] = None
     deployed_process_definitions: List[Dict[str, Any]] = []
 
 
@@ -62,7 +61,6 @@ class ProcessDefinitionResponse(BaseModel):
     version_tag: Optional[str] = None
     category: Optional[str] = None
     deployment_id: str
-    tenant_id: Optional[str] = None
     resource: Optional[str] = None
     suspended: bool = False
 
@@ -95,7 +93,6 @@ class ProcessInstanceResponse(BaseModel):
     definition_id: str
     definition_key: Optional[str] = None
     business_key: Optional[str] = None
-    tenant_id: Optional[str] = None
     ended: bool = False
     suspended: bool = False
     links: Optional[List[Dict[str, Any]]] = None
@@ -131,7 +128,6 @@ class TaskResponse(BaseModel):
     process_instance_id: str
     task_definition_key: str
     form_key: Optional[str] = None
-    tenant_id: Optional[str] = None
     suspended: bool = False
 
 

@@ -421,14 +421,7 @@ async def get_document_service(
     db: AsyncSession = Depends(get_async_db),
     current_user: UserProfile = Depends(get_current_user_async),
 ):
-    """
-    Dependency to get an instance of AsyncDocumentService.
-
-    NOTE: AsyncDocumentService.create() still has a tenant_id parameter.
-    Plan 2 Task 12 refactors that service to take a UserProfile instead.
-    Until then, we pass `user_id=current_user.sub` and a placeholder
-    tenant_id of None — the service will need to handle that gracefully.
-    """
+    """Dependency to get an instance of AsyncDocumentService."""
     from app.services.async_document_service import AsyncDocumentService
     return await AsyncDocumentService.create(
         user_id=current_user.sub,

@@ -35,7 +35,6 @@ class SignatureProviderUpdate(BaseModel):
 class SignatureProvider(SignatureProviderBase):
     """Schema for signature provider responses"""
     id: UUID
-    tenant_id: UUID
     created_at: datetime
     updated_at: datetime
     
@@ -111,7 +110,6 @@ class SignatureRequest(BaseModel):
     """Schema for signature request responses - without document_content"""
     id: UUID
     provider_id: UUID
-    tenant_id: UUID
     created_by: UUID
     title: str = Field(..., min_length=1, max_length=200)
     message: Optional[str] = None

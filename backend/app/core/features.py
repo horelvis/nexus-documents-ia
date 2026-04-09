@@ -2,12 +2,11 @@
 Feature Flags System for NouxCubeIA.
 
 This module provides centralized control over which features are enabled/disabled.
-Designed to support the transition from SaaS to on-premise Emma-centric deployment.
+On-premise single-tenant: flags are deployment-wide.
 
 Features can be controlled via:
 1. Environment variables (FEATURE_<NAME>=true/false)
-2. Per-tenant configuration in database (future)
-3. Default values defined here
+2. Default values defined here
 
 Usage:
     from app.core.features import Feature, FeatureFlags
@@ -16,8 +15,8 @@ Usage:
         # Include signatures router
         pass
 
-    # Get all features for a tenant
-    features = FeatureFlags.get_all(tenant_id="...")
+    # Get all feature states
+    features = FeatureFlags.get_all()
 """
 
 import os
@@ -146,11 +145,8 @@ class FeatureFlags:
 
     Priority order (highest to lowest):
     1. Environment variable override
-    2. Tenant-specific configuration (future)
-    3. Deployment mode defaults
+    2. Deployment mode defaults
     """
-
-    _tenant_cache: Dict[str, Dict[str, bool]] = {}
 
     @classmethod
     def _get_deployment_mode(cls) -> DeploymentMode:
@@ -181,27 +177,12 @@ class FeatureFlags:
         return env_value.lower() in ("true", "1", "yes", "on")
 
     @classmethod
-    def _get_tenant_override(cls, feature: Feature, tenant_id: str) -> Optional[bool]:
-        """
-        Get tenant-specific feature override from cache.
-
-        Note: Actual database lookup should be done by load_tenant_config().
-        This method only checks the cache.
-        """
-        if tenant_id not in cls._tenant_cache:
-            return None
-
-        tenant_features = cls._tenant_cache[tenant_id]
-        return tenant_features.get(feature.value)
-
-    @classmethod
-    def is_enabled(cls, feature: Feature, tenant_id: Optional[str] = None) -> bool:
+    def is_enabled(cls, feature: Feature) -> bool:
         """
         Check if a feature is enabled.
 
         Args:
             feature: The feature to check
-            tenant_id: Optional tenant ID for tenant-specific overrides
 
         Returns:
             True if the feature is enabled, False otherwise
@@ -215,61 +196,25 @@ class FeatureFlags:
         if env_override is not None:
             return env_override
 
-        # Priority 2: Tenant-specific (if tenant_id provided)
-        if tenant_id:
-            tenant_override = cls._get_tenant_override(feature, tenant_id)
-            if tenant_override is not None:
-                return tenant_override
-
-        # Priority 3: Deployment mode default
+        # Priority 2: Deployment mode default
         return cls._get_mode_default(feature)
 
     @classmethod
-    def get_all(cls, tenant_id: Optional[str] = None) -> Dict[str, bool]:
+    def get_all(cls) -> Dict[str, bool]:
         """
         Get state of all features.
-
-        Args:
-            tenant_id: Optional tenant ID for tenant-specific overrides
 
         Returns:
             Dictionary mapping feature names to their enabled state
 
         Example:
-            features = FeatureFlags.get_all(tenant_id="abc123")
+            features = FeatureFlags.get_all()
             # {"digital_signatures": False, "emma_fullscreen_mode": True, ...}
         """
         return {
-            feature.value: cls.is_enabled(feature, tenant_id)
+            feature.value: cls.is_enabled(feature)
             for feature in Feature
         }
-
-    @classmethod
-    def load_tenant_config(cls, tenant_id: str, config: Dict[str, bool]):
-        """
-        Load tenant-specific feature configuration into cache.
-
-        This should be called when loading tenant settings from database.
-
-        Args:
-            tenant_id: The tenant ID
-            config: Dictionary of feature name to enabled state
-        """
-        cls._tenant_cache[tenant_id] = config
-        logger.debug(f"Loaded feature config for tenant {tenant_id[:8]}...")
-
-    @classmethod
-    def clear_tenant_cache(cls, tenant_id: Optional[str] = None):
-        """
-        Clear tenant feature cache.
-
-        Args:
-            tenant_id: Specific tenant to clear, or None to clear all
-        """
-        if tenant_id:
-            cls._tenant_cache.pop(tenant_id, None)
-        else:
-            cls._tenant_cache.clear()
 
     @classmethod
     def get_deployment_mode(cls) -> str:
@@ -277,15 +222,15 @@ class FeatureFlags:
         return cls._get_deployment_mode().value
 
     @classmethod
-    def get_disabled_features(cls, tenant_id: Optional[str] = None) -> list[str]:
+    def get_disabled_features(cls) -> list[str]:
         """Get list of disabled feature names."""
-        all_features = cls.get_all(tenant_id)
+        all_features = cls.get_all()
         return [name for name, enabled in all_features.items() if not enabled]
 
     @classmethod
-    def get_enabled_features(cls, tenant_id: Optional[str] = None) -> list[str]:
+    def get_enabled_features(cls) -> list[str]:
         """Get list of enabled feature names."""
-        all_features = cls.get_all(tenant_id)
+        all_features = cls.get_all()
         return [name for name, enabled in all_features.items() if enabled]
 
 
@@ -300,21 +245,21 @@ def is_on_premise_mode() -> bool:
     return FeatureFlags.get_deployment_mode() == DeploymentMode.ON_PREMISE.value
 
 
-def signatures_enabled(tenant_id: Optional[str] = None) -> bool:
+def signatures_enabled() -> bool:
     """Check if digital signatures are enabled."""
-    return FeatureFlags.is_enabled(Feature.DIGITAL_SIGNATURES, tenant_id)
+    return FeatureFlags.is_enabled(Feature.DIGITAL_SIGNATURES)
 
 
-def elasticsearch_enabled(tenant_id: Optional[str] = None) -> bool:
+def elasticsearch_enabled() -> bool:
     """Check if Elasticsearch is enabled."""
-    return FeatureFlags.is_enabled(Feature.ELASTICSEARCH_SEARCH, tenant_id)
+    return FeatureFlags.is_enabled(Feature.ELASTICSEARCH_SEARCH)
 
 
-def emma_fullscreen_enabled(tenant_id: Optional[str] = None) -> bool:
+def emma_fullscreen_enabled() -> bool:
     """Check if Emma fullscreen mode is enabled."""
-    return FeatureFlags.is_enabled(Feature.EMMA_FULLSCREEN_MODE, tenant_id)
+    return FeatureFlags.is_enabled(Feature.EMMA_FULLSCREEN_MODE)
 
 
-def sso_enabled(tenant_id: Optional[str] = None) -> bool:
+def sso_enabled() -> bool:
     """Check if multi-protocol SSO is enabled."""
-    return FeatureFlags.is_enabled(Feature.SSO_MULTI_PROTOCOL, tenant_id)
+    return FeatureFlags.is_enabled(Feature.SSO_MULTI_PROTOCOL)

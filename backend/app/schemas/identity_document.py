@@ -200,7 +200,6 @@ class IdentityExtractionAuditLog(BaseModel):
     """Audit log entry for identity document access (GDPR compliance)"""
     id: UUID
     document_id: UUID
-    tenant_id: UUID
     user_id: UUID
     action: str  # extract, view, export, delete
     timestamp: datetime
@@ -213,7 +212,6 @@ class IdentityExtractionAuditLog(BaseModel):
 class IdentityDocumentDBCreate(BaseModel):
     """Schema for creating identity document extraction in database"""
     document_id: UUID
-    tenant_id: UUID
     document_type: IdentityDocumentType
     issuing_country: Optional[str] = None
     extracted_data: Dict[str, Any]  # Encrypted JSON

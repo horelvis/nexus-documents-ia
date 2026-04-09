@@ -42,7 +42,9 @@ def _get_mcp_url(connector_type: str) -> str:
         )
     return url
 
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
 from app.db.async_database import get_async_db
 from app.db.models import User, Connector, UserConnectorAuth, UserDocumentSync
 from app.schemas.connector import (
@@ -163,7 +165,6 @@ async def list_connectors(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List all connectors for the tenant (admin view).
@@ -208,7 +209,6 @@ async def create_connector(
     connector_data: ConnectorCreate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Create a new connector (admin only).
@@ -259,7 +259,6 @@ async def get_connector(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get details of a specific connector (admin only).
@@ -285,7 +284,6 @@ async def update_connector(
     connector_data: ConnectorUpdate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Update a connector's configuration (admin only).
@@ -326,7 +324,6 @@ async def delete_connector(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Delete a connector (admin only).
@@ -370,7 +367,6 @@ async def check_connector_health(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Check the health of a connector (admin only).
@@ -440,7 +436,6 @@ async def get_connector_stats(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get detailed statistics for a connector (admin only).
@@ -602,7 +597,6 @@ async def get_failed_documents(
     error_filter: Optional[str] = Query(None, description="Filter by error message (partial match)"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List failed documents for a connector with full details (admin only).
@@ -701,7 +695,6 @@ async def retry_failed_documents(
     error_filter: Optional[str] = Body(None, description="Only retry documents matching this error"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Retry indexing for failed documents (admin only).
@@ -790,7 +783,6 @@ async def sync_content_model(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Discover and sync the content model (types, aspects, properties) from Alfresco.
@@ -906,7 +898,6 @@ async def get_content_model(
     include_properties: bool = Query(True, description="Include full property definitions"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get the discovered content model for a connector.
@@ -972,7 +963,6 @@ async def sync_folders(
     max_depth: int = Query(10, description="Maximum folder depth to crawl"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Sync folders with their properties from Alfresco.
@@ -1035,7 +1025,6 @@ async def trigger_connector_sync(
     retry_failed: bool = Query(False, description="Also retry previously failed documents"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Trigger a manual sync for a connector (admin only).
@@ -1187,7 +1176,6 @@ async def trigger_index_pending(
     retry_failed: bool = Query(False, description="Also retry previously failed documents"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Trigger indexing of pending documents for a connector (admin only).
@@ -1321,7 +1309,6 @@ async def get_pending_documents(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List pending documents for a connector (admin only).
@@ -1478,7 +1465,6 @@ async def oauth_authorize(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Initiate OAuth2 flow for an OAuth connector (admin only).
@@ -1598,7 +1584,6 @@ async def oauth_status(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Check OAuth status for an OAuth connector (Google Drive, OneDrive)."""
     await _check_admin_permission(current_user, tenant_id)
@@ -1643,7 +1628,6 @@ async def list_drive_folders(
     parent_id: str = Query("root", description="Parent folder ID"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List folders for an OAuth connector (admin only).
@@ -1696,7 +1680,6 @@ async def oauth_revoke(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Revoke OAuth tokens for an OAuth connector (admin only)."""
     await _check_admin_permission(current_user, tenant_id)

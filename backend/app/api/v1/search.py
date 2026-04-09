@@ -12,7 +12,8 @@ import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.db.models import User, Document
 from app.services.search_service import SearchService
 from app.services.weaviate_client import weaviate_client
@@ -39,7 +40,6 @@ async def search_elasticsearch(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     SIMPLE Elasticsearch search - no fallbacks
@@ -84,7 +84,6 @@ async def search_database(
     tags: Optional[List[str]] = Query(None),
     category: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     SIMPLE database search - no fallbacks
@@ -164,7 +163,6 @@ async def search_documents(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Unified search endpoint using the appropriate backend.
@@ -249,7 +247,6 @@ async def get_search_analytics(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get comprehensive search and document analytics from Elasticsearch
@@ -273,7 +270,6 @@ async def get_search_analytics(
 async def suggest_search_type(
     query: str = Query(..., description="Query to analyze"),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Suggest optimal search type based on query characteristics
@@ -303,7 +299,6 @@ async def suggest_search_type(
 async def ask_documents(
     message: ChatMessage,
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Responde a una pregunta basada en los documentos.
@@ -324,7 +319,6 @@ async def ask_documents(
 @router.get("/health", response_model=dict)
 async def check_search_system_health(
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Verifica la salud del sistema de búsqueda semántica.
@@ -338,7 +332,6 @@ async def check_search_system_health(
 @router.post("/fix-embedding-model", response_model=dict)
 async def fix_embedding_model(
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Endpoint removido - el modelo de embeddings ahora es manejado por el microservicio de Weaviate.
@@ -352,7 +345,6 @@ async def fix_embedding_model(
 @router.get("/reindex/status", response_model=dict)
 async def get_reindex_status(
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Obtiene el estado del reindexado para el tenant actual.
@@ -365,7 +357,6 @@ async def get_reindex_status(
 @router.post("/reindex/all", response_model=dict)
 async def reindex_all_documents(
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Reindexa todos los documentos que faltan en el vector store.
@@ -379,7 +370,6 @@ async def reindex_all_documents(
 async def force_reindex_all_documents(
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Fuerza el reindexado de TODOS los documentos del tenant.
@@ -421,7 +411,6 @@ async def reindex_all_documents_background(tenant_id: str, force: bool = False):
 async def reindex_specific_documents(
     document_ids: List[str],
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Reindexa documentos específicos por sus IDs.
@@ -437,7 +426,6 @@ async def reindex_specific_documents(
 @router.post("/fix-and-reindex", response_model=dict)
 async def fix_collection_and_reindex(
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Endpoint removido - los problemas de dimensiones ahora son manejados por el microservicio de Weaviate.
@@ -451,7 +439,6 @@ async def fix_collection_and_reindex(
 @router.post("/auto-reindex", response_model=dict)
 async def auto_reindex_failed_documents(
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Automáticamente reindexa documentos que tienen errores de indexación.
@@ -489,7 +476,6 @@ async def start_global_auto_reindex(
 @router.post("/auto-reindex/run-once", response_model=dict)
 async def run_auto_reindex_once(
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Ejecuta una sola vez el auto-reindex para el tenant actual.

@@ -274,9 +274,6 @@ class OIDCAuthProvider(AuthProvider):
         from datetime import datetime
         token_expiry = datetime.fromtimestamp(exp) if exp else None
 
-        # Tenant hint (custom claim, if present)
-        tenant_hint = payload.get("tenant_id") or payload.get("tid")  # Azure AD uses tid
-
         return AuthenticatedIdentity(
             external_id=subject,
             email=email,
@@ -294,7 +291,6 @@ class OIDCAuthProvider(AuthProvider):
             roles=all_roles,
             session_id=session_id,
             token_expiry=token_expiry,
-            tenant_hint=tenant_hint,
         )
 
     async def get_user_info(self, identity: AuthenticatedIdentity) -> Dict[str, Any]:

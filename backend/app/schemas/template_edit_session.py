@@ -15,7 +15,6 @@ class TemplateEditSessionBase(BaseModel):
     template_file_mime: Optional[str] = None
     user_id: str
     user_email: str
-    tenant_id: str
     google_doc_id: str
     google_doc_url: str
     google_doc_edit_url: str

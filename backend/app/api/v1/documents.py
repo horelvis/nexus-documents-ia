@@ -23,11 +23,12 @@ from app.core.config import settings
 
 from app.api.async_dependencies import (
     get_current_user_async,
-    get_current_tenant_id_async,
     require_document_upload_permission_async,
     get_document_service,
     get_async_db
 )
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import filter_visible_to_user
 from app.db.models import User, Document as DBDocument, Tag, IndexedDocument, Connector
 from app.schemas.document import (
     Document, DocumentDetail,
@@ -149,7 +150,6 @@ async def list_documents(
     db: AsyncSession = Depends(get_async_db),
     document_service: AsyncDocumentService = Depends(get_document_service),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     search: Optional[str] = Query(None),
@@ -210,7 +210,6 @@ async def create_document(
     folder_path: Optional[str] = Form(None),  # Target folder for upload (Google Drive style)
     file: UploadFile = File(...),
     current_user: User = Depends(require_document_upload_permission_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     # Note: We manually create service here because require_document_upload_permission_async
     # might consume the body stream if not handled carefully, but here we use Form/File
     # We can use the factory manually or add a dependency that doesn't conflict.
@@ -260,7 +259,6 @@ async def get_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -305,7 +303,6 @@ async def stream_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -491,7 +488,6 @@ async def serve_pdf(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -542,7 +538,6 @@ async def serve_converted_pdf(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -607,7 +602,6 @@ async def update_document(
     update_data: DocumentUpdate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -643,7 +637,6 @@ async def delete_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -662,7 +655,6 @@ async def get_document_summary(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -682,7 +674,6 @@ async def add_document_tag(
     tag: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -702,7 +693,6 @@ async def remove_document_tag(
     tag_name: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -722,7 +712,6 @@ async def get_document_preview(
     force_regenerate: bool = Query(False, description="Force regeneration of preview"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -820,7 +809,6 @@ async def get_preview_info(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Obtiene información de preview existente sin regenerar.
@@ -855,7 +843,6 @@ async def get_document_agents(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -884,7 +871,6 @@ async def recategorize_document(
     doc_id: str,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -942,7 +928,6 @@ async def recategorize_document(
 async def recategorize_all_documents(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service),
     only_uncategorized: bool = Query(True),
     batch_size: int = Query(10, ge=1, le=50)
@@ -1032,7 +1017,6 @@ async def queue_preview_generation(
     force_regenerate: bool = Query(False),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -1072,7 +1056,6 @@ async def queue_batch_preview_generation(
     batch_size: int = Query(5, ge=1, le=20),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     document_service: AsyncDocumentService = Depends(get_document_service)
 ):
     """
@@ -1124,7 +1107,6 @@ async def get_document_facets(
     filters: Optional[dict] = Body(None),
     facet_fields: Optional[List[str]] = Body(["file_type", "category", "tags"]),
     max_facet_values: int = Body(10, ge=1, le=50),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get facets for document search results via Elasticsearch.
@@ -1176,7 +1158,6 @@ async def process_identity_document(
     retention_days: int = Form(default=90, ge=1, le=365, description="Days to retain extracted data"),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Process an identity document (DNI, NIE, Passport, Driver's License) and extract structured data.

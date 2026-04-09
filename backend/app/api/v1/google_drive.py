@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.core.config import settings
 from app.db.models import User
 from app.schemas.google_drive import (

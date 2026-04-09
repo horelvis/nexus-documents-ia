@@ -95,7 +95,6 @@ class NotebookUpdate(BaseModel):
 class NotebookResponse(NotebookBase):
     """Response schema for a notebook"""
     id: UUID
-    tenant_id: UUID
     user_id: UUID
     settings: Dict[str, Any] = Field(default_factory=dict)
     source_count: int = 0

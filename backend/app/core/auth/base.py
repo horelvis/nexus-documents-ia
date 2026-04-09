@@ -58,9 +58,6 @@ class AuthenticatedIdentity:
     session_id: Optional[str] = None
     token_expiry: Optional[datetime] = None
 
-    # Tenant hint (if provider supplies it)
-    tenant_hint: Optional[str] = None
-
     def get_full_name(self) -> str:
         """Get full name, constructing from parts if needed."""
         if self.name:
@@ -85,7 +82,6 @@ class AuthenticatedIdentity:
             "groups": self.groups,
             "roles": self.roles,
             "session_id": self.session_id,
-            "tenant_hint": self.tenant_hint,
         }
 
 

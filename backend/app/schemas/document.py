@@ -13,12 +13,18 @@ class TagBase(BaseModel):
 class DocumentBase(BaseModel):
     title: str
     description: Optional[str] = None
+    roles: List[str] = Field(
+        default=["EVERYONE"],
+        description=(
+            "KeyCloak role names that can see this document. "
+            "Use ['EVERYONE'] for organization-wide visibility."
+        ),
+    )
 
 
 # Esquemas para DocumentMetrics
 class DocumentMetricsBase(BaseModel):
     document_id: UUID
-    tenant_id: UUID
     view_count: int = 0
     download_count: int = 0
     share_count: int = 0
@@ -52,7 +58,6 @@ class DocumentTag(DocumentTagBase):
 class DocumentViewBase(BaseModel):
     user_id: UUID
     document_id: UUID
-    tenant_id: UUID
     view_duration_seconds: Optional[int] = None
     is_complete_view: bool = False
 
@@ -72,7 +77,6 @@ class DocumentBasic(DocumentBase):
     filename: str
     file_type: str
     file_size: int
-    tenant_id: UUID
     created_by: UUID
     indexed: int
     created_at: datetime
@@ -133,11 +137,17 @@ class DocumentUpdate(BaseModel):
     description: Optional[str] = None
     tags: Optional[List[str]] = None
     category: Optional[str] = None
+    roles: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "KeyCloak role names that can see this document. "
+            "Use ['EVERYONE'] for organization-wide visibility."
+        ),
+    )
 
 # Esquemas para respuestas
 class Tag(TagBase):
     id: int
-    tenant_id: UUID
     created_at: datetime
     
     class Config:
@@ -150,7 +160,6 @@ class Document(DocumentBase):
     file_size: int
     mime_type: Optional[str] = None
     category: Optional[str] = None
-    tenant_id: UUID
     created_by: UUID
     indexed: int
     created_at: datetime

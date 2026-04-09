@@ -10,8 +10,8 @@ import logging
 import os
 import httpx
 
-from app.api.async_dependencies import get_current_tenant_id_async, get_current_user_async
-from app.db.models import User
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.services.weaviate_client import weaviate_client
 from app.clients.exceptions import HTTPClientError, ServiceTimeoutError
 from app.core.config import settings
@@ -30,7 +30,6 @@ EMMA_SERVICE_URL = settings.EMMA_SERVICE_URL.rstrip("/")
 @router.post("/emma/query")
 async def emma_query(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Proxy Emma AI queries to Emma Agent Service with ACL context"""
@@ -71,7 +70,6 @@ async def emma_query(
 @router.post("/emma/query/stream")
 async def emma_query_stream(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -138,7 +136,6 @@ async def emma_query_stream(
 @router.post("/emma/uploads/temp")
 async def emma_upload_temp(
     file: UploadFile = File(...),
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async),
 ):
     """Proxy temporary upload for non-indexed documents to Emma Agent Service."""
@@ -194,7 +191,6 @@ async def emma_health():
 @router.post("/emma/v2/query")
 async def emma_v2_query(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -240,7 +236,6 @@ async def emma_v2_query(
 @router.post("/emma/v2/query/stream")
 async def emma_v2_query_stream(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -325,7 +320,6 @@ async def emma_list_tools():
 @router.post("/emma/feedback")
 async def emma_feedback(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Submit feedback to Emma AI for learning"""
     try:
@@ -342,7 +336,6 @@ async def emma_feedback(
 @router.get("/emma/analysis/{job_id}")
 async def emma_get_analysis(
     job_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get a stored analysis result by job ID.
@@ -365,7 +358,6 @@ async def emma_get_analysis(
 async def emma_document_markdown(
     document_id: str = Form(...),
     pdf_file: UploadFile = File(...),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Convert a PDF document to Markdown format.
@@ -392,7 +384,6 @@ async def emma_analyze_with_annotations(
     document_id: str = Form(...),
     analysis_type: str = Form("legal"),
     file: Optional[UploadFile] = File(None),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Analyze document and return annotated PDF with highlights.
@@ -432,7 +423,6 @@ async def emma_analyze_with_annotations_stream(
     document_id: str = Form(...),
     analysis_type: str = Form("legal"),
     file: Optional[UploadFile] = File(None),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Analyze document with streaming progress updates.
@@ -570,7 +560,6 @@ async def public_knowledge_get_document(doc_id: str):
 @router.post("/knowledge/search")
 async def knowledge_search(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Search knowledge entities semantically with ACL filtering"""
@@ -594,7 +583,6 @@ async def knowledge_list_entities(
     entity_type: Optional[str] = None,
     domain: Optional[str] = None,
     limit: int = 50,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """List knowledge entities for current tenant"""
     try:
@@ -614,7 +602,6 @@ async def knowledge_list_entities(
 @router.get("/knowledge/entities/{entity_id}")
 async def knowledge_get_entity(
     entity_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Get a specific knowledge entity"""
     try:
@@ -631,7 +618,6 @@ async def knowledge_get_entity(
 @router.delete("/knowledge/entities/{entity_id}")
 async def knowledge_delete_entity(
     entity_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Delete a knowledge entity"""
     try:
@@ -648,7 +634,6 @@ async def knowledge_delete_entity(
 @router.delete("/knowledge/documents/{document_id}")
 async def knowledge_delete_by_document(
     document_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Delete all knowledge entities from a document"""
     try:
@@ -662,7 +647,6 @@ async def knowledge_delete_by_document(
 
 @router.get("/knowledge/stats")
 async def knowledge_stats(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     include_public: bool = True
 ):
     """Get knowledge graph statistics for current tenant.
@@ -726,7 +710,6 @@ async def knowledge_stats(
 
 @router.get("/learning/profile")
 async def learning_get_profile(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Get current user's learning profile"""
@@ -742,7 +725,6 @@ async def learning_get_profile(
 @router.put("/learning/profile")
 async def learning_update_profile(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Update current user's learning profile preferences"""
@@ -759,7 +741,6 @@ async def learning_update_profile(
 @router.post("/learning/feedback")
 async def learning_record_feedback(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Record user feedback for learning"""
@@ -776,7 +757,6 @@ async def learning_record_feedback(
 @router.post("/learning/document-view")
 async def learning_record_document_view(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Record document view for learning"""
@@ -792,7 +772,6 @@ async def learning_record_document_view(
 
 @router.get("/learning/stats")
 async def learning_get_stats(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Get learning statistics for current user"""
@@ -807,7 +786,6 @@ async def learning_get_stats(
 
 @router.get("/learning/context")
 async def learning_get_context(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Get full user context for Emma"""
@@ -822,7 +800,6 @@ async def learning_get_context(
 
 @router.get("/learning/ranking-weights")
 async def learning_get_ranking_weights(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Get personalized ranking weights for RAG"""
@@ -846,7 +823,6 @@ async def learning_get_ranking_weights(
 @router.post("/sil/query")
 async def sil_query(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -879,7 +855,6 @@ async def sil_query(
 @router.get("/sil/structure/{document_id}")
 async def sil_get_structure(
     document_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Get structural metadata for a specific document"""
     try:
@@ -895,7 +870,6 @@ async def sil_get_structure(
 
 @router.get("/sil/graph/stats")
 async def sil_graph_stats(
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Get statistics about the structural graph.
@@ -917,7 +891,6 @@ async def sil_search_structural(
     limit: int = 10,
     semantic_type: Optional[str] = None,
     domain: Optional[str] = None,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """
     Search structural documents by semantic similarity.
@@ -944,7 +917,6 @@ async def sil_search_structural(
 async def sil_get_folder_contents(
     folder_path: str,
     include_subfolders: bool = False,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Get contents of a structural folder"""
     try:
@@ -965,7 +937,6 @@ async def sil_get_related_documents(
     document_id: str,
     relationship_type: Optional[str] = None,
     max_depth: int = 2,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Get documents related to a given document through the structural graph"""
     try:
@@ -985,7 +956,6 @@ async def sil_get_related_documents(
 @router.get("/sil/graph/document-ids")
 async def sil_get_document_ids(
     limit: int = 10000,
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Get list of document IDs already indexed in the SIL graph"""
     try:
@@ -1004,7 +974,6 @@ async def sil_get_document_ids(
 @router.post("/sil/index-structural")
 async def sil_index_structural(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -1029,7 +998,6 @@ async def sil_index_structural(
 @router.delete("/sil/structure/{document_id}")
 async def sil_mark_document_removed(
     document_id: str,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """Mark a document as removed in the structural graph (admin only)"""
@@ -1047,7 +1015,6 @@ async def sil_mark_document_removed(
 
 @router.delete("/sil/graph/clear")
 async def sil_clear_graph(
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -1072,7 +1039,6 @@ async def sil_clear_graph(
 @router.post("/sil/reindex")
 async def sil_reindex(
     request: Request,
-    tenant_id: str = Depends(get_current_tenant_id_async),
     current_user: User = Depends(get_current_user_async)
 ):
     """
@@ -1412,7 +1378,6 @@ WEAVIATE_SERVICE_URL = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-servic
 
 @router.get("/tree/stats")
 async def tree_stats(
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Get knowledge tree stats from FalkorDB via knowledge-tree-service"""
     try:
@@ -1436,7 +1401,6 @@ async def tree_stats(
 
 @router.get("/tree/graph/structure")
 async def tree_graph_structure(
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Get full graph structure (nodes + edges) for visualization"""
     try:

@@ -21,7 +21,8 @@ from google_auth_oauthlib.flow import Flow
 import requests
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.core.config import settings
 from app.db.async_database import get_async_db
 from app.db.models import User
@@ -75,7 +76,6 @@ async def list_channels(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List information channels accessible to the current user.
@@ -108,7 +108,6 @@ async def create_channel(
     channel_data: ChannelCreate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Create a new information channel.
@@ -138,7 +137,6 @@ async def get_channel(
     channel_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get details of a specific channel.
@@ -166,7 +164,6 @@ async def update_channel(
     channel_data: ChannelUpdate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Update a channel's configuration.
@@ -192,7 +189,6 @@ async def delete_channel(
     channel_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Delete a channel and all associated data.
@@ -228,7 +224,6 @@ async def get_oauth_url(
     channel_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get OAuth authorization URL for a Google channel.
@@ -406,7 +401,6 @@ async def trigger_sync(
     request: SyncTriggerRequest = SyncTriggerRequest(),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Trigger a manual sync for a channel.
@@ -464,7 +458,6 @@ async def get_sync_history(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get sync history for a channel.
@@ -504,7 +497,6 @@ async def list_channel_documents(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List documents indexed from a channel.
@@ -545,7 +537,6 @@ async def set_db_credentials(
     credentials: DBCredentialsCreate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Set database credentials for an external database channel.
@@ -586,7 +577,6 @@ async def test_connection(
     channel_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Test connection to an external database channel.

@@ -187,10 +187,9 @@ async def init_database() -> Dict[str, Any]:
     _check_debug_mode()
 
     try:
-        from app.db.models import Base
+        from app.db.models import Base, User
         from app.db.database import engine, SessionLocal
         from app.services.auth_service import AuthService
-        from app.db.models import Tenant, User
         import uuid
 
         logger.warning("🚨 DEVELOPMENT ONLY: Initializing database via API endpoint")
@@ -199,23 +198,9 @@ async def init_database() -> Dict[str, Any]:
         Base.metadata.create_all(bind=engine)
         logger.info("✅ Tables created")
 
-        # Create initial data
+        # Create initial admin user (single-tenant mode — no tenant row needed)
         db = SessionLocal()
         try:
-            # Create default tenant
-            tenant = db.query(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT).first()
-            if not tenant:
-                tenant = Tenant(
-                    id=uuid.uuid4(),
-                    name=settings.DEFAULT_TENANT,
-                    description="Default tenant",
-                    bucket_name=f"nexus-{settings.DEFAULT_TENANT}"
-                )
-                db.add(tenant)
-                db.flush()
-                logger.info(f"✅ Default tenant created: {tenant.id}")
-
-            # Create admin user
             admin_user = db.query(User).filter(User.email == "admin@example.com").first()
             if not admin_user:
                 admin_user = User(
@@ -225,7 +210,6 @@ async def init_database() -> Dict[str, Any]:
                     full_name="Admin User",
                     is_superuser=True,
                     is_active=True,
-                    tenant_id=tenant.id
                 )
                 db.add(admin_user)
                 logger.info("✅ Admin user created")
@@ -238,7 +222,6 @@ async def init_database() -> Dict[str, Any]:
         return {
             "status": "success",
             "message": "Database initialized successfully (DEVELOPMENT ONLY)",
-            "tenant_id": str(tenant.id) if tenant else None,
             "warning": "This endpoint should NOT be used in production"
         }
 

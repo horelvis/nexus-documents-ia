@@ -133,7 +133,6 @@ class ConnectorContentModelResponse(BaseModel):
     """Response schema for connector content model."""
     id: UUID
     connector_id: UUID
-    tenant_id: UUID
 
     # Raw model
     content_types: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
@@ -196,7 +195,6 @@ class LearnedFolderPatternResponse(BaseModel):
     """Response schema for folder pattern."""
     id: UUID
     connector_id: UUID
-    tenant_id: UUID
     path_pattern: str
     level_semantics: Dict[str, Dict[str, Any]]
     example_paths: Optional[List[str]] = None
@@ -252,7 +250,6 @@ class LearnedPropertyMappingResponse(BaseModel):
     """Response schema for property mapping."""
     id: UUID
     connector_id: UUID
-    tenant_id: UUID
     source_property: str
     source_type: Optional[str] = None
     target_field: str
@@ -299,7 +296,6 @@ class LearnedRelationshipTypeResponse(BaseModel):
     """Response schema for relationship type."""
     id: UUID
     connector_id: UUID
-    tenant_id: UUID
     source_relationship: str
     relationship_category: RelationshipCategory
     kg_edge_type: str
@@ -359,7 +355,6 @@ class ConnectorIndexingStrategyResponse(BaseModel):
     """Response schema for indexing strategy."""
     id: UUID
     connector_id: UUID
-    tenant_id: UUID
     document_type: Optional[str] = None
     mime_type_pattern: Optional[str] = None
     chunking_type: ChunkingType
@@ -392,7 +387,6 @@ class DataLearningJobResponse(BaseModel):
     """Response schema for learning job."""
     id: UUID
     connector_id: UUID
-    tenant_id: UUID
     job_type: DataLearningJobType
     status: DataLearningJobStatus
     status_message: Optional[str] = None

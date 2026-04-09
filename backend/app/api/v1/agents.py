@@ -10,7 +10,8 @@ from pydantic import BaseModel
 import json
 import httpx
 
-from app.api.async_dependencies import get_current_active_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_active_user_async
+from app.core.auth.base import UserProfile
 from app.db.models import User
 from app.core.config import settings
 
@@ -141,7 +142,6 @@ async def list_agent_types():
 @router.get("/list")
 async def list_available_agents(
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """List available CrewAI agents for the tenant"""
     try:
@@ -184,7 +184,6 @@ async def list_available_agents(
 async def create_custom_agent(
     request: CreateAgentRequest,
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Create a custom CrewAI agent configuration"""
     try:
@@ -225,7 +224,6 @@ async def create_custom_agent(
 async def delete_agent(
     agent_id: str,
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Delete/disable agent configuration"""
     try:
@@ -259,7 +257,6 @@ async def delete_agent(
 async def chat_with_agents(
     request: ChatRequest,
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Chat using CrewAI agents"""
     async def event_stream():
@@ -336,7 +333,6 @@ async def chat_with_specific_agent(
     agent_id: str,
     request: ChatRequest,
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Chat with a specific CrewAI agent"""
     # Add agent preference to context
@@ -351,7 +347,6 @@ async def execute_agent_task(
     agent_id: str,
     request: ExecuteTaskRequest,
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Execute a task with CrewAI agents"""
     async def event_stream():
@@ -417,7 +412,6 @@ async def execute_agent_task(
 @router.get("/statistics")
 async def get_agent_statistics(
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Get CrewAI agent usage statistics"""
     try:
@@ -457,7 +451,6 @@ async def get_agent_statistics(
 async def get_agent_activity(
     limit: int = Query(10, ge=1, le=100),
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Get recent CrewAI agent activity"""
     try:
@@ -486,7 +479,6 @@ async def get_agent_activity(
 async def get_specific_agent_stats(
     agent_id: str,
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Get statistics for a specific CrewAI agent"""
     try:
@@ -519,7 +511,6 @@ async def get_specific_agent_stats(
 @router.post("/test")
 async def test_crewai_integration(
     current_user: User = Depends(get_current_active_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
 ):
     """Test CrewAI integration with a simple query"""
     try:

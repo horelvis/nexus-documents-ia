@@ -52,7 +52,7 @@ def build_role_filter_clause(user: UserProfile) -> BooleanClauseList:
 def filter_visible_to_user(query, user: UserProfile):
     """Apply role-based ACL filter to a Document query.
 
-    Replaces every legacy `filter(Document.tenant_id == ...)` call.
+    Replaces every legacy multi-tenant filter on the Document table.
 
     Args:
         query: A SQLAlchemy query object selecting from Document.

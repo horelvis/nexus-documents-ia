@@ -19,7 +19,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.db.async_database import get_async_db
 from app.db.models import (
     User,
@@ -96,7 +97,6 @@ async def get_learning_status(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get overall learning status for a connector.
@@ -128,7 +128,6 @@ async def trigger_learning(
     request: TriggerLearningRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Trigger a learning job for a connector.
@@ -176,7 +175,6 @@ async def get_content_model(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get the discovered content model for a connector.
@@ -208,7 +206,6 @@ async def get_content_model_summary(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get a summary of the discovered content model.
@@ -238,7 +235,6 @@ async def list_folder_patterns(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List learned folder patterns for a connector.
@@ -286,7 +282,6 @@ async def get_folder_pattern(
     pattern_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Get a specific folder pattern."""
     await _check_admin_permission(current_user, tenant_id)
@@ -312,7 +307,6 @@ async def update_folder_pattern(
     update: LearnedFolderPatternUpdate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Update a folder pattern.
@@ -364,7 +358,6 @@ async def get_folder_context(
     request: FolderContextRequest,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Get the semantic context for a folder path.
@@ -412,7 +405,6 @@ async def list_property_mappings(
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List property mappings for a connector.
@@ -468,7 +460,6 @@ async def get_property_mapping(
     mapping_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Get a specific property mapping."""
     await _check_admin_permission(current_user, tenant_id)
@@ -494,7 +485,6 @@ async def update_property_mapping(
     update: LearnedPropertyMappingUpdate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Update a property mapping.
@@ -531,7 +521,6 @@ async def list_relationship_types(
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List learned relationship types for a connector.
@@ -581,7 +570,6 @@ async def update_relationship_type(
     update: LearnedRelationshipTypeUpdate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Update a relationship type mapping.
@@ -618,7 +606,6 @@ async def list_indexing_strategies(
     page_size: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List indexing strategies for a connector.
@@ -669,7 +656,6 @@ async def get_indexing_strategy(
     strategy_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Get a specific indexing strategy."""
     await _check_admin_permission(current_user, tenant_id)
@@ -694,7 +680,6 @@ async def create_indexing_strategy(
     create: ConnectorIndexingStrategyCreate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Create a custom indexing strategy.
@@ -719,7 +704,6 @@ async def update_indexing_strategy(
     update: ConnectorIndexingStrategyUpdate,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Update an indexing strategy.
@@ -750,7 +734,6 @@ async def delete_indexing_strategy(
     strategy_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Delete an indexing strategy."""
     await _check_admin_permission(current_user, tenant_id)
@@ -784,7 +767,6 @@ async def list_learning_jobs(
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     List learning jobs for a connector.
@@ -831,7 +813,6 @@ async def get_learning_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """Get details of a specific learning job."""
     await _check_admin_permission(current_user, tenant_id)
@@ -856,7 +837,6 @@ async def cancel_learning_job(
     job_id: UUID,
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
 ):
     """
     Cancel a running learning job.

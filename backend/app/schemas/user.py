@@ -2,8 +2,6 @@ from typing import Optional, List
 from datetime import datetime
 import uuid
 from pydantic import BaseModel, EmailStr, Field
-from .rbac import Role
-# from .billing import Subscription  # Removed - subscriptions handled by Stripe
 
 from app.core.enums import UserRole
 
@@ -39,7 +37,6 @@ class UserBase(BaseModel):
 # Schema for creating a user (request model)
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8, example="securepassword123")
-    tenant_id: uuid.UUID = Field(..., example=uuid.uuid4())
     is_superuser: bool = Field(False, example=False)
     is_active: bool = Field(True, example=True)
 
@@ -72,7 +69,6 @@ class UserRead(UserBase):
     full_name: Optional[str] = None
     is_active: bool
     is_superuser: bool
-    tenant_id: uuid.UUID
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -87,7 +83,6 @@ class UserUpdate(BaseModel):
     is_superuser: Optional[bool] = Field(None, example=False)
     clerk_user_id: Optional[str] = Field(None, example="user_2aBcDeFgHiJkLmNoPqRsTuVwXyZ_updated")
     password: Optional[str] = Field(None, min_length=8, example="newpassword123")
-    tenant_id: Optional[uuid.UUID] = Field(None, example=uuid.uuid4())
 
 # Schema for complete user response with relationships
 class User(UserBase):
@@ -96,12 +91,13 @@ class User(UserBase):
     is_superuser: bool = Field(..., example=False)
     onboarding_completed: bool = Field(False, example=False)
     stripe_customer_id: Optional[str] = Field(None, example="cus_1234567890")
-    tenant_id: uuid.UUID = Field(..., example=uuid.uuid4())
     created_at: datetime = Field(..., example=datetime.now())
     updated_at: datetime = Field(..., example=datetime.now())
     image: Optional[UserImage] = None
-    roles: List[Role] = []
-    # subscription: Optional[Subscription] = None  # Removed - subscriptions handled by Stripe
+    roles: List[str] = Field(
+        default_factory=list,
+        description="KeyCloak role names (sourced from JWT, not stored locally).",
+    )
     
     # Subscription info from Stripe (populated dynamically)
     subscription_plan: Optional[str] = Field(None, example="pro")
