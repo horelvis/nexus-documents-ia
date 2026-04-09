@@ -48,7 +48,6 @@ async def get_learning() -> PreferenceLearningService:
 class LearningProfileResponse(BaseModel):
     """Response for user learning profile."""
     user_id: str
-    tenant_id: str
     response_style: str = "balanced"
     expertise_level: str = "general"
     preferred_language: str = "es"
@@ -87,7 +86,6 @@ class DocumentViewRequest(BaseModel):
 class LearningStatsResponse(BaseModel):
     """Response for learning statistics."""
     user_id: str
-    tenant_id: str
     total_queries: int
     total_document_views: int
     frequent_queries_count: int
@@ -121,7 +119,6 @@ class UserContextResponse(BaseModel):
 
 @router.get("/profile", response_model=LearningProfileResponse)
 async def get_learning_profile(
-    tenant_id: str = Query(..., description="Tenant identifier"),
     user_id: str = Query(..., description="User identifier"),
     _api_key: str = Depends(get_api_key)
 ):
@@ -133,11 +130,10 @@ async def get_learning_profile(
     """
     try:
         learning = await get_learning()
-        profile = await learning.get_user_profile(user_id, tenant_id)
+        profile = await learning.get_user_profile(user_id)
 
         return LearningProfileResponse(
             user_id=profile.user_id,
-            tenant_id=profile.tenant_id,
             response_style=profile.response_style,
             expertise_level=profile.expertise_level,
             preferred_language=profile.preferred_language,
@@ -159,7 +155,6 @@ async def get_learning_profile(
 @router.put("/profile", response_model=LearningProfileResponse)
 async def update_learning_profile(
     request: UpdateProfileRequest,
-    tenant_id: str = Query(..., description="Tenant identifier"),
     user_id: str = Query(..., description="User identifier"),
     _api_key: str = Depends(get_api_key)
 ):
@@ -173,7 +168,6 @@ async def update_learning_profile(
 
         profile = await learning.update_preferences(
             user_id=user_id,
-            tenant_id=tenant_id,
             response_style=request.response_style,
             expertise_level=request.expertise_level,
             preferred_language=request.preferred_language
@@ -181,7 +175,6 @@ async def update_learning_profile(
 
         return LearningProfileResponse(
             user_id=profile.user_id,
-            tenant_id=profile.tenant_id,
             response_style=profile.response_style,
             expertise_level=profile.expertise_level,
             preferred_language=profile.preferred_language,
@@ -203,7 +196,6 @@ async def update_learning_profile(
 @router.post("/feedback")
 async def record_feedback(
     request: FeedbackRequest,
-    tenant_id: str = Query(..., description="Tenant identifier"),
     user_id: str = Query(..., description="User identifier"),
     _api_key: str = Depends(get_api_key)
 ):
@@ -217,7 +209,6 @@ async def record_feedback(
         memory = await get_memory()
 
         await memory.record_feedback(
-            tenant_id=tenant_id,
             user_id=user_id,
             session_id=request.session_id,
             rating=request.rating,
@@ -238,7 +229,6 @@ async def record_feedback(
 @router.post("/document-view")
 async def record_document_view(
     request: DocumentViewRequest,
-    tenant_id: str = Query(..., description="Tenant identifier"),
     user_id: str = Query(..., description="User identifier"),
     _api_key: str = Depends(get_api_key)
 ):
@@ -251,7 +241,6 @@ async def record_document_view(
         memory = await get_memory()
 
         await memory.record_document_view(
-            tenant_id=tenant_id,
             user_id=user_id,
             document_id=request.document_id,
             dwell_time_seconds=request.dwell_time_seconds,
@@ -272,7 +261,6 @@ async def record_document_view(
 
 @router.get("/stats", response_model=LearningStatsResponse)
 async def get_learning_stats(
-    tenant_id: str = Query(..., description="Tenant identifier"),
     user_id: str = Query(..., description="User identifier"),
     _api_key: str = Depends(get_api_key)
 ):
@@ -283,11 +271,10 @@ async def get_learning_stats(
     """
     try:
         memory = await get_memory()
-        stats = await memory.get_learning_stats(tenant_id, user_id)
+        stats = await memory.get_learning_stats(user_id)
 
         return LearningStatsResponse(
             user_id=stats.get("user_id", user_id),
-            tenant_id=stats.get("tenant_id", tenant_id),
             total_queries=stats.get("total_queries", 0),
             total_document_views=stats.get("total_document_views", 0),
             frequent_queries_count=stats.get("frequent_queries_count", 0),
@@ -305,7 +292,6 @@ async def get_learning_stats(
 
 @router.get("/context", response_model=UserContextResponse)
 async def get_user_context(
-    tenant_id: str = Query(..., description="Tenant identifier"),
     user_id: str = Query(..., description="User identifier"),
     _api_key: str = Depends(get_api_key)
 ):
@@ -317,7 +303,7 @@ async def get_user_context(
     """
     try:
         memory = await get_memory()
-        context = await memory.get_user_context(tenant_id, user_id)
+        context = await memory.get_user_context(user_id)
 
         return UserContextResponse(
             name=context.get("name"),
@@ -342,7 +328,6 @@ async def get_user_context(
 
 @router.get("/ranking-weights")
 async def get_ranking_weights(
-    tenant_id: str = Query(..., description="Tenant identifier"),
     user_id: str = Query(..., description="User identifier"),
     _api_key: str = Depends(get_api_key)
 ):
@@ -354,11 +339,10 @@ async def get_ranking_weights(
     """
     try:
         memory = await get_memory()
-        weights = await memory.get_ranking_weights(tenant_id, user_id)
+        weights = await memory.get_ranking_weights(user_id)
 
         return {
             "user_id": user_id,
-            "tenant_id": tenant_id,
             "weights": weights,
             "description": {
                 "recency": "Weight for recently accessed documents",
@@ -374,7 +358,6 @@ async def get_ranking_weights(
 
 @router.post("/flush")
 async def flush_learning_data(
-    tenant_id: str = Query(..., description="Tenant identifier"),
     user_id: str = Query(..., description="User identifier"),
     _api_key: str = Depends(get_api_key)
 ):
@@ -386,7 +369,7 @@ async def flush_learning_data(
     """
     try:
         memory = await get_memory()
-        await memory.flush_learning_data(tenant_id, user_id)
+        await memory.flush_learning_data(user_id)
 
         return {
             "status": "flushed",

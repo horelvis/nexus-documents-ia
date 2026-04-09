@@ -60,14 +60,6 @@ def _decrypt_credentials(ciphertext: str) -> str:
     return ciphertext
 
 
-def _get_tenant_id(x_tenant_id: Optional[str] = Header(None)) -> str:
-    if x_tenant_id:
-        return x_tenant_id
-    if settings.single_tenant_mode:
-        return settings.default_tenant_id
-    raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
-
-
 # Redis-backed channel storage (same pattern as triggers)
 import redis.asyncio as aioredis
 
@@ -116,22 +108,21 @@ class PairingConfirm(BaseModel):
 @router.post("/channels")
 async def create_channel(
     body: ChannelCreate,
-    x_tenant_id: Optional[str] = Header(None),
+    user_id: Optional[str] = Depends(extract_user_id),
 ):
     """Create a new messaging channel."""
-    tenant_id = _get_tenant_id(x_tenant_id)
     r = await _get_redis()
     channel_id = str(uuid.uuid4())
 
     channel_data = {
         "id": channel_id,
-        "tenant_id": tenant_id,
         **body.model_dump(exclude={"credentials"}),
         "credentials_encrypted": _encrypt_credentials(body.credentials or "") if body.credentials else None,
         "is_active": True,
+        "created_by": user_id,
     }
-    await r.set(f"{CHANNELS_PREFIX}:{tenant_id}:{channel_id}", json.dumps(channel_data))
-    await r.sadd(f"{CHANNELS_PREFIX}:{tenant_id}:index", channel_id)
+    await r.set(f"{CHANNELS_PREFIX}:{channel_id}", json.dumps(channel_data))
+    await r.sadd(f"{CHANNELS_PREFIX}:index", channel_id)
 
     # Don't return encrypted credentials
     channel_data.pop("credentials_encrypted", None)
@@ -139,14 +130,13 @@ async def create_channel(
 
 
 @router.get("/channels")
-async def list_channels(x_tenant_id: Optional[str] = Header(None)):
-    """List all channels for the tenant."""
-    tenant_id = _get_tenant_id(x_tenant_id)
+async def list_channels():
+    """List all channels."""
     r = await _get_redis()
-    channel_ids = await r.smembers(f"{CHANNELS_PREFIX}:{tenant_id}:index")
+    channel_ids = await r.smembers(f"{CHANNELS_PREFIX}:index")
     channels = []
     for cid in channel_ids:
-        data = await r.get(f"{CHANNELS_PREFIX}:{tenant_id}:{cid}")
+        data = await r.get(f"{CHANNELS_PREFIX}:{cid}")
         if data:
             ch = json.loads(data)
             ch.pop("credentials_encrypted", None)
@@ -155,10 +145,9 @@ async def list_channels(x_tenant_id: Optional[str] = Header(None)):
 
 
 @router.get("/channels/{channel_id}")
-async def get_channel(channel_id: str, x_tenant_id: Optional[str] = Header(None)):
-    tenant_id = _get_tenant_id(x_tenant_id)
+async def get_channel(channel_id: str):
     r = await _get_redis()
-    data = await r.get(f"{CHANNELS_PREFIX}:{tenant_id}:{channel_id}")
+    data = await r.get(f"{CHANNELS_PREFIX}:{channel_id}")
     if not data:
         raise HTTPException(status_code=404, detail="Channel not found")
     ch = json.loads(data)
@@ -170,11 +159,9 @@ async def get_channel(channel_id: str, x_tenant_id: Optional[str] = Header(None)
 async def update_channel(
     channel_id: str,
     body: ChannelUpdate,
-    x_tenant_id: Optional[str] = Header(None),
 ):
-    tenant_id = _get_tenant_id(x_tenant_id)
     r = await _get_redis()
-    key = f"{CHANNELS_PREFIX}:{tenant_id}:{channel_id}"
+    key = f"{CHANNELS_PREFIX}:{channel_id}"
     data = await r.get(key)
     if not data:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -192,22 +179,20 @@ async def update_channel(
 
 
 @router.delete("/channels/{channel_id}")
-async def delete_channel(channel_id: str, x_tenant_id: Optional[str] = Header(None)):
-    tenant_id = _get_tenant_id(x_tenant_id)
+async def delete_channel(channel_id: str):
     r = await _get_redis()
-    deleted = await r.delete(f"{CHANNELS_PREFIX}:{tenant_id}:{channel_id}")
-    await r.srem(f"{CHANNELS_PREFIX}:{tenant_id}:index", channel_id)
+    deleted = await r.delete(f"{CHANNELS_PREFIX}:{channel_id}")
+    await r.srem(f"{CHANNELS_PREFIX}:index", channel_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Channel not found")
     return {"deleted": True}
 
 
 @router.get("/channels/{channel_id}/health")
-async def channel_health(channel_id: str, x_tenant_id: Optional[str] = Header(None)):
+async def channel_health(channel_id: str):
     """Check channel connectivity."""
-    tenant_id = _get_tenant_id(x_tenant_id)
     r = await _get_redis()
-    data = await r.get(f"{CHANNELS_PREFIX}:{tenant_id}:{channel_id}")
+    data = await r.get(f"{CHANNELS_PREFIX}:{channel_id}")
     if not data:
         raise HTTPException(status_code=404, detail="Channel not found")
 
@@ -226,10 +211,7 @@ async def inbound_webhook(
     channel_type: str,
     request: Request,
 ):
-    """Receive inbound messages from external channels.
-
-    The channel is identified by the channel_type + tenant from config.
-    """
+    """Receive inbound messages from external channels."""
     # Parse body based on content type
     content_type = request.headers.get("content-type", "")
     if "json" in content_type:
@@ -244,18 +226,11 @@ async def inbound_webhook(
 
     # Find the channel config for this type
     r = await _get_redis()
-    # In single-tenant, use default tenant
-    tenant_id = settings.default_tenant_id if settings.single_tenant_mode else ""
-
-    if not tenant_id:
-        # Try to extract from webhook data
-        raise HTTPException(status_code=400, detail="Cannot determine tenant from webhook")
-
-    channel_ids = await r.smembers(f"{CHANNELS_PREFIX}:{tenant_id}:index")
+    channel_ids = await r.smembers(f"{CHANNELS_PREFIX}:index")
     target_channel = None
 
     for cid in channel_ids:
-        data = await r.get(f"{CHANNELS_PREFIX}:{tenant_id}:{cid}")
+        data = await r.get(f"{CHANNELS_PREFIX}:{cid}")
         if data:
             ch = json.loads(data)
             if ch.get("channel_type") == channel_type and ch.get("is_active"):
@@ -273,7 +248,6 @@ async def inbound_webhook(
         config=target_channel["config"],
         credentials=credentials,
         webhook_data=webhook_data,
-        tenant_id=tenant_id,
     )
     return result
 
