@@ -12,7 +12,6 @@ import httpx
 
 from app.api.async_dependencies import get_current_active_user_async
 from app.core.auth.base import UserProfile
-from app.db.models import User
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -123,7 +122,6 @@ async def list_agent_types():
             response = await client.get(
                 f"{settings.CAG_SERVICE_URL}/api/v1/cag/agents/available",
                 headers=headers,
-                params={"tenant_id": "default"}
             )
             response.raise_for_status()
             agents_data = response.json()
@@ -141,38 +139,33 @@ async def list_agent_types():
 
 @router.get("/list")
 async def list_available_agents(
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
-    """List available CrewAI agents for the tenant"""
+    """List available CrewAI agents"""
     try:
-        # Get agent types and add tenant-specific information
         agent_types_response = await list_agent_types()
         available_types = agent_types_response.get("available_types", {})
-        
-        # Add tenant-specific status for each agent
+
         for agent_key, agent_info in available_types.items():
             agent_info.update({
-                "tenant_id": tenant_id,
                 "status": "active",  # CrewAI agents are always ready
                 "is_enabled": True,
                 "last_activity": None,
-                "execution_count": 0,  # Would need to track this
-                "average_response_time": 0  # Would need to track this
+                "execution_count": 0,
+                "average_response_time": 0
             })
-        
+
         return {
             "available_types": available_types,
             "total": len(available_types),
-            "tenant_id": tenant_id,
             "service": "crewai"
         }
-        
+
     except Exception as e:
-        logger.error(f"Error listing agents for tenant {tenant_id}: {str(e)}")
+        logger.error(f"Error listing agents: {str(e)}")
         return {
             "available_types": {},
             "total": 0,
-            "tenant_id": tenant_id,
             "error": str(e)
         }
 
@@ -183,7 +176,7 @@ async def list_available_agents(
 @router.post("/create")
 async def create_custom_agent(
     request: CreateAgentRequest,
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Create a custom CrewAI agent configuration"""
     try:
@@ -194,20 +187,16 @@ async def create_custom_agent(
         custom_agent_config = {
             "name": request.name,
             "role": request.role,
-            "goal": request.goal, 
+            "goal": request.goal,
             "backstory": request.backstory,
             "tools": request.tools,
-            "tenant_id": tenant_id,
-            "created_by": str(current_user.id),
+            "created_by": str(current_user.sub),
             "created_at": datetime.utcnow().isoformat(),
             "configuration": request.configuration or {}
         }
-        
-        # In a full implementation, this would be stored and used by CrewAI
-        # For now, return the configuration
-        
+
         return {
-            "agent_id": f"custom_{request.name.lower().replace(' ', '_')}_{tenant_id}",
+            "agent_id": f"custom_{request.name.lower().replace(' ', '_')}",
             "configuration": custom_agent_config,
             "status": "created",
             "message": "Custom agent configuration created. Will be available in next CrewAI deployment."
@@ -223,7 +212,7 @@ async def create_custom_agent(
 @router.delete("/{agent_id}")
 async def delete_agent(
     agent_id: str,
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Delete/disable agent configuration"""
     try:
@@ -256,7 +245,7 @@ async def delete_agent(
 @router.post("/chat")
 async def chat_with_agents(
     request: ChatRequest,
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Chat using CrewAI agents"""
     async def event_stream():
@@ -265,16 +254,14 @@ async def chat_with_agents(
                 # Use CAG service for chat with CrewAI agents
                 query_request = {
                     "query": request.message,
-                    "tenant_id": tenant_id,
-                    "user_id": str(current_user.id),
+                    "user_id": str(current_user.sub),
                     "context": request.context or {},
                     "conversation_id": request.conversation_id
                 }
-                
+
                 headers = {
                     "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-Tenant-ID": tenant_id,
-                    "X-User-ID": str(current_user.id)
+                    "X-User-ID": str(current_user.sub)
                 }
                 
                 # Use streaming CAG endpoint
@@ -332,7 +319,7 @@ async def chat_with_agents(
 async def chat_with_specific_agent(
     agent_id: str,
     request: ChatRequest,
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Chat with a specific CrewAI agent"""
     # Add agent preference to context
@@ -340,13 +327,13 @@ async def chat_with_specific_agent(
     request.context["preferred_agent"] = agent_id
     request.context["agent_id"] = agent_id
     
-    return await chat_with_agents(request, current_user, tenant_id)
+    return await chat_with_agents(request, current_user)
 
 @router.post("/{agent_id}/execute")
 async def execute_agent_task(
     agent_id: str,
     request: ExecuteTaskRequest,
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Execute a task with CrewAI agents"""
     async def event_stream():
@@ -357,15 +344,13 @@ async def execute_agent_task(
                     "task_description": request.task_description,
                     "expected_output": request.expected_output,
                     "agent_roles": request.agent_roles or [agent_id],
-                    "tenant_id": tenant_id,
-                    "user_id": str(current_user.id),
+                    "user_id": str(current_user.sub),
                     "context": request.context or {}
                 }
-                
+
                 headers = {
                     "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-Tenant-ID": tenant_id,
-                    "X-User-ID": str(current_user.id)
+                    "X-User-ID": str(current_user.sub)
                 }
                 
                 # Use CAG service to execute the task
@@ -411,7 +396,7 @@ async def execute_agent_task(
 
 @router.get("/statistics")
 async def get_agent_statistics(
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Get CrewAI agent usage statistics"""
     try:
@@ -419,7 +404,6 @@ async def get_agent_statistics(
         # For now, return mock data that represents what would be tracked
         
         return {
-            "tenant_id": tenant_id,
             "enabled_agents": 6,  # Number of CrewAI agents available
             "total_executions": 0,  # Would track actual executions
             "executions_last_24h": 0,
@@ -442,7 +426,6 @@ async def get_agent_statistics(
     except Exception as e:
         logger.error(f"Error fetching agent statistics: {str(e)}")
         return {
-            "tenant_id": tenant_id,
             "error": str(e),
             "generated_at": datetime.utcnow().isoformat()
         }
@@ -450,7 +433,7 @@ async def get_agent_statistics(
 @router.get("/activity")
 async def get_agent_activity(
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Get recent CrewAI agent activity"""
     try:
@@ -460,31 +443,28 @@ async def get_agent_activity(
         return {
             "activities": [],
             "total": 0,
-            "tenant_id": tenant_id,
             "has_more": False,
             "service": "crewai",
             "message": "Activity tracking for CrewAI agents will be implemented in future versions"
         }
-        
+
     except Exception as e:
         logger.error(f"Error fetching agent activity: {str(e)}")
         return {
             "activities": [],
             "total": 0,
-            "tenant_id": tenant_id,
             "error": str(e)
         }
 
 @router.get("/{agent_id}/stats")
 async def get_specific_agent_stats(
     agent_id: str,
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Get statistics for a specific CrewAI agent"""
     try:
         return {
             "agent_id": agent_id,
-            "tenant_id": tenant_id,
             "tasks_completed": 0,
             "avg_response_time": 0.0,
             "success_rate": 0.0,
@@ -500,7 +480,6 @@ async def get_specific_agent_stats(
         logger.error(f"Error fetching stats for agent {agent_id}: {str(e)}")
         return {
             "agent_id": agent_id,
-            "tenant_id": tenant_id,
             "error": str(e)
         }
 
@@ -510,7 +489,7 @@ async def get_specific_agent_stats(
 
 @router.post("/test")
 async def test_crewai_integration(
-    current_user: User = Depends(get_current_active_user_async),
+    current_user: UserProfile = Depends(get_current_active_user_async),
 ):
     """Test CrewAI integration with a simple query"""
     try:
@@ -524,15 +503,13 @@ async def test_crewai_integration(
         async with httpx.AsyncClient() as client:
             test_request = {
                 "query": "Hello, this is a test of the CrewAI integration",
-                "tenant_id": tenant_id,
-                "user_id": str(current_user.id),
+                "user_id": str(current_user.sub),
                 "context": {"test": True}
             }
-            
+
             headers = {
                 "X-API-Key": settings.MICROSERVICES_API_KEY,
-                "X-Tenant-ID": tenant_id,
-                "X-User-ID": str(current_user.id)
+                "X-User-ID": str(current_user.sub)
             }
             
             response = await client.post(
@@ -549,8 +526,7 @@ async def test_crewai_integration(
             "message": "CrewAI integration test completed successfully",
             "test_result": result,
             "service": "crewai",
-            "agents_available": True,
-            "tenant_id": tenant_id
+            "agents_available": True
         }
         
     except Exception as e:

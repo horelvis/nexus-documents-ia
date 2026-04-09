@@ -25,7 +25,6 @@ from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
 from app.core.config import settings
 from app.db.async_database import get_async_db
-from app.db.models import User
 from app.schemas.channel import (
     ChannelCreate,
     ChannelUpdate,
@@ -75,7 +74,7 @@ async def list_channels(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List information channels accessible to the current user.
@@ -86,8 +85,7 @@ async def list_channels(
     """
     service = _get_channel_service(db)
     channels, total = await service.list_channels(
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
         channel_type=channel_type,
         is_active=is_active,
         page=page,
@@ -107,7 +105,7 @@ async def list_channels(
 async def create_channel(
     channel_data: ChannelCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Create a new information channel.
@@ -118,8 +116,7 @@ async def create_channel(
     service = _get_channel_service(db)
 
     channel = await service.create_channel(
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
         channel_type=channel_data.channel_type,
         name=channel_data.name,
         description=channel_data.description,
@@ -128,7 +125,7 @@ async def create_channel(
         sync_interval_minutes=channel_data.sync_interval_minutes,
     )
 
-    logger.info(f"Created channel {channel.id} ({channel_data.channel_type}) for user {current_user.id}")
+    logger.info(f"Created channel {channel.id} ({channel_data.channel_type}) for user {current_user.sub}")
     return service.channel_to_response(channel)
 
 
@@ -136,7 +133,7 @@ async def create_channel(
 async def get_channel(
     channel_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get details of a specific channel.
@@ -148,8 +145,7 @@ async def get_channel(
     service = _get_channel_service(db)
     channel = await service.get_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
     )
 
     if not channel:
@@ -163,7 +159,7 @@ async def update_channel(
     channel_id: UUID,
     channel_data: ChannelUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Update a channel's configuration.
@@ -173,8 +169,7 @@ async def update_channel(
     service = _get_channel_service(db)
     channel = await service.update_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
         update_data=channel_data,
     )
 
@@ -188,7 +183,7 @@ async def update_channel(
 async def delete_channel(
     channel_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Delete a channel and all associated data.
@@ -203,8 +198,7 @@ async def delete_channel(
     service = _get_channel_service(db)
     deleted = await service.delete_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
     )
 
     if not deleted:
@@ -223,7 +217,7 @@ async def delete_channel(
 async def get_oauth_url(
     channel_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get OAuth authorization URL for a Google channel.
@@ -234,8 +228,7 @@ async def get_oauth_url(
     service = _get_channel_service(db)
     channel = await service.get_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
     )
 
     if not channel:
@@ -245,7 +238,7 @@ async def get_oauth_url(
         raise HTTPException(status_code=400, detail="OAuth only supported for Gmail and Google Drive channels")
 
     # Verify channel owner
-    if channel.created_by != current_user.id:
+    if channel.created_by != current_user.sub:
         raise HTTPException(status_code=403, detail="Only channel owner can authorize")
 
     # Determine scopes based on channel type
@@ -274,8 +267,7 @@ async def get_oauth_url(
     state = secrets.token_urlsafe(32)
     _oauth_states[state] = {
         "channel_id": str(channel_id),
-        "user_id": str(current_user.id),
-        "tenant_id": tenant_id,
+        "user_id": str(current_user.sub),
     }
 
     authorization_url, _ = flow.authorization_url(
@@ -303,20 +295,15 @@ async def oauth_callback(
     2. Stores encrypted credentials
     3. Redirects to frontend success/error page
     """
-    # Validate state first to get tenant_id for error redirects
+    # Validate state first
     state_data = _oauth_states.pop(state, None)
-    tenant_id = state_data.get("tenant_id") if state_data else None
 
-    # Build base error URL with tenant_id if available
     error_base_url = settings.CHANNEL_OAUTH_ERROR_REDIRECT_URL
-    if tenant_id:
-        error_base_url = f"{error_base_url}?tenant_id={tenant_id}"
 
     # Check for errors from Google
     if error:
         logger.error(f"OAuth error from Google: {error}")
-        separator = "&" if tenant_id else "?"
-        return RedirectResponse(f"{error_base_url}{separator}error={error}")
+        return RedirectResponse(f"{error_base_url}?error={error}")
 
     # Validate state was found
     if not state_data:
@@ -327,14 +314,12 @@ async def oauth_callback(
 
     channel_id = UUID(state_data["channel_id"])
     user_id = UUID(state_data["user_id"])
-    tenant_id = state_data["tenant_id"]
 
     try:
         # Get channel to determine scopes
         service = _get_channel_service(db)
         channel = await service.get_channel(
             channel_id=channel_id,
-            tenant_id=UUID(tenant_id),
             user_id=user_id,
         )
 
@@ -382,13 +367,13 @@ async def oauth_callback(
 
         logger.info(f"OAuth successful for channel {channel_id}, email: {userinfo.get('email')}")
 
-        # Redirect to success page with tenant_id and channel_id
+        # Redirect to success page with channel_id
         success_url = settings.CHANNEL_OAUTH_SUCCESS_REDIRECT_URL
-        return RedirectResponse(f"{success_url}?tenant_id={tenant_id}&channel_id={channel_id}")
+        return RedirectResponse(f"{success_url}?channel_id={channel_id}")
 
     except Exception as e:
         logger.exception(f"OAuth callback error: {e}")
-        return RedirectResponse(f"{error_base_url}&error=token_exchange_failed")
+        return RedirectResponse(f"{error_base_url}?error=token_exchange_failed")
 
 
 # =============================================================================
@@ -400,7 +385,7 @@ async def trigger_sync(
     channel_id: UUID,
     request: SyncTriggerRequest = SyncTriggerRequest(),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Trigger a manual sync for a channel.
@@ -410,8 +395,7 @@ async def trigger_sync(
     service = _get_channel_service(db)
     channel = await service.get_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
     )
 
     if not channel:
@@ -457,7 +441,7 @@ async def get_sync_history(
     channel_id: UUID,
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get sync history for a channel.
@@ -467,15 +451,13 @@ async def get_sync_history(
     # Verify access
     channel = await service.get_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
     )
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
 
     logs = await service.get_sync_history(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
         limit=limit,
     )
 
@@ -496,7 +478,7 @@ async def list_channel_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List documents indexed from a channel.
@@ -506,8 +488,7 @@ async def list_channel_documents(
     # Verify access
     channel = await service.get_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
     )
     if not channel:
         raise HTTPException(status_code=404, detail="Channel not found")
@@ -536,7 +517,7 @@ async def set_db_credentials(
     channel_id: UUID,
     credentials: DBCredentialsCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Set database credentials for an external database channel.
@@ -546,8 +527,7 @@ async def set_db_credentials(
     service = _get_channel_service(db)
     channel = await service.get_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
     )
 
     if not channel:
@@ -559,7 +539,7 @@ async def set_db_credentials(
             detail="DB credentials only supported for external database channels"
         )
 
-    if channel.created_by != current_user.id:
+    if channel.created_by != current_user.sub:
         raise HTTPException(status_code=403, detail="Only channel owner can set credentials")
 
     credential_service = _get_credential_service(db)
@@ -576,7 +556,7 @@ async def set_db_credentials(
 async def test_connection(
     channel_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Test connection to an external database channel.
@@ -589,8 +569,7 @@ async def test_connection(
     service = _get_channel_service(db)
     channel = await service.get_channel(
         channel_id=channel_id,
-        tenant_id=UUID(tenant_id),
-        user_id=current_user.id,
+        user_id=current_user.sub,
     )
 
     if not channel:

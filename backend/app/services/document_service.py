@@ -9,6 +9,8 @@ from fastapi import UploadFile, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import filter_visible_to_user, EVERYONE_ROLE
 from app.db.models import Document, Tag
 from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
@@ -21,45 +23,48 @@ logger = logging.getLogger(__name__)
 
 
 class DocumentService:
-    """Servicio para gestión de documentos"""
-    
-    def __init__(self, tenant_id: str = None, user_id: str = None):
+    """Servicio para gestión de documentos (single-tenant, role-based ACL)."""
+
+    def __init__(self, user: Optional[UserProfile] = None):
         """
         Inicializa el servicio de documentos.
-        
+
         Args:
-            tenant_id: ID del tenant (debe ser un UUID válido)
-            user_id: ID del usuario actual
+            user: Perfil del usuario actual (contiene sub y roles)
         """
-        # Si tenant_id es None o el string "default", obtener el UUID real del tenant por defecto
-        if not tenant_id or tenant_id == settings.DEFAULT_TENANT:
-            from app.db.database import SessionLocal
-            from app.db.models import Tenant
-            db = SessionLocal()
-            try:
-                default_tenant = db.query(Tenant).filter(Tenant.name == settings.DEFAULT_TENANT).first()
-                if default_tenant:
-                    self.tenant_id = str(default_tenant.id)
-                else:
-                    raise ValueError(f"Default tenant '{settings.DEFAULT_TENANT}' not found in database")
-                
-                # Crear storage service con la sesión de BD para obtener bucket_name
-                self.storage_service = StorageServiceFactory.create_storage_service(self.tenant_id, user_id, db)
-            finally:
-                db.close()
-        else:
-            self.tenant_id = tenant_id
-            # Para tenants existentes, crear nueva sesión para el storage service
-            from app.db.database import SessionLocal
-            db = SessionLocal()
-            try:
-                self.storage_service = StorageServiceFactory.create_storage_service(self.tenant_id, user_id, db)
-            finally:
-                db.close()
-            
-        self.user_id = user_id
-        self.collection_name = f"Nouxcube_{self.tenant_id.replace('-', '_')}_documents"
-        self.text_extraction_client = TextExtractionClient(self.tenant_id, self.user_id)
+        self.user = user
+        self.user_id: Optional[str] = user.sub if user else None
+        self.user_roles: List[str] = list(user.roles) if user else []
+
+        # Single-tenant: storage factory still takes a legacy positional
+        # bucket-scope string (slated for storage cleanup).
+        storage_scope = settings.DEFAULT_TENANT_ID
+
+        db = SessionLocal()
+        try:
+            self.storage_service = StorageServiceFactory.create_storage_service(
+                storage_scope, self.user_id, db
+            )
+        finally:
+            db.close()
+
+        # Single shared Weaviate collection for the deployment.
+        self.collection_name = "Nouxcube_documents"
+        self.text_extraction_client = TextExtractionClient(storage_scope, self.user_id)
+
+    def _check_acl(self, document: Optional[Document]) -> Optional[Document]:
+        """Return the document if the current user is authorized, else 404.
+
+        Uses the same role-based visibility rules as filter_visible_to_user.
+        """
+        if document is None or self.user is None:
+            return document
+        doc_roles = list(document.roles or [])
+        if EVERYONE_ROLE in doc_roles:
+            return document
+        if any(r in doc_roles for r in (self.user.roles or [])):
+            return document
+        raise HTTPException(status_code=404, detail="Document not found")
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
         """
@@ -93,14 +98,15 @@ class DocumentService:
         return file_ext, contents, file_size
 
     def _create_document_record(
-        self, 
-        db: Session, 
-        title: str, 
-        description: Optional[str], 
-        filename: str, 
-        file_ext: str, 
-        file_size: int, 
-        tags: Optional[List[str]]
+        self,
+        db: Session,
+        title: str,
+        description: Optional[str],
+        filename: str,
+        file_ext: str,
+        file_size: int,
+        tags: Optional[List[str]],
+        roles: Optional[List[str]] = None,
     ) -> Document:
         """
         Creates the Document ORM object, generates doc_id, constructs file_path,
@@ -117,20 +123,17 @@ class DocumentService:
             file_path=file_path,
             file_type=file_ext,
             file_size=file_size,
-            tenant_id=self.tenant_id,
             created_by=self.user_id,
+            roles=roles or [EVERYONE_ROLE],
             indexed=IndexingStatus.PROCESSING
         )
 
         if tags:
             for tag_name in tags:
                 if tag_name:
-                    tag = db.query(Tag).filter(
-                        Tag.name == tag_name,
-                        Tag.tenant_id == self.tenant_id
-                    ).first()
+                    tag = db.query(Tag).filter(Tag.name == tag_name).first()
                     if not tag:
-                        tag = Tag(name=tag_name, tenant_id=self.tenant_id)
+                        tag = Tag(name=tag_name)
                         db.add(tag)
                         db.flush()
                     db_document.tags.append(tag)
@@ -216,7 +219,6 @@ class DocumentService:
         # Prepare metadata for downstream services
         document_metadata = {
             "doc_id": str(db_document.id),
-            "tenant_id": self.tenant_id,
             "title": title,
             "filename": db_document.filename,
             "description": db_document.description,
@@ -247,7 +249,6 @@ class DocumentService:
         # For new documents, default to owner-only access (created_by)
         # ACL will be synced later when permissions are granted
         elasticsearch_task = elasticsearch_client.index_document(
-            tenant_id=self.tenant_id,
             doc_id=str(db_document.id),
             title=title,
             content=document_text,
@@ -373,7 +374,6 @@ class DocumentService:
                 "filename": db_document.filename,
                 "file_type": db_document.file_type,
                 "file_size": db_document.file_size,
-                "tenant_id": str(db_document.tenant_id),
                 "created_by": str(db_document.created_by),
                 "indexed": db_document.indexed,
                 "created_at": db_document.created_at.isoformat(),
@@ -414,9 +414,10 @@ class DocumentService:
             document = db.query(Document).options(
                 joinedload(Document.tags)
             ).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
@@ -445,12 +446,11 @@ class DocumentService:
                 "file_path": document.file_path,
                 "file_type": document.file_type,
                 "file_size": document.file_size,
-                "tenant_id": str(document.tenant_id),
                 "created_by": str(document.created_by),
                 "indexed": document.indexed,
                 "created_at": document.created_at.isoformat(),
                 "updated_at": document.updated_at.isoformat(),
-                "tags": [{"id": tag.id, "name": tag.name, "tenant_id": str(tag.tenant_id), "created_at": tag.created_at.isoformat()} for tag in document.tags],
+                "tags": [{"id": tag.id, "name": tag.name, "created_at": tag.created_at.isoformat()} for tag in document.tags],
                 "extracted_entities": document.extracted_entities or [],
                 "preview_chunks": chunks_dict
             }
@@ -473,9 +473,10 @@ class DocumentService:
         
         try:
             document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
@@ -516,9 +517,10 @@ class DocumentService:
         try:
             # Verificar acceso al documento
             document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
@@ -566,9 +568,10 @@ class DocumentService:
             document = db.query(Document).options(
                 joinedload(Document.tags)
             ).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
@@ -579,13 +582,10 @@ class DocumentService:
                     return {"message": f"Tag '{tag_name}' already assigned to document"}
             
             # Buscar etiqueta existente o crear nueva
-            tag = db.query(Tag).filter(
-                Tag.name == tag_name,
-                Tag.tenant_id == self.tenant_id
-            ).first()
-            
+            tag = db.query(Tag).filter(Tag.name == tag_name).first()
+
             if not tag:
-                tag = Tag(name=tag_name, tenant_id=self.tenant_id)
+                tag = Tag(name=tag_name)
                 db.add(tag)
             
             # Asignar etiqueta al documento
@@ -613,19 +613,17 @@ class DocumentService:
             document = db.query(Document).options(
                 joinedload(Document.tags)
             ).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             
             # Buscar etiqueta
-            tag = db.query(Tag).filter(
-                Tag.name == tag_name,
-                Tag.tenant_id == self.tenant_id
-            ).first()
-            
+            tag = db.query(Tag).filter(Tag.name == tag_name).first()
+
             if not tag:
                 raise HTTPException(status_code=404, detail=f"Tag '{tag_name}' not found")
             
@@ -689,7 +687,9 @@ class DocumentService:
         # db = next(get_db()) # Removed this line
         
         try:
-            query = db.query(Document).filter(Document.tenant_id == self.tenant_id)
+            query = db.query(Document)
+            if self.user:
+                query = filter_visible_to_user(query, self.user)
             
             # Aplicar filtros
             if search:
@@ -773,9 +773,10 @@ class DocumentService:
         
         try:
             document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
@@ -806,9 +807,10 @@ class DocumentService:
         try:
             # Verificar acceso al documento
             document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
@@ -860,9 +862,10 @@ class DocumentService:
         
         try:
             document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
@@ -873,13 +876,10 @@ class DocumentService:
                     return {"message": f"Tag '{tag_name}' already assigned to document"}
             
             # Buscar etiqueta existente o crear nueva
-            tag = db.query(Tag).filter(
-                Tag.name == tag_name,
-                Tag.tenant_id == self.tenant_id
-            ).first()
-            
+            tag = db.query(Tag).filter(Tag.name == tag_name).first()
+
             if not tag:
-                tag = Tag(name=tag_name, tenant_id=self.tenant_id)
+                tag = Tag(name=tag_name)
                 db.add(tag)
             
             # Asignar etiqueta al documento
@@ -911,19 +911,17 @@ class DocumentService:
         
         try:
             document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
             
             # Buscar etiqueta
-            tag = db.query(Tag).filter(
-                Tag.name == tag_name,
-                Tag.tenant_id == self.tenant_id
-            ).first()
-            
+            tag = db.query(Tag).filter(Tag.name == tag_name).first()
+
             if not tag:
                 raise HTTPException(status_code=404, detail=f"Tag '{tag_name}' not found")
             
@@ -957,9 +955,10 @@ class DocumentService:
         
         try:
             document = db.query(Document).filter(
-                Document.id == doc_id,
-                Document.tenant_id == self.tenant_id
+                Document.id == doc_id
             ).first()
+            if document and self.user:
+                document = self._check_acl(document)
             
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")

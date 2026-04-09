@@ -28,10 +28,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/google-drive", tags=["google-drive"])
 
 
-def _encode_state(user: User) -> str:
+def _encode_state(user: UserProfile) -> str:
     payload = {
-        "user_id": str(user.id),
-        "tenant_id": str(user.tenant_id),
+        "user_id": str(user.sub),
         "exp": datetime.utcnow() + timedelta(minutes=10),
     }
     return jwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
@@ -46,7 +45,7 @@ def _decode_state(state: str) -> dict:
 
 @router.get("/oauth-url", response_model=GoogleDriveAuthURLResponse)
 async def get_authorization_url(
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: Session = Depends(get_db),
 ):
     service = GoogleDriveTokenService(db)
@@ -84,11 +83,11 @@ def oauth_callback(
 
 @router.get("/status", response_model=GoogleDriveStatusResponse)
 async def get_status(
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: Session = Depends(get_db),
 ):
     service = GoogleDriveTokenService(db)
-    record = service.get_token_record(current_user.id)
+    record = service.get_token_record(current_user.sub)
     if not record:
         return GoogleDriveStatusResponse(connected=False)
 
@@ -102,9 +101,9 @@ async def get_status(
 
 @router.post("/disconnect", response_model=GoogleDriveDisconnectResponse)
 async def disconnect(
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     db: Session = Depends(get_db),
 ):
     service = GoogleDriveTokenService(db)
-    disconnected = service.delete_tokens(current_user.id)
+    disconnected = service.delete_tokens(current_user.sub)
     return GoogleDriveDisconnectResponse(disconnected=disconnected)
