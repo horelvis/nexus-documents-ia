@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.security import verify_api_key
+from app.core.auth_headers import extract_user_roles, extract_user_id
 from app.services.emma_persistence_service import get_emma_persistence_service
 from app.schemas.emma import (
     EmmaSessionCreate,
@@ -146,9 +147,8 @@ def _generate_contextual_suggestions(
 class EmmaQuery(BaseModel):
     """Query request for Emma."""
     query: str = Field(..., description="User's natural language query")
-    tenant_id: str = Field(..., description="Tenant identifier")
     user_id: Optional[str] = Field(None, description="User identifier")
-    user_role_ids: Optional[List[str]] = Field(None, description="User role IDs for ACL filtering")
+    user_roles: Optional[List[str]] = Field(None, description="User role IDs for ACL filtering")
     is_admin: bool = Field(False, description="Whether user is admin (bypasses ACL)")
     thread_id: Optional[str] = Field(None, description="Conversation thread ID for history")
     session_id: Optional[str] = Field(None, description="Session ID (alias for thread_id)")
@@ -162,7 +162,6 @@ class EmmaQuery(BaseModel):
         json_schema_extra = {
             "example": {
                 "query": "¿Cuántos contratos laborales tengo?",
-                "tenant_id": "tenant-123",
                 "user_id": "user-456",
                 "thread_id": "thread-789",
                 "enable_sil": True,
@@ -281,6 +280,8 @@ def is_emma_enabled() -> bool:
 @router.post("/query", response_model=EmmaQueryResponse)
 async def emma_query(
     query: EmmaQuery,
+    user_roles: List[str] = Depends(extract_user_roles),
+    header_user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -295,9 +296,15 @@ async def emma_query(
             detail="Emma is not enabled. Set EMMA_ENABLED=true",
         )
 
-    # Resolve user_id: frontend sends it inside context, not as top-level field
+    # Resolve user_id: prefer header, then body, then context
+    if not query.user_id:
+        query.user_id = header_user_id
     if not query.user_id and query.context:
         query.user_id = query.context.get("user_id")
+
+    # Merge roles from header if body did not provide them
+    if not query.user_roles:
+        query.user_roles = user_roles
 
     # Build context
     thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
@@ -305,7 +312,7 @@ async def emma_query(
     # Extend TTL and restore document context from previous session
     try:
         persistence = get_emma_persistence_service()
-        await persistence.touch_session(thread_id, query.tenant_id)
+        await persistence.touch_session(thread_id)
         session = await persistence.get_session(thread_id)
         if session:
             saved_ctx = (session.get("metadata") or {}).get("document_context")
@@ -319,21 +326,20 @@ async def emma_query(
         logger.warning(f"Failed to restore session context for {thread_id}: {e}")
 
     # LangGraph is the only orchestration engine
-    from app.agents.langgraph import is_langgraph_enabled_for_tenant, execute_langgraph_query
+    from app.agents.langgraph import is_langgraph_enabled, execute_langgraph_query
 
-    if not is_langgraph_enabled_for_tenant(query.tenant_id):
+    if not is_langgraph_enabled():
         raise HTTPException(
             status_code=500,
             detail="Legacy Emma engine has been removed. LangGraph is the only orchestration engine.",
         )
 
-    logger.info(f"LangGraph query for tenant {query.tenant_id}")
+    logger.info(f"LangGraph query (user={query.user_id})")
     try:
         langgraph_result = await execute_langgraph_query(
             query=query.query,
-            tenant_id=query.tenant_id,
             user_id=query.user_id,
-            user_role_ids=query.user_role_ids,
+            user_roles=query.user_roles,
             is_admin=query.is_admin,
             thread_id=thread_id,
             context=query.context,
@@ -344,7 +350,6 @@ async def emma_query(
             try:
                 from app.services.memory.fact_extractor import extract_and_save_facts
                 asyncio.create_task(extract_and_save_facts(
-                    tenant_id=query.tenant_id,
                     user_id=query.user_id,
                     user_message=query.query,
                     assistant_response=langgraph_result.answer or "",
@@ -485,7 +490,7 @@ async def _generate_langgraph_sse(
         try:
             persistence = get_emma_persistence_service()
             # Extend TTL for active session
-            await persistence.touch_session(thread_id, query.tenant_id)
+            await persistence.touch_session(thread_id)
             session = await persistence.get_session(thread_id)
             # Restore document context from previous session into current query
             if session:
@@ -501,8 +506,8 @@ async def _generate_langgraph_sse(
 
         async for event in stream_func(
             query=query.query,
-            tenant_id=query.tenant_id,
             user_id=query.user_id,
+            user_roles=query.user_roles,
             thread_id=thread_id,
             context=query.context,
             enable_thinking=getattr(query, "deep_reasoning", None),
@@ -743,7 +748,6 @@ async def _generate_langgraph_sse(
                     try:
                         from app.services.memory.fact_extractor import extract_and_save_facts
                         asyncio.create_task(extract_and_save_facts(
-                            tenant_id=query.tenant_id,
                             user_id=query.user_id,
                             user_message=query.query,
                             assistant_response=data.get("answer", ""),
@@ -762,7 +766,6 @@ async def _generate_langgraph_sse(
                     asyncio.create_task(persistence.save_message(
                         session_id=thread_id,
                         user_id=query.user_id or "",
-                        tenant_id=query.tenant_id,
                         user_message=query.query,
                         assistant_response=data.get("answer", ""),
                         sources=data.get("sources"),
@@ -785,6 +788,8 @@ async def _generate_langgraph_sse(
 @router.post("/query/stream")
 async def emma_query_stream(
     query: EmmaQuery,
+    user_roles: List[str] = Depends(extract_user_roles),
+    header_user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -827,22 +832,28 @@ async def emma_query_stream(
             detail="Emma is not enabled. Set EMMA_ENABLED=true",
         )
 
-    # Resolve user_id: frontend sends it inside context, not as top-level field
+    # Resolve user_id: prefer header, then body, then context
+    if not query.user_id:
+        query.user_id = header_user_id
     if not query.user_id and query.context:
         query.user_id = query.context.get("user_id")
 
+    # Merge roles from header if body did not provide them
+    if not query.user_roles:
+        query.user_roles = user_roles
+
     # Check if LangGraph is enabled → uses ReAct agent graph (default behavior)
     from app.agents.langgraph import (
-        is_langgraph_enabled_for_tenant, stream_react_query,
+        is_langgraph_enabled, stream_react_query,
     )
 
-    if not is_langgraph_enabled_for_tenant(query.tenant_id):
+    if not is_langgraph_enabled():
         raise HTTPException(
             status_code=500,
             detail="Legacy Emma engine has been removed. LangGraph is the only orchestration engine.",
         )
 
-    logger.info(f"LangGraph ReAct streaming for tenant {query.tenant_id}")
+    logger.info(f"LangGraph ReAct streaming (user={query.user_id})")
     return StreamingResponse(
         _generate_langgraph_sse(query, stream_react_query),
         media_type="text/event-stream",
@@ -863,13 +874,14 @@ class ResumeRequest(BaseModel):
     """
     thread_id: str = Field(..., description="Thread ID of the paused graph")
     resume_value: Any = Field(..., description="User's decision — string (legacy) or dict (HITLDecision)")
-    tenant_id: str = Field(..., description="Tenant identifier")
     user_id: Optional[str] = Field(None, description="User identifier")
 
 
 @router.post("/query/resume/stream")
 async def emma_query_resume_stream(
     body: ResumeRequest,
+    user_roles: List[str] = Depends(extract_user_roles),
+    header_user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Resume a paused ReAct graph after a HITL interrupt (e.g., clarification).
@@ -880,21 +892,23 @@ async def emma_query_resume_stream(
 
     SSE events are identical to /query/stream (token, complete, etc.).
     """
-    from app.agents.langgraph import is_langgraph_enabled_for_tenant
+    from app.agents.langgraph import is_langgraph_enabled
     from app.agents.langgraph.api import resume_react_query
 
     if not is_emma_enabled():
         raise HTTPException(status_code=503, detail="Emma is not enabled")
 
-    if not is_langgraph_enabled_for_tenant(body.tenant_id):
-        raise HTTPException(status_code=400, detail="LangGraph not enabled for this tenant")
+    if not is_langgraph_enabled():
+        raise HTTPException(status_code=400, detail="LangGraph not enabled")
+
+    resolved_user_id = body.user_id or header_user_id
 
     async def generate_resume_sse() -> AsyncGenerator[str, None]:
         async for event in resume_react_query(
             thread_id=body.thread_id,
             resume_value=body.resume_value,
-            tenant_id=body.tenant_id,
-            user_id=body.user_id,
+            user_id=resolved_user_id,
+            user_roles=user_roles,
         ):
             event_type = event.get("type", "")
             data = event.get("data", {})
@@ -1026,7 +1040,6 @@ async def update_cendoj_status(
 async def create_session(
     body: EmmaSessionCreate,
     user_id: str = Query(..., description="User ID"),
-    tenant_id: str = Query(..., description="Tenant ID"),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -1040,7 +1053,6 @@ async def create_session(
 
     result = await persistence.create_session(
         user_id=user_id,
-        tenant_id=tenant_id,
         session_id=body.session_id,
         title=body.title,
     )
@@ -1054,7 +1066,6 @@ async def create_session(
 @router.get("/sessions", response_model=EmmaSessionListResponse)
 async def list_sessions(
     user_id: str = Query(..., description="User ID"),
-    tenant_id: str = Query(..., description="Tenant ID"),
     include_archived: bool = Query(False, description="Include archived sessions"),
     limit: int = Query(50, ge=1, le=100, description="Max sessions to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
@@ -1074,7 +1085,6 @@ async def list_sessions(
 
     result = await persistence.get_user_sessions(
         user_id=user_id,
-        tenant_id=tenant_id,
         include_archived=include_archived,
         limit=limit,
         offset=offset,
@@ -1086,7 +1096,6 @@ async def list_sessions(
 @router.get("/sessions/{session_id}", response_model=EmmaSessionResponse)
 async def get_session(
     session_id: str,
-    tenant_id: str = Query(..., description="Tenant ID"),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -1107,17 +1116,12 @@ async def get_session(
     if not session:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
-    # Verify tenant access
-    if session["tenant_id"] != tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied to this session")
-
     return EmmaSessionResponse(**session)
 
 
 @router.post("/sessions/{session_id}/continue")
 async def continue_session(
     session_id: str,
-    tenant_id: str = Query(..., description="Tenant ID"),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -1140,11 +1144,6 @@ async def continue_session(
             session = await persistence.get_session(session_id)
             if not session:
                 yield f"event: error\ndata: {json.dumps({'error': f'Session {session_id} not found', 'success': False})}\n\n"
-                return
-
-            # Verify tenant access
-            if session["tenant_id"] != tenant_id:
-                yield f"event: error\ndata: {json.dumps({'error': 'Access denied to this session', 'success': False})}\n\n"
                 return
 
             yield f"event: start\ndata: {json.dumps({'message': 'Restoring session...', 'session_id': session_id})}\n\n"
@@ -1178,7 +1177,6 @@ async def continue_session(
 @router.api_route("/sessions/{session_id}/history", methods=["GET", "POST"])
 async def get_session_history(
     session_id: str,
-    tenant_id: str = Query(..., description="Tenant ID"),
     limit: int = Query(10, ge=1, le=50, description="Max state snapshots to return"),
     _: bool = Depends(verify_api_key),
 ):
@@ -1195,14 +1193,11 @@ async def get_session_history(
     from app.core.checkpointer import get_checkpointer
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 
-    # Verify session belongs to tenant (if it exists in emma_sessions).
     # Sessions created implicitly by the checkpointer may not have an
-    # emma_sessions row yet, so we allow access if no row is found —
-    # the checkpointer itself is keyed by thread_id only.
+    # emma_sessions row yet — the checkpointer itself is keyed by
+    # thread_id only.
     persistence = get_emma_persistence_service()
-    session = await persistence.get_session(session_id)
-    if session and session["tenant_id"] != tenant_id:
-        raise HTTPException(status_code=403, detail="Access denied to this session")
+    await persistence.get_session(session_id)
 
     checkpointer = await get_checkpointer()
     if checkpointer is None:
@@ -1277,7 +1272,6 @@ async def update_session(
     session_id: str,
     update: EmmaSessionUpdate,
     user_id: str = Query(..., description="User ID"),
-    tenant_id: str = Query(..., description="Tenant ID"),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -1296,14 +1290,13 @@ async def update_session(
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     # Verify ownership
-    if session["user_id"] != user_id or session["tenant_id"] != tenant_id:
+    if session["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="Access denied to this session")
 
     # Update
     updated = await persistence.update_session(
         session_id=session_id,
         user_id=user_id,
-        tenant_id=tenant_id,
         title=update.title,
         is_archived=update.is_archived,
         is_pinned=update.is_pinned,
@@ -1319,7 +1312,6 @@ async def update_session(
 async def delete_session(
     session_id: str,
     user_id: str = Query(..., description="User ID"),
-    tenant_id: str = Query(..., description="Tenant ID"),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -1340,14 +1332,13 @@ async def delete_session(
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
     # Verify ownership
-    if session["user_id"] != user_id or session["tenant_id"] != tenant_id:
+    if session["user_id"] != user_id:
         raise HTTPException(status_code=403, detail="Access denied to this session")
 
     # Delete
     deleted = await persistence.delete_session(
         session_id=session_id,
         user_id=user_id,
-        tenant_id=tenant_id,
     )
 
     if not deleted:
@@ -1379,7 +1370,6 @@ class UserFactsListResponse(BaseModel):
 @router.get("/memory/facts", response_model=UserFactsListResponse)
 async def list_user_facts(
     user_id: str = Query(..., description="User ID"),
-    tenant_id: str = Query(..., description="Tenant ID"),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -1391,7 +1381,7 @@ async def list_user_facts(
     from app.services.memory.user_facts import get_user_facts_service
 
     service = get_user_facts_service()
-    facts = await service.get_user_facts(tenant_id, user_id)
+    facts = await service.get_user_facts(user_id)
 
     return UserFactsListResponse(
         facts=[UserFactResponse(**f) for f in facts],
@@ -1402,7 +1392,6 @@ async def list_user_facts(
 @router.delete("/memory/facts")
 async def clear_user_facts(
     user_id: str = Query(..., description="User ID"),
-    tenant_id: str = Query(..., description="Tenant ID"),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -1414,7 +1403,7 @@ async def clear_user_facts(
     from app.services.memory.user_facts import get_user_facts_service
 
     service = get_user_facts_service()
-    count = await service.clear_user_facts(tenant_id, user_id)
+    count = await service.clear_user_facts(user_id)
 
     return {"success": True, "deleted_count": count, "message": f"Cleared {count} facts"}
 
@@ -1423,7 +1412,6 @@ async def clear_user_facts(
 async def delete_user_fact(
     fact_id: str,
     user_id: str = Query(..., description="User ID"),
-    tenant_id: str = Query(..., description="Tenant ID"),
     _: bool = Depends(verify_api_key),
 ):
     """
@@ -1435,7 +1423,7 @@ async def delete_user_fact(
     from app.services.memory.user_facts import get_user_facts_service
 
     service = get_user_facts_service()
-    deleted = await service.delete_fact(tenant_id, user_id, fact_id)
+    deleted = await service.delete_fact(user_id, fact_id)
 
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Fact {fact_id} not found or already deleted")
@@ -1448,7 +1436,6 @@ async def delete_user_fact(
 # ============================================================================
 
 class GenerateMemoryRequest(BaseModel):
-    tenant_id: str
     document_id: str
     document_text: str = Field(..., description="Full or partial document text")
     filename: str = Field("", description="Document filename")
@@ -1473,7 +1460,6 @@ async def generate_document_memory(
     from app.services.memory.memory_generator import generate_and_store_memory
 
     result = await generate_and_store_memory(
-        tenant_id=request.tenant_id,
         document_id=request.document_id,
         document_text=request.document_text,
         filename=request.filename,
@@ -1488,7 +1474,6 @@ async def generate_document_memory(
 # ============================================================================
 
 class MemorizeRequest(BaseModel):
-    tenant_id: str
     document_id: str
     document_text: str = Field("", description="Full or partial document text")
     filename: str = Field("", description="Document filename")
@@ -1516,7 +1501,6 @@ async def memorag_memorize(
 @router.get("/welcome")
 async def get_welcome_message(
     user_id: str = Query(..., description="User ID"),
-    tenant_id: str = Query(..., description="Tenant ID"),
     user_name: str = Query("", description="User display name"),
     _: bool = Depends(verify_api_key),
 ):
@@ -1533,7 +1517,7 @@ async def get_welcome_message(
     import redis.asyncio as aioredis
 
     # Check Redis cache first (1h TTL per user)
-    cache_key = f"emma:welcome:{tenant_id}:{user_id}"
+    cache_key = f"emma:welcome:{user_id}"
     redis_client = None
     try:
         redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
@@ -1551,7 +1535,7 @@ async def get_welcome_message(
     try:
         from app.services.memory.user_facts import get_user_facts_service
         facts_service = get_user_facts_service()
-        facts = await facts_service.get_user_facts(tenant_id, user_id)
+        facts = await facts_service.get_user_facts(user_id)
         if facts:
             fact_lines = [f"- {f['fact_key']}: {f['fact_value']}" for f in facts if f.get('fact_value')]
             if fact_lines:
@@ -1563,7 +1547,7 @@ async def get_welcome_message(
     try:
         persistence = get_emma_persistence_service()
         sessions_result = await persistence.get_user_sessions(
-            user_id=user_id, tenant_id=tenant_id,
+            user_id=user_id,
             include_archived=False, limit=3, offset=0,
         )
         sessions = sessions_result.get("sessions", [])

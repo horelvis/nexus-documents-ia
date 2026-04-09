@@ -63,14 +63,13 @@ class WeaviateClient(BaseHTTPClient):
     Example:
         client = WeaviateClient()
         results = await client.search_documents(
-            tenant_id="tenant-123",
             query="contratos laborales",
             limit=10
         )
     """
 
-    # Collection prefix matching weaviate-service configuration
-    COLLECTION_PREFIX = "Nouxcube_"
+    # Single-tenant collection name
+    DOCUMENTS_COLLECTION = "Nouxcube_documents"
 
     def __init__(self):
         config = HTTPClientConfig(
@@ -84,24 +83,17 @@ class WeaviateClient(BaseHTTPClient):
         super().__init__(config)
         self._api_key = settings.MICROSERVICES_API_KEY
 
-    def _headers(self) -> dict[str, str]:
-        """Get headers with API key"""
-        return {
+    def _headers(self, user_roles: Optional[list[str]] = None, user_id: Optional[str] = None) -> dict[str, str]:
+        """Get headers with API key and optional user context for ACL filtering."""
+        headers = {
             "X-API-Key": self._api_key,
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
         }
-
-    def _get_collection_name(self, tenant_id: str, collection_type: str = "documents") -> str:
-        """
-        Generate tenant-specific collection name for Weaviate.
-
-        Matches the naming convention in weaviate-service:
-        Nouxcube_{tenant_id_with_underscores}_{collection_type}
-
-        Example: Nouxcube_00000000_0000_0000_0000_000000000001_documents
-        """
-        tenant_normalized = tenant_id.replace("-", "_")
-        return f"{self.COLLECTION_PREFIX}{tenant_normalized}_{collection_type}"
+        if user_roles:
+            headers["X-User-Roles"] = ",".join(user_roles)
+        if user_id:
+            headers["X-User-Id"] = user_id
+        return headers
 
     # =========================================================================
     # Vector Search
@@ -109,8 +101,9 @@ class WeaviateClient(BaseHTTPClient):
 
     async def search_documents(
         self,
-        tenant_id: str,
         query: str,
+        user_roles: Optional[list[str]] = None,
+        user_id: Optional[str] = None,
         limit: int = 10,
         filters: Optional[dict[str, Any]] = None,
         include_content: bool = True
@@ -119,8 +112,9 @@ class WeaviateClient(BaseHTTPClient):
         Search documents using vector similarity.
 
         Args:
-            tenant_id: Tenant identifier
             query: Search query text
+            user_roles: User role IDs for ACL filtering
+            user_id: User ID for ACL filtering
             limit: Maximum results to return
             filters: Optional metadata filters
             include_content: Include document content in results
@@ -128,12 +122,8 @@ class WeaviateClient(BaseHTTPClient):
         Returns:
             List of SearchResult with document matches
         """
-        # Generate tenant-specific collection name
-        collection_name = self._get_collection_name(tenant_id, "documents")
-
-        payload = {
+        payload: dict[str, Any] = {
             "query": query,
-            "tenant_id": tenant_id,
             "limit": limit,
             "include_content": include_content
         }
@@ -142,9 +132,9 @@ class WeaviateClient(BaseHTTPClient):
 
         try:
             response = await self.post_json(
-                f"/weaviate/collections/{collection_name}/search",
+                f"/weaviate/collections/{self.DOCUMENTS_COLLECTION}/search",
                 json=payload,
-                headers=self._headers()
+                headers=self._headers(user_roles=user_roles, user_id=user_id)
             )
 
             results = []
@@ -169,8 +159,9 @@ class WeaviateClient(BaseHTTPClient):
 
     async def hybrid_search(
         self,
-        tenant_id: str,
         query: str,
+        user_roles: Optional[list[str]] = None,
+        user_id: Optional[str] = None,
         limit: int = 10,
         alpha: float = 0.5,
         filters: Optional[dict[str, Any]] = None,
@@ -186,8 +177,9 @@ class WeaviateClient(BaseHTTPClient):
         Hybrid search combining vector and keyword search.
 
         Args:
-            tenant_id: Tenant identifier
             query: Search query text
+            user_roles: User role IDs for ACL filtering
+            user_id: User ID for ACL filtering
             limit: Maximum results
             alpha: Balance between vector (1.0) and keyword (0.0)
             filters: Optional metadata filters
@@ -202,7 +194,6 @@ class WeaviateClient(BaseHTTPClient):
         """
         payload: dict[str, Any] = {
             "query": query,
-            "tenant_id": tenant_id,
             "limit": limit,
             "alpha": alpha,
         }
@@ -229,7 +220,7 @@ class WeaviateClient(BaseHTTPClient):
             response = await self.post_json(
                 "/weaviate/collections/documents/hybrid",
                 json=payload,
-                headers=self._headers()
+                headers=self._headers(user_roles=user_roles, user_id=user_id)
             )
 
             results = []
@@ -337,8 +328,8 @@ class WeaviateClient(BaseHTTPClient):
 
     async def rag_query(
         self,
-        tenant_id: str,
         query: str,
+        user_roles: Optional[list[str]] = None,
         user_id: Optional[str] = None,
         conversation_id: Optional[str] = None,
         max_tokens: int = 4096,
@@ -357,9 +348,9 @@ class WeaviateClient(BaseHTTPClient):
         7. Response formatting
 
         Args:
-            tenant_id: Tenant identifier
             query: User query
-            user_id: Optional user ID for personalization
+            user_roles: User role IDs for ACL filtering
+            user_id: User ID for personalization / ACL
             conversation_id: Optional conversation ID for context
             max_tokens: Maximum tokens for response
             include_sources: Include source documents
@@ -367,9 +358,8 @@ class WeaviateClient(BaseHTTPClient):
         Returns:
             RAGResult with answer and sources
         """
-        payload = {
+        payload: dict[str, Any] = {
             "query": query,
-            "tenant_id": tenant_id,
             "max_tokens": max_tokens,
             "include_sources": include_sources
         }
@@ -382,7 +372,7 @@ class WeaviateClient(BaseHTTPClient):
             response = await self.post_json(
                 "/weaviate/rag/query",
                 json=payload,
-                headers=self._headers()
+                headers=self._headers(user_roles=user_roles, user_id=user_id)
             )
 
             return RAGResult(
@@ -407,16 +397,18 @@ class WeaviateClient(BaseHTTPClient):
 
     async def get_document_content(
         self,
-        tenant_id: str,
         document_id: str,
+        user_roles: Optional[list[str]] = None,
+        user_id: Optional[str] = None,
         include_chunks: bool = False
     ) -> dict[str, Any]:
         """
         Get document content by ID.
 
         Args:
-            tenant_id: Tenant identifier
             document_id: Document UUID
+            user_roles: User role IDs for ACL filtering
+            user_id: User ID for ACL filtering
             include_chunks: Include individual chunks
 
         Returns:
@@ -426,9 +418,9 @@ class WeaviateClient(BaseHTTPClient):
 
         try:
             return await self.get_json(
-                f"/weaviate/documents/{tenant_id}/{document_id}/content",
+                f"/weaviate/documents/{document_id}/content",
                 params=params,
-                headers=self._headers()
+                headers=self._headers(user_roles=user_roles, user_id=user_id)
             )
         except Exception as e:
             logger.error(f"Get document content failed: {e}")
@@ -436,8 +428,9 @@ class WeaviateClient(BaseHTTPClient):
 
     async def get_document_chunks(
         self,
-        tenant_id: str,
         document_id: str,
+        user_roles: Optional[list[str]] = None,
+        user_id: Optional[str] = None,
         offset: int = 0,
         limit: int = 100
     ) -> list[dict[str, Any]]:
@@ -445,8 +438,9 @@ class WeaviateClient(BaseHTTPClient):
         Get document chunks.
 
         Args:
-            tenant_id: Tenant identifier
             document_id: Document UUID
+            user_roles: User role IDs for ACL filtering
+            user_id: User ID for ACL filtering
             offset: Pagination offset
             limit: Maximum chunks to return
 
@@ -457,9 +451,9 @@ class WeaviateClient(BaseHTTPClient):
 
         try:
             response = await self.get_json(
-                f"/weaviate/documents/{tenant_id}/{document_id}/chunks",
+                f"/weaviate/documents/{document_id}/chunks",
                 params=params,
-                headers=self._headers()
+                headers=self._headers(user_roles=user_roles, user_id=user_id)
             )
             return response.get("chunks", [])
         except Exception as e:
@@ -472,8 +466,9 @@ class WeaviateClient(BaseHTTPClient):
 
     async def structural_query(
         self,
-        tenant_id: str,
         query: str,
+        user_roles: Optional[list[str]] = None,
+        user_id: Optional[str] = None,
         max_results: int = 20
     ) -> StructuralQueryResult:
         """
@@ -494,15 +489,15 @@ class WeaviateClient(BaseHTTPClient):
         - HYBRID: Combination of both
 
         Args:
-            tenant_id: Tenant identifier
             query: Natural language query
+            user_roles: User role IDs for ACL filtering
+            user_id: User ID for ACL filtering
             max_results: Maximum results
 
         Returns:
             StructuralQueryResult with route and data
         """
         payload = {
-            "tenant_id": tenant_id,
             "query": query,
             "max_results": max_results
         }
@@ -512,7 +507,7 @@ class WeaviateClient(BaseHTTPClient):
             response = await self.post_json(
                 "/weaviate/structural/query",
                 json=payload,
-                headers=self._headers()
+                headers=self._headers(user_roles=user_roles, user_id=user_id)
             )
 
             route = response.get("route", "VECTOR_ONLY")
@@ -551,7 +546,6 @@ class WeaviateClient(BaseHTTPClient):
 
     async def get_related_entities(
         self,
-        tenant_id: str,
         entity_id: str,
         relationship_types: Optional[list[str]] = None,
         depth: int = 1,
@@ -566,7 +560,6 @@ class WeaviateClient(BaseHTTPClient):
         - Knowledge graph navigation
 
         Args:
-            tenant_id: Tenant identifier
             entity_id: Starting entity ID
             relationship_types: Filter by relationship types
             depth: Traversal depth
@@ -575,8 +568,7 @@ class WeaviateClient(BaseHTTPClient):
         Returns:
             List of related entities with relationships
         """
-        payload = {
-            "tenant_id": tenant_id,
+        payload: dict[str, Any] = {
             "entity_id": entity_id,
             "depth": depth,
             "limit": limit
@@ -606,14 +598,11 @@ class WeaviateClient(BaseHTTPClient):
         except Exception as e:
             return {"status": "unhealthy", "error": str(e)}
 
-    async def get_collection_stats(
-        self,
-        tenant_id: str
-    ) -> dict[str, Any]:
-        """Get collection statistics for tenant"""
+    async def get_collection_stats(self) -> dict[str, Any]:
+        """Get collection statistics."""
         try:
             return await self.get_json(
-                f"/weaviate/collections/{tenant_id}/stats",
+                "/weaviate/collections/stats",
                 headers=self._headers()
             )
         except Exception as e:
@@ -622,17 +611,15 @@ class WeaviateClient(BaseHTTPClient):
 
     async def get_structural_summary(
         self,
-        tenant_id: str,
         include_entities: bool = True,
         include_relationships: bool = False,
     ) -> dict[str, Any]:
         """
-        Get structural summary for a tenant.
+        Get structural summary.
 
         Returns learned terminology and document structure information.
         """
         payload = {
-            "tenant_id": tenant_id,
             "include_entities": include_entities,
             "include_relationships": include_relationships,
         }
@@ -648,19 +635,19 @@ class WeaviateClient(BaseHTTPClient):
                 "summary": "",
             }
 
-    async def get_tenant_stats(self, tenant_id: str) -> dict[str, Any]:
-        """Get tenant statistics including document count."""
+    async def get_stats(self) -> dict[str, Any]:
+        """Get statistics including document count."""
         try:
             return await self.get_json(
-                f"/weaviate/collections/{tenant_id}/stats",
+                "/weaviate/collections/stats",
                 headers=self._headers()
             )
         except Exception as e:
-            logger.warning(f"Get tenant stats failed: {e}")
+            logger.warning(f"Get stats failed: {e}")
             return {"document_count": 0, "error": str(e)}
 
     async def count_by_semantic_type(
-        self, tenant_id: str, semantic_type: str | None = None
+        self, semantic_type: str | None = None
     ) -> dict[str, Any]:
         """Count documents by semantic_type via Weaviate aggregate."""
         try:
@@ -668,7 +655,7 @@ class WeaviateClient(BaseHTTPClient):
             if semantic_type:
                 params["semantic_type"] = semantic_type
             return await self.get_json(
-                f"/weaviate/tenants/{tenant_id}/count-by-type",
+                "/weaviate/count-by-type",
                 params=params,
                 headers=self._headers(),
             )
@@ -676,15 +663,15 @@ class WeaviateClient(BaseHTTPClient):
             logger.warning(f"count_by_semantic_type failed: {e}")
             return {"count": 0, "error": str(e)}
 
-    async def get_tenant_schema(self, tenant_id: str) -> dict[str, Any]:
-        """Get schema information for tenant's collections."""
+    async def get_schema(self) -> dict[str, Any]:
+        """Get schema information for collections."""
         try:
             return await self.get_json(
-                f"/weaviate/tenants/{tenant_id}/schema",
+                "/weaviate/schema",
                 headers=self._headers()
             )
         except Exception as e:
-            logger.warning(f"Get tenant schema failed: {e}")
+            logger.warning(f"Get schema failed: {e}")
             return {"collections": [], "properties": {}}
 
     # =========================================================================
@@ -694,14 +681,12 @@ class WeaviateClient(BaseHTTPClient):
     async def search_entities(
         self,
         query: str,
-        tenant_id: str,
         collection: str | None = None,
         limit: int = 50,
     ) -> list[dict]:
         """Search TrustGraph entities by text similarity via weaviate-service."""
         payload: dict[str, Any] = {
             "query": query,
-            "tenant_id": tenant_id,
             "limit": limit,
         }
         if collection:
@@ -718,14 +703,12 @@ class WeaviateClient(BaseHTTPClient):
     async def search_entities_by_embedding(
         self,
         embedding: list[float],
-        tenant_id: str,
         collection: str | None = None,
         limit: int = 50,
     ) -> list[dict]:
         """Search entities using a pre-computed embedding vector."""
         payload: dict[str, Any] = {
             "query_embedding": embedding,
-            "tenant_id": tenant_id,
             "limit": limit,
         }
         if collection:

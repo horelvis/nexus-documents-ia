@@ -29,25 +29,24 @@ class KnowledgeTreeClient(BaseHTTPClient):
             "X-API-Key": settings.MICROSERVICES_API_KEY,
         }
 
-    async def get_tree_context(self, tenant_id: str, limit: int = 15) -> Dict[str, Any]:
-        payload = {"tenant_id": tenant_id, "limit": limit}
+    async def get_tree_context(self, limit: int = 15) -> Dict[str, Any]:
+        payload = {"limit": limit}
         try:
             return await self.post_json("/tree/context", json=payload, headers=self._headers())
         except Exception as e:
             logger.warning(f"Knowledge tree context failed: {e}")
             return {"success": False, "context_for_llm": "", "metadata": {"error": str(e)}}
 
-    async def get_structural_summary(self, tenant_id: str) -> Dict[str, Any]:
-        payload = {"tenant_id": tenant_id}
+    async def get_structural_summary(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
         try:
             return await self.post_json("/tree/summary", json=payload, headers=self._headers())
         except Exception as e:
             logger.warning(f"Knowledge tree summary failed: {e}")
             return {"summary": ""}
 
-    async def structural_query(self, tenant_id: str, query: str, max_results: int = 100) -> Dict[str, Any]:
+    async def structural_query(self, query: str, max_results: int = 100) -> Dict[str, Any]:
         payload = {
-            "tenant_id": tenant_id,
             "query": query,
             "max_results": max_results,
         }
@@ -63,11 +62,10 @@ class KnowledgeTreeClient(BaseHTTPClient):
             }
 
 
-    async def graph_query(self, cypher: str, graph_name: str, tenant_id: str) -> Dict[str, Any]:
+    async def graph_query(self, cypher: str, graph_name: str) -> Dict[str, Any]:
         payload = {
             "cypher": cypher,
             "graph_name": graph_name,
-            "tenant_id": tenant_id,
         }
         try:
             return await self.post_json("/tree/graph/query", json=payload, headers=self._headers())
@@ -79,7 +77,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
 
     async def store_memory(
         self,
-        tenant_id: str,
         document_id: str,
         summary: str,
         key_entities: Optional[List[str]] = None,
@@ -89,7 +86,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
     ) -> Dict[str, Any]:
         """Store a document memory in the knowledge graph."""
         payload = {
-            "tenant_id": tenant_id,
             "document_id": document_id,
             "summary": summary,
             "key_entities": key_entities or [],
@@ -105,7 +101,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
 
     async def recall_memories(
         self,
-        tenant_id: str,
         query_topics: Optional[List[str]] = None,
         domain: Optional[str] = None,
         semantic_type: Optional[str] = None,
@@ -113,7 +108,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
     ) -> List[Dict[str, Any]]:
         """Recall document memories matching criteria. Used by planner for clue generation."""
         payload = {
-            "tenant_id": tenant_id,
             "query_topics": query_topics,
             "domain": domain,
             "semantic_type": semantic_type,
@@ -126,11 +120,11 @@ class KnowledgeTreeClient(BaseHTTPClient):
             logger.warning(f"Memory bank recall failed: {e}")
             return []
 
-    async def get_memorized_document_ids(self, tenant_id: str) -> List[str]:
+    async def get_memorized_document_ids(self) -> List[str]:
         """Get document IDs that already have memories. Used to skip re-generation."""
         try:
             result = await self.get_json(
-                f"/tree/memory/?tenant_id={tenant_id}", headers=self._headers()
+                "/tree/memory/", headers=self._headers()
             )
             return result if isinstance(result, list) else []
         except Exception as e:
@@ -138,11 +132,10 @@ class KnowledgeTreeClient(BaseHTTPClient):
             return []
 
     async def get_documents_by_person(
-        self, tenant_id: str, person_name: str, entity_type: str = "person"
+        self, person_name: str, entity_type: str = "person"
     ) -> List[str]:
         """Get document IDs linked to a person via the FalkorDB knowledge graph."""
         payload = {
-            "tenant_id": tenant_id,
             "entity_name": person_name,
             "entity_type": entity_type,
         }
@@ -158,7 +151,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
 
     async def extract_subgraph(
         self,
-        tenant_id: str,
         entities: List[Dict[str, Any]],
         max_hops: int = 2,
         max_nodes: int = 30,
@@ -169,7 +161,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
         Returns structured nodes/edges for LLM context, not flat document IDs.
         """
         payload = {
-            "tenant_id": tenant_id,
             "entities": entities,
             "max_hops": max_hops,
             "max_nodes": max_nodes,
@@ -184,15 +175,13 @@ class KnowledgeTreeClient(BaseHTTPClient):
 
     async def query_triples(
         self,
-        tenant_id: str,
         subject_uri: Optional[str] = None,
         predicate_uri: Optional[str] = None,
         object_value: Optional[str] = None,
         limit: int = 100,
     ) -> Dict[str, Any]:
         """Query triples from TrustGraph."""
-        payload = {
-            "tenant_id": tenant_id,
+        payload: Dict[str, Any] = {
             "limit": limit,
         }
         if subject_uri is not None:
@@ -207,20 +196,20 @@ class KnowledgeTreeClient(BaseHTTPClient):
             logger.warning(f"Triple query failed: {e}")
             return {"success": False, "triples": [], "error": str(e)}
 
-    async def get_triple_context(self, tenant_id: str, limit: int = 20) -> Dict[str, Any]:
+    async def get_triple_context(self, limit: int = 20) -> Dict[str, Any]:
         """Get LLM context from triple store."""
-        payload = {"tenant_id": tenant_id, "limit": limit}
+        payload = {"limit": limit}
         try:
             return await self.post_json("/triples/context", json=payload, headers=self._headers())
         except Exception as e:
             logger.warning(f"Triple context failed: {e}")
             return {"success": False, "context_for_llm": "", "error": str(e)}
 
-    async def get_triple_stats(self, tenant_id: str) -> Dict[str, Any]:
+    async def get_triple_stats(self) -> Dict[str, Any]:
         """Get graph statistics."""
         try:
             return await self.get_json(
-                f"/triples/stats?tenant_id={tenant_id}", headers=self._headers()
+                "/triples/stats", headers=self._headers()
             )
         except Exception as e:
             logger.warning(f"Triple stats failed: {e}")
@@ -228,7 +217,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
 
     async def batch_neighbors(
         self,
-        tenant_id: str,
         seed_uris: List[str],
         max_hops: int = 2,
         max_edges: int = 150,
@@ -237,7 +225,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
     ) -> Dict[str, Any]:
         """BFS subgraph traversal via /triples/neighbors."""
         payload = {
-            "tenant_id": tenant_id,
             "seed_uris": seed_uris,
             "max_hops": max_hops,
             "max_edges": max_edges,
@@ -252,14 +239,12 @@ class KnowledgeTreeClient(BaseHTTPClient):
 
     async def trace_sources(
         self,
-        tenant_id: str,
         edges: List[Dict[str, str]],
         collection: str = "default",
     ) -> List[Dict[str, Any]]:
         """Trace graph edges back to source document chunks."""
         payload = {
             "edges": edges,
-            "tenant_id": tenant_id,
             "collection": collection,
         }
         try:

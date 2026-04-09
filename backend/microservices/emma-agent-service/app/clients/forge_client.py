@@ -25,7 +25,6 @@ class ForgeClient:
 
     async def analyze(
         self,
-        tenant_id: str,
         user_id: str,
         document_id: str | None = None,
         user_intent: str = "modification",
@@ -35,7 +34,6 @@ class ForgeClient:
     ) -> dict[str, Any]:
         """Call POST /analyze on forge-service."""
         data = {
-            "tenant_id": tenant_id,
             "user_id": user_id,
             "user_intent": user_intent,
             "max_fields": str(max_fields),
@@ -108,7 +106,6 @@ class ForgeClient:
     async def persist(
         self,
         session_id: str,
-        tenant_id: str,
         user_id: str,
         persist_formats: list[str] | None = None,
         index_in_weaviate: bool = True,
@@ -117,7 +114,6 @@ class ForgeClient:
         """Call POST /persist on forge-service."""
         payload: dict[str, Any] = {
             "session_id": session_id,
-            "tenant_id": tenant_id,
             "user_id": user_id,
             "index_in_weaviate": index_in_weaviate,
         }
