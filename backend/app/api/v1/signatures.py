@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
-from app.api.async_dependencies import get_async_db, get_current_active_user_async, get_current_active_superuser_async, get_current_tenant_admin_async
-from app.db.models import User
+from app.api.async_dependencies import get_async_db, get_current_user_async
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
 from app.services.async_signature_service import AsyncSignatureService
 from app.schemas.signature import (
     SignatureProviderCreate, SignatureProviderUpdate, SignatureProvider,
@@ -31,7 +32,7 @@ router = APIRouter()
 async def create_signature_provider(
     provider_data: SignatureProviderCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_tenant_admin_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """Crear un proveedor de firma digital (solo administradores del tenant)"""
     
@@ -39,8 +40,7 @@ async def create_signature_provider(
         signature_service = AsyncSignatureService(db)
         provider = await signature_service.create_provider(
             provider_data,
-            current_user.tenant_id,
-            current_user.id
+            current_user.sub
         )
         return provider
         
@@ -61,16 +61,13 @@ async def create_signature_provider(
 async def get_signature_providers(
     is_active: Optional[bool] = True,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Obtener proveedores de firma del tenant"""
     
     try:
         signature_service = AsyncSignatureService(db)
-        providers = await signature_service.get_providers(
-            current_user.tenant_id,
-            is_active=is_active
-        )
+        providers = await signature_service.get_providers(is_active=is_active)
         return providers
         
     except Exception as e:
@@ -85,13 +82,13 @@ async def get_signature_providers(
 async def get_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Obtener un proveedor específico"""
     
     try:
         signature_service = AsyncSignatureService(db)
-        provider = await signature_service.get_provider(provider_id, current_user.tenant_id)
+        provider = await signature_service.get_provider(provider_id)
         
         if not provider:
             raise HTTPException(
@@ -114,13 +111,13 @@ async def get_signature_provider(
 @router.get("/providers/default", response_model=SignatureProvider)
 async def get_default_signature_provider(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Obtener el proveedor por defecto"""
     
     try:
         signature_service = AsyncSignatureService(db)
-        provider = await signature_service.get_default_provider(current_user.tenant_id)
+        provider = await signature_service.get_default_provider()
         
         if not provider:
             raise HTTPException(
@@ -145,7 +142,7 @@ async def update_signature_provider(
     provider_id: UUID,
     provider_data: SignatureProviderCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_tenant_admin_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """Actualizar un proveedor de firma (solo admin del tenant)"""
     
@@ -154,8 +151,7 @@ async def update_signature_provider(
         provider = await signature_service.update_provider(
             provider_id,
             provider_data,
-            current_user.tenant_id,
-            current_user.id
+            current_user.sub
         )
         
         if not provider:
@@ -183,7 +179,7 @@ async def update_signature_provider(
 async def delete_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_tenant_admin_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """Eliminar un proveedor de firma (solo admin del tenant)"""
     
@@ -191,8 +187,7 @@ async def delete_signature_provider(
         signature_service = AsyncSignatureService(db)
         success = await signature_service.delete_provider(
             provider_id,
-            current_user.tenant_id,
-            current_user.id
+            current_user.sub
         )
         
         if not success:
@@ -215,7 +210,7 @@ async def delete_signature_provider(
 async def set_default_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_tenant_admin_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """Establecer un proveedor como predeterminado (solo admin)"""
     
@@ -223,8 +218,7 @@ async def set_default_signature_provider(
         signature_service = AsyncSignatureService(db)
         provider = await signature_service.set_default_provider(
             provider_id,
-            current_user.tenant_id,
-            current_user.id
+            current_user.sub
         )
         
         if not provider:
@@ -247,16 +241,13 @@ async def set_default_signature_provider(
 async def test_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_tenant_admin_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """Probar la conexión con un proveedor (solo admin)"""
     
     try:
         signature_service = AsyncSignatureService(db)
-        result = await signature_service.test_provider_connection(
-            provider_id,
-            current_user.tenant_id
-        )
+        result = await signature_service.test_provider_connection(provider_id)
         
         return {
             "success": result["success"],
@@ -278,7 +269,7 @@ async def test_signature_provider(
 
 @router.get("/providers/supported")
 async def get_supported_providers(
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Obtener lista de proveedores soportados y sus campos requeridos"""
     
@@ -416,7 +407,7 @@ async def signaturit_webhook(
 async def create_signature_request(
     request_data: SignatureRequestCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Crear una solicitud de firma"""
     
@@ -424,8 +415,7 @@ async def create_signature_request(
         signature_service = AsyncSignatureService(db)
         signature_request = await signature_service.create_signature_request(
             request_data,
-            current_user.tenant_id,
-            current_user.id
+            current_user.sub
         )
         return signature_request
         
@@ -446,17 +436,14 @@ async def create_signature_request(
 async def send_signature_request(
     request_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Enviar solicitud de firma a los firmantes"""
     
     try:
-        logger.info(f"User {current_user.id} sending signature request {request_id}")
+        logger.info(f"User {current_user.sub} sending signature request {request_id}")
         signature_service = AsyncSignatureService(db)
-        success = await signature_service.send_signature_request(
-            request_id,
-            current_user.tenant_id
-        )
+        success = await signature_service.send_signature_request(request_id)
         
         if not success:
             raise HTTPException(
@@ -484,18 +471,17 @@ async def send_signature_request(
 async def delete_signature_request(
     request_id: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Eliminar una solicitud de firma"""
-    logger.info(f"User {current_user.id} deleting signature request {request_id}")
-    
+    logger.info(f"User {current_user.sub} deleting signature request {request_id}")
+
     try:
         signature_service = AsyncSignatureService(db)
-        
+
         # First check if the request exists and belongs to the user
         request = await signature_service.get_signature_request(
-            request_id=UUID(request_id),
-            tenant_id=current_user.tenant_id
+            request_id=UUID(request_id)
         )
         
         if not request:
@@ -513,8 +499,7 @@ async def delete_signature_request(
         
         # Delete the request
         success = await signature_service.delete_signature_request(
-            request_id=UUID(request_id),
-            tenant_id=current_user.tenant_id
+            request_id=UUID(request_id)
         )
         
         if not success:
@@ -547,15 +532,14 @@ async def get_signature_requests(
     limit: int = 50,
     offset: int = 0,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Obtener solicitudes de firma del usuario"""
     
     try:
         signature_service = AsyncSignatureService(db)
         requests = await signature_service.get_signature_requests(
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
+            user_id=current_user.sub,
             status=status_filter,
             limit=limit,
             offset=offset
@@ -574,23 +558,20 @@ async def get_signature_requests(
 async def get_signature_request(
     request_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Obtener una solicitud de firma específica"""
     
     try:
         signature_service = AsyncSignatureService(db)
-        request = await signature_service.get_signature_request(
-            request_id,
-            current_user.tenant_id
-        )
-        
+        request = await signature_service.get_signature_request(request_id)
+
         if not request:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Signature request not found"
             )
-        
+
         return request
         
     except HTTPException:
@@ -608,29 +589,26 @@ async def update_signature_request(
     request_id: UUID,
     request_data: SignatureRequestUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Actualizar una solicitud de firma (solo en estado draft)"""
     
     try:
         signature_service = AsyncSignatureService(db)
-        request = await signature_service.get_signature_request(
-            request_id,
-            current_user.tenant_id
-        )
-        
+        request = await signature_service.get_signature_request(request_id)
+
         if not request:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Signature request not found"
             )
-        
-        if request.created_by != current_user.id:
+
+        if str(request.created_by) != str(current_user.sub):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Permission denied"
             )
-        
+
         if request.status != 'draft':
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -661,16 +639,13 @@ async def update_signature_request(
 async def refresh_signature_status(
     request_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Actualizar estado de la solicitud desde el proveedor"""
     
     try:
         signature_service = AsyncSignatureService(db)
-        updated_request = await signature_service.update_signature_status(
-            request_id,
-            current_user.tenant_id
-        )
+        updated_request = await signature_service.update_signature_status(request_id)
         
         if not updated_request:
             raise HTTPException(
@@ -695,7 +670,7 @@ async def refresh_signature_status(
 async def download_signed_document(
     request_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Descargar documento firmado"""
     
@@ -703,18 +678,15 @@ async def download_signed_document(
         signature_service = AsyncSignatureService(db)
         
         # Verificar que la solicitud existe y pertenece al usuario
-        request = await signature_service.get_signature_request(
-            request_id,
-            current_user.tenant_id
-        )
-        
+        request = await signature_service.get_signature_request(request_id)
+
         if not request:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Signature request not found"
             )
-        
-        if request.created_by != current_user.id:
+
+        if str(request.created_by) != str(current_user.sub):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Permission denied"
@@ -727,10 +699,7 @@ async def download_signed_document(
             )
         
         # Descargar documento
-        document_bytes = await signature_service.download_signed_document(
-            request_id,
-            current_user.tenant_id
-        )
+        document_bytes = await signature_service.download_signed_document(request_id)
         
         if not document_bytes:
             raise HTTPException(
@@ -764,22 +733,20 @@ async def download_signed_document(
 async def handle_signature_webhook(
     provider_name: str,
     request: Request,
-    tenant_id: UUID,  # Debe venir como query parameter
     db: AsyncSession = Depends(get_async_db)
 ):
     """Manejar webhooks de proveedores de firma"""
-    
+
     try:
         # Obtener payload y signature
         payload = await request.json()
         signature = request.headers.get("X-Signature") or request.headers.get("Authorization", "")
-        
+
         signature_service = AsyncSignatureService(db)
         success = await signature_service.handle_webhook(
             provider_name,
             payload,
-            signature,
-            tenant_id
+            signature
         )
         
         if success:

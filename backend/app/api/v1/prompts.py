@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field
 
 from app.db.database import get_db
 from app.core.config import settings
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,6 @@ class PromptRuleUpdate(BaseModel):
 
 class PromptRuleResponse(BaseModel):
     id: UUID
-    tenant_id: Optional[UUID] = None
     rule_name: str
     description: Optional[str] = None
     conditions: Dict[str, Any]
@@ -78,7 +79,6 @@ class GuardrailCreate(BaseModel):
 
 class GuardrailResponse(BaseModel):
     id: UUID
-    tenant_id: Optional[UUID] = None
     guardrail_name: str
     description: Optional[str] = None
     guardrail_type: str
@@ -96,16 +96,6 @@ class GuardrailResponse(BaseModel):
 # DEPENDENCIES
 # ══════════════════════════════════════════════════════════════════════════════
 
-def get_tenant_id(x_tenant_id: Optional[str] = Header(None)) -> Optional[UUID]:
-    """Extract tenant ID from header."""
-    if x_tenant_id:
-        try:
-            return UUID(x_tenant_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid tenant ID format")
-    return None
-
-
 def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
     """Verify microservices API key."""
     if x_api_key != settings.MICROSERVICES_API_KEY:
@@ -120,24 +110,23 @@ def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
 @router.post("/rules", response_model=PromptRuleResponse)
 def create_rule(
     rule: PromptRuleCreate,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """Create a new prompt injection rule."""
     try:
         query = text("""
             INSERT INTO emma_prompt_rules
-                (tenant_id, rule_name, description, conditions, action_type, action_config, priority, is_active)
+                (rule_name, description, conditions, action_type, action_config, priority, is_active)
             VALUES
-                (:tenant_id, :rule_name, :description, CAST(:conditions AS jsonb), :action_type, CAST(:action_config AS jsonb), :priority, :is_active)
-            RETURNING id, tenant_id, rule_name, description, conditions, action_type, action_config, priority, is_active, created_at, updated_at
+                (:rule_name, :description, CAST(:conditions AS jsonb), :action_type, CAST(:action_config AS jsonb), :priority, :is_active)
+            RETURNING id, rule_name, description, conditions, action_type, action_config, priority, is_active, created_at, updated_at
         """)
 
         result = db.execute(
             query,
             {
-                "tenant_id": str(tenant_id) if tenant_id else None,
                 "rule_name": rule.rule_name,
                 "description": rule.description,
                 "conditions": json.dumps(rule.conditions),
@@ -152,16 +141,15 @@ def create_rule(
 
         return PromptRuleResponse(
             id=row[0],
-            tenant_id=row[1],
-            rule_name=row[2],
-            description=row[3],
-            conditions=row[4],
-            action_type=row[5],
-            action_config=row[6],
-            priority=row[7],
-            is_active=row[8],
-            created_at=row[9],
-            updated_at=row[10],
+            rule_name=row[1],
+            description=row[2],
+            conditions=row[3],
+            action_type=row[4],
+            action_config=row[5],
+            priority=row[6],
+            is_active=row[7],
+            created_at=row[8],
+            updated_at=row[9],
         )
 
     except Exception as e:
@@ -171,40 +159,34 @@ def create_rule(
 
 @router.get("/rules", response_model=List[PromptRuleResponse])
 def list_rules(
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
     active_only: bool = Query(True),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
 ):
-    """List prompt rules for tenant."""
+    """List prompt rules."""
     try:
         query = text("""
-            SELECT id, tenant_id, rule_name, description, conditions, action_type, action_config, priority, is_active, created_at, updated_at
+            SELECT id, rule_name, description, conditions, action_type, action_config, priority, is_active, created_at, updated_at
             FROM emma_prompt_rules
-            WHERE (tenant_id = :tenant_id OR tenant_id IS NULL)
-              AND (:active_only = false OR is_active = true)
+            WHERE (:active_only = false OR is_active = true)
             ORDER BY priority ASC
         """)
 
-        result = db.execute(
-            query,
-            {"tenant_id": str(tenant_id) if tenant_id else None, "active_only": active_only},
-        )
+        result = db.execute(query, {"active_only": active_only})
         rows = result.fetchall()
 
         return [
             PromptRuleResponse(
                 id=row[0],
-                tenant_id=row[1],
-                rule_name=row[2],
-                description=row[3],
-                conditions=row[4],
-                action_type=row[5],
-                action_config=row[6],
-                priority=row[7],
-                is_active=row[8],
-                created_at=row[9],
-                updated_at=row[10],
+                rule_name=row[1],
+                description=row[2],
+                conditions=row[3],
+                action_type=row[4],
+                action_config=row[5],
+                priority=row[6],
+                is_active=row[7],
+                created_at=row[8],
+                updated_at=row[9],
             )
             for row in rows
         ]
@@ -218,14 +200,14 @@ def list_rules(
 def update_rule(
     rule_id: UUID,
     rule: PromptRuleUpdate,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """Update an existing prompt rule."""
     try:
         updates = []
-        params = {"rule_id": str(rule_id), "tenant_id": str(tenant_id) if tenant_id else None}
+        params = {"rule_id": str(rule_id)}
 
         if rule.rule_name is not None:
             updates.append("rule_name = :rule_name")
@@ -257,8 +239,8 @@ def update_rule(
         query = text(f"""
             UPDATE emma_prompt_rules
             SET {", ".join(updates)}
-            WHERE id = :rule_id AND (tenant_id = :tenant_id OR tenant_id IS NULL)
-            RETURNING id, tenant_id, rule_name, description, conditions, action_type, action_config, priority, is_active, created_at, updated_at
+            WHERE id = :rule_id
+            RETURNING id, rule_name, description, conditions, action_type, action_config, priority, is_active, created_at, updated_at
         """)
 
         result = db.execute(query, params)
@@ -270,16 +252,15 @@ def update_rule(
 
         return PromptRuleResponse(
             id=row[0],
-            tenant_id=row[1],
-            rule_name=row[2],
-            description=row[3],
-            conditions=row[4],
-            action_type=row[5],
-            action_config=row[6],
-            priority=row[7],
-            is_active=row[8],
-            created_at=row[9],
-            updated_at=row[10],
+            rule_name=row[1],
+            description=row[2],
+            conditions=row[3],
+            action_type=row[4],
+            action_config=row[5],
+            priority=row[6],
+            is_active=row[7],
+            created_at=row[8],
+            updated_at=row[9],
         )
 
     except HTTPException:
@@ -292,23 +273,20 @@ def update_rule(
 @router.delete("/rules/{rule_id}")
 def delete_rule(
     rule_id: UUID,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """Delete (deactivate) a prompt rule."""
     try:
         query = text("""
             UPDATE emma_prompt_rules
             SET is_active = false, updated_at = now()
-            WHERE id = :rule_id AND (tenant_id = :tenant_id OR tenant_id IS NULL)
+            WHERE id = :rule_id
             RETURNING id
         """)
 
-        result = db.execute(
-            query,
-            {"rule_id": str(rule_id), "tenant_id": str(tenant_id) if tenant_id else None},
-        )
+        result = db.execute(query, {"rule_id": str(rule_id)})
         row = result.fetchone()
         db.commit()
 
@@ -331,24 +309,23 @@ def delete_rule(
 @router.post("/guardrails", response_model=GuardrailResponse)
 def create_guardrail(
     guardrail: GuardrailCreate,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """Create a new guardrail."""
     try:
         query = text("""
             INSERT INTO emma_guardrails
-                (tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector)
+                (guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector)
             VALUES
-                (:tenant_id, :guardrail_name, :description, :guardrail_type, CAST(:config AS jsonb), :action_on_match, :applies_to, :priority, :is_active, :sector)
-            RETURNING id, tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector, created_at, updated_at
+                (:guardrail_name, :description, :guardrail_type, CAST(:config AS jsonb), :action_on_match, :applies_to, :priority, :is_active, :sector)
+            RETURNING id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector, created_at, updated_at
         """)
 
         result = db.execute(
             query,
             {
-                "tenant_id": str(tenant_id) if tenant_id else None,
                 "guardrail_name": guardrail.guardrail_name,
                 "description": guardrail.description,
                 "guardrail_type": guardrail.guardrail_type,
@@ -365,18 +342,17 @@ def create_guardrail(
 
         return GuardrailResponse(
             id=row[0],
-            tenant_id=row[1],
-            guardrail_name=row[2],
-            description=row[3],
-            guardrail_type=row[4],
-            config=row[5],
-            action_on_match=row[6],
-            applies_to=row[7],
-            priority=row[8],
-            is_active=row[9],
-            sector=row[10],
-            created_at=row[11],
-            updated_at=row[12],
+            guardrail_name=row[1],
+            description=row[2],
+            guardrail_type=row[3],
+            config=row[4],
+            action_on_match=row[5],
+            applies_to=row[6],
+            priority=row[7],
+            is_active=row[8],
+            sector=row[9],
+            created_at=row[10],
+            updated_at=row[11],
         )
 
     except Exception as e:
@@ -386,19 +362,17 @@ def create_guardrail(
 
 @router.get("/guardrails", response_model=List[GuardrailResponse])
 def list_guardrails(
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
     active_only: bool = Query(True),
     sector: Optional[str] = Query(None, description="Filter by sector (legal, medical, documental). Returns sector-specific + global guardrails."),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
 ):
-    """List guardrails for tenant, optionally filtered by sector."""
+    """List guardrails, optionally filtered by sector."""
     try:
         query = text("""
-            SELECT id, tenant_id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector, created_at, updated_at
+            SELECT id, guardrail_name, description, guardrail_type, config, action_on_match, applies_to, priority, is_active, sector, created_at, updated_at
             FROM emma_guardrails
-            WHERE (tenant_id = :tenant_id OR tenant_id IS NULL)
-              AND (:active_only = false OR is_active = true)
+            WHERE (:active_only = false OR is_active = true)
               AND (:sector IS NULL OR sector = :sector OR sector IS NULL)
             ORDER BY priority ASC
         """)
@@ -406,7 +380,6 @@ def list_guardrails(
         result = db.execute(
             query,
             {
-                "tenant_id": str(tenant_id) if tenant_id else None,
                 "active_only": active_only,
                 "sector": sector,
             },
@@ -416,18 +389,17 @@ def list_guardrails(
         return [
             GuardrailResponse(
                 id=row[0],
-                tenant_id=row[1],
-                guardrail_name=row[2],
-                description=row[3],
-                guardrail_type=row[4],
-                config=row[5],
-                action_on_match=row[6],
-                applies_to=row[7],
-                priority=row[8],
-                is_active=row[9],
-                sector=row[10],
-                created_at=row[11],
-                updated_at=row[12],
+                guardrail_name=row[1],
+                description=row[2],
+                guardrail_type=row[3],
+                config=row[4],
+                action_on_match=row[5],
+                applies_to=row[6],
+                priority=row[7],
+                is_active=row[8],
+                sector=row[9],
+                created_at=row[10],
+                updated_at=row[11],
             )
             for row in rows
         ]
@@ -440,23 +412,20 @@ def list_guardrails(
 @router.delete("/guardrails/{guardrail_id}")
 def delete_guardrail(
     guardrail_id: UUID,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """Delete (deactivate) a guardrail."""
     try:
         query = text("""
             UPDATE emma_guardrails
             SET is_active = false, updated_at = now()
-            WHERE id = :guardrail_id AND (tenant_id = :tenant_id OR tenant_id IS NULL)
+            WHERE id = :guardrail_id
             RETURNING id
         """)
 
-        result = db.execute(
-            query,
-            {"guardrail_id": str(guardrail_id), "tenant_id": str(tenant_id) if tenant_id else None},
-        )
+        result = db.execute(query, {"guardrail_id": str(guardrail_id)})
         row = result.fetchone()
         db.commit()
 

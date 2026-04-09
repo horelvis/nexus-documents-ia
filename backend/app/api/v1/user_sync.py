@@ -21,11 +21,12 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.core.config import settings
 from app.db.async_database import get_async_db
 from app.db.models import (
-    User, Connector, UserConnectorAuth, UserDocumentSync, IndexedDocument
+    Connector, UserConnectorAuth, UserDocumentSync, IndexedDocument
 )
 from app.schemas.connector import (
     ConnectorType,
@@ -60,8 +61,7 @@ _connector_oauth_states: dict[str, dict] = {}
 @router.get("/onboarding", response_model=OnboardingStatusResponse)
 async def get_onboarding_status(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get user's onboarding status with available connectors.
@@ -72,7 +72,6 @@ async def get_onboarding_status(
     # Get all active connectors for tenant
     connectors_result = await db.execute(
         select(Connector)
-        .where(Connector.tenant_id == UUID(tenant_id))
         .where(Connector.is_active == True)
         .order_by(Connector.name)
     )
@@ -81,14 +80,14 @@ async def get_onboarding_status(
     # Get user's authorizations
     auths_result = await db.execute(
         select(UserConnectorAuth)
-        .where(UserConnectorAuth.user_id == current_user.id)
+        .where(UserConnectorAuth.user_id == current_user.sub)
     )
     user_auths = {auth.connector_id: auth for auth in auths_result.scalars().all()}
 
     # Get user's syncs
     syncs_result = await db.execute(
         select(UserDocumentSync)
-        .where(UserDocumentSync.user_id == current_user.id)
+        .where(UserDocumentSync.user_id == current_user.sub)
     )
     user_syncs = {sync.connector_id: sync for sync in syncs_result.scalars().all()}
 
@@ -140,8 +139,7 @@ async def get_onboarding_status(
 async def get_connector_auth_status(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get user's authorization status for a specific connector.
@@ -150,7 +148,6 @@ async def get_connector_auth_status(
     connector_result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
         .where(Connector.is_active == True)
     )
     connector = connector_result.scalar_one_or_none()
@@ -161,7 +158,7 @@ async def get_connector_auth_status(
     # Get user's auth for this connector
     auth_result = await db.execute(
         select(UserConnectorAuth)
-        .where(UserConnectorAuth.user_id == current_user.id)
+        .where(UserConnectorAuth.user_id == current_user.sub)
         .where(UserConnectorAuth.connector_id == connector_id)
     )
     auth = auth_result.scalar_one_or_none()
@@ -183,8 +180,7 @@ async def get_connector_auth_status(
 async def get_connector_oauth_url(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get OAuth authorization URL to connect user's account to a connector.
@@ -195,7 +191,6 @@ async def get_connector_oauth_url(
     connector_result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
         .where(Connector.is_active == True)
     )
     connector = connector_result.scalar_one_or_none()
@@ -217,8 +212,7 @@ async def get_connector_oauth_url(
     state = secrets.token_urlsafe(32)
     _connector_oauth_states[state] = {
         "connector_id": str(connector_id),
-        "user_id": str(current_user.id),
-        "tenant_id": tenant_id,
+        "user_id": str(current_user.sub),
         "connector_type": connector_type,
     }
 
@@ -226,7 +220,8 @@ async def get_connector_oauth_url(
 
     if connector_type in ["sharepoint", "onedrive"]:
         # Microsoft OAuth
-        ms_tenant = config.get("tenant_id", "common")
+        # Microsoft Azure AD directory identifier (third-party OAuth, not our tenancy model)
+        ms_tenant = config.get("tenant_id", "common")  # noqa: tenant_removal
         client_id = config.get("client_id")
 
         if not client_id:
@@ -309,7 +304,6 @@ async def oauth_callback(
 
     connector_id = UUID(state_data["connector_id"])
     user_id = UUID(state_data["user_id"])
-    tenant_id = state_data["tenant_id"]
     connector_type = state_data["connector_type"]
 
     try:
@@ -329,7 +323,8 @@ async def oauth_callback(
         import httpx
 
         if connector_type in ["sharepoint", "onedrive"]:
-            ms_tenant = config.get("tenant_id", "common")
+            # Microsoft Azure AD directory identifier (third-party OAuth, not our tenancy model)
+            ms_tenant = config.get("tenant_id", "common")  # noqa: tenant_removal
             token_url = f"https://login.microsoftonline.com/{ms_tenant}/oauth2/v2.0/token"
 
             async with httpx.AsyncClient() as client:
@@ -422,8 +417,7 @@ async def oauth_callback(
 async def revoke_connector_auth(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Revoke user's authorization for a connector.
@@ -436,7 +430,7 @@ async def revoke_connector_auth(
     # Delete user's auth for this connector
     auth_result = await db.execute(
         select(UserConnectorAuth)
-        .where(UserConnectorAuth.user_id == current_user.id)
+        .where(UserConnectorAuth.user_id == current_user.sub)
         .where(UserConnectorAuth.connector_id == connector_id)
     )
     auth = auth_result.scalar_one_or_none()
@@ -447,7 +441,7 @@ async def revoke_connector_auth(
     # Disable sync if exists
     sync_result = await db.execute(
         select(UserDocumentSync)
-        .where(UserDocumentSync.user_id == current_user.id)
+        .where(UserDocumentSync.user_id == current_user.sub)
         .where(UserDocumentSync.connector_id == connector_id)
     )
     sync = sync_result.scalar_one_or_none()
@@ -469,8 +463,7 @@ async def revoke_connector_auth(
 @router.get("/syncs", response_model=UserSyncListResponse)
 async def list_user_syncs(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List all document syncs for the current user.
@@ -479,7 +472,7 @@ async def list_user_syncs(
     syncs_result = await db.execute(
         select(UserDocumentSync)
         .options(selectinload(UserDocumentSync.connector))
-        .where(UserDocumentSync.user_id == current_user.id)
+        .where(UserDocumentSync.user_id == current_user.sub)
         .order_by(UserDocumentSync.created_at.desc())
     )
     syncs = syncs_result.scalars().all()
@@ -514,8 +507,7 @@ async def create_user_sync(
     connector_id: UUID,
     config: UserSyncConfigCreate = UserSyncConfigCreate(),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Enable document sync for a connector.
@@ -526,7 +518,6 @@ async def create_user_sync(
     connector_result = await db.execute(
         select(Connector)
         .where(Connector.id == connector_id)
-        .where(Connector.tenant_id == UUID(tenant_id))
         .where(Connector.is_active == True)
     )
     connector = connector_result.scalar_one_or_none()
@@ -538,7 +529,7 @@ async def create_user_sync(
     if connector.auth_type == "delegated":
         auth_result = await db.execute(
             select(UserConnectorAuth)
-            .where(UserConnectorAuth.user_id == current_user.id)
+            .where(UserConnectorAuth.user_id == current_user.sub)
             .where(UserConnectorAuth.connector_id == connector_id)
             .where(UserConnectorAuth.is_valid == True)
         )
@@ -551,7 +542,7 @@ async def create_user_sync(
     # Check if sync already exists
     existing_sync = await db.execute(
         select(UserDocumentSync)
-        .where(UserDocumentSync.user_id == current_user.id)
+        .where(UserDocumentSync.user_id == current_user.sub)
         .where(UserDocumentSync.connector_id == connector_id)
     )
     sync = existing_sync.scalar_one_or_none()
@@ -566,7 +557,7 @@ async def create_user_sync(
     else:
         # Create new sync
         sync = UserDocumentSync(
-            user_id=current_user.id,
+            user_id=current_user.sub,
             connector_id=connector_id,
             sync_enabled=config.sync_enabled,
             include_paths=config.include_paths,
@@ -581,7 +572,7 @@ async def create_user_sync(
     # Reload with connector relationship
     await db.refresh(sync, ["connector"])
 
-    logger.info(f"User {current_user.id} enabled sync for connector {connector_id}")
+    logger.info(f"User {current_user.sub} enabled sync for connector {connector_id}")
 
     # TODO: Trigger initial sync in background
 
@@ -611,8 +602,7 @@ async def update_user_sync(
     sync_id: UUID,
     config: UserSyncConfigUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Update sync configuration.
@@ -621,7 +611,7 @@ async def update_user_sync(
         select(UserDocumentSync)
         .options(selectinload(UserDocumentSync.connector))
         .where(UserDocumentSync.id == sync_id)
-        .where(UserDocumentSync.user_id == current_user.id)
+        .where(UserDocumentSync.user_id == current_user.sub)
     )
     sync = sync_result.scalar_one_or_none()
 
@@ -662,8 +652,7 @@ async def update_user_sync(
 async def delete_user_sync(
     sync_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Delete a sync configuration (stops syncing, keeps indexed documents).
@@ -671,7 +660,7 @@ async def delete_user_sync(
     sync_result = await db.execute(
         select(UserDocumentSync)
         .where(UserDocumentSync.id == sync_id)
-        .where(UserDocumentSync.user_id == current_user.id)
+        .where(UserDocumentSync.user_id == current_user.sub)
     )
     sync = sync_result.scalar_one_or_none()
 
@@ -689,8 +678,7 @@ async def trigger_manual_sync(
     sync_id: UUID,
     request: TriggerSyncRequest = TriggerSyncRequest(),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Trigger a manual sync for a connector.
@@ -698,7 +686,7 @@ async def trigger_manual_sync(
     sync_result = await db.execute(
         select(UserDocumentSync)
         .where(UserDocumentSync.id == sync_id)
-        .where(UserDocumentSync.user_id == current_user.id)
+        .where(UserDocumentSync.user_id == current_user.sub)
     )
     sync = sync_result.scalar_one_or_none()
 
@@ -716,7 +704,7 @@ async def trigger_manual_sync(
     sync.status_message = "Manual sync triggered"
     await db.commit()
 
-    logger.info(f"Manual sync triggered for user {current_user.id}, sync {sync_id}")
+    logger.info(f"Manual sync triggered for user {current_user.sub}, sync {sync_id}")
 
     # TODO: Queue actual sync task via Celery
 
@@ -740,23 +728,13 @@ async def list_my_indexed_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List documents indexed from user's connectors.
     Shows all tenant documents (owned by user OR public to tenant).
     """
-    query = (
-        select(IndexedDocument)
-        .where(IndexedDocument.tenant_id == UUID(tenant_id))
-        .where(
-            or_(
-                IndexedDocument.owner_id == current_user.id,
-                IndexedDocument.is_tenant_public == True,
-            )
-        )
-    )
+    query = select(IndexedDocument)
 
     if connector_id:
         query = query.where(IndexedDocument.connector_id == connector_id)

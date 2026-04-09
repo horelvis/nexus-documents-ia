@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
 from app.api.async_dependencies import (
-    get_async_db, 
-    get_current_active_user_async,
-    get_current_tenant_id_async
+    get_async_db,
+    get_current_user_async,
 )
-from app.db.models import User
+from app.core.auth.base import UserProfile
+from app.core.config import settings
 from app.services.signature_ai_service import SignatureAIService
 from app.schemas.signature import SignatureRequestCreate
 
@@ -71,8 +71,7 @@ class PlacementSuggestionRequest(BaseModel):
 async def analyze_document(
     request: DocumentAnalysisRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async),
-    tenant_id: UUID = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Analyze a document and get AI suggestions for signature placement
@@ -80,22 +79,22 @@ async def analyze_document(
     try:
         # Get document content
         from app.services.async_document_service import AsyncDocumentService
-        doc_service = AsyncDocumentService(tenant_id=str(tenant_id), user_id=str(current_user.id))
+        doc_service = await AsyncDocumentService.create(user=current_user, db=db)
         document = await doc_service.get_document(db, str(request.document_id))
-        
+
         if not document:
             raise HTTPException(status_code=404, detail="Document not found")
-        
+
         # Get document content from storage
         from app.services.async_storage_service import AsyncStorageService
-        storage_service = AsyncStorageService(str(tenant_id), str(current_user.id))
+        storage_service = AsyncStorageService(settings.DEFAULT_TENANT_ID, current_user.sub)
         document_content = await storage_service.download_file(document.file_path or '')
-        
+
         if not document_content:
             raise HTTPException(status_code=500, detail="Could not retrieve document content")
-        
+
         # Initialize AI service
-        ai_service = SignatureAIService(tenant_id)
+        ai_service = SignatureAIService(UUID(settings.DEFAULT_TENANT_ID))
         
         # Analyze document
         analysis_result = await ai_service.analyze_document(
@@ -123,8 +122,7 @@ async def analyze_uploaded_file(
     file: UploadFile = File(...),
     metadata: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async),
-    tenant_id: UUID = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Analyze an uploaded file without saving it to get signature suggestions
@@ -138,8 +136,8 @@ async def analyze_uploaded_file(
         parsed_metadata = json.loads(metadata) if metadata else {}
         
         # Initialize AI service
-        ai_service = SignatureAIService(tenant_id)
-        
+        ai_service = SignatureAIService(UUID(settings.DEFAULT_TENANT_ID))
+
         # Analyze document
         analysis_result = await ai_service.analyze_document(
             db=db,
@@ -162,21 +160,20 @@ async def analyze_uploaded_file(
 async def learn_from_placement(
     feedback: PlacementFeedback,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async),
-    tenant_id: UUID = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Submit user's actual field placements for AI learning
     """
     try:
-        ai_service = SignatureAIService(tenant_id)
-        
+        ai_service = SignatureAIService(UUID(settings.DEFAULT_TENANT_ID))
+
         success = await ai_service.learn_from_placement(
             db=db,
             document_id=feedback.document_id,
             document_type=feedback.document_type,
             placed_fields=feedback.placed_fields,
-            user_id=current_user.id
+            user_id=current_user.sub
         )
         
         if success:
@@ -192,28 +189,27 @@ async def learn_from_placement(
 async def suggest_placements_for_signers(
     request: PlacementSuggestionRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async),
-    tenant_id: UUID = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get specific field placement suggestions for given signers
     """
     try:
-        ai_service = SignatureAIService(tenant_id)
-        
+        ai_service = SignatureAIService(UUID(settings.DEFAULT_TENANT_ID))
+
         # If no analysis provided, analyze first
         if not request.document_analysis:
             # Get document and analyze
             from app.services.async_document_service import AsyncDocumentService
-            doc_service = AsyncDocumentService(tenant_id=str(tenant_id), user_id=str(current_user.id))
+            doc_service = await AsyncDocumentService.create(user=current_user, db=db)
             document = await doc_service.get_document(db, str(request.document_id))
-            
+
             if not document:
                 raise HTTPException(status_code=404, detail="Document not found")
-            
+
             # Get content and analyze
             from app.services.async_storage_service import AsyncStorageService
-            storage_service = AsyncStorageService(str(tenant_id), str(current_user.id))
+            storage_service = AsyncStorageService(settings.DEFAULT_TENANT_ID, current_user.sub)
             document_content = await storage_service.download_file(document.file_path or '')
             
             document_analysis = await ai_service.analyze_document(
@@ -250,8 +246,7 @@ async def suggest_placements_for_signers(
 async def get_learned_patterns(
     document_type: str,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async),
-    tenant_id: UUID = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get learned patterns for a specific document type
@@ -261,7 +256,6 @@ async def get_learned_patterns(
         from app.db.models import SignaturePlacementPattern
         
         stmt = select(SignaturePlacementPattern).filter(
-            SignaturePlacementPattern.tenant_id == tenant_id,
             SignaturePlacementPattern.document_type == document_type,
             SignaturePlacementPattern.is_active == True
         ).order_by(SignaturePlacementPattern.confidence.desc())
@@ -291,8 +285,7 @@ async def get_learned_patterns(
 @router.get("/document-types")
 async def get_document_types(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_user_async),
-    tenant_id: UUID = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get configured document types for the tenant
@@ -302,7 +295,6 @@ async def get_document_types(
         from app.db.models import DocumentTypeClassification
         
         stmt = select(DocumentTypeClassification).filter(
-            DocumentTypeClassification.tenant_id == tenant_id,
             DocumentTypeClassification.is_active == True
         )
         
@@ -342,8 +334,7 @@ async def get_document_types(
 @router.post("/generate-message")
 async def generate_signature_message(
     request: Dict[str, Any],
-    current_user: User = Depends(get_current_active_user_async),
-    tenant_id: UUID = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Generate AI-powered message for signature request
@@ -353,7 +344,7 @@ async def generate_signature_message(
         signer_count = request.get("signer_count", 1)
         document_type = request.get("document_type", "general")
         
-        ai_service = SignatureAIService(tenant_id)
+        ai_service = SignatureAIService(UUID(settings.DEFAULT_TENANT_ID))
         message = ai_service.generate_signature_message(
             document_title=document_title,
             signer_count=signer_count,
