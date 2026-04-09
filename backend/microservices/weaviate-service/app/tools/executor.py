@@ -133,7 +133,7 @@ class ToolExecutor:
 
         result = await executor.execute(
             call=ToolCall(name="search_emails", arguments={"query": "invoice"}),
-            context=ToolExecutionContext(tenant_id="abc123")
+            context=ToolExecutionContext(user_id="user-123", user_roles=["LEGAL"])
         )
 
         if result.is_success:

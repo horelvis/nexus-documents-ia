@@ -23,8 +23,8 @@ Usage in EmmaService:
             if needs_tool_execution:
                 results = await self.tool_integration.execute_tools(
                     tool_calls=parsed_tool_calls,
-                    tenant_id=query.tenant_id,
-                    user_id=query.user_id
+                    user_id=query.user_id,
+                    user_roles=query.user_roles,
                 )
 """
 
@@ -118,16 +118,14 @@ class ToolIntegration:
         """Get the current adapter."""
         return self._adapter
 
-    def get_tools_for_tenant(
+    def get_tools(
         self,
-        tenant_id: str,
         category: Optional[str] = None
     ) -> List[ToolDefinition]:
         """
-        Get available tools for a tenant.
+        Get available tool definitions.
 
         Args:
-            tenant_id: Tenant identifier
             category: Optional category filter
 
         Returns:
@@ -136,18 +134,16 @@ class ToolIntegration:
         if not self._registry:
             return []
 
-        return self._registry.get_definitions_for_tenant(tenant_id, category)
+        return self._registry.get_definitions(category=category)
 
     def format_tools_for_request(
         self,
-        tenant_id: str,
         category: Optional[str] = None
     ) -> Any:
         """
         Get tools formatted for the current LLM provider.
 
         Args:
-            tenant_id: Tenant identifier
             category: Optional category filter
 
         Returns:
@@ -156,7 +152,7 @@ class ToolIntegration:
         if not self._adapter or not self._registry:
             return []
 
-        definitions = self._registry.get_definitions_for_tenant(tenant_id, category)
+        definitions = self._registry.get_definitions(category=category)
         return self._adapter.format_tools_for_request(definitions)
 
     def parse_tool_calls(self, response: Any) -> List[ToolCall]:
@@ -192,8 +188,8 @@ class ToolIntegration:
     async def execute_tool(
         self,
         tool_call: ToolCall,
-        tenant_id: str,
         user_id: Optional[str] = None,
+        user_roles: Optional[List[str]] = None,
         credentials: Optional[Dict[str, Any]] = None,
         conversation_id: Optional[str] = None
     ) -> ToolResult:
@@ -202,8 +198,8 @@ class ToolIntegration:
 
         Args:
             tool_call: The tool call to execute
-            tenant_id: Tenant identifier (from authenticated context)
-            user_id: Optional user identifier
+            user_id: Optional user identifier (from authenticated context)
+            user_roles: Optional list of user roles for ACL scoping
             credentials: Optional OAuth credentials
             conversation_id: Optional conversation ID
 
@@ -211,37 +207,28 @@ class ToolIntegration:
             ToolResult from execution
 
         Note:
-            tenant_id and user_id are automatically injected into tool_call.arguments
-            to ensure proper data isolation regardless of what the LLM passes.
+            user_id and user_roles are automatically injected into tool_call.arguments
+            to ensure proper ACL scoping regardless of what the LLM passes.
         """
         if not self._executor:
             raise RuntimeError("Tool integration not initialized")
 
-        # === Automatic injection of tenant_id and user_id ===
-        # This ensures proper tenant isolation even if the LLM doesn't pass these correctly
+        # === Automatic injection of user_id and user_roles ===
         if tool_call.arguments is None:
             tool_call.arguments = {}
 
-        # Security: Log if LLM tried to pass a different tenant_id
-        if 'tenant_id' in tool_call.arguments:
-            llm_tenant = tool_call.arguments['tenant_id']
-            if llm_tenant != tenant_id:
-                logger.warning(
-                    f"🔒 tenant_id override in {tool_call.name}: "
-                    f"LLM passed '{llm_tenant}', using authenticated '{tenant_id}'"
-                )
-
-        # Always override with the authenticated tenant_id
-        tool_call.arguments['tenant_id'] = tenant_id
-
-        # Inject user_id if available (for user-level isolation within tenant)
+        # Inject user_id if available
         if user_id and 'user_id' not in tool_call.arguments:
             tool_call.arguments['user_id'] = user_id
+
+        # Inject user_roles for ACL scoping
+        if user_roles is not None and 'user_roles' not in tool_call.arguments:
+            tool_call.arguments['user_roles'] = list(user_roles)
         # === End automatic injection ===
 
         context = ToolExecutionContext(
-            tenant_id=tenant_id,
             user_id=user_id,
+            user_roles=list(user_roles) if user_roles is not None else None,
             credentials=credentials,
             conversation_id=conversation_id,
             metadata={"call_id": tool_call.id}
@@ -252,8 +239,8 @@ class ToolIntegration:
     async def execute_tools(
         self,
         tool_calls: List[ToolCall],
-        tenant_id: str,
         user_id: Optional[str] = None,
+        user_roles: Optional[List[str]] = None,
         credentials: Optional[Dict[str, Any]] = None,
         conversation_id: Optional[str] = None
     ) -> List[ToolResult]:
@@ -264,8 +251,8 @@ class ToolIntegration:
 
         Args:
             tool_calls: List of tool calls to execute
-            tenant_id: Tenant identifier
             user_id: Optional user identifier
+            user_roles: Optional list of user roles for ACL scoping
             credentials: Optional OAuth credentials
             conversation_id: Optional conversation ID
 
@@ -275,31 +262,23 @@ class ToolIntegration:
         if not self._executor:
             raise RuntimeError("Tool integration not initialized")
 
-        # === Automatic injection of tenant_id and user_id for each tool_call ===
+        # === Automatic injection of user_id and user_roles for each tool_call ===
         for tool_call in tool_calls:
             if tool_call.arguments is None:
                 tool_call.arguments = {}
 
-            # Security: Log if LLM tried to pass a different tenant_id
-            if 'tenant_id' in tool_call.arguments:
-                llm_tenant = tool_call.arguments['tenant_id']
-                if llm_tenant != tenant_id:
-                    logger.warning(
-                        f"🔒 tenant_id override in {tool_call.name}: "
-                        f"LLM passed '{llm_tenant}', using authenticated '{tenant_id}'"
-                    )
-
-            # Always override with the authenticated tenant_id
-            tool_call.arguments['tenant_id'] = tenant_id
-
             # Inject user_id if available
             if user_id and 'user_id' not in tool_call.arguments:
                 tool_call.arguments['user_id'] = user_id
+
+            # Inject user_roles for ACL scoping
+            if user_roles is not None and 'user_roles' not in tool_call.arguments:
+                tool_call.arguments['user_roles'] = list(user_roles)
         # === End automatic injection ===
 
         context = ToolExecutionContext(
-            tenant_id=tenant_id,
             user_id=user_id,
+            user_roles=list(user_roles) if user_roles is not None else None,
             credentials=credentials,
             conversation_id=conversation_id
         )

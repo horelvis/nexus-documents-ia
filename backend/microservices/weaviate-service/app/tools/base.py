@@ -180,7 +180,7 @@ class ToolCall(BaseModel):
         name: Name of the tool to invoke
         arguments: Parsed arguments as dictionary
         raw_arguments: Original string arguments (for debugging)
-        metadata: Additional context (tenant_id, user_id, etc.)
+        metadata: Additional context (user_id, user_roles, etc.)
     """
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str = Field(..., description="Tool name to invoke")
@@ -390,13 +390,16 @@ class ToolExecutionContext(BaseModel):
     Context passed to tools during execution.
 
     Contains all the information a tool might need to execute,
-    including tenant isolation, user identity, and credentials.
+    including user identity, role-based ACL scope, and credentials.
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    # Tenant isolation
-    tenant_id: str = Field(..., description="Current tenant ID")
+    # User identity + role-based ACL scope
     user_id: Optional[str] = Field(default=None, description="Current user ID")
+    user_roles: List[str] = Field(
+        default_factory=list,
+        description="KeyCloak role names the caller has; ACL filters fold in EVERYONE",
+    )
 
     # Credentials (for OAuth tools)
     credentials: Optional[Dict[str, Any]] = Field(

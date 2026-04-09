@@ -13,12 +13,13 @@ Endpoints:
 import json
 import logging
 import uuid
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from cryptography.fernet import Fernet
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from app.core.auth_headers import extract_user_id, extract_user_roles
 from app.core.config import settings
 from app.services.channel_router import channel_router
 from app.services.pairing_service import pairing_service
