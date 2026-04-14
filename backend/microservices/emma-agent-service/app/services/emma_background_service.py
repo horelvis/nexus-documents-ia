@@ -22,7 +22,7 @@ class EmmaBackgroundService:
     async def analyze_document(
         self,
         document_id: str,
-        tenant_id: str,
+        tenant_id: str = "",
         prompt_template: Optional[str] = None,
         agent: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -82,9 +82,9 @@ class EmmaBackgroundService:
 
     async def proactive_analysis(
         self,
-        tenant_id: str,
         analysis_type: str,
         query: str,
+        tenant_id: str = "",
         context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Run a custom proactive analysis."""

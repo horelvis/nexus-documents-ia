@@ -181,7 +181,7 @@ class PromptComposer:
         # 2. Evaluate and apply rules
         if settings.rule_engine_enabled:
             rule_context = RuleContext.from_state(state)
-            rule_result = await self._rule_engine.evaluate(rule_context, tenant_id)
+            rule_result = await self._rule_engine.evaluate(rule_context)
 
             if rule_result.matched_rules:
                 result.rules_applied = [r.rule_name for r in rule_result.matched_rules]
