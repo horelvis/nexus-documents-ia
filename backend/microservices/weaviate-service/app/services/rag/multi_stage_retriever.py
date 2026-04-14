@@ -34,12 +34,34 @@ from .soft_selection import (
 )
 from .graph_retriever import graph_retriever
 from ...core.config import settings
-from ...core.security import get_tenant_collection_name
-from ..weaviate_service import weaviate_service
+from ..weaviate_service import weaviate_service, DOCUMENTS_COLLECTION
 from ...schemas.weaviate import SearchRequest
 from ...schemas.public_knowledge import PublicSearchRequest, PublicDocumentCategory
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Single-tenant placeholders
+# =============================================================================
+# Legacy out-of-scope helpers (graph_retriever, etc.) still accept a tenant_id
+# argument — we pass this placeholder until they are cleaned up in Wave 4.
+_SINGLE_TENANT = "default"
+
+
+def _build_search_request(user_roles: List[str], **kwargs) -> SearchRequest:
+    """
+    Construct a SearchRequest and attach `user_roles` for ACL filtering.
+
+    The SearchRequest schema still has the legacy `tenant_id` (required) and
+    `user_role_ids` fields (Wave 11 will drop these). We pass a placeholder
+    tenant_id and force-set `user_roles` via object.__setattr__ because the
+    pydantic schema doesn't declare it yet — weaviate_service.search_documents
+    reads `user_roles` with `getattr(..., 'user_roles', None) or []`.
+    """
+    req = SearchRequest(tenant_id=_SINGLE_TENANT, **kwargs)
+    object.__setattr__(req, "user_roles", list(user_roles or []))
+    return req
 
 
 # =============================================================================
@@ -48,12 +70,6 @@ logger = logging.getLogger(__name__)
 # Adjacent chunk retrieval preserves context across chunk boundaries.
 # When a relevant chunk is found, we also fetch chunks immediately before/after
 # from the same document to provide fuller context to the LLM.
-
-
-# Use centralized function from security module
-def _get_tenant_collection_name(tenant_id: str) -> str:
-    """Wrapper for centralized collection name generation."""
-    return get_tenant_collection_name(tenant_id, "documents")
 
 
 class MultiStageRetriever:
@@ -193,10 +209,8 @@ class MultiStageRetriever:
     async def retrieve(
         self,
         query_analysis: QueryAnalysis,
-        tenant_id: str,
         user_id: Optional[str] = None,
-        user_role_ids: Optional[List[str]] = None,
-        is_admin: bool = False,
+        user_roles: Optional[List[str]] = None,
         collection_name: Optional[str] = None,
         top_k: int = 10,
         stage1_limit: int = 50,
@@ -208,11 +222,9 @@ class MultiStageRetriever:
 
         Args:
             query_analysis: Analyzed query from Layer 1
-            tenant_id: Tenant identifier
-            user_id: User identifier for ACL filtering
-            user_role_ids: List of role IDs the user belongs to (for role-based ACL)
-            is_admin: Whether user is admin (bypasses ACL checks)
-            collection_name: Optional specific collection (defaults to tenant collection)
+            user_id: User identifier (optional, used for logging)
+            user_roles: KeyCloak roles for role-based ACL filtering
+            collection_name: Optional specific collection (defaults to DOCUMENTS_COLLECTION)
             top_k: Final number of documents to return
             stage1_limit: Number of candidates from initial search
             stage2_limit: Number after reranking
@@ -221,18 +233,21 @@ class MultiStageRetriever:
         Returns:
             Tuple of (List[RetrievedDocument], Dict[str, Any]) where dict contains selection_metadata
 
-        SECURITY: user_id and user_role_ids are passed to all search operations
-        for document-level ACL filtering. Only documents the user has permission
-        to view will be returned.
+        SECURITY: user_roles is passed to all search operations for document-level
+        ACL filtering via the `roles` property. Only documents whose `roles` array
+        intersects with `allowed_roles(user_roles)` (which folds in EVERYONE) are
+        returned.
         """
         await self.initialize()
 
         # Clear embedding storage for this retrieval
         self._document_embeddings.clear()
 
+        user_roles = list(user_roles or [])
+
         # Determine collection name
         if not collection_name:
-            collection_name = _get_tenant_collection_name(tenant_id)
+            collection_name = DOCUMENTS_COLLECTION
 
         # Determine if public knowledge should be included
         use_public_knowledge = include_public_knowledge if include_public_knowledge is not None else self._public_knowledge_enabled
@@ -245,9 +260,10 @@ class MultiStageRetriever:
         if settings.rag_knowledge_graph_enabled:
             try:
                 graph_start = time.time()
+                # NOTE: graph_retriever still takes tenant_id (Wave 4 scope)
                 query_analysis = await graph_retriever.expand_query_with_graph(
                     query_analysis=query_analysis,
-                    tenant_id=tenant_id,
+                    tenant_id=_SINGLE_TENANT,
                 )
                 graph_time_ms = (time.time() - graph_start) * 1000
 
@@ -264,17 +280,14 @@ class MultiStageRetriever:
             except Exception as e:
                 logger.warning(f"  Stage 0: Graph expansion failed: {e}")
 
-        # Stage 1: Filtered vector/hybrid search (tenant documents) with ACL
-        tenant_candidates = await self._stage1_filtered_search(
+        # Stage 1: Filtered vector/hybrid search (local documents) with role-based ACL
+        local_candidates = await self._stage1_filtered_search(
             query_analysis=query_analysis,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            user_role_ids=user_role_ids,
-            is_admin=is_admin,
+            user_roles=user_roles,
             collection_name=collection_name,
             limit=stage1_limit,
         )
-        logger.info(f"  Stage 1a: {len(tenant_candidates)} candidates from tenant documents")
+        logger.info(f"  Stage 1a: {len(local_candidates)} candidates from local documents")
 
         # Stage 1b: Public Knowledge search (if enabled)
         public_candidates = []
@@ -285,15 +298,15 @@ class MultiStageRetriever:
             )
             logger.info(f"  Stage 1b: {len(public_candidates)} candidates from public knowledge")
 
-        # Combine tenant and public candidates with RRF
-        if tenant_candidates and public_candidates:
-            candidates = self._merge_tenant_and_public(
-                tenant_docs=tenant_candidates,
+        # Combine local and public candidates with RRF
+        if local_candidates and public_candidates:
+            candidates = self._merge_local_and_public(
+                local_docs=local_candidates,
                 public_docs=public_candidates,
             )
             logger.info(f"  Stage 1 merged: {len(candidates)} total candidates")
-        elif tenant_candidates:
-            candidates = tenant_candidates
+        elif local_candidates:
+            candidates = local_candidates
         elif public_candidates:
             candidates = public_candidates
         else:
@@ -390,13 +403,14 @@ class MultiStageRetriever:
                     "publication_date": doc.publication_date.isoformat() if doc.publication_date else None,
                 }
 
+                # Mark as public via metadata (public chunks aren't tenant-scoped)
+                metadata["source"] = "public"
                 results.append(RetrievedDocument(
                     id=doc.id,
                     title=f"[LEGAL] {doc.title}",  # Prefix to distinguish
                     content=doc.content,
                     score=doc.similarity_score or 0.5,
                     document_type=f"public_{doc.category}",
-                    tenant_id="public",  # Mark as public document
                     metadata=metadata,
                 ))
 
@@ -406,17 +420,17 @@ class MultiStageRetriever:
             logger.warning(f"⚠️ Public knowledge search failed: {e}")
             return []
 
-    def _merge_tenant_and_public(
+    def _merge_local_and_public(
         self,
-        tenant_docs: List[RetrievedDocument],
+        local_docs: List[RetrievedDocument],
         public_docs: List[RetrievedDocument],
     ) -> List[RetrievedDocument]:
         """
-        Merge tenant and public documents using weighted interleaving.
+        Merge local and public documents using weighted interleaving.
 
         Public documents are weighted by the configured weight factor.
-        This ensures legal context is included but tenant-specific docs
-        are prioritized for direct answers.
+        This ensures legal context is included but local docs are prioritized
+        for direct answers.
         """
         # Apply weight adjustment to public docs
         for doc in public_docs:
@@ -424,11 +438,11 @@ class MultiStageRetriever:
 
         # Use RRF to merge both lists
         merged = reciprocal_rank_fusion(
-            dense_results=tenant_docs,  # Treat tenant as "dense"
-            sparse_results=public_docs,  # Treat public as "sparse"
+            dense_results=local_docs,
+            sparse_results=public_docs,
             k=self._rrf_k,
-            dense_weight=1.0,  # Tenant weight
-            sparse_weight=self._public_knowledge_weight,  # Public weight
+            dense_weight=1.0,
+            sparse_weight=self._public_knowledge_weight,
         )
 
         return merged
@@ -607,7 +621,6 @@ class MultiStageRetriever:
             content=merged_content,
             score=primary_doc.score,
             document_type=primary_doc.document_type,
-            tenant_id=primary_doc.tenant_id,
             metadata={
                 **primary_doc.metadata,
                 "expanded": True,
@@ -626,22 +639,19 @@ class MultiStageRetriever:
     async def _stage1_filtered_search(
         self,
         query_analysis: QueryAnalysis,
-        tenant_id: str,
-        user_id: Optional[str],
-        user_role_ids: Optional[List[str]],
-        is_admin: bool,
+        user_roles: List[str],
         collection_name: str,
         limit: int,
     ) -> List[RetrievedDocument]:
         """
-        Stage 1: Hybrid search with RRF fusion and ACL filtering
+        Stage 1: Hybrid search with RRF fusion and role-based ACL filtering.
 
         Performs separate dense (vector) and sparse (BM25) searches,
         then combines them using Reciprocal Rank Fusion for better recall.
 
         Also searches multiple query variations and fuses all results.
 
-        SECURITY: All searches are filtered by user ACL permissions.
+        SECURITY: All searches are filtered by the caller's roles.
         """
         # Collect results from multiple query variations
         all_dense_results: List[List[RetrievedDocument]] = []
@@ -652,13 +662,10 @@ class MultiStageRetriever:
 
         for query_text in queries_to_search:
             try:
-                # Stage 1a: Dense vector search with ACL
+                # Stage 1a: Dense vector search with role-based ACL
                 dense_results = await self._vector_search(
                     query=query_text,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    user_role_ids=user_role_ids,
-                    is_admin=is_admin,
+                    user_roles=user_roles,
                     collection_name=collection_name,
                     limit=limit,
                 )
@@ -666,13 +673,10 @@ class MultiStageRetriever:
                     all_dense_results.append(dense_results)
                     logger.debug(f"  Dense search returned {len(dense_results)} results")
 
-                # Stage 1b: Sparse BM25 search with ACL
+                # Stage 1b: Sparse BM25 search with role-based ACL
                 sparse_results = await self._bm25_search(
                     query=query_text,
-                    tenant_id=tenant_id,
-                    user_id=user_id,
-                    user_role_ids=user_role_ids,
-                    is_admin=is_admin,
+                    user_roles=user_roles,
                     collection_name=collection_name,
                     limit=limit,
                 )
@@ -716,21 +720,15 @@ class MultiStageRetriever:
     async def _vector_search(
         self,
         query: str,
-        tenant_id: str,
-        user_id: Optional[str],
-        user_role_ids: Optional[List[str]],
-        is_admin: bool,
+        user_roles: List[str],
         collection_name: str,
         limit: int,
     ) -> List[RetrievedDocument]:
-        """Execute dense vector search with ACL filtering"""
+        """Execute dense vector search with role-based ACL filtering."""
         try:
-            search_request = SearchRequest(
+            search_request = _build_search_request(
+                user_roles=user_roles,
                 query=query,
-                tenant_id=tenant_id,
-                user_id=user_id,  # ACL: user identification
-                user_role_ids=user_role_ids,  # ACL: role-based access
-                is_admin=is_admin,  # ACL: admin bypass
                 limit=limit,
                 search_type="vector",
                 filters=None,
@@ -750,7 +748,6 @@ class MultiStageRetriever:
                     score=result.similarity_score or 0.0,
                     vector_score=result.similarity_score,
                     document_type=result.document_type,
-                    tenant_id=result.tenant_id,
                     metadata=result.metadata or {},
                 ))
             return results
@@ -762,21 +759,15 @@ class MultiStageRetriever:
     async def _bm25_search(
         self,
         query: str,
-        tenant_id: str,
-        user_id: Optional[str],
-        user_role_ids: Optional[List[str]],
-        is_admin: bool,
+        user_roles: List[str],
         collection_name: str,
         limit: int,
     ) -> List[RetrievedDocument]:
-        """Execute sparse BM25 keyword search with ACL filtering"""
+        """Execute sparse BM25 keyword search with role-based ACL filtering."""
         try:
-            search_request = SearchRequest(
+            search_request = _build_search_request(
+                user_roles=user_roles,
                 query=query,
-                tenant_id=tenant_id,
-                user_id=user_id,  # ACL: user identification
-                user_role_ids=user_role_ids,  # ACL: role-based access
-                is_admin=is_admin,  # ACL: admin bypass
                 limit=limit,
                 search_type="keyword",
                 filters=None,
@@ -796,7 +787,6 @@ class MultiStageRetriever:
                     score=result.similarity_score or 0.0,
                     bm25_score=result.similarity_score,
                     document_type=result.document_type,
-                    tenant_id=result.tenant_id,
                     metadata=result.metadata or {},
                 ))
             return results
@@ -1054,10 +1044,8 @@ class MultiStageRetriever:
     async def retrieve_multimodal(
         self,
         query_analysis: QueryAnalysis,
-        tenant_id: str,
         user_id: Optional[str] = None,
-        user_role_ids: Optional[List[str]] = None,
-        is_admin: bool = False,
+        user_roles: Optional[List[str]] = None,
         collection_name: Optional[str] = None,
         top_k: int = 10,
         stage1_limit: int = 50,
@@ -1075,10 +1063,8 @@ class MultiStageRetriever:
 
         Args:
             query_analysis: Analyzed query from Layer 1
-            tenant_id: Tenant identifier
-            user_id: User identifier for ACL filtering
-            user_role_ids: Role IDs for role-based ACL
-            is_admin: Whether user is admin (bypasses ACL)
+            user_id: User identifier (optional, for logging)
+            user_roles: Roles for role-based ACL filtering
             collection_name: Optional specific collection
             top_k: Final number of text documents to return
             stage1_limit: Number of candidates from initial search
@@ -1096,13 +1082,13 @@ class MultiStageRetriever:
         """
         await self.initialize()
 
+        user_roles = list(user_roles or [])
+
         # Execute standard text retrieval
         text_docs, selection_metadata = await self.retrieve(
             query_analysis=query_analysis,
-            tenant_id=tenant_id,
             user_id=user_id,
-            user_role_ids=user_role_ids,
-            is_admin=is_admin,
+            user_roles=user_roles,
             collection_name=collection_name,
             top_k=top_k,
             stage1_limit=stage1_limit,
@@ -1115,9 +1101,7 @@ class MultiStageRetriever:
         if include_visual and settings.multimodal_embedding_enabled:
             visual_results = await self._search_visual_content(
                 query_analysis=query_analysis,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role_ids=user_role_ids,
+                user_roles=user_roles,
                 limit=visual_limit,
                 content_types=visual_content_types,
             )
@@ -1136,9 +1120,7 @@ class MultiStageRetriever:
     async def _search_visual_content(
         self,
         query_analysis: QueryAnalysis,
-        tenant_id: str,
-        user_id: Optional[str] = None,
-        user_role_ids: Optional[List[str]] = None,
+        user_roles: List[str],
         limit: int = 5,
         content_types: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
@@ -1150,9 +1132,7 @@ class MultiStageRetriever:
 
         Args:
             query_analysis: Analyzed query with embedding
-            tenant_id: Tenant identifier
-            user_id: User ID for ACL filtering
-            user_role_ids: Role IDs for ACL
+            user_roles: Roles for role-based ACL
             limit: Maximum results
             content_types: Filter by content types
 
@@ -1179,12 +1159,10 @@ class MultiStageRetriever:
 
             query_vector = query_embedding_result.vectors[0]
 
-            # Search visual content collection
+            # Search visual content collection (role-based ACL)
             visual_results = await weaviate_service.search_visual_content(
-                tenant_id=tenant_id,
                 query_vector=query_vector,
-                user_id=user_id,
-                user_role_ids=user_role_ids,
+                user_roles=user_roles,
                 content_types=content_types,
                 limit=limit,
                 certainty=0.65,  # Lower threshold for cross-modal search
@@ -1199,10 +1177,8 @@ class MultiStageRetriever:
     async def retrieve_with_cross_modal_rrf(
         self,
         query_analysis: QueryAnalysis,
-        tenant_id: str,
         user_id: Optional[str] = None,
-        user_role_ids: Optional[List[str]] = None,
-        is_admin: bool = False,
+        user_roles: Optional[List[str]] = None,
         collection_name: Optional[str] = None,
         top_k: int = 10,
         visual_top_k: int = 3,
@@ -1218,10 +1194,8 @@ class MultiStageRetriever:
 
         Args:
             query_analysis: Analyzed query
-            tenant_id: Tenant identifier
-            user_id: User ID for ACL
-            user_role_ids: Role IDs for ACL
-            is_admin: Admin bypass flag
+            user_id: User ID (optional)
+            user_roles: Roles for role-based ACL
             collection_name: Optional collection name
             top_k: Total results to return (text + visual combined)
             visual_top_k: Maximum visual results before RRF
@@ -1235,13 +1209,13 @@ class MultiStageRetriever:
         """
         await self.initialize()
 
+        user_roles = list(user_roles or [])
+
         # Get text results
         text_docs, selection_metadata = await self.retrieve(
             query_analysis=query_analysis,
-            tenant_id=tenant_id,
             user_id=user_id,
-            user_role_ids=user_role_ids,
-            is_admin=is_admin,
+            user_roles=user_roles,
             collection_name=collection_name,
             top_k=top_k * 2,  # Get more candidates for RRF
         )
@@ -1251,9 +1225,7 @@ class MultiStageRetriever:
         if settings.multimodal_embedding_enabled:
             visual_results = await self._search_visual_content(
                 query_analysis=query_analysis,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                user_role_ids=user_role_ids,
+                user_roles=user_roles,
                 limit=visual_top_k * 2,
             )
 
@@ -1382,7 +1354,7 @@ class MultiStageRetriever:
     async def fetch_documents_by_ids(
         self,
         doc_ids: List[str],
-        tenant_id: str,
+        user_roles: Optional[List[str]] = None,
         scores: Optional[List[float]] = None,
     ) -> List[RetrievedDocument]:
         """
@@ -1391,9 +1363,13 @@ class MultiStageRetriever:
         This is much faster than a full vector search when we already know
         which documents we want. Used when retrieval cache returns doc IDs.
 
+        Note: ACL is enforced at cache-write time (only user-accessible docs
+        are ever stored in the retrieval cache), so ID-based lookup does not
+        re-check `roles` — `user_roles` is accepted for symmetry / future use.
+
         Args:
             doc_ids: List of document/chunk UUIDs to fetch
-            tenant_id: Tenant identifier
+            user_roles: Caller's roles (reserved for future re-validation)
             scores: Optional pre-computed scores (from cache)
 
         Returns:
@@ -1405,11 +1381,9 @@ class MultiStageRetriever:
         await self.initialize()
 
         try:
-            collection_name = _get_tenant_collection_name(tenant_id)
-
             # Fetch documents from Weaviate by UUID
             docs = await weaviate_service.fetch_objects_by_ids(
-                collection_name=collection_name,
+                collection_name=DOCUMENTS_COLLECTION,
                 object_ids=doc_ids,
             )
 
@@ -1428,7 +1402,6 @@ class MultiStageRetriever:
                     content=doc.get("content", ""),
                     score=score,
                     document_type=doc.get("document_type"),
-                    tenant_id=doc.get("tenant_id", tenant_id),
                     metadata={
                         "chunk_index": doc.get("chunk_index", 0),
                         "total_chunks": doc.get("total_chunks", 1),

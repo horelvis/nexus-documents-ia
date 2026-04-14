@@ -10,6 +10,9 @@ Key benefits:
 - Reduces LLM API costs by ~50%
 
 Reference: "I Rebuilt My RAG Pipeline 11 Times" - Semantic Caching section
+
+Note: On-premise single-tenant deployment. Cache keys are namespaced per user
+(for ACL-aware caching) but not per tenant — there is only one tenant.
 """
 
 import os
@@ -70,20 +73,20 @@ class SemanticCache:
         RAG_CACHE_ENABLED: Enable/disable caching (default: true)
         RAG_CACHE_SIMILARITY_THRESHOLD: Cosine similarity threshold (default: 0.92)
         RAG_CACHE_TTL_SECONDS: Cache TTL in seconds (default: 3600)
-        RAG_CACHE_MAX_ENTRIES: Maximum cache entries per tenant (default: 1000)
+        RAG_CACHE_MAX_ENTRIES: Maximum cache entries per user (default: 1000)
     """
 
     def __init__(
         self,
         similarity_threshold: float = 0.92,
         ttl_seconds: int = 3600,
-        max_entries_per_tenant: int = 1000,
+        max_entries_per_user: int = 1000,
     ):
         self._redis: Optional[redis.Redis] = None
         self._initialized = False
         self.similarity_threshold = similarity_threshold
         self.ttl_seconds = ttl_seconds
-        self.max_entries_per_tenant = max_entries_per_tenant
+        self.max_entries_per_user = max_entries_per_user
         self._stats = CacheStats()
         self._tei_url = settings.tei_url
 
@@ -112,7 +115,7 @@ class SemanticCache:
             await self._redis.close()
             self._initialized = False
 
-    def _cache_key(self, tenant_id: str, user_id: str, scope: str, query_hash: str) -> str:
+    def _cache_key(self, user_id: str, scope: str, query_hash: str) -> str:
         """
         Generate cache key for a query with user isolation.
 
@@ -120,15 +123,15 @@ class SemanticCache:
         Each user has their own cache namespace to ensure ACL-filtered
         results are not shared between users with different permissions.
         """
-        return f"rag:cache:{tenant_id}:{user_id}:{scope}:{query_hash}"
+        return f"rag:cache:{user_id}:{scope}:{query_hash}"
 
-    def _index_key(self, tenant_id: str, user_id: str, scope: str) -> str:
+    def _index_key(self, user_id: str, scope: str) -> str:
         """
         Key for user's cache index (list of all cached query hashes).
 
         SECURITY: Isolated per user to prevent enumeration of other users' queries.
         """
-        return f"rag:cache:index:{tenant_id}:{user_id}:{scope}"
+        return f"rag:cache:index:{user_id}:{scope}"
 
     def _query_hash(self, query: str) -> str:
         """Generate deterministic hash for a query"""
@@ -138,7 +141,6 @@ class SemanticCache:
         self,
         query: str,
         query_embedding: List[float],
-        tenant_id: str,
         user_id: Optional[str] = None,
         scope: Optional[str] = None,
     ) -> Optional[CachedResponse]:
@@ -148,8 +150,8 @@ class SemanticCache:
         Args:
             query: The user's query
             query_embedding: Pre-computed embedding for the query
-            tenant_id: Tenant identifier for isolation
             user_id: User identifier for ACL-aware caching (REQUIRED for security)
+            scope: Optional scope label (e.g. route / pipeline variant)
 
         Returns:
             CachedResponse if a similar query is found, None otherwise
@@ -169,15 +171,15 @@ class SemanticCache:
 
         try:
             scope_value = scope or "default"
-            # Get all cached entries for this user within tenant
-            index_key = self._index_key(tenant_id, user_id, scope_value)
+            # Get all cached entries for this user
+            index_key = self._index_key(user_id, scope_value)
             cached_hashes = await self._redis.lrange(index_key, 0, -1)
 
             best_match: Optional[CachedResponse] = None
             best_similarity = 0.0
 
             for query_hash in cached_hashes:
-                cache_key = self._cache_key(tenant_id, user_id, scope_value, query_hash)
+                cache_key = self._cache_key(user_id, scope_value, query_hash)
                 cached_data = await self._redis.hgetall(cache_key)
 
                 if not cached_data:
@@ -234,7 +236,6 @@ class SemanticCache:
         self,
         query: str,
         query_embedding: List[float],
-        tenant_id: str,
         user_id: Optional[str],
         answer: str,
         sources: List[Dict[str, Any]],
@@ -249,13 +250,13 @@ class SemanticCache:
         Args:
             query: The original query
             query_embedding: Embedding for the query
-            tenant_id: Tenant identifier
             user_id: User identifier for ACL-aware caching (REQUIRED for security)
             answer: Generated answer
             sources: Source documents used
             confidence_score: Answer confidence
             query_analysis: Query analysis metadata
             context_info: Context assembly metadata
+            scope: Optional scope label
 
         Returns:
             True if cached successfully, False otherwise
@@ -274,8 +275,8 @@ class SemanticCache:
         try:
             scope_value = scope or "default"
             query_hash = self._query_hash(query)
-            cache_key = self._cache_key(tenant_id, user_id, scope_value, query_hash)
-            index_key = self._index_key(tenant_id, user_id, scope_value)
+            cache_key = self._cache_key(user_id, scope_value, query_hash)
+            index_key = self._index_key(user_id, scope_value)
 
             # Prepare cache entry
             cache_data = {
@@ -300,17 +301,17 @@ class SemanticCache:
 
             # Enforce max entries limit per user (FIFO eviction)
             index_len = await self._redis.llen(index_key)
-            if index_len > self.max_entries_per_tenant:
+            if index_len > self.max_entries_per_user:
                 # Remove oldest entries
                 to_remove = await self._redis.lrange(
                     index_key,
-                    self.max_entries_per_tenant,
+                    self.max_entries_per_user,
                     -1
                 )
                 for old_hash in to_remove:
-                    old_key = self._cache_key(tenant_id, user_id, scope_value, old_hash)
+                    old_key = self._cache_key(user_id, scope_value, old_hash)
                     await self._redis.delete(old_key)
-                await self._redis.ltrim(index_key, 0, self.max_entries_per_tenant - 1)
+                await self._redis.ltrim(index_key, 0, self.max_entries_per_user - 1)
 
             logger.debug(f"Cached response for query: '{query[:50]}...'")
             return True
@@ -321,7 +322,6 @@ class SemanticCache:
 
     async def invalidate(
         self,
-        tenant_id: str,
         user_id: Optional[str] = None,
         query: Optional[str] = None,
         scope: Optional[str] = None,
@@ -330,7 +330,6 @@ class SemanticCache:
         Invalidate cache entries.
 
         Args:
-            tenant_id: Tenant identifier
             user_id: User identifier (required for user-specific invalidation)
             query: Optional specific query to invalidate (None = all for user)
             scope: Optional scope filter
@@ -339,8 +338,8 @@ class SemanticCache:
             Number of entries invalidated
 
         Note: If user_id is None, this is a no-op for security. To invalidate
-        all users' cache (e.g., when a document is updated), you need to
-        invalidate per-user or implement a document-based invalidation strategy.
+        all users' cache (e.g., when a document is updated), invalidate per-user
+        or use `invalidate_by_document` for targeted document-based invalidation.
         """
         if not self._initialized or not self._redis:
             return 0
@@ -356,24 +355,24 @@ class SemanticCache:
             if query:
                 # Invalidate specific query for user
                 query_hash = self._query_hash(query)
-                cache_key = self._cache_key(tenant_id, user_id, scope_value, query_hash)
-                index_key = self._index_key(tenant_id, user_id, scope_value)
+                cache_key = self._cache_key(user_id, scope_value, query_hash)
+                index_key = self._index_key(user_id, scope_value)
 
                 deleted = await self._redis.delete(cache_key)
                 await self._redis.lrem(index_key, 0, query_hash)
                 return deleted
 
-            # Invalidate all entries for user within tenant
-            index_key = self._index_key(tenant_id, user_id, scope_value)
+            # Invalidate all entries for user
+            index_key = self._index_key(user_id, scope_value)
             cached_hashes = await self._redis.lrange(index_key, 0, -1)
 
             count = 0
             for query_hash in cached_hashes:
-                cache_key = self._cache_key(tenant_id, user_id, scope_value, query_hash)
+                cache_key = self._cache_key(user_id, scope_value, query_hash)
                 count += await self._redis.delete(cache_key)
 
             await self._redis.delete(index_key)
-            logger.info(f"Invalidated {count} cache entries for user {user_id} in tenant {tenant_id}")
+            logger.info(f"Invalidated {count} cache entries for user {user_id}")
             return count
 
         except Exception as e:
@@ -382,7 +381,6 @@ class SemanticCache:
 
     async def invalidate_by_document(
         self,
-        tenant_id: str,
         document_id: str,
     ) -> int:
         """
@@ -392,11 +390,10 @@ class SemanticCache:
         response that used that document as a source. This prevents stale
         cached responses from being returned to users who no longer have access.
 
-        This method scans all cache entries for the tenant and removes those
-        whose sources contain the specified document_id.
+        This method scans all cache entries and removes those whose sources
+        contain the specified document_id.
 
         Args:
-            tenant_id: Tenant identifier
             document_id: Document ID whose ACL changed
 
         Returns:
@@ -409,9 +406,9 @@ class SemanticCache:
             return 0
 
         try:
-            # Find all cache keys for this tenant (across all users and scopes)
-            # Pattern: rag:cache:{tenant_id}:*
-            pattern = f"rag:cache:{tenant_id}:*"
+            # Find all cache keys (across all users and scopes)
+            # Pattern: rag:cache:{user_id}:{scope}:{hash}
+            pattern = "rag:cache:*"
             cursor = 0
             invalidated = 0
 
@@ -443,8 +440,7 @@ class SemanticCache:
 
             if invalidated > 0:
                 logger.info(
-                    f"🔄 Invalidated {invalidated} cache entries referencing document {document_id} "
-                    f"in tenant {tenant_id}"
+                    f"🔄 Invalidated {invalidated} cache entries referencing document {document_id}"
                 )
 
             return invalidated
@@ -453,8 +449,8 @@ class SemanticCache:
             logger.warning(f"Cache invalidation error: {e}")
             return 0
 
-    async def get_stats(self, tenant_id: Optional[str] = None) -> CacheStats:
-        """Get cache statistics"""
+    async def get_stats(self, user_id: Optional[str] = None) -> CacheStats:
+        """Get cache statistics. If user_id is given, also reports that user's cache size."""
         stats = CacheStats(
             hits=self._stats.hits,
             misses=self._stats.misses,
@@ -462,9 +458,9 @@ class SemanticCache:
             avg_similarity_on_hit=self._stats.avg_similarity_on_hit,
         )
 
-        if self._initialized and self._redis and tenant_id:
+        if self._initialized and self._redis and user_id:
             try:
-                index_key = self._index_key(tenant_id)
+                index_key = self._index_key(user_id, "default")
                 stats.cache_size = await self._redis.llen(index_key)
             except Exception:
                 pass
@@ -510,5 +506,5 @@ class SemanticCache:
 semantic_cache = SemanticCache(
     similarity_threshold=float(os.environ.get("RAG_CACHE_SIMILARITY_THRESHOLD", "0.92")),
     ttl_seconds=int(os.environ.get("RAG_CACHE_TTL_SECONDS", "3600")),
-    max_entries_per_tenant=int(os.environ.get("RAG_CACHE_MAX_ENTRIES", "1000")),
+    max_entries_per_user=int(os.environ.get("RAG_CACHE_MAX_ENTRIES", "1000")),
 )

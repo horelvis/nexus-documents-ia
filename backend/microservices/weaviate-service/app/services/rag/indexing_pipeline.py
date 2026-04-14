@@ -24,7 +24,6 @@ Usage:
         file_bytes=pdf_content,
         filename="contract.pdf",
         metadata={"title": "Contract"},
-        tenant_id="tenant-abc"
     )
 
     # Or process from already-extracted text
@@ -32,7 +31,6 @@ Usage:
         document_id="doc-123",
         text=extracted_text,
         metadata={"title": "Contract"},
-        tenant_id="tenant-abc"
     )
 
     # Process with multimodal (visual) content
@@ -41,9 +39,13 @@ Usage:
         file_bytes=pdf_content,
         filename="report.pdf",
         metadata={"title": "Annual Report"},
-        tenant_id="tenant-abc",
         extract_visuals=True,  # Enable multimodal extraction
     )
+
+Note: on-premise single-tenant deployment. The legacy `tenant_id` kwarg is
+accepted-and-ignored on public entrypoints for compatibility with out-of-scope
+callers (api/boe_legislation.py, backend/scripts/...) that will be cleaned up
+in Wave 6.
 """
 
 import logging
@@ -123,6 +125,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Single-tenant placeholder for downstream out-of-scope callees
+# (intelligence_client, knowledge_extractor, hierarchical_indexer,
+# contextual_retrieval, event_publisher) whose signatures still accept a
+# tenant_id. They will be cleaned up in Wave 4/6.
+_SINGLE_TENANT = "default"
+
 
 @dataclass
 class VisualEmbeddingItem:
@@ -140,7 +148,8 @@ class IndexingResult:
     """Result of document indexing pipeline"""
     # Document info
     document_id: str
-    tenant_id: str
+    # Legacy field retained for callers still reading it; on-premise = "default".
+    tenant_id: str = _SINGLE_TENANT
 
     # Extraction results
     extracted_text: str = ""
@@ -263,11 +272,11 @@ class IndexingPipeline:
         file_bytes: bytes,
         filename: str,
         metadata: Dict[str, Any],
-        tenant_id: str,
         user_id: Optional[str] = None,
         extraction_strategy: str = "auto",
         extract_visuals: Optional[bool] = None,
         indexing_strategy: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored (Wave 6 callers)
     ) -> IndexingResult:
         """
         Process a document file through the complete pipeline.
@@ -277,7 +286,6 @@ class IndexingPipeline:
             file_bytes: Raw file content (PDF, DOCX, etc.)
             filename: Original filename
             metadata: Document metadata
-            tenant_id: Tenant identifier
             user_id: Optional user identifier
             extraction_strategy: Text extraction strategy (auto, fast, hi_res)
             extract_visuals: If True, extract visual content for multimodal embedding.
@@ -305,7 +313,7 @@ class IndexingPipeline:
         extract_result = await self.extractor.extract_from_bytes(
             file_bytes=file_bytes,
             filename=filename,
-            tenant_id=tenant_id,
+            tenant_id=_SINGLE_TENANT,  # Wave-4 intelligence_client still wants tenant_id
             user_id=user_id,
             strategy=extraction_strategy,
         )
@@ -316,7 +324,6 @@ class IndexingPipeline:
             logger.error(f"[{document_id}] Text extraction failed: {extract_result.error}")
             return IndexingResult(
                 document_id=document_id,
-                tenant_id=tenant_id,
                 extraction_time_ms=extraction_time,
                 total_time_ms=(time.time() - start_time) * 1000,
                 success=False,
@@ -406,7 +413,7 @@ class IndexingPipeline:
                         use_hybrid=settings.enhanced_ocr_use_hybrid or ocr_config.get("use_hybrid", False),
                         preprocess=ocr_config.get("preprocess", True),
                         dpi=ocr_config.get("dpi", 300),
-                        tenant_id=tenant_id,
+                        tenant_id=_SINGLE_TENANT,  # Wave-4 intelligence_client interop
                     )
 
                     ocr_time = (time.time() - ocr_start) * 1000
@@ -468,7 +475,6 @@ class IndexingPipeline:
             logger.error(f"[{document_id}] No text extracted from {filename} (Tika + OCR both failed)")
             return IndexingResult(
                 document_id=document_id,
-                tenant_id=tenant_id,
                 extraction_time_ms=extraction_time + ocr_time,
                 total_time_ms=(time.time() - start_time) * 1000,
                 success=False,
@@ -497,7 +503,6 @@ class IndexingPipeline:
             document_id=document_id,
             text=text_to_use,  # Use OCR text if it was better, otherwise Tika
             metadata=enriched_metadata,
-            tenant_id=tenant_id,
             errors=errors,
             warnings=warnings,
             indexing_strategy=indexing_strategy,
@@ -521,7 +526,6 @@ class IndexingPipeline:
             visual_result = await self._extract_visuals(
                 pdf_bytes=file_bytes,
                 document_id=document_id,
-                tenant_id=tenant_id,
             )
 
             if visual_result:
@@ -535,7 +539,7 @@ class IndexingPipeline:
         result.total_time_ms = (time.time() - start_time) * 1000
 
         # Emit document.indexed event to the reactive event bus
-        await self._emit_document_indexed(document_id, tenant_id, metadata, result)
+        await self._emit_document_indexed(document_id, metadata, result)
 
         return result
 
@@ -544,9 +548,9 @@ class IndexingPipeline:
         document_id: str,
         text: str,
         metadata: Dict[str, Any],
-        tenant_id: str,
         collection_name: Optional[str] = None,
         indexing_strategy: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored (Wave 6 callers)
     ) -> IndexingResult:
         """
         Process already-extracted text through the pipeline.
@@ -557,9 +561,8 @@ class IndexingPipeline:
             document_id: Unique document identifier
             text: Already-extracted document text
             metadata: Document metadata
-            tenant_id: Tenant identifier
             collection_name: Optional Weaviate collection override (e.g., "PublicKnowledge"
-                for BOE legislation). If None, uses tenant default collection.
+                for BOE legislation). If None, uses DOCUMENTS_COLLECTION.
             indexing_strategy: Optional strategy for chunking:
                 - chunking_type: semantic, legal_sections, markdown_headers, paragraph
                 - chunking_config: {target_chunk_size, overlap, ...}
@@ -577,7 +580,6 @@ class IndexingPipeline:
             document_id=document_id,
             text=text,
             metadata=metadata,
-            tenant_id=tenant_id,
             errors=[],
             warnings=[],
             indexing_strategy=indexing_strategy,
@@ -588,7 +590,7 @@ class IndexingPipeline:
         result.total_time_ms = (time.time() - start_time) * 1000
 
         # Emit document.indexed event to the reactive event bus
-        await self._emit_document_indexed(document_id, tenant_id, metadata, result)
+        await self._emit_document_indexed(document_id, metadata, result)
 
         return result
 
@@ -597,7 +599,6 @@ class IndexingPipeline:
         document_id: str,
         text: str,
         metadata: Dict[str, Any],
-        tenant_id: str,
         errors: List[str],
         warnings: List[str],
         indexing_strategy: Optional[Dict[str, Any]] = None,
@@ -629,7 +630,6 @@ class IndexingPipeline:
 
             return IndexingResult(
                 document_id=document_id,
-                tenant_id=tenant_id,
                 analysis_time_ms=(time.time() - analysis_start) * 1000,
                 success=False,
                 errors=errors,
@@ -679,7 +679,6 @@ class IndexingPipeline:
             chunk_metadata = {
                 **metadata,
                 "document_id": document_id,
-                "tenant_id": tenant_id,
                 "quality": analysis.quality.value,
                 "confidence": analysis.confidence,
             }
@@ -716,7 +715,6 @@ class IndexingPipeline:
 
             return IndexingResult(
                 document_id=document_id,
-                tenant_id=tenant_id,
                 analysis=analysis,
                 analysis_time_ms=analysis_time,
                 chunking_time_ms=(time.time() - chunking_start) * 1000,
@@ -733,7 +731,7 @@ class IndexingPipeline:
                 pc_start = time.time()
                 children = parent_child_chunker.chunk_with_parents(
                     text=text_for_chunking,
-                    metadata={**metadata, "document_id": document_id, "tenant_id": tenant_id},
+                    metadata={**metadata, "document_id": document_id},
                     doc_type=str(doc_type) if doc_type else "general",
                 )
                 pc_time = (time.time() - pc_start) * 1000
@@ -780,7 +778,7 @@ class IndexingPipeline:
                     document_id=document_id,
                     text=text_for_chunking,
                     metadata=metadata,
-                    tenant_id=tenant_id,
+                    tenant_id=_SINGLE_TENANT,  # Wave-4 contextual_retrieval still wants it
                     use_llm=settings.contextual_retrieval_use_llm,
                 )
 
@@ -888,7 +886,7 @@ class IndexingPipeline:
 
                 knowledge_result = await self.knowledge_extractor.extract_from_document(
                     document_id=document_id,
-                    tenant_id=tenant_id,
+                    tenant_id=_SINGLE_TENANT,  # Wave-4 knowledge_extractor still wants it
                     extracted_entities=extracted_entities,  # Use entities from LangExtract
                     content=text_for_chunking,
                     document_type=metadata.get("document_type", "general"),
@@ -924,7 +922,7 @@ class IndexingPipeline:
                     title=metadata.get("title", "Untitled"),
                     full_text=text_for_chunking,
                     document_type=metadata.get("document_type", "general"),
-                    tenant_id=tenant_id,
+                    tenant_id=_SINGLE_TENANT,  # Wave-4 hierarchical_indexer still wants it
                     total_chunks=len(chunks),
                     metadata=metadata,
                 )
@@ -948,7 +946,6 @@ class IndexingPipeline:
 
         return IndexingResult(
             document_id=document_id,
-            tenant_id=tenant_id,
             analysis=analysis,
             chunks=chunks,
             contextual_domain=contextual_domain,
@@ -1087,9 +1084,9 @@ class IndexingPipeline:
         file_url: str,
         filename: str,
         metadata: Dict[str, Any],
-        tenant_id: str,
         user_id: Optional[str] = None,
         extraction_strategy: str = "auto",
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> IndexingResult:
         """
         Download file from URL and process through pipeline.
@@ -1099,7 +1096,6 @@ class IndexingPipeline:
             file_url: URL to download file from
             filename: Original filename
             metadata: Document metadata
-            tenant_id: Tenant identifier
             user_id: Optional user identifier
             extraction_strategy: Extraction strategy
 
@@ -1115,7 +1111,7 @@ class IndexingPipeline:
         extract_result = await self.extractor.extract_from_url(
             file_url=file_url,
             filename=filename,
-            tenant_id=tenant_id,
+            tenant_id=_SINGLE_TENANT,  # Wave-4 intelligence_client interop
             user_id=user_id,
             strategy=extraction_strategy,
         )
@@ -1125,7 +1121,6 @@ class IndexingPipeline:
         if not extract_result.success:
             return IndexingResult(
                 document_id=document_id,
-                tenant_id=tenant_id,
                 extraction_time_ms=extraction_time,
                 total_time_ms=(time.time() - start_time) * 1000,
                 success=False,
@@ -1144,7 +1139,6 @@ class IndexingPipeline:
             document_id=document_id,
             text=extract_result.text,
             metadata=enriched_metadata,
-            tenant_id=tenant_id,
             errors=[],
             warnings=[],
         )
@@ -1160,15 +1154,14 @@ class IndexingPipeline:
     async def process_batch_files(
         self,
         files: List[Dict[str, Any]],
-        tenant_id: str,
         user_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> List[IndexingResult]:
         """
         Process multiple files in batch.
 
         Args:
             files: List of dicts with document_id, file_bytes, filename, metadata
-            tenant_id: Tenant identifier
             user_id: Optional user identifier
 
         Returns:
@@ -1182,7 +1175,6 @@ class IndexingPipeline:
                 file_bytes=file_info["file_bytes"],
                 filename=file_info["filename"],
                 metadata=file_info.get("metadata", {}),
-                tenant_id=tenant_id,
                 user_id=user_id,
             )
             results.append(result)
@@ -1204,8 +1196,8 @@ class IndexingPipeline:
         pdf_bytes: bytes,
         tika_text: Optional[str],
         metadata: Dict[str, Any],
-        tenant_id: str,
         alignment_service: Optional[TextAlignmentService] = None,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> "PositionedIndexingResult":
         """
         Procesa un PDF creando chunks con información de posición.
@@ -1221,7 +1213,6 @@ class IndexingPipeline:
             pdf_bytes: PDF en bytes
             tika_text: Texto extraído por Tika (opcional, se extrae con PyMuPDF si no se provee)
             metadata: Metadatos del documento
-            tenant_id: ID del tenant
             alignment_service: Servicio de alineamiento (opcional)
 
         Returns:
@@ -1250,7 +1241,6 @@ class IndexingPipeline:
                 logger.warning(f"[{document_id}] No se alinearon bloques")
                 return PositionedIndexingResult(
                     document_id=document_id,
-                    tenant_id=tenant_id,
                     alignment_time_ms=alignment_time,
                     total_time_ms=(time.time() - start_time) * 1000,
                     success=False,
@@ -1268,7 +1258,6 @@ class IndexingPipeline:
             logger.error(f"[{document_id}] Error en alineamiento: {e}")
             return PositionedIndexingResult(
                 document_id=document_id,
-                tenant_id=tenant_id,
                 alignment_time_ms=(time.time() - alignment_start) * 1000,
                 total_time_ms=(time.time() - start_time) * 1000,
                 success=False,
@@ -1302,7 +1291,6 @@ class IndexingPipeline:
             chunk_metadata = {
                 **metadata,
                 "document_id": document_id,
-                "tenant_id": tenant_id,
                 "quality": analysis.quality.value if analysis else "unknown",
                 "alignment_quality": alignment_result.alignment_quality,
             }
@@ -1321,7 +1309,6 @@ class IndexingPipeline:
             logger.error(f"[{document_id}] Error en chunking: {e}")
             return PositionedIndexingResult(
                 document_id=document_id,
-                tenant_id=tenant_id,
                 alignment_result=alignment_result,
                 analysis=analysis,
                 alignment_time_ms=alignment_time,
@@ -1335,7 +1322,6 @@ class IndexingPipeline:
 
         return PositionedIndexingResult(
             document_id=document_id,
-            tenant_id=tenant_id,
             full_text=alignment_result.full_text,
             alignment_result=alignment_result,
             analysis=analysis,
@@ -1352,7 +1338,6 @@ class IndexingPipeline:
     async def _emit_document_indexed(
         self,
         document_id: str,
-        tenant_id: str,
         metadata: Dict[str, Any],
         result: "IndexingResult",
     ):
@@ -1361,7 +1346,7 @@ class IndexingPipeline:
             from app.services.event_publisher import publish_event
             await publish_event(
                 event_type="document.indexed",
-                tenant_id=tenant_id,
+                tenant_id=_SINGLE_TENANT,  # Wave-4 event_publisher still wants it
                 payload={
                     "doc_id": document_id,
                     "collection": metadata.get("_collection_name", ""),
@@ -1384,7 +1369,6 @@ class IndexingPipeline:
         self,
         pdf_bytes: bytes,
         document_id: str,
-        tenant_id: str,
     ) -> Optional["VisualExtractionPipelineResult"]:
         """
         Extract visual content from PDF and generate embeddings.
@@ -1397,7 +1381,6 @@ class IndexingPipeline:
         Args:
             pdf_bytes: PDF file content
             document_id: Document identifier
-            tenant_id: Tenant identifier
 
         Returns:
             VisualExtractionPipelineResult or None if extraction fails
@@ -1513,7 +1496,8 @@ class PositionedIndexingResult:
     - Coordenadas bbox para PDF
     """
     document_id: str
-    tenant_id: str
+    # Legacy field retained for compatibility; on-premise = "default".
+    tenant_id: str = _SINGLE_TENANT
 
     # Texto completo
     full_text: str = ""

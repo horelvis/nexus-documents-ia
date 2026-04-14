@@ -16,7 +16,7 @@ Key improvements:
 - Cross-encoder reranking for precision
 
 This replaces the Elysia framework with a custom implementation
-optimized for local LLMs and multi-tenant document management.
+optimized for local LLMs and on-premise document management.
 """
 
 import os
@@ -47,6 +47,11 @@ from ...core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Single-tenant placeholder used when calling legacy cache helpers that still
+# accept a `tenant_id` argument (retrieval_cache, context_cache, version_manager
+# — cleaned up in Wave 4). Redis keys keep a fixed namespace segment.
+_SINGLE_TENANT = "default"
+
 # Configuration
 CACHE_ENABLED = os.environ.get("RAG_CACHE_ENABLED", "true").lower() == "true"
 RETRIEVAL_CACHE_ENABLED = os.environ.get("RETRIEVAL_CACHE_ENABLED", "true").lower() == "true"
@@ -66,7 +71,8 @@ class RAGPipeline:
         await pipeline.initialize()
         response = await pipeline.process_query(
             query="¿Qué dice el contrato sobre la confidencialidad?",
-            tenant_id="tenant_123"
+            user_id="a060f046-...",
+            user_roles=["LEGAL"],
         )
     """
 
@@ -151,11 +157,13 @@ class RAGPipeline:
                     self.context_cache.invalidate_by_documents
                 )
             if self._cache_enabled:
-                # Wrapper to adapt semantic_cache's single-doc method to multi-doc callback
+                # Wrapper to adapt semantic_cache's single-doc method to multi-doc callback.
+                # Signature kept compatible with Wave-4 version_manager (still passes a
+                # tenant-like key, ignored by semantic_cache).
                 async def semantic_cache_invalidator(tenant_id: str, doc_ids: List[str]) -> int:
                     total = 0
                     for doc_id in doc_ids:
-                        total += await self.cache.invalidate_by_document(tenant_id, doc_id)
+                        total += await self.cache.invalidate_by_document(doc_id)
                     return total
                 self.version_manager.register_invalidation_callback(semantic_cache_invalidator)
             logger.info("✅ Version manager initialized with invalidation callbacks")
@@ -168,10 +176,8 @@ class RAGPipeline:
     async def process_query(
         self,
         query: str,
-        tenant_id: str,
         user_id: Optional[str] = None,
-        user_role_ids: Optional[List[str]] = None,
-        is_admin: bool = False,
+        user_roles: Optional[List[str]] = None,
         collection_name: Optional[str] = None,
         top_k: int = 10,
         validate_claims: bool = True,
@@ -185,10 +191,8 @@ class RAGPipeline:
 
         Args:
             query: User's query
-            tenant_id: Tenant identifier for multi-tenant isolation
             user_id: User identifier for ACL filtering (REQUIRED for document access control)
-            user_role_ids: List of role IDs the user belongs to (for role-based ACL)
-            is_admin: Whether user is admin (bypasses ACL checks)
+            user_roles: KeyCloak roles the user holds (for role-based ACL filtering)
             collection_name: Optional specific collection to search
             top_k: Number of documents to retrieve
             validate_claims: Whether to validate generated claims
@@ -200,19 +204,19 @@ class RAGPipeline:
         Returns:
             RAGResponse with answer, sources, and metadata
 
-        SECURITY: user_id and user_role_ids are used for:
+        SECURITY: user_id and user_roles are used for:
         1. ACL filtering in document retrieval (only returns accessible documents)
         2. User-isolated semantic caching (prevents cross-user data exposure)
         """
         await self.initialize()
 
         start_time = time.time()
-        logger.info(f"🔄 Processing query: '{query[:50]}...' for tenant {tenant_id}")
+        logger.info(f"🔄 Processing query: '{query[:50]}...' for user {user_id}")
 
         # Initialize monitoring metrics
         metrics = None
         if self._monitoring_enabled:
-            metrics = self.monitor.start_query(tenant_id, user_id, query)
+            metrics = self.monitor.start_query(_SINGLE_TENANT, user_id, query)
 
         try:
             # === Layer 2: Query Intelligence ===
@@ -247,7 +251,6 @@ class RAGPipeline:
                     cached = await self.cache.get(
                         query=query,
                         query_embedding=query_embedding,
-                        tenant_id=tenant_id,
                         user_id=user_id,  # SECURITY: User-isolated cache
                         scope=cache_scope,
                     )
@@ -272,7 +275,6 @@ class RAGPipeline:
                                 content=s.get("content", ""),
                                 score=s.get("score", 0.0),
                                 document_type=s.get("document_type"),
-                                tenant_id=tenant_id,
                             )
                             for s in cached.sources
                         ]
@@ -299,8 +301,8 @@ class RAGPipeline:
             retrieval_start = time.time()
             logger.info("  Layer 3: Hybrid Retrieval + RRF + Public Knowledge + Soft Selection")
 
-            # Get current versions for cache validation
-            versions = await self.version_manager.get_versions(tenant_id)
+            # Get current versions for cache validation (Wave-4 signature still wants tenant_id)
+            versions = await self.version_manager.get_versions(_SINGLE_TENANT)
             current_index_version = versions.index_version
 
             # === NEW: Retrieval Cache Check ===
@@ -308,7 +310,7 @@ class RAGPipeline:
             if self._retrieval_cache_enabled and query_embedding and user_id:
                 cached_retrieval = await self.retrieval_cache.get(
                     query_embedding=query_embedding,
-                    tenant_id=tenant_id,
+                    tenant_id=_SINGLE_TENANT,
                     user_id=user_id,
                     collection_name=collection_name,
                     top_k=top_k,
@@ -322,7 +324,7 @@ class RAGPipeline:
                 # Fetch actual documents by IDs (much faster than full search)
                 retrieved_docs = await self.retriever.fetch_documents_by_ids(
                     doc_ids=cached_retrieval.doc_ids,
-                    tenant_id=tenant_id,
+                    user_roles=user_roles or [],
                     scores=cached_retrieval.scores,
                 )
                 selection_metadata = cached_retrieval.metadata
@@ -330,10 +332,8 @@ class RAGPipeline:
                 # Retrieval cache MISS - full search
                 retrieved_docs, selection_metadata = await self.retriever.retrieve(
                     query_analysis=query_analysis,
-                    tenant_id=tenant_id,
-                    user_id=user_id,  # ACL: user identification
-                    user_role_ids=user_role_ids,  # ACL: role-based access
-                    is_admin=is_admin,  # ACL: admin bypass
+                    user_id=user_id,
+                    user_roles=user_roles or [],
                     collection_name=collection_name,
                     top_k=top_k,
                     include_public_knowledge=include_public_knowledge,
@@ -343,7 +343,7 @@ class RAGPipeline:
                 if self._retrieval_cache_enabled and query_embedding and user_id and retrieved_docs:
                     await self.retrieval_cache.set(
                         query_embedding=query_embedding,
-                        tenant_id=tenant_id,
+                        tenant_id=_SINGLE_TENANT,
                         user_id=user_id,
                         doc_ids=[d.id for d in retrieved_docs],
                         scores=[d.score for d in retrieved_docs],
@@ -354,14 +354,14 @@ class RAGPipeline:
                         version=current_index_version,
                     )
 
-            # Log public vs tenant document count
-            public_count = sum(1 for d in retrieved_docs if d.tenant_id == "public")
-            tenant_count = len(retrieved_docs) - public_count
+            # Log public vs local document count (public chunks still tagged via source field)
+            public_count = sum(1 for d in retrieved_docs if getattr(d, "source", None) == "public")
+            local_count = len(retrieved_docs) - public_count
             soft_selection_info = ""
             if selection_metadata and selection_metadata.get("soft_selection_enabled"):
                 soft_selection_info = f", diversity={selection_metadata.get('diversity_score', 0):.2f}, coverage={selection_metadata.get('coverage_score', 0):.2f}"
             cache_info = " (from cache)" if cached_retrieval else ""
-            logger.info(f"    Retrieved {len(retrieved_docs)} documents ({tenant_count} tenant, {public_count} public{soft_selection_info}){cache_info}")
+            logger.info(f"    Retrieved {len(retrieved_docs)} documents ({local_count} local, {public_count} public{soft_selection_info}){cache_info}")
 
             if metrics:
                 metrics.retrieval_ms = (time.time() - retrieval_start) * 1000
@@ -394,7 +394,7 @@ class RAGPipeline:
             if self._context_cache_enabled and doc_ids_for_context:
                 cached_context = await self.context_cache.get(
                     doc_ids=doc_ids_for_context,
-                    tenant_id=tenant_id,
+                    tenant_id=_SINGLE_TENANT,
                     chunk_version=chunk_version,
                     index_version=index_version,
                     model_type=model_type,
@@ -428,7 +428,7 @@ class RAGPipeline:
                 if self._context_cache_enabled and assembled_context.formatted_context:
                     await self.context_cache.set(
                         doc_ids=doc_ids_for_context,
-                        tenant_id=tenant_id,
+                        tenant_id=_SINGLE_TENANT,
                         context_string=assembled_context.formatted_context,
                         total_tokens=assembled_context.total_tokens,
                         metadata=assembled_context.to_dict(),
@@ -503,7 +503,6 @@ class RAGPipeline:
                         await self.cache.set(
                             query=query,
                             query_embedding=query_embedding,
-                            tenant_id=tenant_id,
                             user_id=user_id,  # SECURITY: User-isolated cache
                             answer=validated_response.answer,
                             sources=[s.to_dict() for s in assembled_context.documents],
@@ -556,8 +555,8 @@ class RAGPipeline:
     async def process_query_stream(
         self,
         query: str,
-        tenant_id: str,
         user_id: Optional[str] = None,
+        user_roles: Optional[List[str]] = None,
         collection_name: Optional[str] = None,
         top_k: int = 10,
         context: Optional[Dict[str, Any]] = None,
@@ -586,7 +585,8 @@ class RAGPipeline:
             yield {"type": "progress", "content": "Buscando documentos relevantes...", "progress": 30}
             retrieved_docs, selection_metadata = await self.retriever.retrieve(
                 query_analysis=query_analysis,
-                tenant_id=tenant_id,
+                user_id=user_id,
+                user_roles=user_roles or [],
                 collection_name=collection_name,
                 top_k=top_k,
             )
@@ -658,7 +658,6 @@ class RAGPipeline:
         self,
         document_content: str,
         document_id: str,
-        tenant_id: str,
         analysis_type: str = "comprehensive",
     ) -> Dict[str, Any]:
         """
@@ -693,7 +692,6 @@ class RAGPipeline:
             content=document_content,
             score=1.0,
             document_type="analysis_target",
-            tenant_id=tenant_id,
         )
 
         # Analyze query
@@ -800,15 +798,12 @@ class RAGPipeline:
                 "error": str(e),
             }
 
-    def get_monitoring_metrics(
-        self,
-        tenant_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    def get_monitoring_metrics(self) -> Dict[str, Any]:
         """Get detailed monitoring metrics for dashboards"""
         if not self._monitoring_enabled:
             return {"monitoring_enabled": False}
 
-        aggregated = self.monitor.get_aggregated_metrics(tenant_id=tenant_id)
+        aggregated = self.monitor.get_aggregated_metrics()
 
         return {
             "monitoring_enabled": True,
