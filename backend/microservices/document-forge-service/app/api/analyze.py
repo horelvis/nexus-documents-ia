@@ -2,12 +2,14 @@
 
 import logging
 from io import BytesIO
+from typing import List, Optional
 
 from docx import Document
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.clients.storage_client import get_storage_client
 from app.clients.weaviate_client import get_weaviate_client
+from app.core.auth_headers import extract_user_id, extract_user_roles
 from app.core.config import get_settings
 from app.core.security import verify_api_key
 from app.schemas.analyze import AnalyzeResponse
@@ -136,12 +138,13 @@ def _enrich_widget_fields(
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_document(
-    tenant_id: str = Form(...),
     user_id: str = Form(...),
     document_id: str = Form(None),
     user_intent: str = Form("modification"),
     max_fields: int = Form(30),
     file: UploadFile | None = File(None),
+    user_roles: List[str] = Depends(extract_user_roles),
+    header_user_id: Optional[str] = Depends(extract_user_id),
     _api_key: str = Depends(verify_api_key),
 ):
     """Detect variable fields in a document.
@@ -168,7 +171,9 @@ async def analyze_document(
     # Path 2: Fetch by document_id
     elif document_id:
         weaviate = get_weaviate_client()
-        metadata = await weaviate.get_document_metadata(document_id, tenant_id)
+        metadata = await weaviate.get_document_metadata(
+            document_id, user_roles=user_roles, user_id=header_user_id or user_id
+        )
         if not metadata:
             raise HTTPException(status_code=404, detail="Document not found")
 
@@ -179,7 +184,9 @@ async def analyze_document(
         source_title = metadata.get("file_name", metadata.get("title", "document"))
 
         storage = get_storage_client()
-        file_bytes = await storage.download_document(file_path, tenant_id)
+        file_bytes = await storage.download_document(
+            file_path, user_roles=user_roles, user_id=header_user_id or user_id
+        )
         if not file_bytes:
             raise HTTPException(status_code=404, detail="Could not download document")
     else:
@@ -247,7 +254,7 @@ async def analyze_document(
 
     # Create session and store source bytes
     store = get_session_store()
-    session = await store.create_session(tenant_id, user_id)
+    session = await store.create_session(user_id)
     session.source_title = source_title
     session.source_format = source_format
     session.document_type = result.get("document_type", "")

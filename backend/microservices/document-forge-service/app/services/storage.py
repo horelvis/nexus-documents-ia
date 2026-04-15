@@ -2,7 +2,7 @@
 
 import logging
 import os
-from typing import Any
+from typing import Any, List, Optional
 
 from app.clients.storage_client import get_storage_client
 from app.clients.weaviate_client import get_weaviate_client
@@ -18,13 +18,13 @@ class StorageService:
 
     async def persist(
         self,
-        tenant_id: str,
         user_id: str,
         document_title: str,
         docx_bytes: bytes | None = None,
         pdf_bytes: bytes | None = None,
         folder_path: str = "",
         index_in_weaviate: bool = True,
+        user_roles: Optional[List[str]] = None,
     ) -> dict[str, Any]:
         """Upload document(s) to GCS and optionally index in Weaviate.
 
@@ -45,7 +45,8 @@ class StorageService:
                 file_bytes=docx_bytes,
                 file_name=docx_name,
                 folder_path=folder_path,
-                tenant_id=tenant_id,
+                user_roles=user_roles,
+                user_id=user_id,
                 content_type=DOCX_CONTENT_TYPE,
             )
             if upload_result:
@@ -59,7 +60,8 @@ class StorageService:
                 file_bytes=pdf_bytes,
                 file_name=pdf_name,
                 folder_path=folder_path,
-                tenant_id=tenant_id,
+                user_roles=user_roles,
+                user_id=user_id,
                 content_type=PDF_CONTENT_TYPE,
             )
             if upload_result:
@@ -82,7 +84,6 @@ class StorageService:
 
             weaviate = get_weaviate_client()
             index_result = await weaviate.index_document(
-                tenant_id=tenant_id,
                 document_data={
                     "document_id": result.get("document_id", ""),
                     "file_name": index_name,
@@ -91,6 +92,8 @@ class StorageService:
                     "user_id": user_id,
                     "folder_path": folder_path,
                 },
+                user_roles=user_roles,
+                user_id=user_id,
             )
             if index_result:
                 result["weaviate_indexed"] = True

@@ -1,7 +1,7 @@
 """HTTP client for weaviate-service (document metadata + indexing)."""
 
 import logging
-from typing import Any
+from typing import Any, List, Optional
 
 import httpx
 
@@ -18,21 +18,30 @@ class ForgeWeaviateClient:
         self.base_url = settings.weaviate_service_url
         self.api_key = settings.MICROSERVICES_API_KEY
 
-    def _headers(self, tenant_id: str = "") -> dict:
+    def _headers(
+        self,
+        user_roles: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
+    ) -> dict:
         h = {"X-API-Key": self.api_key}
-        if tenant_id:
-            h["X-Tenant-ID"] = tenant_id
+        if user_roles is not None:
+            h["X-User-Roles"] = ",".join(user_roles)
+        if user_id:
+            h["X-User-Id"] = user_id
         return h
 
     async def get_document_metadata(
-        self, document_id: str, tenant_id: str
+        self,
+        document_id: str,
+        user_roles: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
     ) -> dict[str, Any] | None:
         """Get document metadata including file_path from weaviate-service."""
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.get(
                     f"{self.base_url}/weaviate/documents/{document_id}",
-                    headers=self._headers(tenant_id),
+                    headers=self._headers(user_roles, user_id),
                 )
                 if resp.status_code == 200:
                     return resp.json()
@@ -46,8 +55,9 @@ class ForgeWeaviateClient:
 
     async def index_document(
         self,
-        tenant_id: str,
         document_data: dict[str, Any],
+        user_roles: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
     ) -> dict[str, Any] | None:
         """Index a document in Weaviate via the indexing pipeline."""
         try:
@@ -55,7 +65,7 @@ class ForgeWeaviateClient:
                 resp = await client.post(
                     f"{self.base_url}/weaviate/index-from-connector",
                     json=document_data,
-                    headers=self._headers(tenant_id),
+                    headers=self._headers(user_roles, user_id),
                 )
                 if resp.status_code in (200, 201):
                     return resp.json()

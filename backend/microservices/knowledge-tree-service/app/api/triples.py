@@ -9,6 +9,11 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
+from app.core.auth_headers import (
+    EVERYONE_ROLE,
+    extract_user_id,
+    extract_user_roles,
+)
 from app.core.security import verify_api_key
 from app.services.falkordb_client import falkordb_client
 from app.services.triple_query import TripleQuery
@@ -39,10 +44,23 @@ router = APIRouter(
 )
 
 
+def _graph_scope(user_roles: List[str]) -> str:
+    """Resolve the scalar scope token used by the current single-storage model.
+
+    Until the full Node property rename (`user` → `role`) lands, every write
+    uses the EVERYONE sentinel and every read queries that same sentinel. The
+    multi-role ACL filter (`role IN $allowed_roles`) is handled in a later
+    wave; for now we collapse the caller's roles to the EVERYONE bucket so
+    the existing Cypher in the service layer keeps working unchanged.
+    """
+    return EVERYONE_ROLE
+
+
 @router.post("/query", response_model=TripleQueryResponse)
 async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
     """Dispatch to the appropriate TripleQuery method based on which fields are set."""
     tq = TripleQuery(falkordb_client)
+    scope = _graph_scope(request.user_roles)
 
     rows = []
 
@@ -51,14 +69,14 @@ async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
         rows = await tq.by_spo(
             subject_uri=request.subject_uri,
             predicate_uri=request.predicate_uri,
-            user=request.tenant_id,
+            user=scope,
             collection=request.collection,
         )
     elif request.subject_uri:
         # by_subject
         rows = await tq.by_subject(
             subject_uri=request.subject_uri,
-            user=request.tenant_id,
+            user=scope,
             collection=request.collection,
             limit=request.limit,
         )
@@ -67,14 +85,14 @@ async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
         rows = await tq.by_predicate_object(
             predicate_uri=request.predicate_uri,
             object_value=request.object_value,
-            user=request.tenant_id,
+            user=scope,
             object_is_node=request.object_is_node,
         )
     elif request.predicate_uri:
         # by_predicate
         rows = await tq.by_predicate(
             predicate_uri=request.predicate_uri,
-            user=request.tenant_id,
+            user=scope,
             collection=request.collection,
             limit=request.limit,
         )
@@ -82,7 +100,7 @@ async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
         # by_object_node
         rows = await tq.by_object_node(
             object_uri=request.object_value,
-            user=request.tenant_id,
+            user=scope,
             collection=request.collection,
             limit=request.limit,
         )
@@ -90,7 +108,7 @@ async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
         # by_object_value
         rows = await tq.by_object_value(
             value=request.object_value,
-            user=request.tenant_id,
+            user=scope,
             collection=request.collection,
             limit=request.limit,
         )
@@ -101,8 +119,9 @@ async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
 
 @router.get("/top-entities")
 async def top_entities(
-    tenant_id: str = Query(...),
     limit: int = Query(default=10, ge=1, le=50),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
 ) -> List[Dict[str, Any]]:
     """Return entity URIs with highest degree centrality (most connections).
 
@@ -110,6 +129,7 @@ async def top_entities(
     entity is selected.
     """
     tq = TripleQuery(falkordb_client)
+    scope = _graph_scope(user_roles)
     # Find entities with the most Node→Node connections (excluding
     # contradiction edges), prioritizing semantic hubs that produce
     # a rich, connected graph visualization.
@@ -122,7 +142,7 @@ async def top_entities(
         "LIMIT $limit "
         "RETURN uri, degree"
     )
-    params = {"user": tenant_id, "limit": limit}
+    params = {"user": scope, "limit": limit}
     rows = await tq._client.execute_cypher(query, params=params)
     return [{"uri": r["uri"], "degree": r["degree"]} for r in rows]
 
@@ -142,7 +162,7 @@ async def batch_neighbors(request: BatchNeighborsRequest) -> BatchNeighborsRespo
 
     result = await tq.batch_neighbors(
         seed_uris=request.seed_uris,
-        user=request.tenant_id,
+        user=_graph_scope(request.user_roles),
         collection=request.collection,
         max_hops=request.max_hops,
         max_edges=request.max_edges,
@@ -165,7 +185,7 @@ async def trace_sources(request: TraceSourcesRequest) -> TraceSourcesResponse:
 
     sources = await tq.trace_sources(
         edges=request.edges,
-        user=request.tenant_id,
+        user=_graph_scope(request.user_roles),
         collection=request.collection,
     )
     return TraceSourcesResponse(sources=sources)
@@ -175,9 +195,10 @@ async def trace_sources(request: TraceSourcesRequest) -> TraceSourcesResponse:
 async def build_context(request: ContextRequest) -> ContextResponse:
     """Build an LLM-ready text context from the user's knowledge graph."""
     tq = TripleQuery(falkordb_client)
+    scope = _graph_scope(request.user_roles)
 
-    context_text = await tq.build_context(user=request.tenant_id, limit=request.limit)
-    stats = await tq.get_stats(user=request.tenant_id)
+    context_text = await tq.build_context(user=scope, limit=request.limit)
+    stats = await tq.get_stats(user=scope)
 
     return ContextResponse(
         success=True,
@@ -188,13 +209,15 @@ async def build_context(request: ContextRequest) -> ContextResponse:
 
 @router.get("/stats", response_model=StatsResponse)
 async def get_stats(
-    tenant_id: str = Query(...),
     collection: Optional[str] = Query(default=None),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
 ) -> StatsResponse:
     """Return node/literal/rel counts, contradiction count, and entity type breakdown."""
     tq = TripleQuery(falkordb_client)
+    scope = _graph_scope(user_roles)
 
-    stats = await tq.get_stats(user=tenant_id, collection=collection)
+    stats = await tq.get_stats(user=scope, collection=collection)
 
     # Count contradiction nodes (URI starts with nouxcube://contradiction/)
     contradiction_query = (
@@ -203,7 +226,7 @@ async def get_stats(
         "RETURN count(n) AS cnt"
     )
     contradiction_rows = await falkordb_client.execute_cypher(
-        contradiction_query, params={"user": tenant_id}
+        contradiction_query, params={"user": scope}
     )
     contradictions = int(contradiction_rows[0]["cnt"]) if contradiction_rows else 0
 
@@ -217,7 +240,7 @@ async def get_stats(
         "RETURN o.value AS entity_type, count(s) AS cnt "
         "ORDER BY cnt DESC"
     )
-    col_params = {"user": tenant_id, "type_pred": type_pred_uri}
+    col_params = {"user": scope, "type_pred": type_pred_uri}
     if collection:
         col_params["collection"] = collection
     type_rows = await falkordb_client.execute_cypher(type_query, params=col_params)
@@ -237,19 +260,23 @@ async def get_stats(
 
 
 @router.delete("/clear")
-async def clear_tenant(tenant_id: str = Query(...)) -> dict:
-    """Delete all triples for a given tenant. Returns deleted node count."""
+async def clear_graph(
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
+) -> dict:
+    """Delete all triples for the current scope. Returns deleted node count."""
+    scope = _graph_scope(user_roles)
     # Count before deletion
     count_query = (
         "MATCH (n) WHERE (n:Node OR n:Literal) AND n.user = $user RETURN count(n) AS cnt"
     )
     count_rows = await falkordb_client.execute_cypher(
-        count_query, params={"user": tenant_id}
+        count_query, params={"user": scope}
     )
     deleted = int(count_rows[0]["cnt"]) if count_rows else 0
 
     ts = TripleStore(falkordb_client)
-    await ts.clear_tenant(user=tenant_id)
+    await ts.clear_tenant(user=scope)
 
     return {"success": True, "deleted": deleted}
 
@@ -266,7 +293,7 @@ async def execute_template(request: TemplateRequest) -> TemplateResponse:
         result = await _template_executor.execute(
             name=request.template_name,
             client=falkordb_client,
-            user=request.tenant_id,
+            user=_graph_scope(request.user_roles),
             collection=request.collection,
             **request.params,
         )

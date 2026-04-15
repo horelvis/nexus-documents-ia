@@ -20,25 +20,24 @@ def _run_async(coro):
 
 async def _retry_document_indexing(
     document_id: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
         with SessionLocal() as db:
             document = (
                 db.query(Document)
-                .filter(Document.id == document_id, Document.tenant_id == tenant_id)
+                .filter(Document.id == document_id)
                 .first()
             )
             if not document:
                 msg = (
-                    f"Document {document_id} not found for tenant {tenant_id}; "
+                    f"Document {document_id} not found; "
                     "skipping indexing retry."
                 )
                 logger.info(msg)
                 return {"success": True, "skipped": True, "message": msg}
 
-            reindex_service = ReindexService(tenant_id=tenant_id, user_id=user_id)
+            reindex_service = ReindexService(user_id=user_id)
             success = await reindex_service.reindex_document(db, document)
 
             if success:
@@ -63,10 +62,9 @@ async def _retry_document_indexing(
 @celery_app.task(name="indexing.retry_document_indexing")
 def retry_document_indexing_task(
     document_id: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return _run_async(_retry_document_indexing(document_id, tenant_id, user_id))
+    return _run_async(_retry_document_indexing(document_id, user_id))
 
 
 async def _auto_retry_failed_indexing() -> Dict[str, Any]:
@@ -91,7 +89,7 @@ async def _auto_retry_failed_indexing() -> Dict[str, Any]:
         for document in documents:
             processed += 1
             result = await _retry_document_indexing(
-                str(document.id), str(document.tenant_id), user_id=str(document.created_by)
+                str(document.id), user_id=str(document.created_by)
             )
             if result.get("success"):
                 successes += 1

@@ -179,7 +179,6 @@ class AlfrescoSyncService:
 
     async def sync_documents(
         self,
-        tenant_id: UUID,
         connector_id: UUID,
         owner_id: UUID,
         db: AsyncSession,
@@ -190,7 +189,6 @@ class AlfrescoSyncService:
         Sync documents from Alfresco to the database.
 
         Args:
-            tenant_id: Tenant UUID
             connector_id: Connector UUID
             owner_id: Owner user UUID (for service account, documents belong to admin)
             db: Database session
@@ -234,7 +232,6 @@ class AlfrescoSyncService:
                     try:
                         await self._process_document(
                             entry=entry,
-                            tenant_id=tenant_id,
                             connector_id=connector_id,
                             owner_id=owner_id,
                             db=db,
@@ -273,7 +270,6 @@ class AlfrescoSyncService:
     async def _process_document(
         self,
         entry: Dict[str, Any],
-        tenant_id: UUID,
         connector_id: UUID,
         owner_id: UUID,
         db: AsyncSession,
@@ -355,13 +351,11 @@ class AlfrescoSyncService:
                     pass
 
             new_doc = IndexedDocument(
-                tenant_id=tenant_id,
                 connector_id=connector_id,
                 external_id=node_id,
                 external_url=external_url,
                 external_path=external_path,
                 owner_id=owner_id,
-                is_tenant_public=True,  # Service account = public to tenant
                 title=title,
                 description=description,
                 mime_type=mime_type,
@@ -427,13 +421,10 @@ async def _sync_connector(
             # Get owner for documents (the admin who created the connector, or first admin)
             owner_id = connector.created_by_id
             if not owner_id:
-                # Find any admin user for this tenant
+                # Find any active admin user
                 admin_result = await db.execute(
                     select(User).where(
-                        and_(
-                            User.tenant_id == connector.tenant_id,
-                            User.is_active == True,
-                        )
+                        User.is_active == True,
                     ).limit(1)
                 )
                 admin_user = admin_result.scalar_one_or_none()
@@ -456,7 +447,6 @@ async def _sync_connector(
             )
 
             stats = await sync_service.sync_documents(
-                tenant_id=connector.tenant_id,
                 connector_id=connector.id,
                 owner_id=owner_id,
                 db=db,
@@ -487,7 +477,6 @@ async def _sync_connector(
                 from worker_app.services.event_publisher import publish_event
                 publish_event(
                     event_type="connector.synced",
-                    tenant_id=str(connector.tenant_id),
                     payload={
                         "connector_id": str(connector_id),
                         "connector_type": connector.connector_type,

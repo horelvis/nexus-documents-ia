@@ -16,7 +16,6 @@ class SessionStatus(str, Enum):
 
 class ForgeSession(BaseModel):
     session_id: str
-    tenant_id: str
     user_id: str
     status: SessionStatus = SessionStatus.CREATED
     source_title: str = ""
@@ -32,7 +31,6 @@ class ForgeSession(BaseModel):
 
 class PersistRequest(BaseModel):
     session_id: str
-    tenant_id: str
     user_id: str
     persist_formats: list[str] = Field(default=["docx"])
     index_in_weaviate: bool = True

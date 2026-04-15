@@ -11,7 +11,8 @@ from pydantic import BaseModel, Field
 
 
 class TripleExtractionRequest(BaseModel):
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     document_id: str
     collection: str = "default"
     chunks: List[str] = Field(..., min_length=1)
@@ -36,7 +37,8 @@ class TripleExtractionResponse(BaseModel):
 
 
 class TripleQueryRequest(BaseModel):
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     subject_uri: Optional[str] = None
     predicate_uri: Optional[str] = None
     object_value: Optional[str] = None
@@ -65,7 +67,8 @@ class TripleQueryResponse(BaseModel):
 
 
 class ContextRequest(BaseModel):
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     limit: int = Field(default=20, ge=1, le=100)
 
 
@@ -94,7 +97,8 @@ class StatsResponse(BaseModel):
 
 
 class StructuralIndexRequest(BaseModel):
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     document_id: str
     collection: str = "default"
     file_path: str = ""
@@ -116,7 +120,8 @@ class StructuralIndexResponse(BaseModel):
 
 
 class BatchNeighborsRequest(BaseModel):
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     seed_uris: List[str] = Field(..., min_length=1)
     collection: Optional[str] = None
     max_hops: int = Field(default=2, ge=1, le=5)
@@ -138,7 +143,8 @@ class BatchNeighborsResponse(BaseModel):
 
 class TraceSourcesRequest(BaseModel):
     edges: List[Dict[str, str]]
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     collection: str = "default"
 
 
@@ -162,7 +168,8 @@ class TraceSourcesResponse(BaseModel):
 
 
 class ReindexRequest(BaseModel):
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     collection: str = "default"
 
 
@@ -180,7 +187,8 @@ class ReindexResponse(BaseModel):
 
 class TemplateRequest(BaseModel):
     """Execute a named Cypher template."""
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     template_name: str
     collection: Optional[str] = None
     params: Dict[str, Any] = Field(default_factory=dict)

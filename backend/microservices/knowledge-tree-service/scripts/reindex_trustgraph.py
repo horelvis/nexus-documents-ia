@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 """
-Reindex TrustGraph for a tenant.
+Reindex TrustGraph (all data).
 
-Clears the FalkorDB graph for the given tenant, bootstraps the schema +
-ontology, fetches all documents from weaviate-service, and runs
+Clears the FalkorDB graph, bootstraps the schema + ontology, fetches all
+documents from weaviate-service, and runs
 ExtractionCoordinator.extract_document() for each document.
+
+After the multi-tenancy removal refactor, the graph holds a single scope
+so there is no per-tenant iteration.
 
 Usage:
     docker compose exec knowledge-tree-service \
-        python scripts/reindex_trustgraph.py --tenant-id TENANT_ID
+        python scripts/reindex_trustgraph.py
 
     docker compose exec knowledge-tree-service \
-        python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --dry-run
+        python scripts/reindex_trustgraph.py --dry-run
 
     docker compose exec knowledge-tree-service \
-        python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --collection legal
+        python scripts/reindex_trustgraph.py --collection legal
 
     docker compose exec knowledge-tree-service \
-        python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --skip-clear
+        python scripts/reindex_trustgraph.py --skip-clear
 
 Environment:
     WEAVIATE_SERVICE_URL          Base URL for weaviate-service (default: http://weaviate-service:8000)
@@ -39,6 +42,7 @@ import httpx
 # Allow imports from app when running inside the container
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.core.auth_headers import EVERYONE_ROLE
 from app.core.config import settings
 from app.services.falkordb_client import FalkorDBClient
 from app.services.triple_store import TripleStore
@@ -80,36 +84,21 @@ WEAVIATE_HEADERS = {
 EMBED_BATCH_SIZE = 64
 
 
-def _collection_name(tenant_id: str) -> str:
-    """Mirror weaviate-service's get_tenant_collection_name convention."""
-    tenant_normalized = tenant_id.replace("-", "_")
-    # collection_prefix is typically "Nouxcube_" — we read it from weaviate-service indirectly
-    # by using the same env var convention; fall back to common default.
-    prefix = "Nouxcube_"
-    return f"{prefix}{tenant_normalized}_documents"
-
-
 async def _fetch_documents(
     client: httpx.AsyncClient,
-    tenant_id: str,
 ) -> List[Dict[str, Any]]:
-    """Fetch all indexed documents for a tenant from weaviate-service.
+    """Fetch all indexed documents from weaviate-service.
 
-    Tries the canonical list endpoint first:
-        GET /weaviate/documents?tenant_id=TENANT_ID&limit=100
-
-    If that returns 404 (endpoint not yet added), falls back to paginated
-    search on the tenant's Weaviate collection:
-        POST /weaviate/collections/{collection}/search
+    After multi-tenancy removal there is a single unified document collection
+    and the list endpoint returns all documents without a scope parameter.
 
     Returns a list of document dicts with at least "id" and optional
     "title", "file_path", "semantic_type", "domain" keys.
     """
     PAGE_SIZE = 100  # weaviate-service max limit
 
-    # ── Primary: list endpoint ─────────────────────────────────────────────────
     url = f"{WEAVIATE_SERVICE_URL}/weaviate/documents"
-    params = {"tenant_id": tenant_id, "limit": PAGE_SIZE}
+    params = {"limit": PAGE_SIZE}
     resp = await client.get(url, params=params, headers=WEAVIATE_HEADERS)
 
     if resp.status_code == 200:
@@ -118,88 +107,23 @@ async def _fetch_documents(
         logger.info("  Fetched %d documents via /weaviate/documents list endpoint", len(docs))
         return docs
 
-    if resp.status_code != 404:
-        logger.warning(
-            "  /weaviate/documents returned HTTP %d — falling back to collection search",
-            resp.status_code,
-        )
-
-    # ── Fallback: paginated search on tenant collection ────────────────────────
-    collection = _collection_name(tenant_id)
-    search_url = f"{WEAVIATE_SERVICE_URL}/weaviate/collections/{collection}/search"
-
-    seen_doc_ids: set = set()
-    docs: List[Dict[str, Any]] = []
-    offset = 0
-    total_chunks = 0
-
-    while True:
-        payload = {
-            "query": "",
-            "tenant_id": tenant_id,
-            "limit": PAGE_SIZE,
-            "offset": offset,
-            "search_type": "keyword",
-            "filters": {},
-        }
-        search_resp = await client.post(search_url, json=payload, headers=WEAVIATE_HEADERS)
-
-        if search_resp.status_code != 200:
-            if offset == 0:
-                raise RuntimeError(
-                    f"Could not list documents for tenant {tenant_id!r}: "
-                    f"search returned HTTP {search_resp.status_code} — {search_resp.text[:300]}"
-                )
-            # Non-first page error — stop pagination gracefully
-            logger.warning("  Pagination stopped at offset %d: HTTP %d", offset, search_resp.status_code)
-            break
-
-        search_data = search_resp.json()
-        raw_results = search_data.get("results", [])
-        total_chunks += len(raw_results)
-
-        if not raw_results:
-            break  # No more results
-
-        # Deduplicate by document_id — search returns chunks, not docs
-        for item in raw_results:
-            doc_id = item.get("document_id") or item.get("id")
-            if doc_id and doc_id not in seen_doc_ids:
-                seen_doc_ids.add(doc_id)
-                docs.append({
-                    "id": doc_id,
-                    "title": item.get("title", ""),
-                    "file_path": item.get("file_path", ""),
-                    "semantic_type": item.get("semantic_type", ""),
-                    "domain": item.get("domain", ""),
-                })
-
-        offset += PAGE_SIZE
-        if len(raw_results) < PAGE_SIZE:
-            break  # Last page
-
-    logger.info(
-        "  Fetched %d unique documents via paginated collection search "
-        "(%d raw chunks from %r)",
-        len(docs),
-        total_chunks,
-        collection,
+    raise RuntimeError(
+        f"Could not list documents: /weaviate/documents returned HTTP "
+        f"{resp.status_code} — {resp.text[:300]}"
     )
-    return docs
 
 
 async def _fetch_chunks(
     client: httpx.AsyncClient,
-    tenant_id: str,
     document_id: str,
     limit: int = 500,
 ) -> List[str]:
     """Fetch text chunks for a document from weaviate-service.
 
-    GET /weaviate/documents/{tenant_id}/{document_id}/chunks?limit=500
+    GET /weaviate/documents/{document_id}/chunks?limit=500
     Returns list of chunk text strings (ordered).
     """
-    url = f"{WEAVIATE_SERVICE_URL}/weaviate/documents/{tenant_id}/{document_id}/chunks"
+    url = f"{WEAVIATE_SERVICE_URL}/weaviate/documents/{document_id}/chunks"
     params = {"offset": 0, "limit": limit}
     resp = await client.get(url, params=params, headers=WEAVIATE_HEADERS)
 
@@ -232,7 +156,7 @@ async def _fetch_chunks(
 
 async def _resolve_duplicate_entities(
     client: FalkorDBClient,
-    tenant_id: str,
+    scope: str,
     collection: str,
 ) -> int:
     """Merge near-duplicate entity :Nodes after extraction.
@@ -246,12 +170,12 @@ async def _resolve_duplicate_entities(
     (e.g., "juan-garcia" vs "garcia-juan" from "García, Juan" vs "Juan García")
     by comparing sorted token sets.
     """
-    # Fetch all entity node URIs for this tenant+collection
+    # Fetch all entity node URIs for this scope+collection
     rows = await client.execute_cypher(
         "MATCH (n:Node {user: $user, collection: $collection}) "
         "WHERE n.uri STARTS WITH 'nouxcube://entity/' "
         "RETURN n.uri AS uri",
-        {"user": tenant_id, "collection": collection},
+        {"user": scope, "collection": collection},
     )
 
     if not rows:
@@ -290,7 +214,7 @@ async def _resolve_duplicate_entities(
                     "r2.source_chunk = r.source_chunk "
                     "DELETE r",
                     {"dup_uri": dup_uri, "canon_uri": canonical,
-                     "user": tenant_id, "col": collection},
+                     "user": scope, "col": collection},
                 )
                 # Move all incoming rels to duplicate → canonical
                 await client.execute_cypher(
@@ -301,14 +225,14 @@ async def _resolve_duplicate_entities(
                     "r2.source_chunk = r.source_chunk "
                     "DELETE r",
                     {"dup_uri": dup_uri, "canon_uri": canonical,
-                     "user": tenant_id, "col": collection},
+                     "user": scope, "col": collection},
                 )
                 # Delete the orphaned duplicate node
                 await client.execute_cypher(
                     "MATCH (n:Node {uri: $uri, user: $user, collection: $col}) "
                     "WHERE NOT (n)-[:Rel]-() AND NOT ()-[:Rel]->(n) "
                     "DELETE n",
-                    {"uri": dup_uri, "user": tenant_id, "col": collection},
+                    {"uri": dup_uri, "user": scope, "col": collection},
                 )
                 merged_count += 1
                 logger.info(
@@ -324,14 +248,14 @@ async def _resolve_duplicate_entities(
 
 # ── Entity embeddings ─────────────────────────────────────────────────────────
 
-async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
+async def _populate_entity_embeddings(scope: str, collection: str) -> int:
     """Query all :Node entities from FalkorDB, embed via intelligence-docs, upsert to Weaviate.
 
     Steps:
     1. Query entity nodes with label/type/definition properties from FalkorDB.
     2. Build an embed text per entity.
     3. Batch-embed via intelligence-docs-service /embed endpoint (batches of EMBED_BATCH_SIZE).
-    4. Delete existing entity embeddings for this tenant from weaviate-service.
+    4. Delete existing entity embeddings from weaviate-service.
     5. Batch-upsert entities + embeddings to weaviate-service /entities/batch-upsert.
 
     Returns the total number of entities upserted.
@@ -346,13 +270,13 @@ async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
             "OPTIONAL MATCH (n)-[r2:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal) "
             "OPTIONAL MATCH (n)-[r3:Rel {uri: 'nouxcube://predicate/core/definition'}]->(d:Literal) "
             "RETURN n.uri AS uri, l.value AS label, t.value AS type, d.value AS definition",
-            {"user": tenant_id},
+            {"user": scope},
         )
     finally:
         await falkordb.close()
 
     if not rows:
-        logger.info("  No :Node entities found for tenant=%s — skipping embeddings", tenant_id)
+        logger.info("  No :Node entities found for scope=%s — skipping embeddings", scope)
         return 0
 
     logger.info("  Found %d entity nodes to embed", len(rows))
@@ -425,11 +349,10 @@ async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
             f"Embedding count mismatch: got {len(all_embeddings)} for {len(entities)} entities"
         )
 
-    # Delete existing entity embeddings for this tenant
+    # Delete existing entity embeddings
     async with httpx.AsyncClient(timeout=60) as http:
         del_resp = await http.delete(
             f"{WEAVIATE_SERVICE_URL}/weaviate/entities/delete",
-            params={"tenant_id": tenant_id},
             headers=WEAVIATE_HEADERS,
         )
         if del_resp.status_code not in (200, 204, 404):
@@ -438,7 +361,7 @@ async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
                 del_resp.status_code,
             )
         else:
-            logger.info("  Deleted existing entity embeddings for tenant=%s", tenant_id)
+            logger.info("  Deleted existing entity embeddings")
 
         # Batch upsert entities + embeddings
         upserted = 0
@@ -450,7 +373,6 @@ async def _populate_entity_embeddings(tenant_id: str, collection: str) -> int:
                 json={
                     "entities": batch_entities,
                     "embeddings": batch_embeddings,
-                    "tenant_id": tenant_id,
                 },
                 headers=WEAVIATE_HEADERS,
             )
@@ -479,34 +401,35 @@ async def _bootstrap_schema(client: FalkorDBClient) -> None:
 
 # ── Clear ──────────────────────────────────────────────────────────────────────
 
-async def _clear_tenant(client: FalkorDBClient, tenant_id: str) -> int:
-    """Delete all nodes/rels for a tenant. Returns deleted node count."""
+async def _clear_graph(client: FalkorDBClient, scope: str) -> int:
+    """Delete all nodes/rels for the given scope. Returns deleted node count."""
     store = TripleStore(client)
     try:
         rows = await client.execute_cypher(
             "MATCH (n) WHERE n.user = $user RETURN count(n) AS cnt",
-            {"user": tenant_id},
+            {"user": scope},
         )
         count = int(rows[0]["cnt"]) if rows else 0
     except Exception:
         count = 0
 
-    await store.clear_tenant(user=tenant_id)
+    await store.clear_tenant(user=scope)
     return count
 
 
 # ── Main reindex logic ─────────────────────────────────────────────────────────
 
 async def reindex(
-    tenant_id: str,
     collection: str = "default",
     dry_run: bool = False,
     skip_clear: bool = False,
 ) -> None:
     t_total = time.monotonic()
 
+    scope = EVERYONE_ROLE
+
     print(f"\n{BOLD}TrustGraph Reindexation{RESET}")
-    print(f"  tenant_id  : {tenant_id}")
+    print(f"  scope      : {scope}")
     print(f"  collection : {collection}")
     print(f"  dry_run    : {dry_run}")
     print(f"  skip_clear : {skip_clear}")
@@ -518,14 +441,14 @@ async def reindex(
     await falkordb.initialize()
 
     try:
-        # ── Step 2: Clear graph for tenant ────────────────────────────────────
+        # ── Step 2: Clear graph ───────────────────────────────────────────────
         if skip_clear:
             print(f"  {YELLOW}SKIP{RESET}  Clear graph (--skip-clear)")
         elif dry_run:
-            print(f"  {YELLOW}DRY-RUN{RESET}  Would clear graph for tenant={tenant_id}")
+            print(f"  {YELLOW}DRY-RUN{RESET}  Would clear graph for scope={scope}")
         else:
-            logger.info("Clearing graph for tenant=%s...", tenant_id)
-            deleted = await _clear_tenant(falkordb, tenant_id)
+            logger.info("Clearing graph for scope=%s...", scope)
+            deleted = await _clear_graph(falkordb, scope)
             print(f"  {GREEN}OK{RESET}    Cleared graph — {deleted} nodes removed")
 
         # ── Step 3: Bootstrap schema ───────────────────────────────────────────
@@ -552,10 +475,10 @@ async def reindex(
         # ── Step 5: Fetch document list from weaviate-service ──────────────────
         logger.info("Fetching document list from weaviate-service...")
         async with httpx.AsyncClient(timeout=60) as http:
-            documents = await _fetch_documents(http, tenant_id)
+            documents = await _fetch_documents(http)
 
         if not documents:
-            print(f"  {YELLOW}WARN{RESET}  No documents found for tenant={tenant_id} — nothing to reindex")
+            print(f"  {YELLOW}WARN{RESET}  No documents found — nothing to reindex")
             return
 
         print(f"\n  Found {BOLD}{len(documents)}{RESET} document(s) to reindex\n")
@@ -602,7 +525,7 @@ async def reindex(
                     title or "(no title)",
                 )
 
-                chunks = await _fetch_chunks(http, tenant_id, doc_id)
+                chunks = await _fetch_chunks(http, doc_id)
                 if not chunks:
                     logger.warning(
                         "    [%d/%d] No chunks for document %s — skipping",
@@ -621,7 +544,7 @@ async def reindex(
                     result = await coordinator.extract_document(
                         chunks=chunks,
                         document_id=doc_id,
-                        user=tenant_id,
+                        user=scope,
                         collection=collection,
                         title=title,
                         file_path=file_path,
@@ -669,7 +592,7 @@ async def reindex(
         # ── Step 7: Cross-document entity resolution ─────────────────────────
         if not dry_run:
             logger.info("Running cross-document entity resolution...")
-            merged_count = await _resolve_duplicate_entities(falkordb, tenant_id, collection)
+            merged_count = await _resolve_duplicate_entities(falkordb, scope, collection)
             if merged_count:
                 print(f"  {GREEN}OK{RESET}    Entity resolution — merged {merged_count} duplicate node(s)")
             else:
@@ -680,7 +603,7 @@ async def reindex(
         if not dry_run:
             logger.info("── Phase 2: Entity Embeddings ──")
             try:
-                embed_count = await _populate_entity_embeddings(tenant_id, collection)
+                embed_count = await _populate_entity_embeddings(scope, collection)
                 print(f"  {GREEN}OK{RESET}    Entity embeddings — {embed_count} entities upserted")
                 logger.info("Entity embeddings: %d entities", embed_count)
             except Exception as exc:
@@ -718,27 +641,22 @@ async def reindex(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Reindex TrustGraph for a tenant",
+        description="Reindex TrustGraph (all data)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
   # Full reindex (clear + ontology + extract all docs)
-  python scripts/reindex_trustgraph.py --tenant-id 00000000-0000-0000-0000-000000000001
+  python scripts/reindex_trustgraph.py
 
   # Preview — show what would be done without touching the graph
-  python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --dry-run
+  python scripts/reindex_trustgraph.py --dry-run
 
   # Re-extract without clearing existing triples
-  python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --skip-clear
+  python scripts/reindex_trustgraph.py --skip-clear
 
   # Use a custom collection scope
-  python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --collection legal
+  python scripts/reindex_trustgraph.py --collection legal
 """,
-    )
-    parser.add_argument(
-        "--tenant-id",
-        required=True,
-        help="Tenant UUID to reindex",
     )
     parser.add_argument(
         "--collection",
@@ -767,7 +685,6 @@ Examples:
 
     asyncio.run(
         reindex(
-            tenant_id=args.tenant_id,
             collection=args.collection,
             dry_run=args.dry_run,
             skip_clear=args.skip_clear,
