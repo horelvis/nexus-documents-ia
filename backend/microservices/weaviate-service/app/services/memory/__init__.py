@@ -15,17 +15,16 @@ Usage:
 
     # Store conversation
     await memory.add_exchange(
-        tenant_id="...",
         session_id="...",
         user_message="Hello",
         assistant_message="Hi there!"
     )
 
     # Get history for LLM
-    history = await memory.get_conversation_history(tenant_id, session_id)
+    history = await memory.get_conversation_history(session_id)
 
     # Record user preferences
-    await memory.record_query(tenant_id, user_id, query)
+    await memory.record_query(user_id, query)
 """
 
 from .types import (

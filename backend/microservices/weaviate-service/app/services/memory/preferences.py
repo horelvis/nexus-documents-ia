@@ -4,7 +4,7 @@ User Preferences Storage for Emma.
 Provides long-term storage for user preferences and learning data.
 Uses Redis with longer TTL for persistence across sessions.
 
-Key format: emma:pref:{tenant_id}:{user_id}
+Key format: emma:pref:{user_id}
 TTL: 7 days by default (configurable)
 """
 
@@ -40,13 +40,7 @@ class PreferencesStore:
         redis_url: Optional[str] = None,
         ttl_seconds: int = DEFAULT_TTL_SECONDS
     ):
-        """
-        Initialize preferences store.
-
-        Args:
-            redis_url: Redis connection URL. Uses settings if not provided.
-            ttl_seconds: TTL for preference data in seconds.
-        """
+        """Initialize preferences store."""
         self._redis_url = redis_url or settings.redis_url
         self._ttl = ttl_seconds
         self._redis: Optional[redis.Redis] = None
@@ -67,28 +61,15 @@ class PreferencesStore:
             await self._redis.close()
             self._redis = None
 
-    def _make_key(self, tenant_id: str, user_id: str) -> str:
+    def _make_key(self, user_id: str) -> str:
         """Generate Redis key for user preferences."""
-        return f"{self.KEY_PREFIX}:{tenant_id}:{user_id}"
+        return f"{self.KEY_PREFIX}:{user_id}"
 
-    async def get_preferences(
-        self,
-        tenant_id: str,
-        user_id: str
-    ) -> UserPreferences:
-        """
-        Get user preferences, creating defaults if not found.
-
-        Args:
-            tenant_id: Tenant identifier
-            user_id: User identifier
-
-        Returns:
-            UserPreferences (existing or default)
-        """
+    async def get_preferences(self, user_id: str) -> UserPreferences:
+        """Get user preferences, creating defaults if not found."""
         await self.connect()
 
-        key = self._make_key(tenant_id, user_id)
+        key = self._make_key(user_id)
         data = await self._redis.get(key)
 
         if data:
@@ -99,28 +80,20 @@ class PreferencesStore:
             except Exception as e:
                 logger.warning(f"Failed to load preferences for {user_id}: {e}")
 
-        # Create default preferences
+        # Create default preferences — tenant_id retained as dataclass field (empty)
         prefs = UserPreferences(
-            tenant_id=tenant_id,
+            tenant_id="",
             user_id=user_id
         )
         logger.debug(f"Created default preferences for user {user_id}")
         return prefs
 
     async def save_preferences(self, prefs: UserPreferences) -> bool:
-        """
-        Save user preferences to Redis.
-
-        Args:
-            prefs: UserPreferences to save
-
-        Returns:
-            True if saved successfully
-        """
+        """Save user preferences to Redis."""
         await self.connect()
 
         try:
-            key = self._make_key(prefs.tenant_id, prefs.user_id)
+            key = self._make_key(prefs.user_id)
             data = json.dumps(prefs.to_dict())
 
             await self._redis.setex(key, self._ttl, data)
@@ -133,24 +106,12 @@ class PreferencesStore:
 
     async def update_preference(
         self,
-        tenant_id: str,
         user_id: str,
         key: str,
         value: any
     ) -> UserPreferences:
-        """
-        Update a single preference value.
-
-        Args:
-            tenant_id: Tenant identifier
-            user_id: User identifier
-            key: Preference key to update
-            value: New value
-
-        Returns:
-            Updated UserPreferences
-        """
-        prefs = await self.get_preferences(tenant_id, user_id)
+        """Update a single preference value."""
+        prefs = await self.get_preferences(user_id)
 
         # Update attribute if it exists
         if hasattr(prefs, key):
@@ -162,97 +123,42 @@ class PreferencesStore:
         await self.save_preferences(prefs)
         return prefs
 
-    async def record_query(
-        self,
-        tenant_id: str,
-        user_id: str,
-        query: str
-    ) -> None:
-        """
-        Record a user query for learning.
-
-        Args:
-            tenant_id: Tenant identifier
-            user_id: User identifier
-            query: The query to record
-        """
-        prefs = await self.get_preferences(tenant_id, user_id)
+    async def record_query(self, user_id: str, query: str) -> None:
+        """Record a user query for learning."""
+        prefs = await self.get_preferences(user_id)
         prefs.record_query(query)
         await self.save_preferences(prefs)
 
-    async def record_document_access(
-        self,
-        tenant_id: str,
-        user_id: str,
-        document_id: str
-    ) -> None:
-        """
-        Record document access for relevance.
-
-        Args:
-            tenant_id: Tenant identifier
-            user_id: User identifier
-            document_id: Document ID that was accessed
-        """
-        prefs = await self.get_preferences(tenant_id, user_id)
+    async def record_document_access(self, user_id: str, document_id: str) -> None:
+        """Record document access for relevance."""
+        prefs = await self.get_preferences(user_id)
         prefs.record_document_access(document_id)
         await self.save_preferences(prefs)
 
     async def get_frequent_queries(
         self,
-        tenant_id: str,
         user_id: str,
         limit: int = 10
     ) -> List[str]:
-        """
-        Get user's most frequent queries.
-
-        Args:
-            tenant_id: Tenant identifier
-            user_id: User identifier
-            limit: Maximum queries to return
-
-        Returns:
-            List of recent queries
-        """
-        prefs = await self.get_preferences(tenant_id, user_id)
+        """Get user's most frequent queries."""
+        prefs = await self.get_preferences(user_id)
         return prefs.frequent_queries[:limit]
 
     async def get_frequent_documents(
         self,
-        tenant_id: str,
         user_id: str,
         limit: int = 10
     ) -> List[str]:
-        """
-        Get user's most accessed documents.
-
-        Args:
-            tenant_id: Tenant identifier
-            user_id: User identifier
-            limit: Maximum document IDs to return
-
-        Returns:
-            List of frequently accessed document IDs
-        """
-        prefs = await self.get_preferences(tenant_id, user_id)
+        """Get user's most accessed documents."""
+        prefs = await self.get_preferences(user_id)
         return prefs.frequent_documents[:limit]
 
-    async def delete_preferences(self, tenant_id: str, user_id: str) -> bool:
-        """
-        Delete user preferences.
-
-        Args:
-            tenant_id: Tenant identifier
-            user_id: User identifier
-
-        Returns:
-            True if deleted successfully
-        """
+    async def delete_preferences(self, user_id: str) -> bool:
+        """Delete user preferences."""
         await self.connect()
 
         try:
-            key = self._make_key(tenant_id, user_id)
+            key = self._make_key(user_id)
             await self._redis.delete(key)
             logger.info(f"Deleted preferences for user {user_id}")
             return True

@@ -2,9 +2,9 @@
 Conversation Memory for Emma.
 
 Provides persistent conversation storage using Redis with automatic
-TTL expiration. Supports multi-tenant isolation.
+TTL expiration.
 
-Key format: emma:conv:{tenant_id}:{session_id}
+Key format: emma:conv:{session_id}
 TTL: 30 minutes by default (configurable)
 """
 
@@ -80,9 +80,9 @@ class ConversationMemory:
             await self._redis.close()
             self._redis = None
 
-    def _make_key(self, tenant_id: str, session_id: str) -> str:
+    def _make_key(self, session_id: str) -> str:
         """Generate Redis key for a conversation."""
-        return f"{self.KEY_PREFIX}:{tenant_id}:{session_id}"
+        return f"{self.KEY_PREFIX}:{session_id}"
 
     def _estimate_tokens(self, text: str) -> int:
         """
@@ -148,7 +148,6 @@ class ConversationMemory:
 
     async def get_context(
         self,
-        tenant_id: str,
         session_id: str,
         user_id: Optional[str] = None
     ) -> ConversationContext:
@@ -156,7 +155,6 @@ class ConversationMemory:
         Get or create conversation context for a session.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             user_id: Optional user identifier
 
@@ -165,7 +163,7 @@ class ConversationMemory:
         """
         await self.connect()
 
-        key = self._make_key(tenant_id, session_id)
+        key = self._make_key(session_id)
         data = await self._redis.get(key)
 
         if data:
@@ -176,10 +174,10 @@ class ConversationMemory:
             except Exception as e:
                 logger.warning(f"Failed to load conversation {session_id}: {e}")
 
-        # Create new context
+        # Create new context — tenant_id retained as dataclass field for schema compat (empty)
         context = ConversationContext(
             session_id=session_id,
-            tenant_id=tenant_id,
+            tenant_id="",
             user_id=user_id
         )
         logger.debug(f"Created new conversation context: {session_id}")
@@ -218,7 +216,7 @@ class ConversationMemory:
             # Step 3: Trim by total token/char limit
             context.messages = self._trim_conversation_by_tokens(context.messages)
 
-            key = self._make_key(context.tenant_id, context.session_id)
+            key = self._make_key(context.session_id)
             data = json.dumps(context.to_dict())
 
             # Log if data is still large (shouldn't happen after trimming)
@@ -236,58 +234,28 @@ class ConversationMemory:
 
     async def add_message(
         self,
-        tenant_id: str,
         session_id: str,
         role: MessageRole,
         content: str,
         user_id: Optional[str] = None,
         **metadata
     ) -> ConversationContext:
-        """
-        Add a message to a conversation and save.
-
-        Convenience method that loads context, adds message, and saves.
-
-        Args:
-            tenant_id: Tenant identifier
-            session_id: Session identifier
-            role: Message role (user, assistant, etc.)
-            content: Message content
-            user_id: Optional user identifier
-            **metadata: Additional message metadata
-
-        Returns:
-            Updated ConversationContext
-        """
-        context = await self.get_context(tenant_id, session_id, user_id)
+        """Add a message to a conversation and save."""
+        context = await self.get_context(session_id, user_id)
         context.add_message(role, content, **metadata)
         await self.save_context(context)
         return context
 
     async def add_exchange(
         self,
-        tenant_id: str,
         session_id: str,
         user_message: str,
         assistant_message: str,
         user_id: Optional[str] = None,
         **metadata
     ) -> ConversationContext:
-        """
-        Add a user-assistant exchange to conversation.
-
-        Args:
-            tenant_id: Tenant identifier
-            session_id: Session identifier
-            user_message: User's query
-            assistant_message: Assistant's response
-            user_id: Optional user identifier
-            **metadata: Additional metadata
-
-        Returns:
-            Updated ConversationContext
-        """
-        context = await self.get_context(tenant_id, session_id, user_id)
+        """Add a user-assistant exchange to conversation."""
+        context = await self.get_context(session_id, user_id)
         context.add_user_message(user_message)
         context.add_assistant_message(assistant_message, **metadata)
         await self.save_context(context)
@@ -295,39 +263,19 @@ class ConversationMemory:
 
     async def get_history_for_llm(
         self,
-        tenant_id: str,
         session_id: str,
         max_messages: int = 20
     ) -> List[dict]:
-        """
-        Get conversation history formatted for LLM.
-
-        Args:
-            tenant_id: Tenant identifier
-            session_id: Session identifier
-            max_messages: Maximum messages to return
-
-        Returns:
-            List of message dicts in LLM format
-        """
-        context = await self.get_context(tenant_id, session_id)
+        """Get conversation history formatted for LLM."""
+        context = await self.get_context(session_id)
         return context.get_history_for_llm(max_messages)
 
-    async def clear_session(self, tenant_id: str, session_id: str) -> bool:
-        """
-        Clear a conversation session.
-
-        Args:
-            tenant_id: Tenant identifier
-            session_id: Session identifier
-
-        Returns:
-            True if cleared successfully
-        """
+    async def clear_session(self, session_id: str) -> bool:
+        """Clear a conversation session."""
         await self.connect()
 
         try:
-            key = self._make_key(tenant_id, session_id)
+            key = self._make_key(session_id)
             await self._redis.delete(key)
             logger.info(f"Cleared conversation session: {session_id}")
             return True
@@ -335,48 +283,28 @@ class ConversationMemory:
             logger.error(f"Failed to clear session {session_id}: {e}")
             return False
 
-    async def list_sessions(self, tenant_id: str) -> List[str]:
-        """
-        List all active sessions for a tenant.
-
-        Args:
-            tenant_id: Tenant identifier
-
-        Returns:
-            List of session IDs
-        """
+    async def list_sessions(self) -> List[str]:
+        """List all active sessions."""
         await self.connect()
 
         try:
-            pattern = f"{self.KEY_PREFIX}:{tenant_id}:*"
+            pattern = f"{self.KEY_PREFIX}:*"
             keys = []
             async for key in self._redis.scan_iter(match=pattern):
-                # Extract session_id from key
                 parts = key.split(":")
                 if len(parts) >= 3:
                     keys.append(parts[-1])
             return keys
         except Exception as e:
-            logger.error(f"Failed to list sessions for {tenant_id}: {e}")
+            logger.error(f"Failed to list sessions: {e}")
             return []
 
-    async def extend_ttl(self, tenant_id: str, session_id: str) -> bool:
-        """
-        Extend TTL for an active conversation.
-
-        Call this periodically during active conversations to prevent expiration.
-
-        Args:
-            tenant_id: Tenant identifier
-            session_id: Session identifier
-
-        Returns:
-            True if TTL extended
-        """
+    async def extend_ttl(self, session_id: str) -> bool:
+        """Extend TTL for an active conversation."""
         await self.connect()
 
         try:
-            key = self._make_key(tenant_id, session_id)
+            key = self._make_key(session_id)
             result = await self._redis.expire(key, self._ttl)
             return result
         except Exception as e:
