@@ -142,7 +142,6 @@ async def _generate_clues(query: str, memories_text: str) -> Optional[str]:
 
 async def _graph_recall(
     query: str,
-    tenant_id: str,
     sector_config: Optional[Dict[str, Any]],
 ) -> Optional[str]:
     """Extract structural context from the knowledge graph.
@@ -175,13 +174,12 @@ async def _graph_recall(
             return {}
 
         summary_coro = (
-            client.get_structural_summary(tenant_id=tenant_id)
+            client.get_structural_summary()
             if settings.graph_context_summary_enabled
             else _noop_dict()
         )
         subgraph_coro = (
             client.extract_subgraph(
-                tenant_id=tenant_id,
                 entities=entity_seeds,
                 max_hops=settings.graphrag_max_hops,
                 max_nodes=settings.graphrag_max_nodes,
@@ -257,9 +255,8 @@ async def _memory_recall_inner(state: ReActState) -> Dict[str, Any]:
 
     start = time.time()
     query = state.get("query", "")
-    tenant_id = state.get("tenant_id", "")
 
-    if not query or not tenant_id:
+    if not query:
         return {}
 
     # Domain is no longer sector-derived — MemoRAG uses general domain
@@ -274,7 +271,6 @@ async def _memory_recall_inner(state: ReActState) -> Dict[str, Any]:
             from app.services.memorag import get_memorag_service
             service = get_memorag_service()
             results = await service.recall(
-                tenant_id=tenant_id,
                 query=query,
                 limit=settings.memorag_recall_top_k,
                 domain=domain,
@@ -300,7 +296,6 @@ async def _memory_recall_inner(state: ReActState) -> Dict[str, Any]:
             from app.clients.knowledge_tree_client import get_knowledge_tree_client
             client = get_knowledge_tree_client()
             memories = await client.recall_memories(
-                tenant_id=tenant_id,
                 query_topics=topics if topics else None,
                 domain=domain,
                 limit=settings.memory_recall_max_memories,
@@ -361,16 +356,15 @@ async def memory_recall_node(state: ReActState) -> Dict[str, Any]:
     Returns combined state updates. Either can fail independently.
     """
     query = state.get("query", "")
-    tenant_id = state.get("tenant_id", "")
 
-    if not query or not tenant_id:
+    if not query:
         return {}
 
     sector_config = state.get("sector_config")
 
     memory_result, graph_context = await asyncio.gather(
         _memory_recall_inner(state),
-        _graph_recall(query, tenant_id, sector_config),
+        _graph_recall(query, sector_config),
         return_exceptions=True,
     )
 

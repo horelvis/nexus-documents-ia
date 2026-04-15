@@ -72,7 +72,6 @@ async def expand_with_sector_graph(
     query: str,
     entities: Dict[str, List[str]],
     sector_config: Dict[str, Any],
-    tenant_id: str,
 ) -> Dict[str, Any]:
     """
     Expand context using the TrustGraph triple store.
@@ -88,7 +87,6 @@ async def expand_with_sector_graph(
         query: User query
         entities: Extracted entities (from entity_extractor)
         sector_config: Serialized SectorConfig dict
-        tenant_id: Tenant ID for graph isolation
 
     Returns:
         Dict with:
@@ -130,7 +128,6 @@ async def expand_with_sector_graph(
                     continue
                 lookup_tasks.append(
                     client.query_triples(
-                        tenant_id=tenant_id,
                         subject_uri=uri,
                         limit=50,
                     )
@@ -171,7 +168,7 @@ async def expand_with_sector_graph(
         # ------------------------------------------------------------------
         # Phase 2: General triple context for LLM enrichment
         # ------------------------------------------------------------------
-        context_result = await client.get_triple_context(tenant_id=tenant_id, limit=20)
+        context_result = await client.get_triple_context(limit=20)
         llm_context_text = context_result.get("context_for_llm", "") if isinstance(context_result, dict) else ""
 
     except Exception as e:

@@ -28,7 +28,7 @@ class ListSourcesInput(BaseModel):
 
 
 class ListSourcesTool(EmmaTool):
-    """Discover available data sources for the current tenant."""
+    """Discover available data sources."""
 
     @property
     def name(self) -> str:
@@ -51,17 +51,13 @@ class ListSourcesTool(EmmaTool):
         from app.clients.weaviate_client import get_weaviate_client
         from app.services.web_search import get_web_search_client
 
-        tenant_id = context.get("tenant_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
-
         lines = ["**Fuentes de datos disponibles:**\n"]
         data: Dict[str, Any] = {}
 
-        # 1. Tenant document stats
+        # 1. Document stats
         try:
             client = get_weaviate_client()
-            stats = await client.get_tenant_stats(tenant_id=tenant_id)
+            stats = await client.get_stats()
             doc_count = stats.get("total_documents", stats.get("document_count", 0))
             lines.append(f"📄 **Documentos indexados**: {doc_count}")
             if stats.get("collections"):
@@ -71,7 +67,7 @@ class ListSourcesTool(EmmaTool):
                     lines.append(f"   - {col_name}: {col_count} documentos")
             data["documents"] = {"count": doc_count, "available": doc_count > 0}
         except Exception as e:
-            logger.warning(f"Could not get tenant stats: {e}")
+            logger.warning(f"Could not get stats: {e}")
             lines.append("📄 **Documentos**: No se pudo obtener información")
             data["documents"] = {"available": True, "error": str(e)}
 
@@ -110,7 +106,7 @@ class ListSourcesTool(EmmaTool):
         try:
             from app.clients.knowledge_tree_client import get_knowledge_tree_client
             kt_client = get_knowledge_tree_client()
-            summary = await kt_client.get_structural_summary(tenant_id=tenant_id)
+            summary = await kt_client.get_structural_summary()
             if summary and not summary.get("error"):
                 node_count = summary.get("total_nodes", summary.get("node_count", 0))
                 lines.append(f"🔗 **Grafo de conocimiento**: {node_count} entidades")

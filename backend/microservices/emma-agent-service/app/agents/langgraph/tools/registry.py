@@ -2,17 +2,17 @@
 Emma ReAct Agent — Tool Registry
 
 Inspired by OpenManus ToolCollection: a dynamic registry that provides
-context-aware tool sets based on tenant configuration, sector, and features.
+context-aware tool sets based on sector, and features.
 
 The registry is a singleton that lazily initializes all tools on first access.
 Tools are filtered per-request based on:
 - Sector config (which agents/capabilities are enabled)
-- Tenant features (web search, connectors, etc.)
+- Features (web search, connectors, etc.)
 - Available services (knowledge tree, weaviate)
 
 Usage:
     registry = get_tool_registry()
-    tools = registry.get_tools_for_context(tenant_id, sector, features)
+    tools = registry.get_tools_for_context(sector, features)
     result = await registry.execute("smart_search", args, context)
 """
 
@@ -107,7 +107,6 @@ class ToolRegistry:
 
     def get_tools_for_context(
         self,
-        tenant_id: str,
         sector: Optional[str] = None,
         features: Optional[Dict[str, bool]] = None,
     ) -> List[EmmaTool]:
@@ -168,17 +167,15 @@ class ToolRegistry:
 
     def get_openai_params(
         self,
-        tenant_id: str,
         sector: Optional[str] = None,
         features: Optional[Dict[str, bool]] = None,
     ) -> List[Dict[str, Any]]:
         """Get OpenAI-compatible tool schemas for the current context."""
-        tools = self.get_tools_for_context(tenant_id, sector, features)
+        tools = self.get_tools_for_context(sector, features)
         return [t.to_openai_param() for t in tools]
 
     def get_tools_description(
         self,
-        tenant_id: str,
         sector: Optional[str] = None,
         features: Optional[Dict[str, bool]] = None,
         max_desc_chars: int = 0,
@@ -188,7 +185,7 @@ class ToolRegistry:
         Args:
             max_desc_chars: Truncate each description to this length (0 = unlimited).
         """
-        tools = self.get_tools_for_context(tenant_id, sector, features)
+        tools = self.get_tools_for_context(sector, features)
         lines = []
         for tool in tools:
             desc = tool.description

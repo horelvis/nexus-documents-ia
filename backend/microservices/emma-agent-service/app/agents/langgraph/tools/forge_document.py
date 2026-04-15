@@ -92,20 +92,19 @@ class ForgeDocumentTool(EmmaTool):
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
         from app.clients.forge_client import get_forge_client
 
-        tenant_id = context.get("tenant_id", "")
-        user_id = context.get("user_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
+        user_id = context.get("user_id") or ""
+        if not user_id:
+            return ToolResult.from_error("No user_id in context")
 
         action = arguments.get("action", "")
         client = get_forge_client()
 
         if action == "analyze":
-            return await self._handle_analyze(client, arguments, tenant_id, user_id)
+            return await self._handle_analyze(client, arguments, user_id)
         elif action == "render":
             return await self._handle_render(client, arguments)
         elif action == "persist":
-            return await self._handle_persist(client, arguments, tenant_id, user_id)
+            return await self._handle_persist(client, arguments, user_id)
         else:
             return ToolResult.from_error(
                 f"Accion desconocida: '{action}'",
@@ -113,7 +112,7 @@ class ForgeDocumentTool(EmmaTool):
             )
 
     async def _handle_analyze(
-        self, client, arguments: Dict[str, Any], tenant_id: str, user_id: str
+        self, client, arguments: Dict[str, Any], user_id: str
     ) -> ToolResult:
         """Analyze a document to detect variable fields."""
         document_id = arguments.get("document_id", "")
@@ -125,7 +124,6 @@ class ForgeDocumentTool(EmmaTool):
 
         try:
             result = await client.analyze(
-                tenant_id=tenant_id,
                 user_id=user_id,
                 document_id=document_id,
                 user_intent=arguments.get("user_intent", "modification"),
@@ -245,7 +243,7 @@ class ForgeDocumentTool(EmmaTool):
         )
 
     async def _handle_persist(
-        self, client, arguments: Dict[str, Any], tenant_id: str, user_id: str
+        self, client, arguments: Dict[str, Any], user_id: str
     ) -> ToolResult:
         """Persist generated document to GCS and Weaviate."""
         session_id = arguments.get("session_id", "")
@@ -258,7 +256,6 @@ class ForgeDocumentTool(EmmaTool):
         try:
             result = await client.persist(
                 session_id=session_id,
-                tenant_id=tenant_id,
                 user_id=user_id,
             )
         except Exception as e:

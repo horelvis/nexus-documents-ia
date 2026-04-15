@@ -141,7 +141,6 @@ async def decompose_node(state: ReActState) -> Dict[str, Any]:
     # Get available tool names for validation
     registry = get_tool_registry()
     tools = registry.get_tools_for_context(
-        tenant_id=state.get("tenant_id", ""),
         sector=state.get("sector"),
         features=state.get("features"),
     )

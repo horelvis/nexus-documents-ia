@@ -9,7 +9,7 @@ The agent's reasoning flow:
 2. list_sources → discovers active connectors
 3. query_connector → live query to external system
 
-This tool is conditionally available based on tenant configuration.
+This tool is conditionally available based on feature configuration.
 """
 
 import logging
@@ -52,10 +52,6 @@ class QueryConnectorTool(EmmaTool):
         return QueryConnectorInput
 
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
-        tenant_id = context.get("tenant_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
-
         connector_id = arguments["connector_id"]
         query = arguments["query"]
 
@@ -64,7 +60,6 @@ class QueryConnectorTool(EmmaTool):
             from app.agents.langgraph.connectors.connector_manager import get_connector_manager
             manager = get_connector_manager()
             result = await manager.query_connector(
-                tenant_id=tenant_id,
                 connector_id=connector_id,
                 query=query,
             )

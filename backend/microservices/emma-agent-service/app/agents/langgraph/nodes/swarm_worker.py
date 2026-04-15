@@ -135,7 +135,6 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
     # Filter tools to task's assigned tools + terminate
     registry = get_tool_registry()
     all_tools = registry.get_tools_for_context(
-        tenant_id=state.get("tenant_id", ""),
         sector=state.get("sector"),
         features=state.get("features"),
     )
@@ -164,9 +163,8 @@ async def swarm_worker_node(state: ReActState) -> Dict[str, Any]:
 
     # Tool execution context
     tool_context = {
-        "tenant_id": state.get("tenant_id", ""),
         "user_id": state.get("user_id"),
-        "user_role_ids": state.get("user_role_ids"),
+        "user_roles": state.get("user_roles", []),
         "is_admin": state.get("is_admin", False),
         "sector": state.get("sector"),
         "features": state.get("features"),

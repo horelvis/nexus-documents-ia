@@ -284,9 +284,8 @@ class SmartSearchTool(EmmaTool):
         from app.clients.weaviate_client import get_weaviate_client
         from app.core.config import settings
 
-        tenant_id = context.get("tenant_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
+        user_roles: List[str] = context.get("user_roles", [])
+        user_id: Optional[str] = context.get("user_id")
 
         query = arguments["query"]
         scope = arguments.get("scope", "auto")
@@ -352,7 +351,7 @@ class SmartSearchTool(EmmaTool):
         if settings.graphrag_enabled and entities:
             # GraphRAG: multi-hop subgraph extraction (Phase 5)
             graph_context_text, sg_doc_ids, sg_boe_ids = await self._extract_subgraph(
-                tenant_id, entities,
+                entities,
             )
             graph_doc_ids.update(sg_doc_ids)
             graph_boe_ids.extend(sg_boe_ids)
@@ -360,12 +359,12 @@ class SmartSearchTool(EmmaTool):
         elif settings.smart_search_graph_enabled and entities and sector_config_dict.get("graph_name"):
             # Legacy: flat graph expansion (document IDs only)
             graph_doc_ids, graph_boe_ids = await self._expand_graph(
-                query, entities, sector_config_dict, tenant_id
+                query, entities, sector_config_dict
             )
 
         # Also try person-based graph lookup
         if settings.smart_search_graph_enabled and enriched_person:
-            person_doc_ids = await self._get_documents_by_person(tenant_id, enriched_person)
+            person_doc_ids = await self._get_documents_by_person(enriched_person)
             graph_doc_ids.update(person_doc_ids)
 
         # ── Step 4b: Query decomposition (Phase 3) ──
@@ -380,7 +379,7 @@ class SmartSearchTool(EmmaTool):
                     sq_results: List[Dict[str, Any]] = []
                     if sq_scope in ("documents", "auto"):
                         sq_results.extend(await self._search_documents(
-                            decompose_client, tenant_id, sq["query"], limit, decompose_alpha,
+                            decompose_client, user_roles, user_id, sq["query"], limit, decompose_alpha,
                             person_filter=enriched_person,
                             domain_filter=enriched_domain,
                             semantic_type_filter=enriched_semantic_type,
@@ -445,7 +444,8 @@ class SmartSearchTool(EmmaTool):
                 pre_fetched_doc_results = await self._multi_concept_search(
                     concepts=concepts_result.low_level,
                     weaviate_client=client,
-                    tenant_id=tenant_id,
+                    user_roles=user_roles,
+                    user_id=user_id,
                     expanded_query=expanded_query,
                     alpha=alpha,
                     enriched_person=enriched_person,
@@ -459,7 +459,7 @@ class SmartSearchTool(EmmaTool):
             else:
                 # Original single-query hybrid search (fallback)
                 search_tasks.append(self._search_documents(
-                    client, tenant_id, expanded_query, limit, alpha,
+                    client, user_roles, user_id, expanded_query, limit, alpha,
                     person_filter=enriched_person,
                     domain_filter=enriched_domain,
                     semantic_type_filter=enriched_semantic_type,
@@ -715,7 +715,6 @@ class SmartSearchTool(EmmaTool):
 
     async def _extract_subgraph(
         self,
-        tenant_id: str,
         entities: Dict[str, List[str]],
     ) -> tuple:
         """Extract multi-hop subgraph via GraphRAG (Phase 5).
@@ -741,7 +740,6 @@ class SmartSearchTool(EmmaTool):
                 return "", set(), []
 
             subgraph = await client.extract_subgraph(
-                tenant_id=tenant_id,
                 entities=seeds,
                 max_hops=settings.graphrag_max_hops,
                 max_nodes=settings.graphrag_max_nodes,
@@ -786,7 +784,6 @@ class SmartSearchTool(EmmaTool):
         query: str,
         entities: Dict[str, List[str]],
         sector_config: Dict[str, Any],
-        tenant_id: str,
     ) -> tuple[Set[str], List[str]]:
         """Expand context via FalkorDB knowledge graph. Returns (doc_ids, boe_ids)."""
         doc_ids: Set[str] = set()
@@ -799,7 +796,6 @@ class SmartSearchTool(EmmaTool):
                 query=query,
                 entities=entities,
                 sector_config=sector_config,
-                tenant_id=tenant_id,
             )
 
             # Include document IDs from entity lookups (Phase 1)
@@ -826,7 +822,8 @@ class SmartSearchTool(EmmaTool):
         self,
         concepts: list,
         weaviate_client: Any,
-        tenant_id: str,
+        user_roles: List[str],
+        user_id: Optional[str],
         expanded_query: str,
         alpha: float,
         enriched_person: Optional[str],
@@ -851,7 +848,8 @@ class SmartSearchTool(EmmaTool):
         for concept in concepts:
             tasks.append(
                 weaviate_client.hybrid_search(
-                    tenant_id=tenant_id,
+                    user_roles=user_roles,
+                    user_id=user_id,
                     query=concept,
                     limit=per_concept_limit,
                     alpha=alpha,
@@ -924,7 +922,7 @@ class SmartSearchTool(EmmaTool):
         return formatted
 
     async def _get_documents_by_person(
-        self, tenant_id: str, person_name: str
+        self, person_name: str
     ) -> Set[str]:
         """Get document IDs linked to a person via knowledge graph."""
         doc_ids: Set[str] = set()
@@ -932,7 +930,7 @@ class SmartSearchTool(EmmaTool):
             from app.clients.knowledge_tree_client import get_knowledge_tree_client
 
             client = get_knowledge_tree_client()
-            result = await client.get_documents_by_person(tenant_id, person_name)
+            result = await client.get_documents_by_person(person_name)
             doc_ids.update(result)
         except Exception as e:
             logger.debug(f"Person graph lookup skipped: {e}")
@@ -941,7 +939,8 @@ class SmartSearchTool(EmmaTool):
     async def _search_documents(
         self,
         client: Any,
-        tenant_id: str,
+        user_roles: List[str],
+        user_id: Optional[str],
         query: str,
         limit: int,
         alpha: float,
@@ -977,8 +976,9 @@ class SmartSearchTool(EmmaTool):
 
         try:
             results = await client.hybrid_search(
-                tenant_id=tenant_id,
                 query=query,
+                user_roles=user_roles,
+                user_id=user_id,
                 limit=limit,
                 alpha=alpha,
                 person_filter=person_filter,
@@ -1000,8 +1000,9 @@ class SmartSearchTool(EmmaTool):
                     logger.info(f"🔄 0 results with person={person_filter} — retrying without person filter")
                     dropped_filters.append(f"person={person_filter}")
                     results = await client.hybrid_search(
-                        tenant_id=tenant_id,
                         query=query,
+                        user_roles=user_roles,
+                        user_id=user_id,
                         limit=limit,
                         alpha=alpha,
                         domain_filter=domain_filter,
@@ -1018,8 +1019,9 @@ class SmartSearchTool(EmmaTool):
                     logger.info(f"🔄 0 results with domain={domain_filter} — retrying with semantic_type only")
                     dropped_filters.append(f"domain={domain_filter}")
                     results = await client.hybrid_search(
-                        tenant_id=tenant_id,
                         query=query,
+                        user_roles=user_roles,
+                        user_id=user_id,
                         limit=limit,
                         alpha=alpha,
                         semantic_type_filter=semantic_type_filter,
@@ -1034,8 +1036,9 @@ class SmartSearchTool(EmmaTool):
                 if not results:
                     logger.info("🔄 All enrichment filters returned 0 — retrying without any filters")
                     results = await client.hybrid_search(
-                        tenant_id=tenant_id,
                         query=query,
+                        user_roles=user_roles,
+                        user_id=user_id,
                         limit=limit,
                         alpha=alpha,
                         folder_filter=folder_filter,

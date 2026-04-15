@@ -2,7 +2,7 @@
 Emma ReAct Agent — Search Tools
 
 Wraps existing WeaviateClient for:
-- search_documents: Hybrid search in tenant's indexed documents
+- search_documents: Hybrid search in indexed documents
 - search_legislation: Search BOE PublicKnowledge legislation
 - get_document_content: Read a specific document's full content
 
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────
 
 class SearchDocumentsInput(BaseModel):
-    """Input for tenant document search."""
+    """Input for document search."""
     query: str = Field(
         description="Consulta de búsqueda en lenguaje natural. "
         "Sé específico: incluye nombres de documentos, fechas o temas clave. "
@@ -46,7 +46,7 @@ class SearchDocumentsInput(BaseModel):
 
 
 class SearchDocumentsTool(EmmaTool):
-    """Hybrid search (semantic + keyword) in the tenant's indexed documents."""
+    """Hybrid search (semantic + keyword) in indexed documents."""
 
     @property
     def name(self) -> str:
@@ -73,9 +73,8 @@ class SearchDocumentsTool(EmmaTool):
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
         from app.clients.weaviate_client import get_weaviate_client
 
-        tenant_id = context.get("tenant_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
+        user_roles = context.get("user_roles", [])
+        user_id = context.get("user_id")
 
         query = arguments["query"]
         limit = arguments.get("limit", 8)
@@ -103,8 +102,9 @@ class SearchDocumentsTool(EmmaTool):
 
         try:
             results = await client.hybrid_search(
-                tenant_id=tenant_id,
                 query=query,
+                user_roles=user_roles,
+                user_id=user_id,
                 limit=limit,
                 alpha=alpha,
                 filters=filters,
@@ -318,9 +318,8 @@ class GetDocumentContentTool(EmmaTool):
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
         from app.clients.weaviate_client import get_weaviate_client
 
-        tenant_id = context.get("tenant_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
+        user_roles = context.get("user_roles", [])
+        user_id = context.get("user_id")
 
         document_id = arguments["document_id"]
         include_chunks = arguments.get("include_chunks", False)
@@ -329,8 +328,9 @@ class GetDocumentContentTool(EmmaTool):
 
         try:
             doc = await client.get_document_content(
-                tenant_id=tenant_id,
                 document_id=document_id,
+                user_roles=user_roles,
+                user_id=user_id,
                 include_chunks=include_chunks,
             )
         except Exception as e:
