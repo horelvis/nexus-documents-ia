@@ -6,6 +6,13 @@ Provides a single interface for all memory operations, combining:
 - PreferencesStore (long-term user preferences)
 
 This is the recommended interface for EmmaService integration.
+
+NOTE (refactor/remove-multi-tenancy): tenant_id has been removed from this
+service's public API. Internally, it still passes a placeholder tenant_id
+("") to ConversationMemory, PreferencesStore, and PreferenceLearningService
+which are pending refactor in a later wave. Those services ignore the value
+or tolerate empty strings since single-tenant deployment no longer partitions
+data by tenant.
 """
 
 from __future__ import annotations
@@ -20,6 +27,11 @@ from .learning_service import PreferenceLearningService, UserInteraction, get_le
 from .user_facts import UserFactsService, get_user_facts_service
 
 logger = logging.getLogger(__name__)
+
+# Placeholder passed to out-of-scope callees still requiring tenant_id.
+# Pending refactor in a future wave; single-tenant deployment does not
+# partition data by tenant, so the value is effectively inert.
+_LEGACY_TENANT_PLACEHOLDER = ""
 
 
 class MemoryService:
@@ -89,7 +101,6 @@ class MemoryService:
 
     async def get_conversation_history(
         self,
-        tenant_id: str,
         session_id: str,
         max_messages: int = 20
     ) -> List[Dict[str, str]]:
@@ -97,7 +108,6 @@ class MemoryService:
         Get conversation history for LLM context.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             max_messages: Maximum messages to return
 
@@ -105,12 +115,11 @@ class MemoryService:
             List of messages in LLM format [{"role": "user", "content": "..."}]
         """
         return await self._conversation.get_history_for_llm(
-            tenant_id, session_id, max_messages
+            _LEGACY_TENANT_PLACEHOLDER, session_id, max_messages
         )
 
     async def get_context(
         self,
-        tenant_id: str,
         session_id: str,
         user_id: Optional[str] = None
     ) -> ConversationContext:
@@ -118,18 +127,18 @@ class MemoryService:
         Get full conversation context.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             user_id: Optional user identifier
 
         Returns:
             ConversationContext with full history
         """
-        return await self._conversation.get_context(tenant_id, session_id, user_id)
+        return await self._conversation.get_context(
+            _LEGACY_TENANT_PLACEHOLDER, session_id, user_id
+        )
 
     async def add_exchange(
         self,
-        tenant_id: str,
         session_id: str,
         user_message: str,
         assistant_message: str,
@@ -143,7 +152,6 @@ class MemoryService:
         This is the primary method for storing conversation turns.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             user_message: User's query
             assistant_message: Emma's response
@@ -155,7 +163,7 @@ class MemoryService:
             Updated ConversationContext
         """
         context = await self._conversation.add_exchange(
-            tenant_id, session_id,
+            _LEGACY_TENANT_PLACEHOLDER, session_id,
             user_message, assistant_message,
             user_id, active_documents=active_documents,
             **metadata
@@ -163,7 +171,9 @@ class MemoryService:
 
         # Also record query for learning if user_id provided
         if user_id:
-            await self._preferences.record_query(tenant_id, user_id, user_message)
+            await self._preferences.record_query(
+                _LEGACY_TENANT_PLACEHOLDER, user_id, user_message
+            )
 
             # Record interaction for preference learning
             if self._learning_enabled:
@@ -176,7 +186,7 @@ class MemoryService:
                         results_shown=metadata.get("results_count"),
                         selected_document_ids=metadata.get("source_document_ids", [])
                     )
-                    await self._learning.record_interaction(user_id, tenant_id, interaction)
+                    await self._learning.record_interaction(user_id, interaction)
                 except Exception as e:
                     logger.warning(f"⚠️ Failed to record learning interaction: {e}")
 
@@ -184,7 +194,6 @@ class MemoryService:
 
     async def add_tool_result(
         self,
-        tenant_id: str,
         session_id: str,
         tool_name: str,
         result: str,
@@ -194,7 +203,6 @@ class MemoryService:
         Add a tool result to conversation.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             tool_name: Name of the tool that was executed
             result: Tool result content
@@ -203,18 +211,24 @@ class MemoryService:
         Returns:
             Updated ConversationContext
         """
-        context = await self._conversation.get_context(tenant_id, session_id)
+        context = await self._conversation.get_context(
+            _LEGACY_TENANT_PLACEHOLDER, session_id
+        )
         context.add_tool_message(tool_name, result, **metadata)
         await self._conversation.save_context(context)
         return context
 
-    async def clear_session(self, tenant_id: str, session_id: str) -> bool:
+    async def clear_session(self, session_id: str) -> bool:
         """Clear a conversation session."""
-        return await self._conversation.clear_session(tenant_id, session_id)
+        return await self._conversation.clear_session(
+            _LEGACY_TENANT_PLACEHOLDER, session_id
+        )
 
-    async def extend_session(self, tenant_id: str, session_id: str) -> bool:
+    async def extend_session(self, session_id: str) -> bool:
         """Extend TTL for an active session."""
-        return await self._conversation.extend_ttl(tenant_id, session_id)
+        return await self._conversation.extend_ttl(
+            _LEGACY_TENANT_PLACEHOLDER, session_id
+        )
 
     # =========================================================================
     # User Preferences Operations
@@ -222,24 +236,23 @@ class MemoryService:
 
     async def get_preferences(
         self,
-        tenant_id: str,
         user_id: str
     ) -> UserPreferences:
         """
         Get user preferences.
 
         Args:
-            tenant_id: Tenant identifier
             user_id: User identifier
 
         Returns:
             UserPreferences for the user
         """
-        return await self._preferences.get_preferences(tenant_id, user_id)
+        return await self._preferences.get_preferences(
+            _LEGACY_TENANT_PLACEHOLDER, user_id
+        )
 
     async def update_preference(
         self,
-        tenant_id: str,
         user_id: str,
         key: str,
         value: Any
@@ -248,7 +261,6 @@ class MemoryService:
         Update a single preference.
 
         Args:
-            tenant_id: Tenant identifier
             user_id: User identifier
             key: Preference key
             value: New value
@@ -257,30 +269,31 @@ class MemoryService:
             Updated UserPreferences
         """
         return await self._preferences.update_preference(
-            tenant_id, user_id, key, value
+            _LEGACY_TENANT_PLACEHOLDER, user_id, key, value
         )
 
     async def record_query(
         self,
-        tenant_id: str,
         user_id: str,
         query: str
     ) -> None:
         """Record a query for learning."""
-        await self._preferences.record_query(tenant_id, user_id, query)
+        await self._preferences.record_query(
+            _LEGACY_TENANT_PLACEHOLDER, user_id, query
+        )
 
     async def record_document_access(
         self,
-        tenant_id: str,
         user_id: str,
         document_id: str
     ) -> None:
         """Record document access for relevance."""
-        await self._preferences.record_document_access(tenant_id, user_id, document_id)
+        await self._preferences.record_document_access(
+            _LEGACY_TENANT_PLACEHOLDER, user_id, document_id
+        )
 
     async def get_user_context(
         self,
-        tenant_id: str,
         user_id: str
     ) -> Dict[str, Any]:
         """
@@ -289,7 +302,6 @@ class MemoryService:
         Returns preferences and learning data useful for personalizing responses.
 
         Args:
-            tenant_id: Tenant identifier
             user_id: User identifier
 
         Returns:
@@ -302,7 +314,9 @@ class MemoryService:
             - custom_settings: Any custom settings
             - learning: Learned preferences and ranking weights
         """
-        prefs = await self._preferences.get_preferences(tenant_id, user_id)
+        prefs = await self._preferences.get_preferences(
+            _LEGACY_TENANT_PLACEHOLDER, user_id
+        )
 
         context = {
             # Personalization fields
@@ -328,9 +342,7 @@ class MemoryService:
         # Enrich with learning service data
         if self._learning_enabled:
             try:
-                learning_context = await self._learning.get_user_context_for_emma(
-                    user_id, tenant_id
-                )
+                learning_context = await self._learning.get_user_context_for_emma(user_id)
                 context["learning"] = learning_context
                 context["ranking_weights"] = learning_context.get("ranking_weights", {})
                 context["learning_applied"] = True
@@ -339,7 +351,7 @@ class MemoryService:
 
         # Enrich with persistent user facts
         try:
-            user_facts = await self._user_facts.get_user_facts(tenant_id, user_id)
+            user_facts = await self._user_facts.get_user_facts(user_id)
             if user_facts:
                 context["user_facts"] = user_facts
         except Exception as e:
@@ -353,7 +365,6 @@ class MemoryService:
 
     async def get_full_context(
         self,
-        tenant_id: str,
         session_id: str,
         user_id: Optional[str] = None,
         max_history: int = 20
@@ -365,7 +376,6 @@ class MemoryService:
         context object suitable for LLM system prompts.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             user_id: Optional user identifier
             max_history: Maximum conversation history messages
@@ -376,7 +386,9 @@ class MemoryService:
             - active_documents: Documents in current context
             - user_context: User preferences (if user_id provided)
         """
-        context = await self._conversation.get_context(tenant_id, session_id, user_id)
+        context = await self._conversation.get_context(
+            _LEGACY_TENANT_PLACEHOLDER, session_id, user_id
+        )
 
         result = {
             "history": context.get_history_for_llm(max_history),
@@ -385,7 +397,7 @@ class MemoryService:
         }
 
         if user_id:
-            result["user_context"] = await self.get_user_context(tenant_id, user_id)
+            result["user_context"] = await self.get_user_context(user_id)
 
         return result
 
@@ -395,7 +407,6 @@ class MemoryService:
 
     async def record_feedback(
         self,
-        tenant_id: str,
         user_id: str,
         session_id: str,
         rating: int,
@@ -405,7 +416,6 @@ class MemoryService:
         Record user feedback for learning.
 
         Args:
-            tenant_id: Tenant identifier
             user_id: User identifier
             session_id: Session identifier
             rating: Rating 1-5
@@ -421,14 +431,13 @@ class MemoryService:
                 feedback_rating=rating,
                 feedback_text=feedback_text
             )
-            await self._learning.record_interaction(user_id, tenant_id, interaction)
+            await self._learning.record_interaction(user_id, interaction)
             logger.info(f"📊 Recorded feedback: {rating}/5 for user {user_id[:8]}...")
         except Exception as e:
             logger.warning(f"⚠️ Failed to record feedback: {e}")
 
     async def record_document_view(
         self,
-        tenant_id: str,
         user_id: str,
         document_id: str,
         dwell_time_seconds: Optional[int] = None,
@@ -439,7 +448,6 @@ class MemoryService:
         Record a document view for learning.
 
         Args:
-            tenant_id: Tenant identifier
             user_id: User identifier
             document_id: Document ID viewed
             dwell_time_seconds: Time spent on document
@@ -447,7 +455,9 @@ class MemoryService:
             actions: Actions taken (download, share, etc.)
         """
         # Record in preferences (existing behavior)
-        await self._preferences.record_document_access(tenant_id, user_id, document_id)
+        await self._preferences.record_document_access(
+            _LEGACY_TENANT_PLACEHOLDER, user_id, document_id
+        )
 
         # Record for learning
         if self._learning_enabled:
@@ -459,13 +469,12 @@ class MemoryService:
                     scroll_depth_percentage=scroll_depth,
                     actions_taken=actions or []
                 )
-                await self._learning.record_interaction(user_id, tenant_id, interaction)
+                await self._learning.record_interaction(user_id, interaction)
             except Exception as e:
                 logger.warning(f"⚠️ Failed to record document view: {e}")
 
     async def get_ranking_weights(
         self,
-        tenant_id: str,
         user_id: str
     ) -> Dict[str, float]:
         """
@@ -478,14 +487,13 @@ class MemoryService:
             return {"recency": 0.3, "frequency": 0.3, "relevance": 0.4}
 
         try:
-            return await self._learning.get_personalized_ranking_weights(user_id, tenant_id)
+            return await self._learning.get_personalized_ranking_weights(user_id)
         except Exception as e:
             logger.warning(f"⚠️ Failed to get ranking weights: {e}")
             return {"recency": 0.3, "frequency": 0.3, "relevance": 0.4}
 
     async def get_learning_stats(
         self,
-        tenant_id: str,
         user_id: str
     ) -> Dict[str, Any]:
         """Get learning statistics for a user."""
@@ -493,20 +501,19 @@ class MemoryService:
             return {"learning_enabled": False}
 
         try:
-            return await self._learning.get_learning_stats(user_id, tenant_id)
+            return await self._learning.get_learning_stats(user_id)
         except Exception as e:
             logger.warning(f"⚠️ Failed to get learning stats: {e}")
             return {"learning_enabled": False, "error": str(e)}
 
     async def flush_learning_data(
         self,
-        tenant_id: str,
         user_id: str
     ) -> None:
         """Flush pending learning data (call on session end)."""
         if self._learning_enabled:
             try:
-                await self._learning.flush_interactions(user_id, tenant_id)
+                await self._learning.flush_interactions(user_id)
             except Exception as e:
                 logger.warning(f"⚠️ Failed to flush learning data: {e}")
 

@@ -2,26 +2,26 @@
 User Facts Service — Cross-session persistent memory for Emma.
 
 Stores and retrieves user facts (name, department, preferences) across
-chat sessions. Facts survive session expiry and are scoped to (tenant, user).
+chat sessions. Facts survive session expiry and are scoped to user only
+(single-tenant deployment — tenant dimension removed).
 
 Architecture (Phase 2 — LangGraph Store):
     PRIMARY:  AsyncPostgresStore (cross-thread memory, shared psycopg3 pool)
     FALLBACK: asyncpg + Redis (legacy, used when Store unavailable)
 
 Store namespace scheme:
-    ("user_facts", tenant_id, user_id) → key: "{category}/{fact_key}"
+    ("user_facts", user_id) → key: "{category}/{fact_key}"
     value: {category, fact_key, fact_value, confidence, source, source_query}
 
 Usage:
     service = get_user_facts_service()
-    facts = await service.get_user_facts(tenant_id, user_id)
-    prompt_section = await service.format_facts_for_prompt(tenant_id, user_id)
-    await service.save_fact(tenant_id, user_id, "identity", "name", "Carlos", 1.0, "declared")
+    facts = await service.get_user_facts(user_id)
+    prompt_section = await service.format_facts_for_prompt(user_id)
+    await service.save_fact(user_id, "identity", "name", "Carlos", 1.0, "declared")
 """
 
 import json
 import logging
-import uuid
 from typing import Any, Dict, List, Optional
 
 from app.core.config import settings
@@ -53,9 +53,9 @@ class UserFactsService:
         except Exception:
             return None
 
-    def _namespace(self, tenant_id: str, user_id: str) -> tuple:
+    def _namespace(self, user_id: str) -> tuple:
         """Build Store namespace tuple for a user's facts."""
-        return ("user_facts", tenant_id, user_id)
+        return ("user_facts", user_id)
 
     def _store_key(self, category: str, fact_key: str) -> str:
         """Build Store key from category and fact_key."""
@@ -100,20 +100,20 @@ class UserFactsService:
 
     # ─── Cache helpers (legacy) ────────────────────────────────────────
 
-    def _cache_key(self, tenant_id: str, user_id: str) -> str:
-        return f"{FACTS_CACHE_PREFIX}{tenant_id}:{user_id}"
+    def _cache_key(self, user_id: str) -> str:
+        return f"{FACTS_CACHE_PREFIX}{user_id}"
 
-    async def _invalidate_cache(self, tenant_id: str, user_id: str) -> None:
+    async def _invalidate_cache(self, user_id: str) -> None:
         try:
             r = await self._get_redis()
-            await r.delete(self._cache_key(tenant_id, user_id))
+            await r.delete(self._cache_key(user_id))
         except Exception as e:
             logger.debug(f"Failed to invalidate facts cache: {e}")
 
     # ─── READ operations ──────────────────────────────────────────────
 
     async def get_user_facts(
-        self, tenant_id: str, user_id: str
+        self, user_id: str
     ) -> List[Dict[str, Any]]:
         """Get all active facts for a user.
 
@@ -129,17 +129,17 @@ class UserFactsService:
         # Try LangGraph Store first
         store = await self._get_store()
         if store is not None:
-            return await self._get_facts_from_store(store, tenant_id, user_id)
+            return await self._get_facts_from_store(store, user_id)
 
         # Legacy fallback: Redis → PostgreSQL
-        return await self._get_facts_legacy(tenant_id, user_id)
+        return await self._get_facts_legacy(user_id)
 
     async def _get_facts_from_store(
-        self, store, tenant_id: str, user_id: str
+        self, store, user_id: str
     ) -> List[Dict[str, Any]]:
         """Read all facts from LangGraph Store via asearch()."""
         try:
-            ns = self._namespace(tenant_id, user_id)
+            ns = self._namespace(user_id)
             max_facts = getattr(settings, "user_memory_max_facts", 50)
             items = await store.asearch(ns, limit=max_facts)
 
@@ -161,16 +161,16 @@ class UserFactsService:
 
         except Exception as e:
             logger.error(f"Store read failed, trying legacy: {e}")
-            return await self._get_facts_legacy(tenant_id, user_id)
+            return await self._get_facts_legacy(user_id)
 
     async def _get_facts_legacy(
-        self, tenant_id: str, user_id: str
+        self, user_id: str
     ) -> List[Dict[str, Any]]:
         """Legacy: Redis cache → PostgreSQL fallback."""
         # Try Redis cache
         try:
             r = await self._get_redis()
-            cached = await r.get(self._cache_key(tenant_id, user_id))
+            cached = await r.get(self._cache_key(user_id))
             if cached:
                 return json.loads(cached)
         except Exception as e:
@@ -185,10 +185,9 @@ class UserFactsService:
                     SELECT id, category, fact_key, fact_value, confidence, source, source_query,
                            created_at, updated_at
                     FROM emma_user_memory_facts
-                    WHERE tenant_id = $1::uuid AND user_id = $2 AND is_active = true
+                    WHERE user_id = $1 AND is_active = true
                     ORDER BY category, fact_key
                     """,
-                    tenant_id,
                     user_id,
                 )
 
@@ -208,7 +207,7 @@ class UserFactsService:
             try:
                 r = await self._get_redis()
                 await r.set(
-                    self._cache_key(tenant_id, user_id),
+                    self._cache_key(user_id),
                     json.dumps(facts),
                     ex=FACTS_CACHE_TTL,
                 )
@@ -222,7 +221,7 @@ class UserFactsService:
             return []
 
     async def format_facts_for_prompt(
-        self, tenant_id: str, user_id: str
+        self, user_id: str
     ) -> str:
         """Format user facts as a prompt section for LLM injection.
 
@@ -237,7 +236,7 @@ class UserFactsService:
         if not getattr(settings, "user_memory_enabled", True):
             return ""
 
-        facts = await self.get_user_facts(tenant_id, user_id)
+        facts = await self.get_user_facts(user_id)
         if not facts:
             return ""
 
@@ -273,7 +272,6 @@ class UserFactsService:
 
     async def save_fact(
         self,
-        tenant_id: str,
         user_id: str,
         category: str,
         fact_key: str,
@@ -296,23 +294,23 @@ class UserFactsService:
         store = await self._get_store()
         if store is not None:
             return await self._save_fact_store(
-                store, tenant_id, user_id, category, fact_key,
+                store, user_id, category, fact_key,
                 fact_value, confidence, source, source_query,
             )
 
         return await self._save_fact_legacy(
-            tenant_id, user_id, category, fact_key,
+            user_id, category, fact_key,
             fact_value, confidence, source, source_query,
         )
 
     async def _save_fact_store(
-        self, store, tenant_id: str, user_id: str,
+        self, store, user_id: str,
         category: str, fact_key: str, fact_value: str,
         confidence: float, source: str, source_query: Optional[str],
     ) -> bool:
         """Save fact to LangGraph Store with confidence maximization."""
         try:
-            ns = self._namespace(tenant_id, user_id)
+            ns = self._namespace(user_id)
             key = self._store_key(category, fact_key)
 
             # Check existing for confidence maximization
@@ -339,12 +337,12 @@ class UserFactsService:
         except Exception as e:
             logger.error(f"Store save failed, trying legacy: {e}")
             return await self._save_fact_legacy(
-                tenant_id, user_id, category, fact_key,
+                user_id, category, fact_key,
                 fact_value, confidence, source, source_query,
             )
 
     async def _save_fact_legacy(
-        self, tenant_id: str, user_id: str,
+        self, user_id: str,
         category: str, fact_key: str, fact_value: str,
         confidence: float, source: str, source_query: Optional[str],
     ) -> bool:
@@ -355,10 +353,10 @@ class UserFactsService:
                 await conn.execute(
                     """
                     INSERT INTO emma_user_memory_facts
-                        (tenant_id, user_id, category, fact_key, fact_value,
+                        (user_id, category, fact_key, fact_value,
                          confidence, source, source_query, is_active)
-                    VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, true)
-                    ON CONFLICT (tenant_id, user_id, category, fact_key)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+                    ON CONFLICT (user_id, category, fact_key)
                         WHERE is_active = true
                     DO UPDATE SET
                         fact_value = EXCLUDED.fact_value,
@@ -370,7 +368,6 @@ class UserFactsService:
                         source_query = COALESCE(EXCLUDED.source_query, emma_user_memory_facts.source_query),
                         updated_at = now()
                     """,
-                    tenant_id,
                     user_id,
                     category,
                     fact_key,
@@ -380,7 +377,7 @@ class UserFactsService:
                     source_query,
                 )
 
-            await self._invalidate_cache(tenant_id, user_id)
+            await self._invalidate_cache(user_id)
             logger.info(f"Saved fact [{category}/{fact_key}] for user {user_id[:8]}...")
             return True
 
@@ -389,7 +386,7 @@ class UserFactsService:
             return False
 
     async def delete_fact(
-        self, tenant_id: str, user_id: str, fact_id: str
+        self, user_id: str, fact_id: str
     ) -> bool:
         """Delete a single fact by ID.
 
@@ -398,15 +395,15 @@ class UserFactsService:
         """
         store = await self._get_store()
         if store is not None:
-            return await self._delete_fact_store(store, tenant_id, user_id, fact_id)
-        return await self._delete_fact_legacy(tenant_id, user_id, fact_id)
+            return await self._delete_fact_store(store, user_id, fact_id)
+        return await self._delete_fact_legacy(user_id, fact_id)
 
     async def _delete_fact_store(
-        self, store, tenant_id: str, user_id: str, fact_id: str
+        self, store, user_id: str, fact_id: str
     ) -> bool:
         """Delete from Store. fact_id is the Store key (e.g. 'identity/name')."""
         try:
-            ns = self._namespace(tenant_id, user_id)
+            ns = self._namespace(user_id)
             await store.adelete(ns, fact_id)
             logger.info(f"Deleted fact [{fact_id}] for user {user_id[:8]}... (Store)")
             return True
@@ -415,7 +412,7 @@ class UserFactsService:
             return False
 
     async def _delete_fact_legacy(
-        self, tenant_id: str, user_id: str, fact_id: str
+        self, user_id: str, fact_id: str
     ) -> bool:
         """Legacy: soft-delete by UUID."""
         try:
@@ -425,14 +422,13 @@ class UserFactsService:
                     """
                     UPDATE emma_user_memory_facts
                     SET is_active = false, updated_at = now()
-                    WHERE id = $1::uuid AND tenant_id = $2::uuid AND user_id = $3
+                    WHERE id = $1::uuid AND user_id = $2
                     """,
                     fact_id,
-                    tenant_id,
                     user_id,
                 )
 
-            await self._invalidate_cache(tenant_id, user_id)
+            await self._invalidate_cache(user_id)
             return "UPDATE 1" in result
 
         except Exception as e:
@@ -440,7 +436,7 @@ class UserFactsService:
             return False
 
     async def clear_user_facts(
-        self, tenant_id: str, user_id: str
+        self, user_id: str
     ) -> int:
         """Hard-delete ALL facts for a user (GDPR right-to-erasure).
 
@@ -448,15 +444,15 @@ class UserFactsService:
         """
         store = await self._get_store()
         if store is not None:
-            return await self._clear_facts_store(store, tenant_id, user_id)
-        return await self._clear_facts_legacy(tenant_id, user_id)
+            return await self._clear_facts_store(store, user_id)
+        return await self._clear_facts_legacy(user_id)
 
     async def _clear_facts_store(
-        self, store, tenant_id: str, user_id: str
+        self, store, user_id: str
     ) -> int:
         """Delete all facts from Store for a user."""
         try:
-            ns = self._namespace(tenant_id, user_id)
+            ns = self._namespace(user_id)
             items = await store.asearch(ns, limit=200)
             count = 0
             for item in items:
@@ -468,10 +464,10 @@ class UserFactsService:
 
         except Exception as e:
             logger.error(f"Store clear failed, trying legacy: {e}")
-            return await self._clear_facts_legacy(tenant_id, user_id)
+            return await self._clear_facts_legacy(user_id)
 
     async def _clear_facts_legacy(
-        self, tenant_id: str, user_id: str
+        self, user_id: str
     ) -> int:
         """Legacy: hard DELETE from PostgreSQL."""
         try:
@@ -480,13 +476,12 @@ class UserFactsService:
                 result = await conn.execute(
                     """
                     DELETE FROM emma_user_memory_facts
-                    WHERE tenant_id = $1::uuid AND user_id = $2
+                    WHERE user_id = $1
                     """,
-                    tenant_id,
                     user_id,
                 )
 
-            await self._invalidate_cache(tenant_id, user_id)
+            await self._invalidate_cache(user_id)
 
             count = int(result.split()[-1]) if result else 0
             logger.info(f"GDPR: cleared {count} facts for user {user_id[:8]}...")

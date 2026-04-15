@@ -4,7 +4,7 @@ Preference Learning Service for Emma AI.
 Learns user preferences from interactions to personalize responses.
 Integrates with the existing preference system and persists to PostgreSQL.
 
-Version 1.1 - January 2026 (Refactored with centralized config)
+Version 1.2 - 2026 (Multi-tenancy removed — user_id-only scoping)
 """
 
 import logging
@@ -67,7 +67,6 @@ class UserInteraction:
 class UserLearningProfile:
     """User learning profile with preferences and metrics."""
     user_id: str
-    tenant_id: str
 
     # Explicit preferences
     response_style: str = "balanced"
@@ -156,7 +155,6 @@ class PreferenceLearningService:
     async def record_interaction(
         self,
         user_id: str,
-        tenant_id: str,
         interaction: UserInteraction
     ) -> None:
         """
@@ -169,7 +167,7 @@ class PreferenceLearningService:
             await self.initialize()
 
         try:
-            key = f"{tenant_id}:{user_id}"
+            key = user_id
 
             # Add to buffer
             if key not in self._interaction_buffer:
@@ -177,11 +175,11 @@ class PreferenceLearningService:
             self._interaction_buffer[key].append(interaction)
 
             # Store interaction in Redis for persistence
-            await self._store_interaction_redis(user_id, tenant_id, interaction)
+            await self._store_interaction_redis(user_id, interaction)
 
             # Check if we should update profile
             if len(self._interaction_buffer[key]) >= self._buffer_threshold:
-                await self._process_interaction_buffer(user_id, tenant_id)
+                await self._process_interaction_buffer(user_id)
 
             logger.debug(
                 f"📝 Recorded interaction: {interaction.interaction_type} "
@@ -194,12 +192,11 @@ class PreferenceLearningService:
     async def _store_interaction_redis(
         self,
         user_id: str,
-        tenant_id: str,
         interaction: UserInteraction
     ) -> None:
         """Store interaction in Redis for later processing."""
         try:
-            key = f"emma:interactions:{tenant_id}:{user_id}"
+            key = f"emma:interactions:{user_id}"
 
             interaction_data = {
                 "type": interaction.interaction_type,
@@ -228,11 +225,10 @@ class PreferenceLearningService:
 
     async def _process_interaction_buffer(
         self,
-        user_id: str,
-        tenant_id: str
+        user_id: str
     ) -> None:
         """Process buffered interactions and update user profile."""
-        key = f"{tenant_id}:{user_id}"
+        key = user_id
         interactions = self._interaction_buffer.get(key, [])
 
         if not interactions:
@@ -240,7 +236,7 @@ class PreferenceLearningService:
 
         try:
             # Get or create profile
-            profile = await self.get_user_profile(user_id, tenant_id)
+            profile = await self.get_user_profile(user_id)
 
             # Process interactions
             for interaction in interactions:
@@ -334,8 +330,7 @@ class PreferenceLearningService:
 
     async def get_user_profile(
         self,
-        user_id: str,
-        tenant_id: str
+        user_id: str
     ) -> UserLearningProfile:
         """
         Get user learning profile.
@@ -345,7 +340,7 @@ class PreferenceLearningService:
         if not self._initialized:
             await self.initialize()
 
-        cache_key = f"{tenant_id}:{user_id}"
+        cache_key = user_id
 
         # Check cache
         if cache_key in self._profile_cache:
@@ -354,13 +349,12 @@ class PreferenceLearningService:
                 return self._profile_cache[cache_key]
 
         # Try to load from Redis
-        profile = await self._load_profile_from_redis(user_id, tenant_id)
+        profile = await self._load_profile_from_redis(user_id)
 
         if not profile:
             # Create default profile
             profile = UserLearningProfile(
                 user_id=user_id,
-                tenant_id=tenant_id,
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow()
             )
@@ -374,12 +368,11 @@ class PreferenceLearningService:
 
     async def _load_profile_from_redis(
         self,
-        user_id: str,
-        tenant_id: str
+        user_id: str
     ) -> Optional[UserLearningProfile]:
         """Load user profile from Redis."""
         try:
-            key = f"emma:learning:{tenant_id}:{user_id}"
+            key = f"emma:learning:{user_id}"
             data = await self._redis_client.get(key)
 
             if not data:
@@ -388,7 +381,6 @@ class PreferenceLearningService:
             profile_dict = json.loads(data)
             return UserLearningProfile(
                 user_id=profile_dict.get("user_id", user_id),
-                tenant_id=profile_dict.get("tenant_id", tenant_id),
                 response_style=profile_dict.get("response_style", "balanced"),
                 expertise_level=profile_dict.get("expertise_level", "general"),
                 preferred_language=profile_dict.get("preferred_language", "es"),
@@ -410,11 +402,10 @@ class PreferenceLearningService:
     async def _save_profile(self, profile: UserLearningProfile) -> None:
         """Save user profile to Redis."""
         try:
-            key = f"emma:learning:{profile.tenant_id}:{profile.user_id}"
+            key = f"emma:learning:{profile.user_id}"
 
             profile_dict = {
                 "user_id": profile.user_id,
-                "tenant_id": profile.tenant_id,
                 "response_style": profile.response_style,
                 "expertise_level": profile.expertise_level,
                 "preferred_language": profile.preferred_language,
@@ -437,7 +428,7 @@ class PreferenceLearningService:
             )
 
             # Update cache
-            cache_key = f"{profile.tenant_id}:{profile.user_id}"
+            cache_key = profile.user_id
             self._profile_cache[cache_key] = profile
             self._cache_timestamps[cache_key] = datetime.utcnow()
 
@@ -446,28 +437,26 @@ class PreferenceLearningService:
 
     async def get_personalized_ranking_weights(
         self,
-        user_id: str,
-        tenant_id: str
+        user_id: str
     ) -> Dict[str, float]:
         """
         Get personalized ranking weights for a user.
 
         Used by RAG pipeline to adjust result ranking.
         """
-        profile = await self.get_user_profile(user_id, tenant_id)
+        profile = await self.get_user_profile(user_id)
         return profile.ranking_weights.copy()
 
     async def get_user_context_for_emma(
         self,
-        user_id: str,
-        tenant_id: str
+        user_id: str
     ) -> Dict[str, Any]:
         """
         Get enriched user context for Emma.
 
         Returns preferences, frequent documents/queries, and learned patterns.
         """
-        profile = await self.get_user_profile(user_id, tenant_id)
+        profile = await self.get_user_profile(user_id)
 
         return {
             "preferences": {
@@ -490,7 +479,6 @@ class PreferenceLearningService:
     async def update_preferences(
         self,
         user_id: str,
-        tenant_id: str,
         response_style: Optional[str] = None,
         expertise_level: Optional[str] = None,
         preferred_language: Optional[str] = None
@@ -500,7 +488,7 @@ class PreferenceLearningService:
 
         These are preferences the user sets directly, not learned.
         """
-        profile = await self.get_user_profile(user_id, tenant_id)
+        profile = await self.get_user_profile(user_id)
 
         if response_style:
             profile.response_style = response_style
@@ -516,27 +504,24 @@ class PreferenceLearningService:
 
     async def flush_interactions(
         self,
-        user_id: str,
-        tenant_id: str
+        user_id: str
     ) -> None:
         """
         Flush pending interactions and update profile.
 
         Called when user session ends or periodically.
         """
-        await self._process_interaction_buffer(user_id, tenant_id)
+        await self._process_interaction_buffer(user_id)
 
     async def get_learning_stats(
         self,
-        user_id: str,
-        tenant_id: str
+        user_id: str
     ) -> Dict[str, Any]:
         """Get learning statistics for a user."""
-        profile = await self.get_user_profile(user_id, tenant_id)
+        profile = await self.get_user_profile(user_id)
 
         return {
             "user_id": user_id,
-            "tenant_id": tenant_id,
             "total_queries": profile.total_queries,
             "total_document_views": profile.total_document_views,
             "frequent_queries_count": len(profile.frequent_queries),
