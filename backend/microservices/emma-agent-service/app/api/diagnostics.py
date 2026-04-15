@@ -617,7 +617,6 @@ async def _check_react_pipeline(tenant_id: str) -> Dict[str, Any]:
 
         response = await execute_langgraph_query(
             query="Hola",
-            tenant_id=tenant_id,
             user_id="diagnostics-probe",
         )
         ms = (time.time() - t0) * 1000
@@ -961,7 +960,6 @@ async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
         # Turn 1: greeting (warms up the thread in checkpointer)
         resp1 = await execute_langgraph_query(
             query="Hola",
-            tenant_id=tenant_id,
             user_id="diagnostics-probe",
             thread_id=thread_id,
         )
@@ -972,7 +970,6 @@ async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
         # Turn 2: document query — must use tools (not respond without searching)
         resp2 = await execute_langgraph_query(
             query="¿Cuántos documentos tengo?",
-            tenant_id=tenant_id,
             user_id="diagnostics-probe",
             thread_id=thread_id,
         )

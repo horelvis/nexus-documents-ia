@@ -7,7 +7,7 @@ LangGraph is the single orchestration engine — no feature flags needed.
 Usage:
     from app.agents.langgraph.api import execute_langgraph_query
 
-    result = await execute_langgraph_query(query, tenant_id, user_id)
+    result = await execute_langgraph_query(query, user_id=user_id, user_roles=["admin"])
 """
 
 import asyncio
@@ -26,14 +26,8 @@ from .state import ReActState, ExecutionConfig, create_initial_react_state
 logger = logging.getLogger(__name__)
 
 
-# Backwards-compatible stubs — always returns True.
-# These will be removed in a future cleanup pass.
 def is_langgraph_enabled() -> bool:
     """LangGraph is always enabled — it's the core orchestration engine."""
-    return True
-
-def is_langgraph_enabled_for_tenant(tenant_id: str) -> bool:
-    """LangGraph is always enabled for all tenants."""
     return True
 
 
@@ -44,9 +38,8 @@ def is_langgraph_enabled_for_tenant(tenant_id: str) -> bool:
 class LangGraphQueryRequest(BaseModel):
     """Request for LangGraph RAG query."""
     query: str = Field(..., description="User's natural language query")
-    tenant_id: str = Field(..., description="Tenant identifier")
     user_id: Optional[str] = Field(None, description="User identifier for ACL")
-    user_role_ids: Optional[List[str]] = Field(None, description="User role IDs for ACL")
+    user_roles: List[str] = Field(default_factory=list, description="User roles for ACL filtering")
     is_admin: bool = Field(False, description="Admin bypass for ACL")
     thread_id: Optional[str] = Field(None, description="Conversation thread ID")
     context: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Request context (document_id, attachments, etc.)")
@@ -55,8 +48,8 @@ class LangGraphQueryRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "query": "¿Qué documentos sobre RGPD tengo?",
-                "tenant_id": "tenant-123",
                 "user_id": "user-456",
+                "user_roles": ["legal", "EVERYONE"],
                 "thread_id": "thread-789",
             }
         }
@@ -95,69 +88,37 @@ class LangGraphQueryResponse(BaseModel):
 
 async def execute_langgraph_query(
     query: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
-    user_role_ids: Optional[List[str]] = None,
+    user_roles: Optional[List[str]] = None,
     is_admin: bool = False,
     thread_id: Optional[str] = None,
     context: Optional[Dict[str, Any]] = None,
     config: Optional[ExecutionConfig] = None,
     conversation_history: Optional[List[Dict[str, Any]]] = None,
 ) -> LangGraphQueryResponse:
-    """
-    Execute a RAG query using LangGraph.
-
-    This is the main API function for executing queries.
-    Can be called directly or integrated into Emma v2 endpoints.
-
-    Args:
-        query: User's natural language query
-        tenant_id: Tenant ID for ACL isolation
-        user_id: Optional user ID for fine-grained ACL
-        user_role_ids: Optional role IDs for permission checks
-        is_admin: Admin bypass flag
-        thread_id: Optional conversation thread ID
-        config: Optional execution configuration
-
-    Returns:
-        LangGraphQueryResponse with answer, sources, and metadata
-
-    Example:
-        >>> response = await execute_langgraph_query(
-        ...     query="¿Qué contratos tienen cláusula RGPD?",
-        ...     tenant_id="tenant-123",
-        ...     user_id="user-456",
-        ... )
-        >>> print(response.answer)
-    """
+    """Execute a RAG query using LangGraph."""
     start_time = time.time()
 
-    # Generate thread ID if not provided
     if not thread_id:
         thread_id = str(uuid.uuid4())
 
     logger.info(
-        f"🚀 LangGraph query: tenant={tenant_id}, "
-        f"thread={thread_id[:8]}..., query='{query[:50]}...'"
+        f"🚀 LangGraph query: thread={thread_id[:8]}..., query='{query[:50]}...'"
     )
 
-    # Set execution context for tools
     document_id = (context or {}).get("document_id")
     set_execution_context(
-        tenant_id=tenant_id,
         user_id=user_id,
-        user_role_ids=user_role_ids,
+        user_roles=user_roles or [],
         is_admin=is_admin,
         document_id=document_id,
     )
 
     try:
-        # Execute via ReAct graph (default behavior)
         result = await execute_react_query(
             query=query,
-            tenant_id=tenant_id,
             user_id=user_id,
-            user_role_ids=user_role_ids,
+            user_roles=user_roles or [],
             is_admin=is_admin,
             thread_id=thread_id,
             conversation_history=conversation_history,
@@ -217,9 +178,8 @@ async def execute_langgraph_query(
 
 async def stream_react_query(
     query: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
-    user_role_ids: Optional[List[str]] = None,
+    user_roles: Optional[List[str]] = None,
     is_admin: bool = False,
     thread_id: Optional[str] = None,
     conversation_history: Optional[List[Dict[str, Any]]] = None,
@@ -249,9 +209,8 @@ async def stream_react_query(
 
     Args:
         query: User's query
-        tenant_id: Tenant ID
         user_id: Optional user ID
-        user_role_ids: Optional role IDs
+        user_roles: Optional roles for ACL filtering
         is_admin: Admin flag
         thread_id: Optional thread ID
         conversation_history: Previous messages (ignored when checkpointer active)
@@ -264,15 +223,10 @@ async def stream_react_query(
     start_time = time.time()
     thread_id = thread_id or str(uuid.uuid4())
 
-    if not tenant_id or not tenant_id.strip():
-        yield {"type": "error", "data": {"error": "tenant_id is required", "thread_id": thread_id}}
-        return
-
     document_id = (context or {}).get("document_id")
     set_execution_context(
-        tenant_id=tenant_id,
         user_id=user_id,
-        user_role_ids=user_role_ids,
+        user_roles=user_roles or [],
         is_admin=is_admin,
         document_id=document_id,
     )
@@ -306,9 +260,8 @@ async def stream_react_query(
 
         initial_state = await create_initial_react_state(
             query=query,
-            tenant_id=tenant_id,
             user_id=user_id,
-            user_role_ids=user_role_ids,
+            user_roles=user_roles or [],
             is_admin=is_admin,
             thread_id=thread_id,
             conversation_history=langchain_history,
@@ -501,27 +454,16 @@ async def stream_react_query(
 async def resume_react_query(
     thread_id: str,
     resume_value: Any,
-    tenant_id: str,
     user_id: Optional[str] = None,
+    user_roles: Optional[List[str]] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
-    """Resume a paused ReAct graph after a HITL interrupt.
-
-    Uses Command(resume=value) to continue the graph from where it paused.
-    The resumed node re-executes from the beginning, but interrupt() returns
-    the resume_value instead of pausing again.
-
-    Args:
-        thread_id: The thread ID of the paused graph
-        resume_value: The value to pass back to interrupt() (e.g., user's selected option)
-        tenant_id: Tenant ID
-        user_id: Optional user ID
-    """
+    """Resume a paused ReAct graph after a HITL interrupt."""
     from langgraph.types import Command
     from .graph import get_react_graph
 
     start_time = time.time()
 
-    set_execution_context(tenant_id=tenant_id, user_id=user_id)
+    set_execution_context(user_id=user_id, user_roles=user_roles or [])
 
     # Format a human-friendly label for the resume value (HITL decision)
     resume_label = str(resume_value)
@@ -651,18 +593,13 @@ async def resume_react_query(
 
 async def maybe_use_langgraph(
     query: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     **kwargs,
 ) -> Optional[LangGraphQueryResponse]:
-    """Execute a LangGraph query. Always returns a result (LangGraph is always enabled).
-
-    Kept for backwards compatibility with callers that check for None.
-    """
+    """Execute a LangGraph query. Always returns a result (LangGraph is always enabled)."""
     return await execute_langgraph_query(
         query=query,
-        tenant_id=tenant_id,
         user_id=user_id,
         thread_id=thread_id,
         **kwargs,

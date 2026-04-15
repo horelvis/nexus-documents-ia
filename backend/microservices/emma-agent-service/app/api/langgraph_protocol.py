@@ -419,7 +419,6 @@ async def run_stream(
         emma_generator = resume_react_query(
             thread_id=thread_id,
             resume_value=resume_value,
-            tenant_id=x_tenant_id,
             user_id=user_id,
         )
 
@@ -458,7 +457,6 @@ async def run_stream(
 
         emma_generator = stream_react_query(
             query=query,
-            tenant_id=x_tenant_id,
             user_id=user_id,
             thread_id=thread_id,
             context=context,

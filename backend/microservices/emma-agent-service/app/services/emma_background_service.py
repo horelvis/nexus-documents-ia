@@ -448,7 +448,6 @@ Respuesta a reescribir:
 
             langgraph_result = await execute_langgraph_query(
                 query=query,
-                tenant_id=tenant_id,
                 user_id=context.get("user_id") if context else None,
                 thread_id=session_id,
                 context=context or {},

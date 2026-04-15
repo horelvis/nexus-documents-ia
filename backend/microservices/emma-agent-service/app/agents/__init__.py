@@ -10,8 +10,8 @@ Usage:
 
     result = await execute_langgraph_query(
         query="¿Qué dice el RGPD sobre consentimiento?",
-        tenant_id="tenant-123",
         user_id="user-456",
+        user_roles=["legal", "EVERYONE"],
     )
 """
 
