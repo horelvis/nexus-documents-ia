@@ -2,7 +2,7 @@
 MCP Server for Alfresco 7.x ECM.
 
 Exposes Alfresco document management operations as MCP tools.
-Configuration is loaded from the database using connector_id and tenant_id.
+Configuration is loaded from the database using connector_id.
 """
 
 import logging
@@ -42,18 +42,13 @@ def create_server() -> Server:
             Tool(
                 name="alfresco_list_connectors",
                 description=(
-                    "List all active Alfresco connectors configured for the tenant. "
+                    "List all active Alfresco connectors. "
                     "Use this first to discover available Alfresco instances."
                 ),
                 inputSchema={
                     "type": "object",
-                    "properties": {
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                    },
-                    "required": ["tenant_id"],
+                    "properties": {},
+                    "required": [],
                 },
             ),
             Tool(
@@ -69,10 +64,6 @@ def create_server() -> Server:
                         "connector_id": {
                             "type": "string",
                             "description": "Alfresco connector UUID (from alfresco_list_connectors)",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
                         },
                         "query": {
                             "type": "string",
@@ -97,7 +88,7 @@ def create_server() -> Server:
                             "description": "Restrict search to a specific site",
                         },
                     },
-                    "required": ["connector_id", "tenant_id", "query"],
+                    "required": ["connector_id", "query"],
                 },
             ),
             Tool(
@@ -109,29 +100,12 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "node_id": {
-                            "type": "string",
-                            "description": "Document node ID (UUID)",
-                        },
-                        "version_id": {
-                            "type": "string",
-                            "description": "Specific version ID to download",
-                        },
-                        "return_base64": {
-                            "type": "boolean",
-                            "description": "Return content as base64 string",
-                            "default": True,
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "node_id": {"type": "string", "description": "Document node ID (UUID)"},
+                        "version_id": {"type": "string", "description": "Specific version ID to download"},
+                        "return_base64": {"type": "boolean", "description": "Return content as base64 string", "default": True},
                     },
-                    "required": ["connector_id", "tenant_id", "node_id"],
+                    "required": ["connector_id", "node_id"],
                 },
             ),
             Tool(
@@ -143,54 +117,18 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "parent_id": {
-                            "type": "string",
-                            "description": "Parent folder ID (use '-root-' for Company Home)",
-                        },
-                        "filename": {
-                            "type": "string",
-                            "description": "Name for the new document",
-                        },
-                        "content_base64": {
-                            "type": "string",
-                            "description": "File content as base64 string",
-                        },
-                        "mime_type": {
-                            "type": "string",
-                            "description": "MIME type (auto-detected if not provided)",
-                        },
-                        "overwrite": {
-                            "type": "boolean",
-                            "description": "Update existing file with same name",
-                            "default": False,
-                        },
-                        "title": {
-                            "type": "string",
-                            "description": "Document title (cm:title)",
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "Document description",
-                        },
-                        "major_version": {
-                            "type": "boolean",
-                            "description": "Create major version (1.0)",
-                            "default": True,
-                        },
-                        "comment": {
-                            "type": "string",
-                            "description": "Version comment",
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "parent_id": {"type": "string", "description": "Parent folder ID (use '-root-' for Company Home)"},
+                        "filename": {"type": "string", "description": "Name for the new document"},
+                        "content_base64": {"type": "string", "description": "File content as base64 string"},
+                        "mime_type": {"type": "string", "description": "MIME type (auto-detected if not provided)"},
+                        "overwrite": {"type": "boolean", "description": "Update existing file with same name", "default": False},
+                        "title": {"type": "string", "description": "Document title (cm:title)"},
+                        "description": {"type": "string", "description": "Document description"},
+                        "major_version": {"type": "boolean", "description": "Create major version (1.0)", "default": True},
+                        "comment": {"type": "string", "description": "Version comment"},
                     },
-                    "required": ["connector_id", "tenant_id", "parent_id", "filename", "content_base64"],
+                    "required": ["connector_id", "parent_id", "filename", "content_base64"],
                 },
             ),
             Tool(
@@ -202,75 +140,28 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "folder_id": {
-                            "type": "string",
-                            "description": "Folder ID (use '-root-' for Company Home)",
-                            "default": "-root-",
-                        },
-                        "skip": {
-                            "type": "integer",
-                            "description": "Number of results to skip",
-                            "default": 0,
-                        },
-                        "max_items": {
-                            "type": "integer",
-                            "description": "Maximum results to return",
-                            "default": 50,
-                        },
-                        "files_only": {
-                            "type": "boolean",
-                            "description": "Only return files",
-                            "default": False,
-                        },
-                        "folders_only": {
-                            "type": "boolean",
-                            "description": "Only return folders",
-                            "default": False,
-                        },
-                        "order_by": {
-                            "type": "string",
-                            "description": "Sort order (e.g., 'name ASC', 'modifiedAt DESC')",
-                            "default": "name ASC",
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "folder_id": {"type": "string", "description": "Folder ID (use '-root-' for Company Home)", "default": "-root-"},
+                        "skip": {"type": "integer", "description": "Number of results to skip", "default": 0},
+                        "max_items": {"type": "integer", "description": "Maximum results to return", "default": 50},
+                        "files_only": {"type": "boolean", "description": "Only return files", "default": False},
+                        "folders_only": {"type": "boolean", "description": "Only return folders", "default": False},
+                        "order_by": {"type": "string", "description": "Sort order (e.g., 'name ASC', 'modifiedAt DESC')", "default": "name ASC"},
                     },
-                    "required": ["connector_id", "tenant_id"],
+                    "required": ["connector_id"],
                 },
             ),
             Tool(
                 name="alfresco_get_metadata",
-                description=(
-                    "Get detailed metadata for a node, including all properties."
-                ),
+                description="Get detailed metadata for a node, including all properties.",
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "node_id": {
-                            "type": "string",
-                            "description": "Node ID (UUID)",
-                        },
-                        "include_path": {
-                            "type": "boolean",
-                            "description": "Include full path information",
-                            "default": True,
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "node_id": {"type": "string", "description": "Node ID (UUID)"},
+                        "include_path": {"type": "boolean", "description": "Include full path information", "default": True},
                     },
-                    "required": ["connector_id", "tenant_id", "node_id"],
+                    "required": ["connector_id", "node_id"],
                 },
             ),
             Tool(
@@ -282,30 +173,12 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "node_id": {
-                            "type": "string",
-                            "description": "Document node ID",
-                        },
-                        "skip": {
-                            "type": "integer",
-                            "description": "Versions to skip",
-                            "default": 0,
-                        },
-                        "max_items": {
-                            "type": "integer",
-                            "description": "Max versions to return",
-                            "default": 20,
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "node_id": {"type": "string", "description": "Document node ID"},
+                        "skip": {"type": "integer", "description": "Versions to skip", "default": 0},
+                        "max_items": {"type": "integer", "description": "Max versions to return", "default": 20},
                     },
-                    "required": ["connector_id", "tenant_id", "node_id"],
+                    "required": ["connector_id", "node_id"],
                 },
             ),
             Tool(
@@ -314,28 +187,12 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "node_id": {
-                            "type": "string",
-                            "description": "Node ID to move",
-                        },
-                        "target_folder_id": {
-                            "type": "string",
-                            "description": "Destination folder ID",
-                        },
-                        "new_name": {
-                            "type": "string",
-                            "description": "New name (optional)",
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "node_id": {"type": "string", "description": "Node ID to move"},
+                        "target_folder_id": {"type": "string", "description": "Destination folder ID"},
+                        "new_name": {"type": "string", "description": "New name (optional)"},
                     },
-                    "required": ["connector_id", "tenant_id", "node_id", "target_folder_id"],
+                    "required": ["connector_id", "node_id", "target_folder_id"],
                 },
             ),
             Tool(
@@ -344,28 +201,12 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "node_id": {
-                            "type": "string",
-                            "description": "Node ID to copy",
-                        },
-                        "target_folder_id": {
-                            "type": "string",
-                            "description": "Destination folder ID",
-                        },
-                        "new_name": {
-                            "type": "string",
-                            "description": "Name for the copy (optional)",
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "node_id": {"type": "string", "description": "Node ID to copy"},
+                        "target_folder_id": {"type": "string", "description": "Destination folder ID"},
+                        "new_name": {"type": "string", "description": "Name for the copy (optional)"},
                     },
-                    "required": ["connector_id", "tenant_id", "node_id", "target_folder_id"],
+                    "required": ["connector_id", "node_id", "target_folder_id"],
                 },
             ),
             Tool(
@@ -377,25 +218,11 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "node_id": {
-                            "type": "string",
-                            "description": "Node ID to delete",
-                        },
-                        "permanent": {
-                            "type": "boolean",
-                            "description": "Permanently delete (skip trash)",
-                            "default": False,
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "node_id": {"type": "string", "description": "Node ID to delete"},
+                        "permanent": {"type": "boolean", "description": "Permanently delete (skip trash)", "default": False},
                     },
-                    "required": ["connector_id", "tenant_id", "node_id"],
+                    "required": ["connector_id", "node_id"],
                 },
             ),
             Tool(
@@ -407,28 +234,12 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "node_id": {
-                            "type": "string",
-                            "description": "Node ID",
-                        },
-                        "properties": {
-                            "type": "object",
-                            "description": "Property key-value pairs",
-                        },
-                        "new_name": {
-                            "type": "string",
-                            "description": "New name for the node",
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "node_id": {"type": "string", "description": "Node ID"},
+                        "properties": {"type": "object", "description": "Property key-value pairs"},
+                        "new_name": {"type": "string", "description": "New name for the node"},
                     },
-                    "required": ["connector_id", "tenant_id", "node_id", "properties"],
+                    "required": ["connector_id", "node_id", "properties"],
                 },
             ),
             Tool(
@@ -437,32 +248,13 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "parent_id": {
-                            "type": "string",
-                            "description": "Parent folder ID (use '-root-' for Company Home)",
-                        },
-                        "name": {
-                            "type": "string",
-                            "description": "Folder name",
-                        },
-                        "title": {
-                            "type": "string",
-                            "description": "Folder title (cm:title)",
-                        },
-                        "description": {
-                            "type": "string",
-                            "description": "Folder description",
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "parent_id": {"type": "string", "description": "Parent folder ID (use '-root-' for Company Home)"},
+                        "name": {"type": "string", "description": "Folder name"},
+                        "title": {"type": "string", "description": "Folder title (cm:title)"},
+                        "description": {"type": "string", "description": "Folder description"},
                     },
-                    "required": ["connector_id", "tenant_id", "parent_id", "name"],
+                    "required": ["connector_id", "parent_id", "name"],
                 },
             ),
             Tool(
@@ -474,26 +266,11 @@ def create_server() -> Server:
                 inputSchema={
                     "type": "object",
                     "properties": {
-                        "connector_id": {
-                            "type": "string",
-                            "description": "Alfresco connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                        "skip": {
-                            "type": "integer",
-                            "description": "Sites to skip",
-                            "default": 0,
-                        },
-                        "max_items": {
-                            "type": "integer",
-                            "description": "Max sites to return",
-                            "default": 50,
-                        },
+                        "connector_id": {"type": "string", "description": "Alfresco connector UUID"},
+                        "skip": {"type": "integer", "description": "Sites to skip", "default": 0},
+                        "max_items": {"type": "integer", "description": "Max sites to return", "default": 50},
                     },
-                    "required": ["connector_id", "tenant_id"],
+                    "required": ["connector_id"],
                 },
             ),
         ]

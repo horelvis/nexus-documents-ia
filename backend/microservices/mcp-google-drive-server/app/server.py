@@ -2,7 +2,7 @@
 MCP Server for Google Drive.
 
 Exposes Google Drive document management operations as MCP tools.
-Configuration is loaded from the database using connector_id and tenant_id.
+Configuration is loaded from the database using connector_id.
 OAuth tokens are auto-refreshed when expired.
 """
 
@@ -39,18 +39,13 @@ def create_server() -> Server:
             Tool(
                 name="gdrive_list_connectors",
                 description=(
-                    "List all active Google Drive connectors configured for the tenant. "
+                    "List all active Google Drive connectors. "
                     "Use this first to discover available Google Drive instances."
                 ),
                 inputSchema={
                     "type": "object",
-                    "properties": {
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
-                    },
-                    "required": ["tenant_id"],
+                    "properties": {},
+                    "required": [],
                 },
             ),
             Tool(
@@ -65,10 +60,6 @@ def create_server() -> Server:
                         "connector_id": {
                             "type": "string",
                             "description": "Google Drive connector UUID (from gdrive_list_connectors)",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
                         },
                         "folder_id": {
                             "type": "string",
@@ -85,7 +76,7 @@ def create_server() -> Server:
                             "default": 50,
                         },
                     },
-                    "required": ["connector_id", "tenant_id"],
+                    "required": ["connector_id"],
                 },
             ),
             Tool(
@@ -101,10 +92,6 @@ def create_server() -> Server:
                             "type": "string",
                             "description": "Google Drive connector UUID",
                         },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
                         "query": {
                             "type": "string",
                             "description": "Search query string",
@@ -119,7 +106,7 @@ def create_server() -> Server:
                             "default": 50,
                         },
                     },
-                    "required": ["connector_id", "tenant_id", "query"],
+                    "required": ["connector_id", "query"],
                 },
             ),
             Tool(
@@ -136,10 +123,6 @@ def create_server() -> Server:
                             "type": "string",
                             "description": "Google Drive connector UUID",
                         },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
                         "file_id": {
                             "type": "string",
                             "description": "Google Drive file ID",
@@ -150,7 +133,7 @@ def create_server() -> Server:
                             "default": True,
                         },
                     },
-                    "required": ["connector_id", "tenant_id", "file_id"],
+                    "required": ["connector_id", "file_id"],
                 },
             ),
             Tool(
@@ -166,16 +149,12 @@ def create_server() -> Server:
                             "type": "string",
                             "description": "Google Drive connector UUID",
                         },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
                         "file_id": {
                             "type": "string",
                             "description": "Google Drive file ID",
                         },
                     },
-                    "required": ["connector_id", "tenant_id", "file_id"],
+                    "required": ["connector_id", "file_id"],
                 },
             ),
             Tool(
@@ -188,10 +167,6 @@ def create_server() -> Server:
                             "type": "string",
                             "description": "Google Drive connector UUID",
                         },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
                         "folder_id": {
                             "type": "string",
                             "description": "Root folder ID (default: connector's configured folder)",
@@ -202,7 +177,7 @@ def create_server() -> Server:
                             "default": 3,
                         },
                     },
-                    "required": ["connector_id", "tenant_id"],
+                    "required": ["connector_id"],
                 },
             ),
             Tool(
@@ -215,10 +190,6 @@ def create_server() -> Server:
                             "type": "string",
                             "description": "Google Drive connector UUID",
                         },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
                         "name": {
                             "type": "string",
                             "description": "Folder name",
@@ -228,7 +199,7 @@ def create_server() -> Server:
                             "description": "Parent folder ID (optional)",
                         },
                     },
-                    "required": ["connector_id", "tenant_id", "name"],
+                    "required": ["connector_id", "name"],
                 },
             ),
             Tool(
@@ -243,10 +214,6 @@ def create_server() -> Server:
                         "connector_id": {
                             "type": "string",
                             "description": "Google Drive connector UUID",
-                        },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
                         },
                         "filename": {
                             "type": "string",
@@ -266,7 +233,7 @@ def create_server() -> Server:
                             "description": "Parent folder ID",
                         },
                     },
-                    "required": ["connector_id", "tenant_id", "filename", "content_base64"],
+                    "required": ["connector_id", "filename", "content_base64"],
                 },
             ),
             Tool(
@@ -279,10 +246,6 @@ def create_server() -> Server:
                             "type": "string",
                             "description": "Google Drive connector UUID",
                         },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
                         "file_id": {
                             "type": "string",
                             "description": "File ID to move",
@@ -292,7 +255,7 @@ def create_server() -> Server:
                             "description": "Destination folder ID",
                         },
                     },
-                    "required": ["connector_id", "tenant_id", "file_id", "target_folder_id"],
+                    "required": ["connector_id", "file_id", "target_folder_id"],
                 },
             ),
             Tool(
@@ -308,10 +271,6 @@ def create_server() -> Server:
                             "type": "string",
                             "description": "Google Drive connector UUID",
                         },
-                        "tenant_id": {
-                            "type": "string",
-                            "description": "Tenant UUID",
-                        },
                         "file_id": {
                             "type": "string",
                             "description": "File ID to delete",
@@ -322,7 +281,7 @@ def create_server() -> Server:
                             "default": False,
                         },
                     },
-                    "required": ["connector_id", "tenant_id", "file_id"],
+                    "required": ["connector_id", "file_id"],
                 },
             ),
         ]

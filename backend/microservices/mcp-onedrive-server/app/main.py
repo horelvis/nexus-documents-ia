@@ -132,13 +132,12 @@ async def run_http(host: str = "0.0.0.0", port: int = 8000):
     # =================================================================
 
     async def oauth_authorize(request: Request):
-        """GET /oauth/authorize?connector_id=X&tenant_id=Y → Redirect to Microsoft."""
+        """GET /oauth/authorize?connector_id=X → Redirect to Microsoft."""
         connector_id = request.query_params.get("connector_id")
-        tenant_id = request.query_params.get("tenant_id")
 
-        if not connector_id or not tenant_id:
+        if not connector_id:
             return JSONResponse(
-                {"error": "connector_id and tenant_id are required"},
+                {"error": "connector_id is required"},
                 status_code=400,
             )
 
@@ -148,12 +147,12 @@ async def run_http(host: str = "0.0.0.0", port: int = 8000):
             try:
                 from uuid import UUID as _UUID
                 from .core.config import load_connector_from_db
-                config = await load_connector_from_db(_UUID(connector_id), _UUID(tenant_id))
+                config = await load_connector_from_db(_UUID(connector_id))
                 if config and config.microsoft_email:
                     login_hint = config.microsoft_email
             except Exception:
                 pass
-            auth_url = oauth_service.generate_auth_url(connector_id, tenant_id, login_hint=login_hint)
+            auth_url = oauth_service.generate_auth_url(connector_id, login_hint=login_hint)
             return RedirectResponse(url=auth_url)
         except Exception as e:
             logger.error(f"OAuth authorize failed: {e}")
@@ -237,19 +236,16 @@ button:hover{{background:#27272a}}</style></head>
             return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
 
         connector_id = body.get("connector_id")
-        tenant_id = body.get("tenant_id")
 
-        if not connector_id or not tenant_id:
+        if not connector_id:
             return JSONResponse(
-                {"error": "connector_id and tenant_id are required"},
+                {"error": "connector_id is required"},
                 status_code=400,
             )
 
         try:
             from uuid import UUID
-            success = await oauth_service.revoke_token(
-                UUID(connector_id), UUID(tenant_id)
-            )
+            success = await oauth_service.revoke_token(UUID(connector_id))
             return JSONResponse({
                 "success": success,
                 "connector_id": connector_id,
@@ -262,21 +258,18 @@ button:hover{{background:#27272a}}</style></head>
             )
 
     async def oauth_status(request: Request):
-        """GET /oauth/status?connector_id=X&tenant_id=Y → Check OAuth status."""
+        """GET /oauth/status?connector_id=X → Check OAuth status."""
         connector_id = request.query_params.get("connector_id")
-        tenant_id = request.query_params.get("tenant_id")
 
-        if not connector_id or not tenant_id:
+        if not connector_id:
             return JSONResponse(
-                {"error": "connector_id and tenant_id are required"},
+                {"error": "connector_id is required"},
                 status_code=400,
             )
 
         try:
             from uuid import UUID
-            status = await oauth_service.get_oauth_status(
-                UUID(connector_id), UUID(tenant_id)
-            )
+            status = await oauth_service.get_oauth_status(UUID(connector_id))
             return JSONResponse(status)
         except Exception as e:
             logger.error(f"OAuth status check failed: {e}")
@@ -290,14 +283,13 @@ button:hover{{background:#27272a}}</style></head>
     # =================================================================
 
     async def list_folders(request: Request):
-        """GET /folders?connector_id=X&tenant_id=Y&parent_id=root → List OneDrive folders."""
+        """GET /folders?connector_id=X&parent_id=root → List OneDrive folders."""
         connector_id = request.query_params.get("connector_id")
-        tenant_id = request.query_params.get("tenant_id")
         parent_id = request.query_params.get("parent_id", "root")
 
-        if not connector_id or not tenant_id:
+        if not connector_id:
             return JSONResponse(
-                {"error": "connector_id and tenant_id are required"},
+                {"error": "connector_id is required"},
                 status_code=400,
             )
 
@@ -305,7 +297,7 @@ button:hover{{background:#27272a}}</style></head>
             from uuid import UUID
             from .core.config import get_connector
 
-            config = await get_connector(UUID(connector_id), UUID(tenant_id))
+            config = await get_connector(UUID(connector_id))
             if not config or not config.is_authenticated:
                 return JSONResponse(
                     {"error": "Not authorized. Complete OAuth first."},

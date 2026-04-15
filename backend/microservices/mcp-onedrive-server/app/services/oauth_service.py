@@ -24,7 +24,6 @@ import json
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
-from urllib.parse import urlencode
 from uuid import UUID
 
 import httpx
@@ -43,7 +42,7 @@ class OAuthService:
 
     @property
     def authority(self) -> str:
-        """Azure AD authority URL using configured tenant."""
+        """Azure AD authority URL using configured Azure tenant (external)."""
         return f"{self.AUTHORITY_BASE}/{settings.ms_oauth_tenant_id}"
 
     @property
@@ -67,16 +66,15 @@ class OAuthService:
     def generate_auth_url(
         self,
         connector_id: str,
-        tenant_id: str,
         login_hint: str = None,
     ) -> str:
         """
         Generate Microsoft OAuth authorization URL.
 
-        The state parameter encodes connector_id and tenant_id
-        so the callback knows where to store the tokens.
+        The state parameter encodes connector_id so the callback
+        knows which connector to store the tokens under.
         """
-        state = f"{connector_id}:{tenant_id}"
+        state = str(connector_id)
         app = self._get_msal_app()
 
         auth_url = app.get_authorization_request_url(
@@ -109,19 +107,14 @@ class OAuthService:
 
         Args:
             code: Authorization code from Azure AD
-            state: "connector_id:tenant_id" encoded state
+            state: connector_id (possibly followed by legacy ":<ignored>")
 
         Returns:
             Dict with connector_id, microsoft_email, success status
         """
-        # Parse state
-        parts = state.split(":", 1)
-        if len(parts) != 2:
-            raise ValueError(f"Invalid state parameter: {state}")
-
-        connector_id_str, tenant_id_str = parts
+        # Parse state — accept bare UUID or legacy "connector_id:<anything>" format
+        connector_id_str = state.split(":", 1)[0] if ":" in state else state
         connector_id = UUID(connector_id_str)
-        tenant_id = UUID(tenant_id_str)
 
         # Exchange code for tokens via MSAL
         app = self._get_msal_app()
@@ -161,7 +154,6 @@ class OAuthService:
         # Save to database
         await self._save_tokens_to_db(
             connector_id=connector_id,
-            tenant_id=tenant_id,
             access_token_encrypted=access_token_encrypted,
             refresh_token_encrypted=refresh_token_encrypted,
             token_expiry=token_expiry,
@@ -170,21 +162,19 @@ class OAuthService:
         )
 
         # Invalidate cache
-        await invalidate_connector_cache(connector_id, tenant_id)
+        await invalidate_connector_cache(connector_id)
 
         logger.info(f"OAuth tokens saved for connector {connector_id}, email: {microsoft_email}")
 
         return {
             "success": True,
             "connector_id": str(connector_id),
-            "tenant_id": str(tenant_id),
             "microsoft_email": microsoft_email,
         }
 
     async def refresh_access_token(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
     ) -> Optional[str]:
         """
         Refresh an expired access token using the refresh token.
@@ -193,7 +183,7 @@ class OAuthService:
         """
         from ..core.config import load_connector_from_db
 
-        config = await load_connector_from_db(connector_id, tenant_id)
+        config = await load_connector_from_db(connector_id)
         if not config or not config.refresh_token:
             logger.error(f"No refresh token for connector {connector_id}")
             return None
@@ -220,7 +210,6 @@ class OAuthService:
             # Save refreshed tokens
             await self._save_tokens_to_db(
                 connector_id=connector_id,
-                tenant_id=tenant_id,
                 access_token_encrypted=encrypt_token(new_access_token),
                 refresh_token_encrypted=encrypt_token(new_refresh_token),
                 token_expiry=token_expiry,
@@ -228,7 +217,7 @@ class OAuthService:
                 scopes=config.scopes,
             )
 
-            await invalidate_connector_cache(connector_id, tenant_id)
+            await invalidate_connector_cache(connector_id)
 
             logger.info(f"Refreshed access token for connector {connector_id}")
             return new_access_token
@@ -240,7 +229,6 @@ class OAuthService:
     async def revoke_token(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
     ) -> bool:
         """
         Revoke OAuth tokens.
@@ -251,13 +239,13 @@ class OAuthService:
         """
         from ..core.config import load_connector_from_db
 
-        config = await load_connector_from_db(connector_id, tenant_id)
+        config = await load_connector_from_db(connector_id)
         if not config or not config.access_token:
             return False
 
         # Clear tokens in DB
         await self._clear_tokens_in_db(connector_id)
-        await invalidate_connector_cache(connector_id, tenant_id)
+        await invalidate_connector_cache(connector_id)
 
         logger.info(f"Cleared OAuth tokens for connector {connector_id}")
         return True
@@ -265,12 +253,11 @@ class OAuthService:
     async def get_oauth_status(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
     ) -> Dict[str, Any]:
         """Check OAuth status for a connector."""
         from ..core.config import load_connector_from_db
 
-        config = await load_connector_from_db(connector_id, tenant_id)
+        config = await load_connector_from_db(connector_id)
         if not config:
             return {"connected": False, "error": "Connector not found"}
 
@@ -325,9 +312,7 @@ class OAuthService:
             return config.access_token
 
         # Need to refresh
-        new_token = await self.refresh_access_token(
-            config.connector_id, config.tenant_id
-        )
+        new_token = await self.refresh_access_token(config.connector_id)
         if not new_token:
             raise ValueError(
                 f"Failed to refresh token for connector {config.connector_id}. "
@@ -343,7 +328,6 @@ class OAuthService:
     async def _save_tokens_to_db(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
         access_token_encrypted: Optional[str],
         refresh_token_encrypted: Optional[str],
         token_expiry: Optional[datetime],

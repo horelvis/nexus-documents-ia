@@ -2,7 +2,7 @@
 Configuration for MCP Alfresco Server.
 
 Loads Alfresco connector configurations from the backend database.
-Each tenant configures their own Alfresco connector via the UI.
+Connectors are globally scoped (single-tenant deployment).
 
 The MCP server connects to PostgreSQL to read connector configurations
 from the `connectors` table where connector_type = 'alfresco'.
@@ -31,7 +31,6 @@ class AlfrescoInstanceConfig(BaseModel):
 
     # Connector identification
     connector_id: UUID = Field(..., description="Connector UUID from database")
-    tenant_id: UUID = Field(..., description="Tenant UUID")
     name: str = Field(..., description="Connector name")
     description: Optional[str] = Field(default=None)
 
@@ -116,17 +115,16 @@ class ConnectorCache:
         self._ttl = timedelta(seconds=ttl_seconds)
         self._lock = asyncio.Lock()
 
-    def _cache_key(self, connector_id: UUID, tenant_id: UUID) -> str:
+    def _cache_key(self, connector_id: UUID) -> str:
         """Generate cache key."""
-        return f"{tenant_id}:{connector_id}"
+        return str(connector_id)
 
     async def get(
         self,
         connector_id: UUID,
-        tenant_id: UUID
     ) -> Optional[AlfrescoInstanceConfig]:
         """Get cached connector config."""
-        key = self._cache_key(connector_id, tenant_id)
+        key = self._cache_key(connector_id)
         async with self._lock:
             if key in self._cache:
                 config, cached_at = self._cache[key]
@@ -139,17 +137,16 @@ class ConnectorCache:
     async def set(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
-        config: AlfrescoInstanceConfig
+        config: AlfrescoInstanceConfig,
     ) -> None:
         """Cache connector config."""
-        key = self._cache_key(connector_id, tenant_id)
+        key = self._cache_key(connector_id)
         async with self._lock:
             self._cache[key] = (config, datetime.utcnow())
 
-    async def invalidate(self, connector_id: UUID, tenant_id: UUID) -> None:
+    async def invalidate(self, connector_id: UUID) -> None:
         """Invalidate cached config."""
-        key = self._cache_key(connector_id, tenant_id)
+        key = self._cache_key(connector_id)
         async with self._lock:
             self._cache.pop(key, None)
 
@@ -186,16 +183,47 @@ async def _get_db_connection():
         raise
 
 
+def _build_instance_from_row(row) -> AlfrescoInstanceConfig:
+    """Build AlfrescoInstanceConfig from a DB row."""
+    raw_config = row['config']
+    if isinstance(raw_config, str):
+        config_data: Dict[str, Any] = json.loads(raw_config) if raw_config else {}
+    else:
+        config_data = raw_config or {}
+
+    return AlfrescoInstanceConfig(
+        connector_id=row['id'],
+        name=row['name'],
+        description=row['description'],
+        url=config_data.get('url', ''),
+        username=config_data.get('username', ''),
+        password=config_data.get('password', ''),
+        api_path=config_data.get(
+            'api_path',
+            '/alfresco/api/-default-/public/alfresco/versions/1'
+        ),
+        search_api_path=config_data.get(
+            'search_api_path',
+            '/alfresco/api/-default-/public/search/versions/1'
+        ),
+        default_site_id=config_data.get('default_site_id'),
+        default_folder_id=config_data.get('default_folder_id'),
+        timeout_seconds=config_data.get('timeout_seconds', 60),
+        download_timeout_seconds=config_data.get('download_timeout_seconds', 300),
+        max_results=config_data.get('max_results', 100),
+        max_upload_size_mb=config_data.get('max_upload_size_mb', 100),
+        is_active=row['is_active'],
+    )
+
+
 async def load_connector_from_db(
     connector_id: UUID,
-    tenant_id: UUID
 ) -> Optional[AlfrescoInstanceConfig]:
     """
     Load Alfresco connector configuration from database.
 
     Args:
         connector_id: Connector UUID
-        tenant_id: Tenant UUID (for validation)
 
     Returns:
         AlfrescoInstanceConfig or None if not found/not active
@@ -204,62 +232,24 @@ async def load_connector_from_db(
     try:
         conn = await _get_db_connection()
 
-        # Query connector with tenant validation
         row = await conn.fetchrow(
             """
             SELECT
-                id, tenant_id, name, description, config,
+                id, name, description, config,
                 is_active, connector_type
             FROM connectors
             WHERE id = $1
-              AND tenant_id = $2
               AND connector_type = 'alfresco'
               AND is_active = true
             """,
             connector_id,
-            tenant_id
         )
 
         if not row:
-            logger.warning(
-                f"Alfresco connector not found: {connector_id} for tenant {tenant_id}"
-            )
+            logger.warning(f"Alfresco connector not found: {connector_id}")
             return None
 
-        # Parse config JSON (may be string or dict depending on DB driver)
-        raw_config = row['config']
-        if isinstance(raw_config, str):
-            config_data: Dict[str, Any] = json.loads(raw_config) if raw_config else {}
-        else:
-            config_data = raw_config or {}
-
-        # Build instance config
-        instance = AlfrescoInstanceConfig(
-            connector_id=row['id'],
-            tenant_id=row['tenant_id'],
-            name=row['name'],
-            description=row['description'],
-            url=config_data.get('url', ''),
-            username=config_data.get('username', ''),
-            password=config_data.get('password', ''),
-            api_path=config_data.get(
-                'api_path',
-                '/alfresco/api/-default-/public/alfresco/versions/1'
-            ),
-            search_api_path=config_data.get(
-                'search_api_path',
-                '/alfresco/api/-default-/public/search/versions/1'
-            ),
-            default_site_id=config_data.get('default_site_id'),
-            default_folder_id=config_data.get('default_folder_id'),
-            timeout_seconds=config_data.get('timeout_seconds', 60),
-            download_timeout_seconds=config_data.get('download_timeout_seconds', 300),
-            max_results=config_data.get('max_results', 100),
-            max_upload_size_mb=config_data.get('max_upload_size_mb', 100),
-            is_active=row['is_active'],
-        )
-
-        return instance
+        return _build_instance_from_row(row)
 
     except Exception as e:
         logger.error(f"Failed to load connector from DB: {e}")
@@ -269,12 +259,9 @@ async def load_connector_from_db(
             await conn.close()
 
 
-async def list_connectors_for_tenant(tenant_id: UUID) -> list[AlfrescoInstanceConfig]:
+async def list_all_connectors() -> list[AlfrescoInstanceConfig]:
     """
-    List all active Alfresco connectors for a tenant.
-
-    Args:
-        tenant_id: Tenant UUID
+    List all active Alfresco connectors.
 
     Returns:
         List of AlfrescoInstanceConfig
@@ -286,52 +273,16 @@ async def list_connectors_for_tenant(tenant_id: UUID) -> list[AlfrescoInstanceCo
         rows = await conn.fetch(
             """
             SELECT
-                id, tenant_id, name, description, config,
+                id, name, description, config,
                 is_active, connector_type
             FROM connectors
-            WHERE tenant_id = $1
-              AND connector_type = 'alfresco'
+            WHERE connector_type = 'alfresco'
               AND is_active = true
             ORDER BY name
             """,
-            tenant_id
         )
 
-        connectors = []
-        for row in rows:
-            # Parse config JSON (may be string or dict depending on DB driver)
-            raw_config = row['config']
-            if isinstance(raw_config, str):
-                config_data: Dict[str, Any] = json.loads(raw_config) if raw_config else {}
-            else:
-                config_data = raw_config or {}
-            instance = AlfrescoInstanceConfig(
-                connector_id=row['id'],
-                tenant_id=row['tenant_id'],
-                name=row['name'],
-                description=row['description'],
-                url=config_data.get('url', ''),
-                username=config_data.get('username', ''),
-                password=config_data.get('password', ''),
-                api_path=config_data.get(
-                    'api_path',
-                    '/alfresco/api/-default-/public/alfresco/versions/1'
-                ),
-                search_api_path=config_data.get(
-                    'search_api_path',
-                    '/alfresco/api/-default-/public/search/versions/1'
-                ),
-                default_site_id=config_data.get('default_site_id'),
-                default_folder_id=config_data.get('default_folder_id'),
-                timeout_seconds=config_data.get('timeout_seconds', 60),
-                download_timeout_seconds=config_data.get('download_timeout_seconds', 300),
-                max_results=config_data.get('max_results', 100),
-                max_upload_size_mb=config_data.get('max_upload_size_mb', 100),
-                is_active=row['is_active'],
-            )
-            connectors.append(instance)
-
-        return connectors
+        return [_build_instance_from_row(row) for row in rows]
 
     except Exception as e:
         logger.error(f"Failed to list connectors: {e}")
@@ -347,50 +298,33 @@ async def list_connectors_for_tenant(tenant_id: UUID) -> list[AlfrescoInstanceCo
 
 async def get_connector(
     connector_id: UUID,
-    tenant_id: UUID
 ) -> Optional[AlfrescoInstanceConfig]:
     """
     Get Alfresco connector configuration with caching.
-
-    Args:
-        connector_id: Connector UUID
-        tenant_id: Tenant UUID
-
-    Returns:
-        AlfrescoInstanceConfig or None
     """
     # Check cache first
-    cached = await _connector_cache.get(connector_id, tenant_id)
+    cached = await _connector_cache.get(connector_id)
     if cached:
         return cached
 
     # Load from database
-    config = await load_connector_from_db(connector_id, tenant_id)
+    config = await load_connector_from_db(connector_id)
     if config:
-        await _connector_cache.set(connector_id, tenant_id, config)
+        await _connector_cache.set(connector_id, config)
 
     return config
 
 
-async def get_connectors_for_tenant(tenant_id: UUID) -> list[AlfrescoInstanceConfig]:
-    """
-    Get all active Alfresco connectors for a tenant.
-
-    Args:
-        tenant_id: Tenant UUID
-
-    Returns:
-        List of connector configurations
-    """
-    return await list_connectors_for_tenant(tenant_id)
+async def get_all_connectors() -> list[AlfrescoInstanceConfig]:
+    """Get all active Alfresco connectors."""
+    return await list_all_connectors()
 
 
 async def invalidate_connector_cache(
     connector_id: UUID,
-    tenant_id: UUID
 ) -> None:
     """Invalidate cached connector configuration."""
-    await _connector_cache.invalidate(connector_id, tenant_id)
+    await _connector_cache.invalidate(connector_id)
 
 
 def get_instances() -> Dict[str, AlfrescoInstanceConfig]:
@@ -398,9 +332,8 @@ def get_instances() -> Dict[str, AlfrescoInstanceConfig]:
     Get configured Alfresco instances (synchronous compatibility function).
 
     NOTE: This MCP server loads connectors dynamically from the database
-    when tools are invoked. This function returns an empty dict for startup
-    compatibility - actual connectors are loaded via get_connector() or
-    get_connectors_for_tenant() when tools are called with tenant_id.
+    when tools are invoked. Returns an empty dict for startup compatibility;
+    actual connectors are loaded via get_connector() or get_all_connectors().
 
     Returns:
         Empty dict - connectors are loaded dynamically per-request

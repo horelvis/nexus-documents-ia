@@ -2,7 +2,7 @@
 Configuration for MCP OneDrive Server.
 
 Loads OneDrive connector configurations from the backend database.
-Each tenant configures their own OneDrive connector via the UI.
+Connectors are globally scoped (single-tenant deployment).
 
 The MCP server connects to PostgreSQL to read connector configurations
 from the `connectors` table where connector_type = 'onedrive'.
@@ -15,7 +15,7 @@ Environment Variables:
     CONNECTOR_CACHE_TTL: Cache TTL in seconds (default: 300)
     MS_OAUTH_CLIENT_ID: Azure AD application (client) ID
     MS_OAUTH_CLIENT_SECRET: Azure AD client secret
-    MS_OAUTH_TENANT_ID: Azure AD tenant ID (default: "common" for multi-tenant)
+    MS_OAUTH_TENANT_ID: Azure AD tenant ID (external identifier, default: "common")
     MS_OAUTH_REDIRECT_URI: OAuth callback URL
     CREDENTIALS_ENCRYPTION_KEY: Fernet key for token encryption
 """
@@ -39,7 +39,6 @@ class OneDriveInstanceConfig(BaseModel):
 
     # Connector identification
     connector_id: UUID = Field(..., description="Connector UUID from database")
-    tenant_id: UUID = Field(..., description="Tenant UUID")
     name: str = Field(..., description="Connector name")
     description: Optional[str] = Field(default=None)
 
@@ -86,7 +85,8 @@ class Settings(BaseSettings):
     # Cache settings
     connector_cache_ttl: int = int(os.getenv("CONNECTOR_CACHE_TTL", "300"))
 
-    # Microsoft OAuth settings (Azure AD)
+    # Microsoft OAuth settings (Azure AD) — these are EXTERNAL identifiers,
+    # unrelated to the internal multi-tenancy that was removed.
     ms_oauth_client_id: str = os.getenv("MS_OAUTH_CLIENT_ID", "")
     ms_oauth_client_secret: str = os.getenv("MS_OAUTH_CLIENT_SECRET", "")
     ms_oauth_tenant_id: str = os.getenv("MS_OAUTH_TENANT_ID", "common")
@@ -134,15 +134,14 @@ class ConnectorCache:
         self._ttl = timedelta(seconds=ttl_seconds)
         self._lock = asyncio.Lock()
 
-    def _cache_key(self, connector_id: UUID, tenant_id: UUID) -> str:
-        return f"{tenant_id}:{connector_id}"
+    def _cache_key(self, connector_id: UUID) -> str:
+        return str(connector_id)
 
     async def get(
         self,
         connector_id: UUID,
-        tenant_id: UUID
     ) -> Optional[OneDriveInstanceConfig]:
-        key = self._cache_key(connector_id, tenant_id)
+        key = self._cache_key(connector_id)
         async with self._lock:
             if key in self._cache:
                 config, cached_at = self._cache[key]
@@ -154,15 +153,14 @@ class ConnectorCache:
     async def set(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
-        config: OneDriveInstanceConfig
+        config: OneDriveInstanceConfig,
     ) -> None:
-        key = self._cache_key(connector_id, tenant_id)
+        key = self._cache_key(connector_id)
         async with self._lock:
             self._cache[key] = (config, datetime.utcnow())
 
-    async def invalidate(self, connector_id: UUID, tenant_id: UUID) -> None:
-        key = self._cache_key(connector_id, tenant_id)
+    async def invalidate(self, connector_id: UUID) -> None:
+        key = self._cache_key(connector_id)
         async with self._lock:
             self._cache.pop(key, None)
 
@@ -227,9 +225,55 @@ async def _get_db_connection():
     return await asyncpg.connect(db_url)
 
 
+def _build_instance_from_row(row) -> OneDriveInstanceConfig:
+    """Build OneDriveInstanceConfig from a DB row."""
+    raw_config = row['config']
+    if isinstance(raw_config, str):
+        config_data: Dict[str, Any] = json.loads(raw_config) if raw_config else {}
+    else:
+        config_data = raw_config or {}
+
+    # Decrypt OAuth tokens
+    access_token = decrypt_token(config_data.get('access_token_encrypted'))
+    refresh_token = decrypt_token(config_data.get('refresh_token_encrypted'))
+
+    # Parse token expiry
+    token_expiry = None
+    expiry_str = config_data.get('token_expiry')
+    if expiry_str:
+        try:
+            token_expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+        except (ValueError, TypeError):
+            pass
+
+    # Parse scopes
+    scopes = config_data.get('scopes')
+    if isinstance(scopes, str):
+        scopes = [s.strip() for s in scopes.split() if s.strip()]
+
+    return OneDriveInstanceConfig(
+        connector_id=row['id'],
+        name=row['name'],
+        description=row['description'],
+        drive_id=config_data.get('drive_id'),
+        folder_id=config_data.get('folder_id'),
+        include_subfolders=config_data.get('include_subfolders', True),
+        file_types=config_data.get('file_types'),
+        max_file_size_mb=config_data.get('max_file_size_mb', 50),
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_expiry=token_expiry,
+        microsoft_email=config_data.get('microsoft_email'),
+        scopes=scopes,
+        timeout_seconds=config_data.get('timeout_seconds', 60),
+        download_timeout_seconds=config_data.get('download_timeout_seconds', 300),
+        max_results=config_data.get('max_results', 100),
+        is_active=row['is_active'],
+    )
+
+
 async def load_connector_from_db(
     connector_id: UUID,
-    tenant_id: UUID
 ) -> Optional[OneDriveInstanceConfig]:
     """
     Load OneDrive connector configuration from database.
@@ -243,70 +287,21 @@ async def load_connector_from_db(
         row = await conn.fetchrow(
             """
             SELECT
-                id, tenant_id, name, description, config,
+                id, name, description, config,
                 is_active, connector_type
             FROM connectors
             WHERE id = $1
-              AND tenant_id = $2
               AND connector_type = 'onedrive'
               AND is_active = true
             """,
             connector_id,
-            tenant_id
         )
 
         if not row:
-            logger.warning(
-                f"OneDrive connector not found: {connector_id} for tenant {tenant_id}"
-            )
+            logger.warning(f"OneDrive connector not found: {connector_id}")
             return None
 
-        raw_config = row['config']
-        if isinstance(raw_config, str):
-            config_data: Dict[str, Any] = json.loads(raw_config) if raw_config else {}
-        else:
-            config_data = raw_config or {}
-
-        # Decrypt OAuth tokens
-        access_token = decrypt_token(config_data.get('access_token_encrypted'))
-        refresh_token = decrypt_token(config_data.get('refresh_token_encrypted'))
-
-        # Parse token expiry
-        token_expiry = None
-        expiry_str = config_data.get('token_expiry')
-        if expiry_str:
-            try:
-                token_expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                pass
-
-        # Parse scopes
-        scopes = config_data.get('scopes')
-        if isinstance(scopes, str):
-            scopes = [s.strip() for s in scopes.split() if s.strip()]
-
-        instance = OneDriveInstanceConfig(
-            connector_id=row['id'],
-            tenant_id=row['tenant_id'],
-            name=row['name'],
-            description=row['description'],
-            drive_id=config_data.get('drive_id'),
-            folder_id=config_data.get('folder_id'),
-            include_subfolders=config_data.get('include_subfolders', True),
-            file_types=config_data.get('file_types'),
-            max_file_size_mb=config_data.get('max_file_size_mb', 50),
-            access_token=access_token,
-            refresh_token=refresh_token,
-            token_expiry=token_expiry,
-            microsoft_email=config_data.get('microsoft_email'),
-            scopes=scopes,
-            timeout_seconds=config_data.get('timeout_seconds', 60),
-            download_timeout_seconds=config_data.get('download_timeout_seconds', 300),
-            max_results=config_data.get('max_results', 100),
-            is_active=row['is_active'],
-        )
-
-        return instance
+        return _build_instance_from_row(row)
 
     except Exception as e:
         logger.error(f"Failed to load connector from DB: {e}")
@@ -316,8 +311,8 @@ async def load_connector_from_db(
             await conn.close()
 
 
-async def list_connectors_for_tenant(tenant_id: UUID) -> list[OneDriveInstanceConfig]:
-    """List all active OneDrive connectors for a tenant."""
+async def list_all_connectors() -> list[OneDriveInstanceConfig]:
+    """List all active OneDrive connectors."""
     conn = None
     try:
         conn = await _get_db_connection()
@@ -325,63 +320,16 @@ async def list_connectors_for_tenant(tenant_id: UUID) -> list[OneDriveInstanceCo
         rows = await conn.fetch(
             """
             SELECT
-                id, tenant_id, name, description, config,
+                id, name, description, config,
                 is_active, connector_type
             FROM connectors
-            WHERE tenant_id = $1
-              AND connector_type = 'onedrive'
+            WHERE connector_type = 'onedrive'
               AND is_active = true
             ORDER BY name
             """,
-            tenant_id
         )
 
-        connectors = []
-        for row in rows:
-            raw_config = row['config']
-            if isinstance(raw_config, str):
-                config_data = json.loads(raw_config) if raw_config else {}
-            else:
-                config_data = raw_config or {}
-
-            access_token = decrypt_token(config_data.get('access_token_encrypted'))
-            refresh_token = decrypt_token(config_data.get('refresh_token_encrypted'))
-
-            token_expiry = None
-            expiry_str = config_data.get('token_expiry')
-            if expiry_str:
-                try:
-                    token_expiry = datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
-                except (ValueError, TypeError):
-                    pass
-
-            scopes = config_data.get('scopes')
-            if isinstance(scopes, str):
-                scopes = [s.strip() for s in scopes.split() if s.strip()]
-
-            instance = OneDriveInstanceConfig(
-                connector_id=row['id'],
-                tenant_id=row['tenant_id'],
-                name=row['name'],
-                description=row['description'],
-                drive_id=config_data.get('drive_id'),
-                folder_id=config_data.get('folder_id'),
-                include_subfolders=config_data.get('include_subfolders', True),
-                file_types=config_data.get('file_types'),
-                max_file_size_mb=config_data.get('max_file_size_mb', 50),
-                access_token=access_token,
-                refresh_token=refresh_token,
-                token_expiry=token_expiry,
-                microsoft_email=config_data.get('microsoft_email'),
-                scopes=scopes,
-                timeout_seconds=config_data.get('timeout_seconds', 60),
-                download_timeout_seconds=config_data.get('download_timeout_seconds', 300),
-                max_results=config_data.get('max_results', 100),
-                is_active=row['is_active'],
-            )
-            connectors.append(instance)
-
-        return connectors
+        return [_build_instance_from_row(row) for row in rows]
 
     except Exception as e:
         logger.error(f"Failed to list connectors: {e}")
@@ -397,31 +345,29 @@ async def list_connectors_for_tenant(tenant_id: UUID) -> list[OneDriveInstanceCo
 
 async def get_connector(
     connector_id: UUID,
-    tenant_id: UUID
 ) -> Optional[OneDriveInstanceConfig]:
     """Get OneDrive connector configuration with caching."""
-    cached = await _connector_cache.get(connector_id, tenant_id)
+    cached = await _connector_cache.get(connector_id)
     if cached:
         return cached
 
-    config = await load_connector_from_db(connector_id, tenant_id)
+    config = await load_connector_from_db(connector_id)
     if config:
-        await _connector_cache.set(connector_id, tenant_id, config)
+        await _connector_cache.set(connector_id, config)
 
     return config
 
 
-async def get_connectors_for_tenant(tenant_id: UUID) -> list[OneDriveInstanceConfig]:
-    """Get all active OneDrive connectors for a tenant."""
-    return await list_connectors_for_tenant(tenant_id)
+async def get_all_connectors() -> list[OneDriveInstanceConfig]:
+    """Get all active OneDrive connectors."""
+    return await list_all_connectors()
 
 
 async def invalidate_connector_cache(
     connector_id: UUID,
-    tenant_id: UUID
 ) -> None:
     """Invalidate cached connector configuration."""
-    await _connector_cache.invalidate(connector_id, tenant_id)
+    await _connector_cache.invalidate(connector_id)
 
 
 def get_instances() -> Dict[str, OneDriveInstanceConfig]:
