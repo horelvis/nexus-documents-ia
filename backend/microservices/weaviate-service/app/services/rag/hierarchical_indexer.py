@@ -11,10 +11,13 @@ This improves coverage for long documents (>50 pages) by:
 
 Reference: "I Rebuilt My RAG Pipeline 11 Times" - Hierarchical Retrieval section
 Paper: RLM (Recursive Language Models) - arXiv:2512.24601
+
+Single-tenant deployment (on-premise) — legacy `tenant_id` kwargs are
+accepted-and-ignored for backwards compat with Wave-3 upstream callers.
+ACL enforcement on summary search is deferred (roles-based filter TODO).
 """
 
 import logging
-import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,6 +25,9 @@ from datetime import datetime
 from ...core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Fixed summary collection name (single-tenant deployment).
+SUMMARY_COLLECTION_NAME = "Nouxcube_documents_summaries"
 
 
 @dataclass
@@ -34,7 +40,6 @@ class DocumentSummary:
     key_topics: List[str]
     key_entities: List[str]
     document_type: str
-    tenant_id: str
     total_chunks: int
     total_tokens: int
     created_at: datetime = field(default_factory=datetime.now)
@@ -81,8 +86,6 @@ class HierarchicalIndexer:
         self._llm_client = None
         self._weaviate_service = None
         self._initialized = False
-        # Summary collection name pattern
-        self._summary_collection_suffix = "_summaries"
         # Summary generation config
         self._max_summary_tokens = 500
         self._max_topics = 10
@@ -113,12 +116,12 @@ class HierarchicalIndexer:
             # Allow partial operation without LLM
             self._initialized = True
 
-    def get_summary_collection_name(self, tenant_id: str) -> str:
-        """Get the summary collection name for a tenant"""
-        from ...core.security import get_tenant_collection_name
-
-        base_name = get_tenant_collection_name(tenant_id, "documents")
-        return f"{base_name}{self._summary_collection_suffix}"
+    def get_summary_collection_name(
+        self,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> str:
+        """Get the summary collection name (single-tenant)."""
+        return SUMMARY_COLLECTION_NAME
 
     async def generate_document_summary(
         self,
@@ -126,9 +129,9 @@ class HierarchicalIndexer:
         title: str,
         full_text: str,
         document_type: str,
-        tenant_id: str,
         total_chunks: int,
         metadata: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> Optional[DocumentSummary]:
         """
         Generate a document-level summary for hierarchical retrieval.
@@ -138,9 +141,9 @@ class HierarchicalIndexer:
             title: Document title
             full_text: Complete document text
             document_type: Type of document
-            tenant_id: Tenant identifier
             total_chunks: Number of chunks the document was split into
             metadata: Additional metadata
+            tenant_id: DEPRECATED, ignored (single-tenant deployment)
 
         Returns:
             DocumentSummary or None if generation fails
@@ -182,7 +185,6 @@ class HierarchicalIndexer:
                 key_topics=topics[:self._max_topics],
                 key_entities=entities[:self._max_entities],
                 document_type=document_type,
-                tenant_id=tenant_id,
                 total_chunks=total_chunks,
                 total_tokens=total_tokens,
                 metadata=metadata or {},
@@ -277,7 +279,7 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
         await self.initialize()
 
         try:
-            collection_name = self.get_summary_collection_name(summary.tenant_id)
+            collection_name = SUMMARY_COLLECTION_NAME
 
             # Ensure collection exists
             await self._ensure_summary_collection(collection_name)
@@ -294,7 +296,6 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
                 "key_topics": summary.key_topics,
                 "key_entities": summary.key_entities,
                 "document_type": summary.document_type,
-                "tenant_id": summary.tenant_id,
                 "total_chunks": summary.total_chunks,
                 "total_tokens": summary.total_tokens,
                 "created_at": summary.created_at.isoformat(),
@@ -304,8 +305,6 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
             collection = self._weaviate_service.client.collections.get(collection_name)
 
             if embedding:
-                import weaviate.classes as wvc
-
                 collection.data.insert(
                     properties=doc_data,
                     vector=embedding,
@@ -359,10 +358,6 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
                         data_type=wvc.config.DataType.TEXT,
                     ),
                     wvc.config.Property(
-                        name="tenant_id",
-                        data_type=wvc.config.DataType.TEXT,
-                    ),
-                    wvc.config.Property(
                         name="total_chunks",
                         data_type=wvc.config.DataType.INT,
                     ),
@@ -410,21 +405,25 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
     async def search_summaries(
         self,
         query: str,
-        tenant_id: str,
         limit: int = 10,
         filters: Optional[Dict[str, Any]] = None,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> List[DocumentSummary]:
         """
         Search document summaries for hierarchical retrieval.
 
         Args:
             query: Search query
-            tenant_id: Tenant identifier
             limit: Maximum results
             filters: Optional filters (document_type, etc.)
+            tenant_id: DEPRECATED, ignored (single-tenant deployment)
 
         Returns:
             List of matching DocumentSummary objects
+
+        Note: ACL enforcement (roles-based filter) is deferred. In single-tenant
+        mode, all summaries are currently visible — summaries inherit document
+        ACL via the parent document lookup. See Wave-8 follow-up.
         """
         if not settings.rag_hierarchical_enabled:
             return []
@@ -432,7 +431,7 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
         await self.initialize()
 
         try:
-            collection_name = self.get_summary_collection_name(tenant_id)
+            collection_name = SUMMARY_COLLECTION_NAME
 
             # Check if collection exists
             if not self._weaviate_service.client.collections.exists(collection_name):
@@ -454,23 +453,25 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
 
             query_vector = result.vectors[0]
 
-            # Build filters
+            # Build filters (tenant_id filter removed — single-tenant deployment)
             import weaviate.classes.query as wq
 
-            weaviate_filter = wq.Filter.by_property("tenant_id").equal(tenant_id)
-
+            weaviate_filter = None
             if filters and "document_type" in filters:
-                weaviate_filter = weaviate_filter & wq.Filter.by_property(
+                weaviate_filter = wq.Filter.by_property(
                     "document_type"
                 ).equal(filters["document_type"])
 
             # Execute vector search
-            response = collection.query.near_vector(
-                near_vector=query_vector,
-                limit=limit,
-                filters=weaviate_filter,
-                return_metadata=wq.MetadataQuery(certainty=True, distance=True),
-            )
+            query_kwargs = {
+                "near_vector": query_vector,
+                "limit": limit,
+                "return_metadata": wq.MetadataQuery(certainty=True, distance=True),
+            }
+            if weaviate_filter is not None:
+                query_kwargs["filters"] = weaviate_filter
+
+            response = collection.query.near_vector(**query_kwargs)
 
             # Convert to DocumentSummary objects
             results = []
@@ -484,7 +485,6 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
                     key_topics=props.get("key_topics", []),
                     key_entities=props.get("key_entities", []),
                     document_type=props.get("document_type", ""),
-                    tenant_id=props.get("tenant_id", ""),
                     total_chunks=props.get("total_chunks", 0),
                     total_tokens=props.get("total_tokens", 0),
                     metadata={
@@ -501,7 +501,11 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
             logger.warning(f"⚠️ Summary search failed: {e}")
             return []
 
-    async def delete_summary(self, document_id: str, tenant_id: str) -> bool:
+    async def delete_summary(
+        self,
+        document_id: str,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> bool:
         """Delete a document summary when document is deleted"""
         if not settings.rag_hierarchical_enabled:
             return True
@@ -509,7 +513,7 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
         await self.initialize()
 
         try:
-            collection_name = self.get_summary_collection_name(tenant_id)
+            collection_name = SUMMARY_COLLECTION_NAME
 
             if not self._weaviate_service.client.collections.exists(collection_name):
                 return True

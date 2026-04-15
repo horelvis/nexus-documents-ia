@@ -12,6 +12,8 @@ Key design decisions:
 2. Embedding-based keys: Uses truncated embedding for deterministic matching
 3. TTL-based invalidation: Short TTL (5-15 min) since search results can change
 4. Event-based invalidation: On document CRUD operations
+5. Single-tenant deployment (on-premise) — legacy tenant_id kwargs are
+   accepted-and-ignored for backwards compat with Wave-3 upstream callers.
 
 Performance impact:
 - Cache hit: ~10ms (Redis lookup)
@@ -77,7 +79,7 @@ class RetrievalCache:
     Configuration (env vars):
         RETRIEVAL_CACHE_ENABLED: Enable/disable (default: true)
         RETRIEVAL_CACHE_TTL_SECONDS: TTL in seconds (default: 300 = 5 min)
-        RETRIEVAL_CACHE_MAX_ENTRIES: Max entries per tenant/user (default: 500)
+        RETRIEVAL_CACHE_MAX_ENTRIES: Max entries per user (default: 500)
     """
 
     KEY_PREFIX = "retrieval:"
@@ -122,7 +124,6 @@ class RetrievalCache:
     def _build_cache_key(
         self,
         query_embedding: List[float],
-        tenant_id: str,
         user_id: str,
         collection_name: Optional[str] = None,
         top_k: int = 10,
@@ -140,7 +141,6 @@ class RetrievalCache:
 
         key_components = {
             "emb": truncated_emb,
-            "tenant": tenant_id,
             "user": user_id,
             "collection": collection_name or "default",
             "top_k": top_k,
@@ -150,33 +150,33 @@ class RetrievalCache:
         key_json = json.dumps(key_components, sort_keys=True)
         key_hash = hashlib.sha256(key_json.encode()).hexdigest()[:24]
 
-        return f"{self.KEY_PREFIX}{tenant_id}:{user_id}:{key_hash}"
+        return f"{self.KEY_PREFIX}{user_id}:{key_hash}"
 
-    def _index_key(self, tenant_id: str, user_id: str) -> str:
+    def _index_key(self, user_id: str) -> str:
         """Index key for tracking user's cached queries"""
-        return f"{self.INDEX_PREFIX}{tenant_id}:{user_id}"
+        return f"{self.INDEX_PREFIX}{user_id}"
 
     async def get(
         self,
         query_embedding: List[float],
-        tenant_id: str,
         user_id: str,
         collection_name: Optional[str] = None,
         top_k: int = 10,
         include_public: bool = True,
         current_version: Optional[str] = None,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> Optional[CachedRetrievalResult]:
         """
         Get cached retrieval results if available.
 
         Args:
             query_embedding: Query embedding vector
-            tenant_id: Tenant identifier
             user_id: User identifier (REQUIRED for ACL isolation)
             collection_name: Optional collection filter
             top_k: Number of results requested
             include_public: Whether public knowledge is included
             current_version: Current index version (for invalidation check)
+            tenant_id: DEPRECATED, ignored (single-tenant deployment)
 
         Returns:
             CachedRetrievalResult if cache hit, None otherwise
@@ -193,7 +193,7 @@ class RetrievalCache:
 
         try:
             cache_key = self._build_cache_key(
-                query_embedding, tenant_id, user_id,
+                query_embedding, user_id,
                 collection_name, top_k, include_public
             )
 
@@ -233,7 +233,6 @@ class RetrievalCache:
     async def set(
         self,
         query_embedding: List[float],
-        tenant_id: str,
         user_id: str,
         doc_ids: List[str],
         scores: List[float],
@@ -242,13 +241,13 @@ class RetrievalCache:
         top_k: int = 10,
         include_public: bool = True,
         version: str = "0",
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> bool:
         """
         Store retrieval results in cache.
 
         Args:
             query_embedding: Query embedding used for search
-            tenant_id: Tenant identifier
             user_id: User identifier (REQUIRED for ACL isolation)
             doc_ids: List of retrieved document IDs
             scores: Corresponding relevance scores
@@ -257,6 +256,7 @@ class RetrievalCache:
             top_k: Number of results
             include_public: Whether public knowledge was included
             version: Current index version
+            tenant_id: DEPRECATED, ignored (single-tenant deployment)
 
         Returns:
             True if cached successfully
@@ -270,7 +270,7 @@ class RetrievalCache:
 
         try:
             cache_key = self._build_cache_key(
-                query_embedding, tenant_id, user_id,
+                query_embedding, user_id,
                 collection_name, top_k, include_public
             )
 
@@ -291,7 +291,7 @@ class RetrievalCache:
             )
 
             # Track in user's index (for cleanup)
-            index_key = self._index_key(tenant_id, user_id)
+            index_key = self._index_key(user_id)
             await self._redis.lpush(index_key, cache_key)
             await self._redis.expire(index_key, self.ttl_seconds * 2)  # Longer TTL for index
 
@@ -313,7 +313,11 @@ class RetrievalCache:
             logger.warning(f"⚠️ RetrievalCache.set error: {e}")
             return False
 
-    async def invalidate_user(self, tenant_id: str, user_id: str) -> int:
+    async def invalidate_user(
+        self,
+        user_id: str,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> int:
         """
         Invalidate all cached retrievals for a user.
 
@@ -323,7 +327,7 @@ class RetrievalCache:
             return 0
 
         try:
-            index_key = self._index_key(tenant_id, user_id)
+            index_key = self._index_key(user_id)
             cache_keys = await self._redis.lrange(index_key, 0, -1)
 
             count = 0
@@ -342,30 +346,33 @@ class RetrievalCache:
             logger.warning(f"⚠️ RetrievalCache.invalidate_user error: {e}")
             return 0
 
-    async def invalidate_tenant(self, tenant_id: str) -> int:
+    async def invalidate_all(
+        self,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> int:
         """
-        Invalidate all cached retrievals for a tenant.
-
-        Called when tenant's index is rebuilt or documents are bulk-updated.
+        Invalidate all cached retrievals (entire index rebuild or bulk update).
         """
         if not self._initialized or not self._redis:
             return 0
 
         try:
-            # Find all keys for this tenant
-            pattern = f"{self.KEY_PREFIX}{tenant_id}:*"
+            # Find all retrieval cache keys
+            pattern = f"{self.KEY_PREFIX}*"
             cursor = 0
             count = 0
 
             while True:
                 cursor, keys = await self._redis.scan(cursor, match=pattern, count=100)
-                if keys:
-                    count += await self._redis.delete(*keys)
+                # Filter out index keys — we handle those separately
+                data_keys = [k for k in keys if not k.startswith(self.INDEX_PREFIX)]
+                if data_keys:
+                    count += await self._redis.delete(*data_keys)
                 if cursor == 0:
                     break
 
             # Also clean up index keys
-            index_pattern = f"{self.INDEX_PREFIX}{tenant_id}:*"
+            index_pattern = f"{self.INDEX_PREFIX}*"
             cursor = 0
             while True:
                 cursor, keys = await self._redis.scan(cursor, match=index_pattern, count=100)
@@ -375,34 +382,52 @@ class RetrievalCache:
                     break
 
             if count > 0:
-                logger.info(f"🔄 Invalidated {count} retrieval cache entries for tenant {tenant_id}")
+                logger.info(f"🔄 Invalidated {count} retrieval cache entries (all)")
                 self._stats.invalidations += count
 
             return count
 
         except Exception as e:
-            logger.warning(f"⚠️ RetrievalCache.invalidate_tenant error: {e}")
+            logger.warning(f"⚠️ RetrievalCache.invalidate_all error: {e}")
             return 0
+
+    # Backwards-compatible alias — callers still use invalidate_tenant()
+    async def invalidate_tenant(
+        self,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> int:
+        """Deprecated alias for invalidate_all()."""
+        return await self.invalidate_all()
 
     async def invalidate_by_documents(
         self,
-        tenant_id: str,
-        doc_ids: List[str],
+        tenant_id: Optional[str] = None,  # legacy positional arg (accepted-and-ignored)
+        doc_ids: Optional[List[str]] = None,
     ) -> int:
         """
         Invalidate cache entries that include specific documents.
 
-        Called when documents are updated or deleted.
-        This scans all cache entries for the tenant and removes those
-        containing any of the specified document IDs.
+        Called when documents are updated or deleted. Scans all cache entries
+        and removes those containing any of the specified document IDs.
+
+        Signature kept compatible with the version_manager invalidation callback
+        contract `(tenant_id, doc_ids)`. The tenant_id arg is ignored.
 
         Note: This is O(n) but is called infrequently (on document CRUD).
         """
         if not self._initialized or not self._redis:
             return 0
 
+        # Handle both call styles:
+        #   invalidate_by_documents(doc_ids=[...])              — new
+        #   invalidate_by_documents(_SINGLE_TENANT, [...])      — legacy callback
+        if doc_ids is None and isinstance(tenant_id, list):
+            doc_ids = tenant_id
+        if not doc_ids:
+            return 0
+
         try:
-            pattern = f"{self.KEY_PREFIX}{tenant_id}:*"
+            pattern = f"{self.KEY_PREFIX}*"
             cursor = 0
             count = 0
             doc_ids_set = set(doc_ids)
@@ -412,7 +437,7 @@ class RetrievalCache:
 
                 for key in keys:
                     # Skip index keys
-                    if ":index:" in key:
+                    if key.startswith(self.INDEX_PREFIX):
                         continue
 
                     try:

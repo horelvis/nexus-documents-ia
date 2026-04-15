@@ -14,11 +14,12 @@ Key design decisions:
 1. Atomic version increments using Redis INCR
 2. Version history for debugging (last 10 changes)
 3. Event hooks for cache invalidation coordination
-4. Tenant isolation in all version tracking
+4. Single-tenant deployment (on-premise) — legacy tenant_id kwargs are
+   accepted-and-ignored for backwards compat with Wave-3 upstream callers.
 
 Example flow:
-1. Admin triggers reindex for tenant_123
-2. VersionManager.bump_index_version("tenant_123")
+1. Admin triggers reindex
+2. VersionManager.bump_index_version()
 3. This bumps index version from "4" to "5"
 4. All retrieval/context caches with version "4" become invalid
 5. Next query gets fresh results, cached with version "5"
@@ -36,6 +37,11 @@ import redis.asyncio as redis
 from ....core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Single-tenant deployment constant. Passed to invalidation callbacks whose
+# legacy signature still expects a tenant_id string. Safe to remove once all
+# callbacks drop the parameter.
+_SINGLE_TENANT = "default"
 
 
 @dataclass
@@ -55,7 +61,11 @@ class VersionInfo:
         }
 
 
-# Type for invalidation callbacks
+# Type for invalidation callbacks. Signature kept as (tenant_id, doc_ids) for
+# backwards compat with Wave-3 callers (retrieval_cache.invalidate_by_documents,
+# context_cache.invalidate_by_documents, semantic_cache_invalidator). The
+# tenant_id arg is ignored downstream but kept in the type so registration
+# sites don't need to be rewritten.
 InvalidationCallback = Callable[[str, List[str]], Awaitable[int]]
 
 
@@ -64,8 +74,7 @@ class CacheVersionManager:
     Manages version tracking for cache invalidation.
 
     Tracks versions at multiple levels:
-    - Global: Embedding model, default chunking strategy
-    - Tenant: Index version, tenant-specific settings
+    - Global: Embedding model, default chunking strategy, index version
     - Document: Individual document update timestamps
 
     Configuration (env vars):
@@ -74,7 +83,7 @@ class CacheVersionManager:
     """
 
     PREFIX = "version:"
-    HISTORY_PREFIX = "version:history:"
+    HISTORY_KEY = "version:history"
     DOC_VERSION_PREFIX = "version:doc:"
 
     def __init__(self):
@@ -115,6 +124,7 @@ class CacheVersionManager:
         Register a callback to be called when documents are invalidated.
 
         Callbacks receive (tenant_id, doc_ids) and should return count invalidated.
+        tenant_id is a legacy placeholder (_SINGLE_TENANT) in single-tenant mode.
         """
         self._invalidation_callbacks.append(callback)
 
@@ -122,7 +132,10 @@ class CacheVersionManager:
     # Version Getters
     # =========================================================================
 
-    async def get_versions(self, tenant_id: str) -> VersionInfo:
+    async def get_versions(
+        self,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> VersionInfo:
         """
         Get current versions for all cache-affecting components.
 
@@ -138,10 +151,10 @@ class CacheVersionManager:
 
         try:
             keys = [
-                f"{self.PREFIX}{tenant_id}:embedding_model",
-                f"{self.PREFIX}{tenant_id}:chunk_strategy",
-                f"{self.PREFIX}{tenant_id}:index_version",
-                f"{self.PREFIX}{tenant_id}:last_reindex",
+                f"{self.PREFIX}embedding_model",
+                f"{self.PREFIX}chunk_strategy",
+                f"{self.PREFIX}index_version",
+                f"{self.PREFIX}last_reindex",
             ]
 
             values = await self._redis.mget(keys)
@@ -162,25 +175,31 @@ class CacheVersionManager:
                 last_reindex=None,
             )
 
-    async def get_index_version(self, tenant_id: str) -> str:
-        """Get current index version for a tenant"""
+    async def get_index_version(
+        self,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> str:
+        """Get current index version"""
         if not self._initialized or not self._redis:
             return "0"
 
         try:
-            version = await self._redis.get(f"{self.PREFIX}{tenant_id}:index_version")
+            version = await self._redis.get(f"{self.PREFIX}index_version")
             return version or "0"
         except Exception as e:
             logger.warning(f"⚠️ get_index_version error: {e}")
             return "0"
 
-    async def get_chunk_version(self, tenant_id: str) -> str:
-        """Get current chunking strategy version for a tenant"""
+    async def get_chunk_version(
+        self,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> str:
+        """Get current chunking strategy version"""
         if not self._initialized or not self._redis:
             return self._default_chunk_strategy
 
         try:
-            version = await self._redis.get(f"{self.PREFIX}{tenant_id}:chunk_strategy")
+            version = await self._redis.get(f"{self.PREFIX}chunk_strategy")
             return version or self._default_chunk_strategy
         except Exception as e:
             logger.warning(f"⚠️ get_chunk_version error: {e}")
@@ -192,7 +211,6 @@ class CacheVersionManager:
 
     async def _record_version_change(
         self,
-        tenant_id: str,
         component: str,
         old_version: str,
         new_version: str,
@@ -203,7 +221,6 @@ class CacheVersionManager:
             return
 
         try:
-            history_key = f"{self.HISTORY_PREFIX}{tenant_id}"
             change = {
                 "component": component,
                 "old": old_version,
@@ -211,14 +228,18 @@ class CacheVersionManager:
                 "reason": reason,
                 "timestamp": datetime.utcnow().isoformat(),
             }
-            await self._redis.lpush(history_key, json.dumps(change))
-            await self._redis.ltrim(history_key, 0, 9)  # Keep last 10 changes
+            await self._redis.lpush(self.HISTORY_KEY, json.dumps(change))
+            await self._redis.ltrim(self.HISTORY_KEY, 0, 9)  # Keep last 10 changes
         except Exception:
             pass  # History is best-effort
 
-    async def bump_index_version(self, tenant_id: str, reason: str = "reindex") -> str:
+    async def bump_index_version(
+        self,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+        reason: str = "reindex",
+    ) -> str:
         """
-        Increment index version for a tenant.
+        Increment index version.
 
         Called when:
         - Full reindex is performed
@@ -231,7 +252,7 @@ class CacheVersionManager:
             return "0"
 
         try:
-            key = f"{self.PREFIX}{tenant_id}:index_version"
+            key = f"{self.PREFIX}index_version"
             old_version = await self._redis.get(key) or "0"
 
             # Atomic increment
@@ -240,16 +261,16 @@ class CacheVersionManager:
 
             # Record timestamp
             await self._redis.set(
-                f"{self.PREFIX}{tenant_id}:last_reindex",
+                f"{self.PREFIX}last_reindex",
                 datetime.utcnow().isoformat()
             )
 
             # Record in history
             await self._record_version_change(
-                tenant_id, "index", old_version, new_version_str, reason
+                "index", old_version, new_version_str, reason
             )
 
-            logger.info(f"🔖 Bumped index version for tenant {tenant_id}: "
+            logger.info(f"🔖 Bumped index version: "
                        f"{old_version} → {new_version_str} ({reason})")
 
             return new_version_str
@@ -260,30 +281,30 @@ class CacheVersionManager:
 
     async def set_chunk_strategy(
         self,
-        tenant_id: str,
         strategy: str,
-        reason: str = "config_change"
+        reason: str = "config_change",
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> bool:
         """
-        Set chunking strategy version for a tenant.
+        Set chunking strategy version.
 
         Called when admin changes chunking settings.
-        This invalidates all context caches for the tenant.
+        This invalidates all context caches.
         """
         if not self._initialized or not self._redis:
             return False
 
         try:
-            key = f"{self.PREFIX}{tenant_id}:chunk_strategy"
+            key = f"{self.PREFIX}chunk_strategy"
             old_strategy = await self._redis.get(key) or self._default_chunk_strategy
 
             await self._redis.set(key, strategy)
 
             await self._record_version_change(
-                tenant_id, "chunk_strategy", old_strategy, strategy, reason
+                "chunk_strategy", old_strategy, strategy, reason
             )
 
-            logger.info(f"🔖 Set chunk strategy for tenant {tenant_id}: "
+            logger.info(f"🔖 Set chunk strategy: "
                        f"{old_strategy} → {strategy} ({reason})")
 
             return True
@@ -294,12 +315,12 @@ class CacheVersionManager:
 
     async def set_embedding_model(
         self,
-        tenant_id: str,
         model: str,
-        reason: str = "model_upgrade"
+        reason: str = "model_upgrade",
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> bool:
         """
-        Set embedding model version for a tenant.
+        Set embedding model version.
 
         Called when embedding model is upgraded.
         This should trigger a full reindex!
@@ -308,16 +329,16 @@ class CacheVersionManager:
             return False
 
         try:
-            key = f"{self.PREFIX}{tenant_id}:embedding_model"
+            key = f"{self.PREFIX}embedding_model"
             old_model = await self._redis.get(key) or self._default_embedding_model
 
             await self._redis.set(key, model)
 
             await self._record_version_change(
-                tenant_id, "embedding_model", old_model, model, reason
+                "embedding_model", old_model, model, reason
             )
 
-            logger.warning(f"🔖 EMBEDDING MODEL CHANGED for tenant {tenant_id}: "
+            logger.warning(f"🔖 EMBEDDING MODEL CHANGED: "
                           f"{old_model} → {model}. REINDEX REQUIRED!")
 
             return True
@@ -332,9 +353,9 @@ class CacheVersionManager:
 
     async def mark_documents_updated(
         self,
-        tenant_id: str,
         doc_ids: List[str],
-        reason: str = "document_update"
+        reason: str = "document_update",
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> int:
         """
         Mark documents as updated, triggering cache invalidation.
@@ -357,16 +378,17 @@ class CacheVersionManager:
             now = time.time()
             pipe = self._redis.pipeline()
             for doc_id in doc_ids:
-                key = f"{self.DOC_VERSION_PREFIX}{tenant_id}:{doc_id}"
+                key = f"{self.DOC_VERSION_PREFIX}{doc_id}"
                 pipe.set(key, str(now))
                 pipe.expire(key, 86400 * 7)  # Keep for 7 days
             await pipe.execute()
 
-            # Notify registered caches to invalidate
+            # Notify registered caches to invalidate. Callbacks still have the
+            # legacy (tenant_id, doc_ids) signature; pass _SINGLE_TENANT placeholder.
             total_invalidated = 0
             for callback in self._invalidation_callbacks:
                 try:
-                    count = await callback(tenant_id, doc_ids)
+                    count = await callback(_SINGLE_TENANT, doc_ids)
                     total_invalidated += count
                 except Exception as e:
                     logger.warning(f"⚠️ Invalidation callback error: {e}")
@@ -380,13 +402,17 @@ class CacheVersionManager:
             logger.warning(f"⚠️ mark_documents_updated error: {e}")
             return 0
 
-    async def get_document_version(self, tenant_id: str, doc_id: str) -> Optional[str]:
+    async def get_document_version(
+        self,
+        doc_id: str,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> Optional[str]:
         """Get last update timestamp for a document"""
         if not self._initialized or not self._redis:
             return None
 
         try:
-            key = f"{self.DOC_VERSION_PREFIX}{tenant_id}:{doc_id}"
+            key = f"{self.DOC_VERSION_PREFIX}{doc_id}"
             return await self._redis.get(key)
         except Exception:
             return None
@@ -397,32 +423,33 @@ class CacheVersionManager:
 
     async def get_version_history(
         self,
-        tenant_id: str,
-        limit: int = 10
+        limit: int = 10,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> List[Dict[str, Any]]:
-        """Get recent version changes for a tenant (for debugging)"""
+        """Get recent version changes (for debugging)"""
         if not self._initialized or not self._redis:
             return []
 
         try:
-            history_key = f"{self.HISTORY_PREFIX}{tenant_id}"
-            items = await self._redis.lrange(history_key, 0, limit - 1)
+            items = await self._redis.lrange(self.HISTORY_KEY, 0, limit - 1)
             return [json.loads(item) for item in items]
         except Exception as e:
             logger.warning(f"⚠️ get_version_history error: {e}")
             return []
 
-    async def get_cache_health(self, tenant_id: str) -> Dict[str, Any]:
+    async def get_cache_health(
+        self,
+        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
+    ) -> Dict[str, Any]:
         """
-        Get overall cache health information for a tenant.
+        Get overall cache health information.
 
         Useful for admin dashboard monitoring.
         """
-        versions = await self.get_versions(tenant_id)
-        history = await self.get_version_history(tenant_id, limit=5)
+        versions = await self.get_versions()
+        history = await self.get_version_history(limit=5)
 
         return {
-            "tenant_id": tenant_id,
             "current_versions": versions.to_dict(),
             "recent_changes": history,
             "initialized": self._initialized,
