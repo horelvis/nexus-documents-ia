@@ -43,7 +43,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import time
 
 from app.core.config import settings
-from app.api import emma_router, learning_router, uploads_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router, diagnostics_router, generated_documents_router
+from app.api import emma_router, uploads_router, training_router, background_router, triggers_router, notifications_router, channels_router, heartbeat_router, prompts_router, diagnostics_router, generated_documents_router
 from app.api.explainability import router as explainability_router
 from app.api.langgraph_protocol import router as langgraph_protocol_router
 from app.api.report_downloads import router as report_downloads_router
@@ -219,7 +219,6 @@ async def log_requests(request: Request, call_next):
 
 # Include routers
 app.include_router(emma_router, prefix="/emma", tags=["emma"])
-app.include_router(learning_router, prefix="/learning", tags=["learning"])
 app.include_router(uploads_router, prefix="/emma", tags=["uploads"])
 # verified_router and predictive_router removed — absorbed by /emma/query (sub-graph tools)
 app.include_router(training_router, tags=["training"])
@@ -281,7 +280,6 @@ async def service_info():
         ],
         "endpoints": {
             "emma": "/emma/* (AI chat)",
-            "learning": "/learning/* (feedback)",
             "health": "/health",
             "docs": "/docs" if settings.debug else None
         },

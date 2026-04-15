@@ -672,7 +672,7 @@ async def create_initial_react_state(
         try:
             from app.services.memory.user_facts import get_user_facts_service
             facts_service = get_user_facts_service()
-            user_memory = await facts_service.format_facts_for_prompt(tenant_id, user_id)
+            user_memory = await facts_service.format_facts_for_prompt(user_id)
         except Exception as e:
             import logging
             logging.getLogger(__name__).debug(f"User memory load skipped: {e}")

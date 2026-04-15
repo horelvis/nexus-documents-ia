@@ -480,21 +480,6 @@ async def _sync_connector(
                 f"updated={stats['items_updated']}, failed={stats['items_failed']}"
             )
 
-            # ================================================================
-            # NexusRouter Post-Sync Hook
-            # Notify router about new documents for potential retraining
-            # ================================================================
-            new_docs = stats['items_new'] + stats['items_updated']
-            if new_docs > 0:
-                try:
-                    from worker_app.tasks.router_tasks import increment_docs_since_train_task
-                    increment_docs_since_train_task.delay(new_docs)
-                    logger.info(f"📊 NexusRouter notified: {new_docs} new/updated documents")
-                except ImportError:
-                    logger.debug("NexusRouter tasks not available, skipping notification")
-                except Exception as e:
-                    logger.warning(f"Failed to notify NexusRouter: {e}")
-
             stats["success"] = True
 
             # Emit connector.synced event to the reactive event bus

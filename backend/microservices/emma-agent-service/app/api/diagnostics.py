@@ -634,10 +634,7 @@ async def _check_user_memory(tenant_id: str) -> Dict[str, Any]:
     try:
         from app.services.memory.user_facts import get_user_facts_service
         service = get_user_facts_service()
-        facts = await service.get_user_facts(
-            tenant_id=tenant_id,
-            user_id="diagnostics-probe",
-        )
+        facts = await service.get_user_facts(user_id="diagnostics-probe")
         ms = (time.time() - t0) * 1000
         return _ok(ms, f"{len(facts)} facts for probe user")
     except Exception as e:
