@@ -47,11 +47,12 @@ class ContextGatherer:
             await self._redis.aclose()
             self._redis = None
 
-    async def gather(self, tenant_id: str) -> TenantContext:
-        """Gather all context for a tenant.
+    async def gather(self, tenant_id: str = "") -> TenantContext:
+        """Gather all context for the deployment.
 
         Args:
-            tenant_id: The tenant to gather context for
+            tenant_id: Legacy placeholder, accepted for backwards compatibility
+                with Wave 3 callers (heartbeat_service). Ignored.
 
         Returns:
             TenantContext with all available data
@@ -66,7 +67,7 @@ class ContextGatherer:
 
         # Gather from different sources (best effort)
         try:
-            docs_24h, docs_7d, by_collection, total = await self._gather_document_stats(tenant_id)
+            docs_24h, docs_7d, by_collection, total = await self._gather_document_stats()
             context.documents_indexed_24h = docs_24h
             context.documents_indexed_7d = docs_7d
             context.documents_by_collection = by_collection
@@ -75,26 +76,26 @@ class ContextGatherer:
             logger.warning(f"Failed to gather document stats: {e}")
 
         try:
-            exp_7d, exp_30d = await self._gather_expiring_contracts(tenant_id)
+            exp_7d, exp_30d = await self._gather_expiring_contracts()
             context.contracts_expiring_7d = exp_7d
             context.contracts_expiring_30d = exp_30d
         except Exception as e:
             logger.warning(f"Failed to gather contract expirations: {e}")
 
         try:
-            context.user_activity = await self._gather_user_activity(tenant_id)
+            context.user_activity = await self._gather_user_activity()
         except Exception as e:
             logger.warning(f"Failed to gather user activity: {e}")
 
         try:
-            pending, stale = await self._gather_pending_items(tenant_id)
+            pending, stale = await self._gather_pending_items()
             context.pending_analyses = pending
             context.stale_analyses_7d = stale
         except Exception as e:
             logger.warning(f"Failed to gather pending items: {e}")
 
         try:
-            context.anomalies = await self._gather_anomalies(tenant_id)
+            context.anomalies = await self._gather_anomalies()
             context.duplicate_documents = sum(
                 1 for a in context.anomalies if a.anomaly_type == "duplicate"
             )
@@ -105,7 +106,7 @@ class ContextGatherer:
             logger.warning(f"Failed to gather anomalies: {e}")
 
         try:
-            last_insight, today_count, hour_count = await self._gather_delivery_stats(tenant_id)
+            last_insight, today_count, hour_count = await self._gather_delivery_stats()
             context.last_insight_delivered_at = last_insight
             context.insights_delivered_today = today_count
             context.insights_delivered_this_hour = hour_count
@@ -115,7 +116,7 @@ class ContextGatherer:
         return context
 
     async def _gather_document_stats(
-        self, tenant_id: str
+        self,
     ) -> tuple[List[DocumentSummary], int, Dict[str, int], int]:
         """Gather document statistics from main API."""
         docs_24h: List[DocumentSummary] = []
@@ -127,7 +128,7 @@ class ContextGatherer:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 # Get recent documents via main API stats endpoint
                 response = await client.get(
-                    f"{settings.api_url}/api/v1/stats/tenant/{tenant_id}",
+                    f"{settings.api_url}/api/v1/stats/deployment",
                     headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                 )
 
@@ -163,7 +164,7 @@ class ContextGatherer:
         return docs_24h, docs_7d, by_collection, total
 
     async def _gather_expiring_contracts(
-        self, tenant_id: str
+        self,
     ) -> tuple[List[ContractInfo], List[ContractInfo]]:
         """Gather expiring contracts from document metadata."""
         exp_7d: List[ContractInfo] = []
@@ -173,7 +174,7 @@ class ContextGatherer:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{settings.api_url}/api/v1/stats/contracts/expiring",
-                    params={"tenant_id": tenant_id, "days": 30},
+                    params={"days": 30},
                     headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                 )
 
@@ -213,7 +214,7 @@ class ContextGatherer:
 
         return exp_7d, exp_30d
 
-    async def _gather_user_activity(self, tenant_id: str) -> UserActivityStats:
+    async def _gather_user_activity(self) -> UserActivityStats:
         """Gather user activity from Redis session data."""
         stats = UserActivityStats()
 
@@ -221,7 +222,7 @@ class ContextGatherer:
             r = await self._get_redis()
 
             # Get session activity (queries in last 24h)
-            session_key = f"emma:activity:{tenant_id}:*"
+            session_key = "emma:activity:*"
             now = datetime.now(timezone.utc)
             cutoff_24h = (now - timedelta(hours=24)).timestamp()
 
@@ -263,7 +264,7 @@ class ContextGatherer:
 
         return stats
 
-    async def _gather_pending_items(self, tenant_id: str) -> tuple[int, int]:
+    async def _gather_pending_items(self) -> tuple[int, int]:
         """Gather pending analyses and signatures."""
         pending = 0
         stale = 0
@@ -273,7 +274,6 @@ class ContextGatherer:
                 # Check main API for pending analyses
                 response = await client.get(
                     f"{settings.api_url}/api/v1/stats/analyses/pending",
-                    params={"tenant_id": tenant_id},
                     headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                 )
 
@@ -289,7 +289,7 @@ class ContextGatherer:
 
         return pending, stale
 
-    async def _gather_anomalies(self, tenant_id: str) -> List[AnomalyInfo]:
+    async def _gather_anomalies(self) -> List[AnomalyInfo]:
         """Gather anomalies (duplicates, failures) from main API."""
         anomalies: List[AnomalyInfo] = []
 
@@ -297,7 +297,7 @@ class ContextGatherer:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.get(
                     f"{settings.api_url}/api/v1/stats/anomalies/recent",
-                    params={"tenant_id": tenant_id, "hours": 24},
+                    params={"hours": 24},
                     headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                 )
 
@@ -318,7 +318,7 @@ class ContextGatherer:
         return anomalies
 
     async def _gather_delivery_stats(
-        self, tenant_id: str
+        self,
     ) -> tuple[Optional[datetime], int, int]:
         """Get insight delivery stats for rate limiting."""
         last_insight: Optional[datetime] = None
@@ -327,7 +327,7 @@ class ContextGatherer:
 
         try:
             r = await self._get_redis()
-            stats_key = f"emma:heartbeat:delivery:{tenant_id}"
+            stats_key = "emma:heartbeat:delivery"
 
             data = await r.hgetall(stats_key)
             if data:

@@ -1,10 +1,13 @@
 """
 Predictive Analysis Cache — Redis-backed storage for factors and results.
 
-Key format:
-    predictive:{tenant_id}:{session_id}:factors  → List[WeightedFactor]  (TTL: 1h)
-    predictive:{tenant_id}:{session_id}:result   → PredictionResult      (TTL: 7d)
-    predictive:meta:{tenant_id}:{session_id}     → session metadata      (TTL: 1h)
+Key format (single-tenant; tenant_id segment removed in Plan 3):
+    predictive:{session_id}:factors  → List[WeightedFactor]  (TTL: 1h)
+    predictive:result:{session_id}   → PredictionResult      (TTL: 7d)
+    predictive:meta:{session_id}     → session metadata      (TTL: 1h)
+
+Note: method signatures retain ``tenant_id`` for backwards compatibility
+with subgraph callers (Wave 6 scope). The argument is accepted but ignored.
 """
 
 from __future__ import annotations
@@ -54,24 +57,24 @@ class PredictiveCache:
             await self._redis.close()
             self._redis = None
 
-    def _factors_key(self, tenant_id: str, session_id: str) -> str:
-        return f"{self.FACTORS_PREFIX}:{tenant_id}:{session_id}:factors"
+    def _factors_key(self, session_id: str) -> str:
+        return f"{self.FACTORS_PREFIX}:{session_id}:factors"
 
-    def _result_key(self, tenant_id: str, session_id: str) -> str:
-        return f"{self.RESULT_PREFIX}:{tenant_id}:{session_id}"
+    def _result_key(self, session_id: str) -> str:
+        return f"{self.RESULT_PREFIX}:{session_id}"
 
-    def _meta_key(self, tenant_id: str, session_id: str) -> str:
-        return f"{self.META_PREFIX}:{tenant_id}:{session_id}"
+    def _meta_key(self, session_id: str) -> str:
+        return f"{self.META_PREFIX}:{session_id}"
 
     # =========================================================================
     # Factors (ordered list, append-only)
     # =========================================================================
 
     async def add_weighted_factor(
-        self, tenant_id: str, session_id: str, factor: WeightedFactor
+        self, _tenant_id_unused: str, session_id: str, factor: WeightedFactor
     ) -> int:
         await self.connect()
-        key = self._factors_key(tenant_id, session_id)
+        key = self._factors_key(session_id)
         factor_json = json.dumps(factor.to_dict())
         count = await self._redis.rpush(key, factor_json)
         await self._redis.expire(key, self._factors_ttl)
@@ -83,10 +86,10 @@ class PredictiveCache:
         return count
 
     async def get_weighted_factors(
-        self, tenant_id: str, session_id: str
+        self, _tenant_id_unused: str, session_id: str
     ) -> List[WeightedFactor]:
         await self.connect()
-        key = self._factors_key(tenant_id, session_id)
+        key = self._factors_key(session_id)
         factors_json = await self._redis.lrange(key, 0, -1)
         factors = []
         for fj in factors_json:
@@ -97,9 +100,9 @@ class PredictiveCache:
                 logger.warning(f"⚠️ Failed to deserialize factor: {e}")
         return factors
 
-    async def get_factors_count(self, tenant_id: str, session_id: str) -> int:
+    async def get_factors_count(self, _tenant_id_unused: str, session_id: str) -> int:
         await self.connect()
-        key = self._factors_key(tenant_id, session_id)
+        key = self._factors_key(session_id)
         return await self._redis.llen(key)
 
     # =========================================================================
@@ -107,10 +110,10 @@ class PredictiveCache:
     # =========================================================================
 
     async def store_result(
-        self, tenant_id: str, session_id: str, result: PredictionResult
+        self, _tenant_id_unused: str, session_id: str, result: PredictionResult
     ) -> None:
         await self.connect()
-        key = self._result_key(tenant_id, session_id)
+        key = self._result_key(session_id)
         result_dict = result.model_dump()
         result_dict["created_at"] = result_dict["created_at"].isoformat() if hasattr(result_dict["created_at"], "isoformat") else str(result_dict["created_at"])
         # Serialize WeightedFactor objects
@@ -119,10 +122,10 @@ class PredictiveCache:
         logger.info(f"📝 Stored prediction result for session {session_id[:16]}...")
 
     async def get_result(
-        self, tenant_id: str, session_id: str
+        self, _tenant_id_unused: str, session_id: str
     ) -> Optional[PredictionResult]:
         await self.connect()
-        key = self._result_key(tenant_id, session_id)
+        key = self._result_key(session_id)
         data = await self._redis.get(key)
         if data:
             parsed = json.loads(data)
@@ -135,17 +138,17 @@ class PredictiveCache:
     # =========================================================================
 
     async def store_session_metadata(
-        self, tenant_id: str, session_id: str, metadata: dict
+        self, _tenant_id_unused: str, session_id: str, metadata: dict
     ) -> None:
         await self.connect()
-        key = self._meta_key(tenant_id, session_id)
+        key = self._meta_key(session_id)
         await self._redis.set(key, json.dumps(metadata, default=str), ex=self._factors_ttl)
 
     async def get_session_metadata(
-        self, tenant_id: str, session_id: str
+        self, _tenant_id_unused: str, session_id: str
     ) -> dict:
         await self.connect()
-        key = self._meta_key(tenant_id, session_id)
+        key = self._meta_key(session_id)
         data = await self._redis.get(key)
         return json.loads(data) if data else {}
 
@@ -153,27 +156,27 @@ class PredictiveCache:
     # Session management
     # =========================================================================
 
-    async def clear_session(self, tenant_id: str, session_id: str) -> bool:
+    async def clear_session(self, _tenant_id_unused: str, session_id: str) -> bool:
         await self.connect()
         keys = [
-            self._factors_key(tenant_id, session_id),
-            self._result_key(tenant_id, session_id),
-            self._meta_key(tenant_id, session_id),
+            self._factors_key(session_id),
+            self._result_key(session_id),
+            self._meta_key(session_id),
         ]
         await self._redis.delete(*keys)
         logger.info(f"🗑️ Cleared predictive session {session_id[:16]}...")
         return True
 
-    async def extend_ttl(self, tenant_id: str, session_id: str) -> bool:
+    async def extend_ttl(self, _tenant_id_unused: str, session_id: str) -> bool:
         await self.connect()
-        key = self._factors_key(tenant_id, session_id)
+        key = self._factors_key(session_id)
         return await self._redis.expire(key, self._factors_ttl)
 
     async def get_ttl_remaining(
-        self, tenant_id: str, session_id: str
+        self, _tenant_id_unused: str, session_id: str
     ) -> Optional[int]:
         await self.connect()
-        key = self._factors_key(tenant_id, session_id)
+        key = self._factors_key(session_id)
         ttl = await self._redis.ttl(key)
         return ttl if ttl > 0 else None
 

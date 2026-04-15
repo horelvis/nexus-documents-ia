@@ -4,9 +4,13 @@ Verified Context Cache for Agent Self-Verifies pattern.
 Provides Redis-backed storage for verified claims during document generation.
 Claims are stored per session with automatic TTL expiration.
 
-Key format: verified:{tenant_id}:{session_id}
+Key format (single-tenant): verified:{session_id}
 Type: Redis List (lpush/lrange for ordered claims)
 TTL: Configurable (default 3600 seconds)
+
+Plan 3 (multi-tenancy removal): tenant_id segment dropped from Redis keys.
+Public method ``tenant_id`` parameters retained for backwards compatibility
+with subgraph callers (Wave 6 scope) but ignored when computing keys.
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ class VerifiedContextCache:
     Each session has its own list of claims with automatic expiration.
 
     Key Structure:
-        verified:{tenant_id}:{session_id} -> List of JSON-serialized VerifiedClaim
+        verified:{session_id} -> List of JSON-serialized VerifiedClaim
         verify:job:{job_id} -> Hash with job status
 
     Usage:
@@ -87,17 +91,17 @@ class VerifiedContextCache:
             await self._redis.close()
             self._redis = None
 
-    def _make_claims_key(self, tenant_id: str, session_id: str) -> str:
+    def _make_claims_key(self, _tenant_id_unused: str, session_id: str) -> str:
         """Generate Redis key for claims list."""
-        return f"{self.CLAIMS_KEY_PREFIX}:{tenant_id}:{session_id}"
+        return f"{self.CLAIMS_KEY_PREFIX}:{session_id}"
 
     def _make_job_key(self, job_id: str) -> str:
         """Generate Redis key for verification job status."""
         return f"{self.JOB_KEY_PREFIX}:{job_id}"
 
-    def _make_meta_key(self, tenant_id: str, session_id: str) -> str:
+    def _make_meta_key(self, _tenant_id_unused: str, session_id: str) -> str:
         """Generate Redis key for session metadata."""
-        return f"{self.CLAIMS_KEY_PREFIX}:meta:{tenant_id}:{session_id}"
+        return f"{self.CLAIMS_KEY_PREFIX}:meta:{session_id}"
 
     async def store_session_metadata(
         self,
