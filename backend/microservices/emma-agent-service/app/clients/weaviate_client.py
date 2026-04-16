@@ -4,7 +4,6 @@ HTTP client for weaviate-service.
 This client replaces direct service calls, enabling emma-agent-service
 to communicate with weaviate-service over HTTP for:
 - Vector search (semantic similarity)
-- RAG pipeline queries
 - Document content retrieval
 - Structural/graph queries (SIL)
 """
@@ -33,15 +32,6 @@ class SearchResult:
 
 
 @dataclass
-class RAGResult:
-    """Result from RAG pipeline"""
-    answer: str
-    sources: list[dict[str, Any]]
-    confidence: float
-    metadata: dict[str, Any]
-
-
-@dataclass
 class StructuralQueryResult:
     """Result from SIL structural query"""
     route: str  # GRAPH_ONLY, VECTOR_ONLY, HYBRID
@@ -56,7 +46,6 @@ class WeaviateClient(BaseHTTPClient):
 
     Provides async methods for:
     - Vector search (semantic similarity)
-    - RAG pipeline execution
     - Document content retrieval
     - Structural queries (knowledge graph)
 
@@ -249,147 +238,6 @@ class WeaviateClient(BaseHTTPClient):
         except Exception as e:
             logger.error(f"Hybrid search failed: {e}")
             return []
-
-    # =========================================================================
-    # Public Knowledge Search
-    # =========================================================================
-
-    async def search_public_knowledge(
-        self,
-        query: str,
-        limit: int = 5,
-        domain: str = "",
-        boe_ids: list[str] | None = None,
-    ) -> list[SearchResult]:
-        """
-        Search public knowledge base (BOE, legislation).
-
-        Uses the public-knowledge service endpoint which supports
-        hybrid search over indexed legislation with filtering by
-        topics, categories, jurisdictions, and legal status.
-
-        Args:
-            query: Search query text
-            limit: Maximum results to return
-            domain: Optional domain/topic filter (e.g., "labor", "fiscal")
-            boe_ids: Optional list of BOE identifiers to filter by (e.g., ["BOE-A-2006-7899"])
-
-        Returns:
-            List of SearchResult from public knowledge
-        """
-        payload: dict[str, Any] = {
-            "query": query,
-            "limit": limit,
-            "search_type": "hybrid",
-            "current_version_only": True,
-        }
-        # If specific BOE IDs are provided, add them as keywords to the query
-        # This ensures the search prioritizes documents with those identifiers
-        if boe_ids:
-            boe_keywords = " ".join(boe_ids)
-            payload["query"] = f"{query} {boe_keywords}"
-        elif domain:
-            payload["topics"] = [domain]
-
-        try:
-            response = await self.post_json(
-                "/public-knowledge/search",
-                json=payload,
-                headers=self._headers(),
-            )
-
-            results = []
-            for item in response.get("results", []):
-                results.append(SearchResult(
-                    document_id=item.get("id", ""),
-                    chunk_id=None,
-                    content=item.get("content", ""),
-                    score=item.get("similarity_score") or 0.0,
-                    metadata={
-                        "title": item.get("title", ""),
-                        "source": "public_knowledge",
-                        "category": item.get("category", ""),
-                        "legal_reference": item.get("legal_reference", ""),
-                        "legal_status": item.get("legal_status", ""),
-                        "jurisdiction": item.get("jurisdiction", ""),
-                        "boe_id": item.get("boe_id", ""),
-                        "topics": item.get("topics", []),
-                    },
-                ))
-            return results
-
-        except Exception as e:
-            logger.warning(f"Public knowledge search failed: {e}")
-            return []
-
-    # =========================================================================
-    # RAG Pipeline
-    # =========================================================================
-
-    async def rag_query(
-        self,
-        query: str,
-        user_roles: Optional[list[str]] = None,
-        user_id: Optional[str] = None,
-        conversation_id: Optional[str] = None,
-        max_tokens: int = 4096,
-        include_sources: bool = True
-    ) -> RAGResult:
-        """
-        Execute RAG pipeline query.
-
-        This calls the full 7-layer RAG pipeline in weaviate-service:
-        1. Query understanding
-        2. Retrieval
-        3. Reranking
-        4. Context assembly
-        5. Generation
-        6. Validation
-        7. Response formatting
-
-        Args:
-            query: User query
-            user_roles: User role IDs for ACL filtering
-            user_id: User ID for personalization / ACL
-            conversation_id: Optional conversation ID for context
-            max_tokens: Maximum tokens for response
-            include_sources: Include source documents
-
-        Returns:
-            RAGResult with answer and sources
-        """
-        payload: dict[str, Any] = {
-            "query": query,
-            "max_tokens": max_tokens,
-            "include_sources": include_sources
-        }
-        if user_id:
-            payload["user_id"] = user_id
-        if conversation_id:
-            payload["conversation_id"] = conversation_id
-
-        try:
-            response = await self.post_json(
-                "/weaviate/rag/query",
-                json=payload,
-                headers=self._headers(user_roles=user_roles, user_id=user_id)
-            )
-
-            return RAGResult(
-                answer=response.get("answer", ""),
-                sources=response.get("sources", []),
-                confidence=response.get("confidence", 0.0),
-                metadata=response.get("metadata", {})
-            )
-
-        except Exception as e:
-            logger.error(f"RAG query failed: {e}")
-            return RAGResult(
-                answer=f"Error executing RAG query: {e}",
-                sources=[],
-                confidence=0.0,
-                metadata={"error": str(e)}
-            )
 
     # =========================================================================
     # Document Content

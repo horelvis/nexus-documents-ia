@@ -21,7 +21,7 @@ class PredictiveConfig:
     """Configuration for predictive analysis per sector."""
     factor_types: List[str]
     outcome_labels: Dict[str, str]  # {key: display_label}
-    verification_sources: List[str]  # "weaviate", "graph", "web", "public_knowledge"
+    verification_sources: List[str]  # "weaviate", "graph", "web"
     max_factors: int = 10
     confidence_threshold: float = 0.7
     system_prompt_key: str = ""
@@ -49,7 +49,7 @@ PREDICTIVE_CONFIGS: Dict[str, PredictiveConfig] = {
             "unfavorable": "Desfavorable",
             "mixed": "Parcialmente estimado",
         },
-        verification_sources=["weaviate", "graph", "public_knowledge", "jurisprudence", "web"],
+        verification_sources=["weaviate", "graph", "jurisprudence", "web"],
         system_prompt_key="predictive.legal",
         disclaimer=(
             "⚠️ Esta predicción es orientativa y NO sustituye el criterio profesional. "
@@ -73,7 +73,7 @@ PREDICTIVE_CONFIGS: Dict[str, PredictiveConfig] = {
             "no_conforme": "No Conforme",
             "observacion": "Con Observaciones",
         },
-        verification_sources=["weaviate", "public_knowledge"],
+        verification_sources=["weaviate"],
         system_prompt_key="predictive.medical",
         disclaimer=(
             "⚠️ Este análisis es orientativo y NO constituye diagnóstico médico. "

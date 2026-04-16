@@ -212,7 +212,7 @@ class RAGState(TypedDict, total=False):
     # =========================================================================
     # Knowledge Source Routing
     # =========================================================================
-    # Source of knowledge: tenant_documents, public_knowledge, hybrid
+    # Source of knowledge: tenant_documents, hybrid
     knowledge_source: Optional[str]
 
     # Confidence in knowledge source classification

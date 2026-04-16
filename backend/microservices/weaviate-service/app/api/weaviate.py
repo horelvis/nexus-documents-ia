@@ -215,52 +215,6 @@ async def update_document_acl(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ========================================
-# CACHE INVALIDATION (Security)
-# ========================================
-
-class CacheInvalidationRequest(BaseModel):
-    """Request to invalidate cache entries for a document."""
-    document_id: str
-
-
-class CacheInvalidationResponse(BaseModel):
-    """Response from cache invalidation."""
-    status: str
-    document_id: str
-    entries_invalidated: int
-
-
-@router.post("/cache/invalidate-by-document", response_model=CacheInvalidationResponse)
-async def invalidate_cache_by_document(
-    request: CacheInvalidationRequest,
-    _: bool = Depends(verify_api_key),
-):
-    """Invalidate semantic cache entries that reference a specific document."""
-    try:
-        from app.services.rag.semantic_cache import semantic_cache
-
-        await semantic_cache.initialize()
-
-        invalidated = await semantic_cache.invalidate_by_document(
-            document_id=request.document_id,
-        )
-
-        logger.info(
-            f"🔄 Cache invalidation: document={request.document_id}, "
-            f"entries_invalidated={invalidated}"
-        )
-
-        return CacheInvalidationResponse(
-            status="success",
-            document_id=request.document_id,
-            entries_invalidated=invalidated,
-        )
-    except Exception as e:
-        logger.error(f"❌ Failed to invalidate cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.get("/health")
 async def health_check():
     """Weaviate service health check."""
@@ -1299,67 +1253,6 @@ async def structural_summary(
         logger.error(f"Structural summary failed: {e}", exc_info=True)
         return StructuralSummaryResponse(summary="")
 
-
-class RAGQueryRequest(BaseModel):
-    """Request for RAG query (from emma-agent-service)."""
-    query: str
-    conversation_id: Optional[str] = None
-    max_tokens: int = 4096
-    include_sources: bool = True
-
-
-class RAGQueryResponse(BaseModel):
-    """Response from RAG query."""
-    answer: str
-    sources: List[Dict[str, Any]] = []
-    confidence: float = 0.0
-    metadata: Dict[str, Any] = {}
-
-
-@router.post("/rag/query", response_model=RAGQueryResponse)
-async def rag_query(
-    request: RAGQueryRequest,
-    user_roles: List[str] = Depends(extract_user_roles),
-    user_id: Optional[str] = Depends(extract_user_id),
-    _: bool = Depends(verify_api_key),
-):
-    """Execute RAG query through the full pipeline."""
-    try:
-        from app.services.rag.rag_pipeline import RAGPipeline
-
-        pipeline = RAGPipeline()
-        await pipeline.initialize()
-
-        collection = DOCUMENTS_COLLECTION
-
-        result = await pipeline.answer_with_context(
-            collection_name=collection,
-            query=request.query,
-            max_chunks=10,
-        )
-
-        sources = []
-        if request.include_sources and result.get("sources"):
-            sources = result["sources"]
-
-        return RAGQueryResponse(
-            answer=result.get("answer", ""),
-            sources=sources,
-            confidence=result.get("confidence", 0.8),
-            metadata={
-                "tokens_used": result.get("tokens_used", 0),
-                "chunks_retrieved": len(result.get("sources", [])),
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"❌ RAG query failed: {e}", exc_info=True)
-        return RAGQueryResponse(
-            answer=f"Error processing query: {e}",
-            sources=[],
-            confidence=0.0,
-            metadata={"error": str(e)},
-        )
 
 
 class HybridSearchRequest(BaseModel):

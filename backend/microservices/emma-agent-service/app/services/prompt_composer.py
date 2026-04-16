@@ -16,7 +16,6 @@ import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
-from uuid import UUID
 
 from app.core.config import settings
 from app.services.langfuse_prompt_client import get_langfuse_prompt_client, CachedPrompt
@@ -115,7 +114,6 @@ class PromptComposer:
             "user_role": metadata.get("user_role", "user"),
             "locale": metadata.get("locale", "es"),
             "conversation_turn": metadata.get("conversation_turn", 1),
-            "has_public_knowledge": bool(state.get("public_knowledge_results")),
             "tenant_config": state.get("tenant_config", {}),
             "retrieved_doc_types": doc_types,
             "entity_types": entity_types,
@@ -132,7 +130,6 @@ class PromptComposer:
         *,
         fallback_prompt: Optional[str] = None,
         include_sector: bool = True,
-        tenant_id: Optional[UUID] = None,
     ) -> ComposedPrompt:
         """
         Compose a complete agent prompt with all enhancements.
@@ -142,7 +139,6 @@ class PromptComposer:
             state: RAG pipeline state
             fallback_prompt: Fallback prompt if nothing else is found
             include_sector: Whether to include sector context
-            tenant_id: Tenant ID for tenant-specific rules
 
         Returns:
             ComposedPrompt with fully assembled prompt and metadata
@@ -232,7 +228,6 @@ class PromptComposer:
         state: Dict[str, Any],
         *,
         fallback: Optional[str] = None,
-        tenant_id: Optional[UUID] = None,
     ) -> ComposedPrompt:
         """
         Compose a system prompt (synthesis, planning, etc.).
@@ -241,7 +236,6 @@ class PromptComposer:
             key: Prompt key (e.g., "synthesis", "planning")
             state: RAG pipeline state
             fallback: Fallback prompt if not found
-            tenant_id: Tenant ID for tenant-specific rules
 
         Returns:
             ComposedPrompt with assembled prompt
@@ -303,8 +297,6 @@ class PromptComposer:
         self,
         content: str,
         agent_name: str,
-        *,
-        tenant_id: Optional[UUID] = None,
     ) -> ValidatedOutput:
         """
         Validate LLM output against guardrails.
@@ -312,7 +304,6 @@ class PromptComposer:
         Args:
             content: The LLM output to validate
             agent_name: The agent that produced the output
-            tenant_id: Tenant ID for tenant-specific guardrails
 
         Returns:
             ValidatedOutput with validation result
@@ -332,7 +323,6 @@ class PromptComposer:
         result = await self._guardrail_service.validate(
             content,
             agent_name=agent_name,
-            tenant_id=tenant_id,
         )
 
         # Collect warnings

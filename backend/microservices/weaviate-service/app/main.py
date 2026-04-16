@@ -1,16 +1,13 @@
 """
-Weaviate Microservice - RAG and Vector Search
+Weaviate Microservice - Vector Search & Indexing
 
 This service provides:
 - Weaviate vector database operations
-- RAG Pipeline (7-layer retrieval-augmented generation)
 - Document indexing and chunking
 - Semantic and hybrid search
-- Cache management (retrieval, context, semantic)
 
-Note: Agent orchestration (Emma v2, LangGraph) has been separated into
-emma-agent-service for independent scaling. Query understanding is now
-handled by LLM-based reasoning via Multi-Pipeline RAG sectors.
+Note: RAG query pipeline, agent orchestration, and knowledge graph
+have been separated into emma-agent-service and knowledge-tree-service.
 """
 import warnings
 
@@ -59,13 +56,8 @@ from app.core.config import settings
 from app.core.security import verify_api_key
 from app.api import (
     weaviate_router,
-    public_knowledge_router,
     knowledge_router,
 )
-from app.api.boe_legislation import router as boe_router
-from app.api.legal_graph import router as legal_graph_router
-from app.cag.api.cag import router as cag_router
-from app.cag.api.vector import router as cag_vector_router
 
 # Configure logging
 logging.basicConfig(
@@ -82,7 +74,7 @@ logging.getLogger("openai").setLevel(logging.WARNING)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management"""
-    logger.info("Starting Weaviate Service (RAG & Vector Search)...")
+    logger.info("Starting Weaviate Service (Vector Search & Indexing)...")
     logger.info(f"Service Port: {settings.service_port}")
     logger.info(f"Weaviate URL: {settings.weaviate_url}")
 
@@ -91,24 +83,6 @@ async def lifespan(app: FastAPI):
         from app.services.weaviate_service import weaviate_service
         await weaviate_service.initialize()
         logger.info("Weaviate connection established")
-
-        # Initialize integrated CAG engine
-        try:
-            from app.cag.services.cag_service import cag_service
-            await cag_service.initialize()
-            logger.info("CAG engine initialized")
-        except Exception as cag_error:
-            logger.error(f"Failed to initialize CAG engine: {cag_error}")
-            raise cag_error
-
-        # Initialize RAG Pipeline
-        try:
-            from app.services.rag.rag_pipeline import RAGPipeline
-            pipeline = RAGPipeline()
-            await pipeline.initialize()
-            logger.info("RAG Pipeline initialized")
-        except Exception as rag_error:
-            logger.warning(f"RAG Pipeline initialization skipped: {rag_error}")
 
     except Exception as e:
         logger.error(f"Service initialization failed: {e}")
@@ -135,8 +109,8 @@ async def lifespan(app: FastAPI):
 
 # Create FastAPI app
 app = FastAPI(
-    title="Weaviate Service - RAG & Vector Search",
-    description="Vector database operations and RAG pipeline",
+    title="Weaviate Service - Vector Search & Indexing",
+    description="Vector database operations and document indexing",
     version="2.0.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
@@ -176,12 +150,7 @@ async def log_requests(request: Request, call_next):
 
 # Include routers
 app.include_router(weaviate_router, prefix="/weaviate", tags=["weaviate"])
-app.include_router(public_knowledge_router, tags=["public-knowledge"])
-app.include_router(boe_router, tags=["boe-legislation"])
 app.include_router(knowledge_router, tags=["knowledge"])
-app.include_router(legal_graph_router, tags=["legal-knowledge-graph"])
-app.include_router(cag_router)
-app.include_router(cag_vector_router)
 
 
 # Health check
@@ -193,7 +162,7 @@ async def health_check():
         "service": "weaviate-service",
         "version": "2.0.0",
         "weaviate_url": settings.weaviate_url,
-        "capabilities": ["vector-search", "rag-pipeline", "indexing", "caching"]
+        "capabilities": ["vector-search", "hybrid-search", "indexing"]
     }
 
 
@@ -235,26 +204,20 @@ async def service_info():
     """Service information and capabilities"""
     return {
         "service": "weaviate-service",
-        "description": "RAG and Vector Search service using Weaviate",
+        "description": "Vector Search and Indexing service using Weaviate",
         "capabilities": [
             "Vector storage and retrieval",
             "Semantic search",
             "Hybrid search (vector + keyword)",
-            "RAG Pipeline (7 layers)",
             "Document indexing and chunking",
-            "Multi-tier caching",
         ],
         "endpoints": {
             "weaviate": "/weaviate/* (vector operations)",
-            "rag": "/weaviate/rag/* (RAG queries)",
-            "knowledge": "/knowledge/* (knowledge graph)",
-            "legal": "/legal/* (legal knowledge graph)",
-            "verified": "Moved to emma-agent-service (port 8009)",
-            "cag": "/cag/*",
+            "knowledge": "/knowledge/* (knowledge endpoints)",
             "health": "/health",
             "docs": "/docs" if settings.debug else None
         },
-        "note": "Agent orchestration moved to emma-agent-service (port 8009)"
+        "note": "RAG query pipeline moved to emma-agent-service (port 8009)"
     }
 
 

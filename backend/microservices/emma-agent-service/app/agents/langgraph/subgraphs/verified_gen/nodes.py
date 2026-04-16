@@ -115,7 +115,7 @@ async def initialize_node(state: dict) -> dict:
     # CENDOJ jurisprudence (legal sector only)
     verification_sources = state.get("mode_config", {}).get("verification_sources", [])
     sector = state.get("mode_config", {}).get("sector", "")
-    if sector == "legal" and ("jurisprudence" in verification_sources or "public_knowledge" in verification_sources):
+    if sector == "legal" and "jurisprudence" in verification_sources:
         if await is_cendoj_enabled():
             jurisprudence = await search_cendoj_jurisprudence(
                 query=state["query"],

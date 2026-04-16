@@ -76,7 +76,7 @@ class VerificationMatch(BaseModel):
     similarity_score: float = Field(..., ge=0.0, le=1.0)
     outcome: str = Field(..., description="Outcome label for this match (sector-specific)")
     supports_factor: bool = Field(..., description="Whether this match supports the factor")
-    source: str = Field(default="internal", description="Source: internal, web, uploaded, public_knowledge, jurisprudence")
+    source: str = Field(default="internal", description="Source: internal, web, uploaded, jurisprudence")
     url: Optional[str] = Field(None, description="URL if web source")
     # CENDOJ jurisprudence fields (optional, only populated for jurisprudence sources)
     roj: Optional[str] = Field(None, description="ROJ identifier (e.g., STS 1234/2024)")
@@ -206,7 +206,6 @@ class PredictiveEvent(BaseModel):
 class PredictionRequest(BaseModel):
     """Request to perform predictive analysis."""
     case_description: str = Field(..., description="Description of the case/report to analyze")
-    tenant_id: str = Field(..., description="Tenant identifier")
     session_id: Optional[str] = Field(None, description="Session ID (auto-generated if not provided)")
     user_id: Optional[str] = Field(None, description="User ID for audit")
 
@@ -226,7 +225,6 @@ class PredictionRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "case_description": "Analiza las probabilidades de éxito en una reclamación por incumplimiento contractual...",
-                "tenant_id": "tenant-123",
                 "max_factors": 8,
                 "confidence_threshold": 0.7,
             }
@@ -248,7 +246,6 @@ class PredictionResponse(BaseModel):
 class PredictionSessionResponse(BaseModel):
     """Response for cached prediction session."""
     session_id: str
-    tenant_id: str
     result: Optional[PredictionResult] = None
     factors: List[WeightedFactor] = Field(default_factory=list)
     total_factors: int = 0

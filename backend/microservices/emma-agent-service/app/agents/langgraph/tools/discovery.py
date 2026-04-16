@@ -3,12 +3,11 @@ Emma ReAct Agent — List Sources Tool (Discovery)
 
 Enables the agent to discover what data sources are available before
 deciding which tools to use. This is especially useful when the agent
-doesn't know if the tenant has connectors, legislation, or web search.
+doesn't know if the tenant has connectors or web search.
 
 Returns:
 - Active connectors (type, name, last sync)
 - Weaviate collection stats (document count)
-- BOE legislation availability
 - Web search status
 """
 
@@ -39,7 +38,7 @@ class ListSourcesTool(EmmaTool):
         return (
             "Descubre las fuentes de datos disponibles: documentos indexados, "
             "conectores activos (SharePoint, Alfresco, Google Drive), "
-            "legislación BOE, y búsqueda web. Usa esto cuando no sepas "
+            "y búsqueda web. Usa esto cuando no sepas "
             "qué fuentes tiene el usuario."
         )
 
@@ -71,24 +70,7 @@ class ListSourcesTool(EmmaTool):
             lines.append("📄 **Documentos**: No se pudo obtener información")
             data["documents"] = {"available": True, "error": str(e)}
 
-        # 2. Legislation (always available if PublicKnowledge exists)
-        try:
-            pk_results = await client.search_public_knowledge(
-                query="legislación",
-                limit=1,
-            )
-            legislation_available = len(pk_results) > 0
-            if legislation_available:
-                lines.append("⚖️ **Legislación BOE**: Disponible (leyes españolas vigentes)")
-            else:
-                lines.append("⚖️ **Legislación BOE**: No indexada")
-            data["legislation"] = {"available": legislation_available}
-        except Exception as e:
-            logger.debug(f"PublicKnowledge check failed: {e}")
-            lines.append("⚖️ **Legislación BOE**: No disponible")
-            data["legislation"] = {"available": False}
-
-        # 3. Web search
+        # 2. Web search
         try:
             web_client = get_web_search_client()
             web_enabled = web_client.enabled
@@ -102,7 +84,7 @@ class ListSourcesTool(EmmaTool):
             lines.append("🌐 **Búsqueda web**: No disponible")
             data["web_search"] = {"available": False}
 
-        # 4. Knowledge Graph
+        # 3. Knowledge Graph
         try:
             from app.clients.knowledge_tree_client import get_knowledge_tree_client
             kt_client = get_knowledge_tree_client()
@@ -118,7 +100,7 @@ class ListSourcesTool(EmmaTool):
             lines.append("🔗 **Grafo de conocimiento**: No disponible")
             data["knowledge_graph"] = {"available": False}
 
-        # 5. Connectors (check via context features)
+        # 4. Connectors (check via context features)
         features = context.get("features", {})
         if features.get("connectors_enabled"):
             lines.append("🔌 **Conectores externos**: Habilitados (usa query_connector)")

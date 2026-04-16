@@ -3,11 +3,10 @@ Emma ReAct Agent — Search Tools
 
 Wraps existing WeaviateClient for:
 - search_documents: Hybrid search in indexed documents
-- search_legislation: Search BOE PublicKnowledge legislation
 - get_document_content: Read a specific document's full content
 
 These are the most-used tools in the ReAct loop — most queries start
-with search_documents or search_legislation before analyzing results.
+with search_documents before analyzing results.
 """
 
 import logging
@@ -161,117 +160,6 @@ class SearchDocumentsTool(EmmaTool):
                     k: v for k, v in r.metadata.items()
                     if k in ("document_type", "created_at", "tags", "collection")
                 },
-            })
-
-        return ToolResult(
-            output="\n".join(lines),
-            sources=sources,
-            data={"result_count": len(results)},
-        )
-
-
-# ──────────────────────────────────────────────
-# search_legislation
-# ──────────────────────────────────────────────
-
-class SearchLegislationInput(BaseModel):
-    """Input for BOE legislation search."""
-    query: str = Field(
-        description="Consulta sobre legislación española. "
-        "Incluye nombre de la ley, artículo, o tema legal."
-    )
-    domain: str = Field(
-        default="",
-        description="Dominio legal: laboral, fiscal, mercantil, civil, "
-        "administrativo, compliance, proteccion_datos, etc.",
-    )
-    limit: int = Field(
-        default=5,
-        description="Número máximo de resultados (1-10).",
-        ge=1, le=10,
-    )
-    boe_ids: Optional[List[str]] = Field(
-        default=None,
-        description="Filtrar por IDs de BOE específicos (ej: ['BOE-A-2015-11430']).",
-    )
-
-
-class SearchLegislationTool(EmmaTool):
-    """Search Spanish legislation in the BOE PublicKnowledge collection."""
-
-    @property
-    def name(self) -> str:
-        return "search_legislation"
-
-    @property
-    def description(self) -> str:
-        return (
-            "Busca legislación española vigente (BOE) incluyendo leyes, reglamentos "
-            "y normativas. Útil para consultas legales, de compliance o regulatorias. "
-            "Cubre: Estatuto de Trabajadores, Ley de Sociedades, LOPD, Código Civil, etc."
-        )
-
-    @property
-    def parameters_schema(self) -> Type[BaseModel]:
-        return SearchLegislationInput
-
-    async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
-        from app.clients.weaviate_client import get_weaviate_client
-
-        query = arguments["query"]
-        domain = arguments.get("domain", "")
-        limit = arguments.get("limit", 5)
-        boe_ids = arguments.get("boe_ids")
-
-        client = get_weaviate_client()
-
-        try:
-            results = await client.search_public_knowledge(
-                query=query,
-                limit=limit,
-                domain=domain,
-                boe_ids=boe_ids,
-            )
-        except Exception as e:
-            logger.error(f"search_legislation failed: {e}")
-            return ToolResult.from_error(
-                f"Error buscando legislación: {e}",
-                suggestion="Intenta con términos más específicos o un dominio legal diferente.",
-            )
-
-        if not results:
-            return ToolResult(
-                output=f"No se encontró legislación para: '{query}'",
-                sources=[],
-                data={"result_count": 0},
-            )
-
-        lines = [f"Se encontraron {len(results)} resultados legislativos:\n"]
-        sources = []
-
-        for i, r in enumerate(results, 1):
-            title = r.metadata.get("title", r.metadata.get("law_name", "Legislación"))
-            boe_id = r.metadata.get("boe_id", "")
-            article = r.metadata.get("article_number", "")
-            content = r.content[:600] if r.content else ""
-
-            header = f"**{i}. {title}**"
-            if boe_id:
-                header += f" ({boe_id})"
-            if article:
-                header += f" — Art. {article}"
-            lines.append(header)
-            lines.append(f"   Relevancia: {r.score:.2f}")
-            if content:
-                lines.append(f"   Texto: {content}")
-            lines.append("")
-
-            sources.append({
-                "title": title,
-                "boe_id": boe_id,
-                "article": article,
-                "score": r.score,
-                "type": "legislation",
             })
 
         return ToolResult(

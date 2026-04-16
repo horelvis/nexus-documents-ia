@@ -1,23 +1,18 @@
 """
 Emma ReAct Agent — SmartSearch Tool
 
-Unified multi-store search that orchestrates 3 data stores:
+Unified multi-store search that orchestrates 2 data stores:
   1. Weaviate (hybrid vector+keyword) — tenant documents
-  2. PublicKnowledge (hybrid) — BOE legislation
-  3. FalkorDB (knowledge graph) — entity relationships
+  2. FalkorDB (knowledge graph) — entity relationships
 
 Pipeline:
   Entity extraction (regex ~3ms)
-  → Scope detection (rules, no LLM)
   → Filter enrichment (entities → Weaviate filters)
   → Graph expansion (optional, ~20-50ms)
   → Parallel search (asyncio.gather, ~100ms)
   → Merge + deduplicate
   → Multi-signal re-rank (~1ms)
   → Format for LLM
-
-Replaces search_documents + search_legislation with a single tool
-so the LLM doesn't have to choose which store to query.
 """
 
 import asyncio
@@ -59,31 +54,6 @@ _SEMANTIC_TYPE_KEYWORDS: Dict[str, str] = {
     "demanda": "demanda", "demandas": "demanda",
 }
 
-# Keywords that signal legislation scope
-_LEGISLATION_KEYWORDS = {
-    "ley", "leyes", "artículo", "articulo", "art.", "art ",
-    "boe", "real decreto", "estatuto", "normativa", "reglamento",
-    "legislación", "legislacion", "código", "codigo",
-    "disposición", "disposicion", "ley orgánica", "ley organica",
-}
-
-# Keywords that signal document scope
-_DOCUMENT_KEYWORDS = {
-    "factura", "facturas",
-    "contrato", "contratos",
-    "nomina", "nominas", "nómina", "nóminas",
-    "informe", "informes",
-    "expediente", "expedientes",
-    "documento", "documentos",
-    "archivo", "archivos",
-    "carpeta", "carpetas",
-    "acta", "actas",
-    "presupuesto", "presupuestos",
-    "certificado", "certificados",
-    "escrito", "escritos",
-    "persona", "nif", "cliente", "proveedor", "empleado",
-}
-
 
 # ─── Spanish Stemming Expansion (2-tier: static dict + Snowball) ────
 
@@ -107,18 +77,6 @@ _SPANISH_STEM_MAP: Dict[str, str] = {
 }
 
 _snowball_stemmer = None
-_SCOPE_LOW_CONFIDENCE = 0.10
-_SCOPE_MIN_SIGNAL = 0.03
-_SCOPE_MARGIN = 0.05
-_DOC_REQUEST_PATTERNS = (
-    "documentos de",
-    "documentos sobre",
-    "documentos del",
-    "informes de",
-    "contratos de",
-    "facturas de",
-    "expedientes de",
-)
 
 
 def _normalize_for_match(text: str) -> str:
@@ -136,11 +94,6 @@ def _contains_keyword(query: str, keyword: str) -> bool:
         return False
     pattern = rf"(?<!\w){re.escape(kw_norm)}(?!\w)"
     return re.search(pattern, q_norm) is not None
-
-
-def _count_keyword_matches(query: str, keywords: Set[str]) -> int:
-    """Count how many configured keywords match as full tokens/phrases."""
-    return sum(1 for kw in keywords if _contains_keyword(query, kw))
 
 
 def _get_snowball_stemmer():
@@ -226,13 +179,7 @@ class SmartSearchInput(BaseModel):
     """Input for unified multi-store search."""
     query: str = Field(
         description="Consulta en lenguaje natural. Sé específico: incluye nombres, "
-        "fechas, tipos de documento, o referencias legales."
-    )
-    scope: str = Field(
-        default="auto",
-        description="Ámbito de búsqueda: 'documents' (solo documentos del tenant), "
-        "'legislation' (solo legislación BOE), 'all' (ambos), "
-        "'auto' (detección automática basada en la consulta).",
+        "fechas, tipos de documento."
     )
     person_filter: Optional[str] = Field(
         default=None,
@@ -288,7 +235,6 @@ class SmartSearchTool(EmmaTool):
         user_id: Optional[str] = context.get("user_id")
 
         query = arguments["query"]
-        scope = arguments.get("scope", "auto")
         person_filter = arguments.get("person_filter")
         domain_filter = arguments.get("domain_filter")
         folder_filter = arguments.get("folder_filter")
@@ -312,22 +258,6 @@ class SmartSearchTool(EmmaTool):
         if expanded_query != query:
             logger.info(f"🔍 Query expanded: '{query}' → '{expanded_query}'")
 
-        # ── Step 2: Scope detection with confidence scoring ──
-        scope_decision = self._detect_scope(scope, query, entities)
-        search_docs = scope_decision["search_docs"]
-        search_legislation = scope_decision["search_legislation"]
-        entity_confidence = self._score_entities(entities)
-        scope_decision["entity_confidence"] = entity_confidence
-        logger.info(
-            "🔎 Scope decision: docs=%s legal=%s confidence=%.2f docs_score=%.2f legal_score=%.2f reason=%s",
-            search_docs,
-            search_legislation,
-            scope_decision["confidence"],
-            scope_decision["docs_score"],
-            scope_decision["legal_score"],
-            scope_decision["reason"],
-        )
-
         # ── Step 3: Filter enrichment from entities ──
         enriched_person = person_filter
         enriched_semantic_type = None
@@ -345,20 +275,18 @@ class SmartSearchTool(EmmaTool):
 
         # ── Step 4: Graph expansion (optional, ~20-50ms / ~100-200ms for GraphRAG) ──
         graph_doc_ids: Set[str] = set()
-        graph_boe_ids: List[str] = []
         graph_context_text: str = ""  # GraphRAG structured subgraph context
 
         if settings.graphrag_enabled and entities:
             # GraphRAG: multi-hop subgraph extraction (Phase 5)
-            graph_context_text, sg_doc_ids, sg_boe_ids = await self._extract_subgraph(
+            graph_context_text, sg_doc_ids, _sg_boe_ids = await self._extract_subgraph(
                 entities,
             )
             graph_doc_ids.update(sg_doc_ids)
-            graph_boe_ids.extend(sg_boe_ids)
 
         elif settings.smart_search_graph_enabled and entities and sector_config_dict.get("graph_name"):
             # Legacy: flat graph expansion (document IDs only)
-            graph_doc_ids, graph_boe_ids = await self._expand_graph(
+            graph_doc_ids, _legacy_boe_ids = await self._expand_graph(
                 query, entities, sector_config_dict
             )
 
@@ -366,6 +294,8 @@ class SmartSearchTool(EmmaTool):
         if settings.smart_search_graph_enabled and enriched_person:
             person_doc_ids = await self._get_documents_by_person(enriched_person)
             graph_doc_ids.update(person_doc_ids)
+
+        dropped_filters: List[str] = []
 
         # ── Step 4b: Query decomposition (Phase 3) ──
         if self._is_complex_query(query):
@@ -375,22 +305,13 @@ class SmartSearchTool(EmmaTool):
                 decompose_alpha = sector_config_dict.get("hybrid_alpha", 0.5) if sector_config_dict else 0.5
 
                 async def _run_sub_query(sq: Dict[str, str]) -> List[Dict[str, Any]]:
-                    sq_scope = sq.get("scope", "auto")
-                    sq_results: List[Dict[str, Any]] = []
-                    if sq_scope in ("documents", "auto"):
-                        sq_results.extend(await self._search_documents(
-                            decompose_client, user_roles, user_id, sq["query"], limit, decompose_alpha,
-                            person_filter=enriched_person,
-                            domain_filter=enriched_domain,
-                            semantic_type_filter=enriched_semantic_type,
-                            date_from=date_from, date_to=date_to,
-                        ))
-                    if sq_scope in ("legislation", "auto"):
-                        sq_results.extend(await self._search_legislation(
-                            decompose_client, sq["query"], min(limit, 8),
-                            enriched_domain or "", None,
-                        ))
-                    return sq_results
+                    return await self._search_documents(
+                        decompose_client, user_roles, user_id, sq["query"], limit, decompose_alpha,
+                        person_filter=enriched_person,
+                        domain_filter=enriched_domain,
+                        semantic_type_filter=enriched_semantic_type,
+                        date_from=date_from, date_to=date_to,
+                    )
 
                 sub_results = await asyncio.gather(*[_run_sub_query(sq) for sq in sub_queries])
                 merged = self._merge_and_dedup(list(sub_results))
@@ -409,19 +330,16 @@ class SmartSearchTool(EmmaTool):
                         dropped_filters=dropped_filters,
                         retrieval_quality=retrieval_quality,
                         graph_context=graph_context_text,
-                        scope_decision=scope_decision,
                         date_from=date_from,
                         date_to=date_to,
                         person_filter=enriched_person,
                     )
 
-        # ── Step 5: Parallel search (asyncio.gather) ──
+        # ── Step 5: Search documents ──
         client = get_weaviate_client()
         alpha = sector_config_dict.get("hybrid_alpha", 0.5) if sector_config_dict else 0.5
 
         search_tasks = []
-
-        dropped_filters: List[str] = []
 
         # Pre-computed concepts from graph_rag pipeline (Phase 2)
         concepts_result = context.get("_concepts")
@@ -430,59 +348,45 @@ class SmartSearchTool(EmmaTool):
         # can both feed into the same merge step below.
         pre_fetched_doc_results: Optional[List[Dict[str, Any]]] = None
 
-        if search_docs:
-            # Multi-concept search (Phase 2): parallel per-concept hybrid search
-            if (
-                settings.smart_search_multi_concept
-                and concepts_result is not None
-                and hasattr(concepts_result, "low_level")
-                and concepts_result.low_level
-            ):
-                logger.info(
-                    f"🔀 Multi-concept search: {len(concepts_result.low_level)} concepts"
-                )
-                pre_fetched_doc_results = await self._multi_concept_search(
-                    concepts=concepts_result.low_level,
-                    weaviate_client=client,
-                    user_roles=user_roles,
-                    user_id=user_id,
-                    expanded_query=expanded_query,
-                    alpha=alpha,
-                    enriched_person=enriched_person,
-                    enriched_domain=enriched_domain,
-                    enriched_semantic_type=enriched_semantic_type,
-                    folder_filter=folder_filter,
-                    date_from=date_from,
-                    date_to=date_to,
-                    total_limit=limit,
-                )
-            else:
-                # Original single-query hybrid search (fallback)
-                search_tasks.append(self._search_documents(
-                    client, user_roles, user_id, expanded_query, limit, alpha,
-                    person_filter=enriched_person,
-                    domain_filter=enriched_domain,
-                    semantic_type_filter=enriched_semantic_type,
-                    folder_filter=folder_filter,
-                    date_from=date_from,
-                    date_to=date_to,
-                    dropped_filters=dropped_filters,
-                ))
-
-        if search_legislation:
-            legislation_domain = enriched_domain or ""
-            boe_ids = graph_boe_ids if graph_boe_ids else None
-            search_tasks.append(self._search_legislation(
-                client, expanded_query, min(limit, 8), legislation_domain, boe_ids
+        # Multi-concept search (Phase 2): parallel per-concept hybrid search
+        if (
+            settings.smart_search_multi_concept
+            and concepts_result is not None
+            and hasattr(concepts_result, "low_level")
+            and concepts_result.low_level
+        ):
+            logger.info(
+                f"🔀 Multi-concept search: {len(concepts_result.low_level)} concepts"
+            )
+            pre_fetched_doc_results = await self._multi_concept_search(
+                concepts=concepts_result.low_level,
+                weaviate_client=client,
+                user_roles=user_roles,
+                user_id=user_id,
+                expanded_query=expanded_query,
+                alpha=alpha,
+                enriched_person=enriched_person,
+                enriched_domain=enriched_domain,
+                enriched_semantic_type=enriched_semantic_type,
+                folder_filter=folder_filter,
+                date_from=date_from,
+                date_to=date_to,
+                total_limit=limit,
+            )
+        else:
+            # Original single-query hybrid search (fallback)
+            search_tasks.append(self._search_documents(
+                client, user_roles, user_id, expanded_query, limit, alpha,
+                person_filter=enriched_person,
+                domain_filter=enriched_domain,
+                semantic_type_filter=enriched_semantic_type,
+                folder_filter=folder_filter,
+                date_from=date_from,
+                date_to=date_to,
+                dropped_filters=dropped_filters,
             ))
 
-        if not search_tasks and pre_fetched_doc_results is None:
-            return ToolResult(
-                output="No se pudo determinar el ámbito de búsqueda.",
-                sources=[], data={"result_count": 0},
-            )
-
-        # Run remaining search tasks (legislation or single-query docs)
+        # Run search tasks
         raw_results_groups = await asyncio.gather(*search_tasks, return_exceptions=True)
 
         # ── Step 6: Merge + deduplicate ──
@@ -558,7 +462,6 @@ class SmartSearchTool(EmmaTool):
             dropped_filters=dropped_filters,
             retrieval_quality=retrieval_quality,
             graph_context=graph_context_text,
-            scope_decision=scope_decision,
             date_from=date_from,
             date_to=date_to,
             person_filter=enriched_person,
@@ -578,113 +481,6 @@ class SmartSearchTool(EmmaTool):
             patterns = UNIFIED_ENTITY_PATTERNS
 
         return extract_entities(query, patterns) if patterns else {}
-
-    def _detect_scope(
-        self, scope: str, query: str, entities: Dict[str, List[str]]
-    ) -> Dict[str, Any]:
-        """Determine search scope with confidence scoring and controlled fallback."""
-        if scope == "documents":
-            return {
-                "search_docs": True,
-                "search_legislation": False,
-                "docs_score": 1.0,
-                "legal_score": 0.0,
-                "confidence": 1.0,
-                "reason": "explicit_scope_documents",
-            }
-        if scope == "legislation":
-            return {
-                "search_docs": False,
-                "search_legislation": True,
-                "docs_score": 0.0,
-                "legal_score": 1.0,
-                "confidence": 1.0,
-                "reason": "explicit_scope_legislation",
-            }
-        if scope == "all":
-            return {
-                "search_docs": True,
-                "search_legislation": True,
-                "docs_score": 0.8,
-                "legal_score": 0.8,
-                "confidence": 1.0,
-                "reason": "explicit_scope_all",
-            }
-
-        # scope == "auto" — weighted signals
-        legal_kw = _count_keyword_matches(query, _LEGISLATION_KEYWORDS)
-        docs_kw = _count_keyword_matches(query, _DOCUMENT_KEYWORDS)
-        legal_entity = int(bool(entities.get("ley"))) + int(bool(entities.get("articulo"))) + int(bool(entities.get("boe")))
-        docs_entity = (
-            int(bool(entities.get("persona")))
-            + int(bool(entities.get("nif")))
-            + int(bool(entities.get("fecha")))
-            + int(bool(entities.get("importe")))
-            + int(bool(entities.get("referencia")))
-        )
-
-        legal_score = min(1.0, (0.18 * legal_kw) + (0.22 * legal_entity))
-        docs_score = min(1.0, (0.15 * docs_kw) + (0.20 * docs_entity))
-
-        if docs_score == 0.0 and legal_score == 0.0:
-            return {
-                "search_docs": True,
-                "search_legislation": True,
-                "docs_score": 0.0,
-                "legal_score": 0.0,
-                "confidence": 0.2,
-                "reason": "no_scope_signals",
-            }
-
-        # Mixed explicit evidence on both sides: preserve recall querying both.
-        # Exception: "documentos de/sobre X" with only weak legal lexical hints
-        # should stay in documents scope (e.g., "documentos de normativa interna").
-        q_norm = _normalize_for_match(query)
-        doc_request_context = any(p in q_norm for p in _DOC_REQUEST_PATTERNS)
-        if doc_request_context and docs_kw > 0 and legal_entity == 0 and legal_kw <= 1:
-            return {
-                "search_docs": True,
-                "search_legislation": False,
-                "docs_score": docs_score,
-                "legal_score": legal_score,
-                "confidence": min(1.0, docs_score + 0.2),
-                "reason": "doc_request_context_override",
-            }
-
-        if (docs_kw + docs_entity) > 0 and (legal_kw + legal_entity) > 0:
-            return {
-                "search_docs": True,
-                "search_legislation": True,
-                "docs_score": docs_score,
-                "legal_score": legal_score,
-                "confidence": min(1.0, max(docs_score, legal_score)),
-                "reason": "mixed_scope_signals",
-            }
-
-        diff = abs(docs_score - legal_score)
-        max_score = max(docs_score, legal_score)
-        confidence = min(1.0, (0.55 * max_score) + (0.45 * diff))
-
-        # Low confidence / mixed evidence: query both scopes to preserve recall.
-        if confidence < _SCOPE_LOW_CONFIDENCE or max_score < _SCOPE_MIN_SIGNAL or diff < _SCOPE_MARGIN:
-            return {
-                "search_docs": True,
-                "search_legislation": True,
-                "docs_score": docs_score,
-                "legal_score": legal_score,
-                "confidence": confidence,
-                "reason": "low_confidence_fallback_all",
-            }
-
-        search_docs = docs_score > legal_score
-        return {
-            "search_docs": search_docs,
-            "search_legislation": not search_docs,
-            "docs_score": docs_score,
-            "legal_score": legal_score,
-            "confidence": confidence,
-            "reason": "high_confidence_auto_scope",
-        }
 
     def _score_entities(self, entities: Dict[str, List[str]]) -> Dict[str, Any]:
         """Compute lightweight confidence for extracted entities."""
@@ -1072,46 +868,6 @@ class SmartSearchTool(EmmaTool):
             logger.error(f"Document search failed: {e}")
             return []
 
-    async def _search_legislation(
-        self,
-        client: Any,
-        query: str,
-        limit: int,
-        domain: str,
-        boe_ids: Optional[List[str]] = None,
-    ) -> List[Dict[str, Any]]:
-        """Search BOE PublicKnowledge legislation."""
-        try:
-            results = await client.search_public_knowledge(
-                query=query,
-                limit=limit,
-                domain=domain,
-                boe_ids=boe_ids,
-            )
-            return [
-                {
-                    "document_id": r.document_id or r.metadata.get("boe_id", ""),
-                    "title": r.metadata.get("title", r.metadata.get("law_name", "Legislación")),
-                    "content": r.content[:600] if r.content else "",
-                    "score": r.score,
-                    "type": "legislation",
-                    "quality_score": 0.8,  # Legislation has inherent quality
-                    "boe_id": r.metadata.get("boe_id", ""),
-                    "article": r.metadata.get("article_number", ""),
-                    "domain": r.metadata.get("category", domain),
-                    "semantic_type": "legislacion",
-                    "associated_person": "",
-                    "created_at": "",
-                    "folder_path": "",
-                    "document_type": "legislation",
-                    "tags": r.metadata.get("topics", []),
-                }
-                for r in results
-            ]
-        except Exception as e:
-            logger.error(f"Legislation search failed: {e}")
-            return []
-
     def _deduplicate(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Deduplicate results in two passes, keeping highest score per doc.
 
@@ -1156,12 +912,6 @@ class SmartSearchTool(EmmaTool):
             return False
 
         query_lower = query.lower()
-
-        # Scope mixing: document + legislation keywords
-        has_doc = any(kw in query_lower for kw in ("contrato", "factura", "nómina", "documento"))
-        has_leg = any(kw in query_lower for kw in ("ley", "estatuto", "código", "real decreto", "artículo", "boe"))
-        if has_doc and has_leg:
-            return True
 
         # Conjunction with distinct topics
         conjunctions = (" y ", " además ", " también ", " por otro lado ", " comparar ", " compara ")
@@ -1284,15 +1034,11 @@ class SmartSearchTool(EmmaTool):
         dropped_filters: Optional[List[str]] = None,
         retrieval_quality: Any = None,
         graph_context: str = "",
-        scope_decision: Optional[Dict[str, Any]] = None,
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
         person_filter: Optional[str] = None,
     ) -> ToolResult:
         """Format unified results for LLM consumption."""
-        doc_count = sum(1 for r in results if r["type"] == "tenant_document")
-        leg_count = sum(1 for r in results if r["type"] == "legislation")
-
         parts = []
 
         # Prepend GraphRAG subgraph context if available
@@ -1300,10 +1046,7 @@ class SmartSearchTool(EmmaTool):
             parts.append(graph_context)
             parts.append("")  # Blank line separator
 
-        parts.append(f"Se encontraron {len(results)} resultados")
-        if doc_count and leg_count:
-            parts[0] += f" ({doc_count} documentos, {leg_count} legislación)"
-        parts[0] += f" para '{query}':\n"
+        parts.append(f"Se encontraron {len(results)} resultados para '{query}':\n")
 
         # Warn LLM about dropped filters so it doesn't misattribute results
         if dropped_filters:
@@ -1323,19 +1066,9 @@ class SmartSearchTool(EmmaTool):
             doc_id = r.get("document_id", "")
             content = r.get("content", "")
 
-            if r["type"] == "legislation":
-                boe_id = r.get("boe_id", "")
-                article = r.get("article", "")
-                header = f"**{i}. [LEY] {title}**"
-                if boe_id:
-                    header += f" ({boe_id})"
-                if article:
-                    header += f" — Art. {article}"
-                parts.append(header)
-            else:
-                parts.append(f"**{i}. {title}** (relevancia: {score:.2f})")
-                if doc_id:
-                    parts.append(f"   ID: {doc_id}")
+            parts.append(f"**{i}. {title}** (relevancia: {score:.2f})")
+            if doc_id:
+                parts.append(f"   ID: {doc_id}")
 
             if content:
                 parts.append(f"   Contenido: {content}")
@@ -1346,15 +1079,11 @@ class SmartSearchTool(EmmaTool):
                 "document_id": doc_id,
                 "score": score,
                 "type": r["type"],
-            }
-            if r["type"] == "legislation":
-                source["boe_id"] = r.get("boe_id", "")
-                source["article"] = r.get("article", "")
-            else:
-                source["metadata"] = {
+                "metadata": {
                     k: v for k, v in r.items()
                     if k in ("document_type", "created_at", "tags", "folder_path")
-                }
+                },
+            }
             # Chunk-level source attribution (page, excerpt)
             if r.get("page_number") is not None:
                 source["page"] = r["page_number"]
@@ -1381,11 +1110,9 @@ class SmartSearchTool(EmmaTool):
             if eval_text:
                 parts.append(eval_text)
 
-        data = {"result_count": len(results), "doc_count": doc_count, "leg_count": leg_count}
+        data: Dict[str, Any] = {"result_count": len(results)}
         if retrieval_quality:
             data["retrieval_quality"] = retrieval_quality.to_dict()
-        if scope_decision:
-            data["scope_decision"] = scope_decision
 
         return ToolResult(
             output="\n".join(parts),

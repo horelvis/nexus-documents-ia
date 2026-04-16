@@ -23,7 +23,6 @@ from typing import Any, Dict, List, Optional, Type
 from pydantic import BaseModel, Field
 
 from app.services.weaviate_service import WeaviateService
-from app.services.rag.rag_pipeline import RAGPipeline
 from app.schemas.weaviate import SearchRequest
 
 from .base import (
@@ -380,10 +379,8 @@ class RAGQueryTool(BaseTool[RAGQueryParams]):
     def __init__(
         self,
         weaviate_service: Optional[WeaviateService] = None,
-        rag_pipeline: Optional[RAGPipeline] = None
     ):
         self._weaviate = weaviate_service
-        self._rag_pipeline = rag_pipeline
 
     @property
     def name(self) -> str:
