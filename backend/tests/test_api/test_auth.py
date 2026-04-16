@@ -3,11 +3,10 @@ import pytest
 def test_basic_import():
     """Test basic imports work"""
     from app.main import app
-    from app.db.models import User, Tenant
+    from app.db.models import User
     from app.core.security import get_password_hash
     assert app is not None
     assert User is not None
-    assert Tenant is not None
     assert callable(get_password_hash)
 
 def test_database_connection():
@@ -23,9 +22,9 @@ def test_database_connection():
     assert db is not None
 
     # Test basic query
-    from app.db.models import Tenant
-    tenants = db.query(Tenant).all()
-    assert isinstance(tenants, list)
+    from app.db.models import User
+    users = db.query(User).all()
+    assert isinstance(users, list)
 
 def test_app_startup():
     """Test that the FastAPI app can start up"""

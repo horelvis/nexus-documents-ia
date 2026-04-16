@@ -80,16 +80,12 @@ backend/tests/
 │   ├── test_admin.py
 │   ├── test_auth.py
 │   ├── test_chat.py
-│   ├── test_document_insights.py
-│   ├── test_document_shares.py
 │   ├── test_documents.py
-│   ├── test_search.py
-│   └── test_tenants.py
+│   └── test_search.py
 ├── test_services/           # Tests de servicios
 │   ├── test_document_service.py
 │   ├── test_embedding_service.py
-│   ├── test_storage_service.py
-│   └── test_vector_service.py
+│   └── test_storage_service.py
 └── test_utils/              # Tests de utilidades
     └── test_security.py
 ```
@@ -127,24 +123,24 @@ TESTING=true
 ### Fixtures Disponibles
 
 ```python
-# Usuario de test con tenant
+# Usuario de test
 @pytest.fixture
-def test_user(db_session, test_tenant):
-    # Crea usuario con datos únicos
+def test_user(db_session):
+    # Crea usuario con datos unicos
 
 # Superusuario
 @pytest.fixture
-def test_superuser(db_session, test_tenant):
+def test_superuser(db_session):
     # Crea superusuario
 
 # Documentos de test
 @pytest.fixture
-def test_documents(db_session, test_tenant, test_user):
+def test_documents(db_session, test_user):
     # Crea documentos de prueba
 
 # Servicios mockeados
 @pytest.fixture
-def mock_elysia_service():
+def mock_emma_service():
     # Mock del servicio LLM
 
 @pytest.fixture
@@ -312,10 +308,9 @@ def test_update_user():
 
 ```python
 @pytest.fixture
-def test_user(db_session, test_tenant):
+def test_user(db_session):
     user = User(
         email=f"test_{uuid.uuid4().hex[:8]}@example.com",
-        tenant_id=test_tenant.id
     )
     db_session.add(user)
     db_session.commit()
@@ -323,7 +318,7 @@ def test_user(db_session, test_tenant):
 
     yield user
 
-    # Cleanup automático
+    # Cleanup automatico
     db_session.delete(user)
     db_session.commit()
 ```

@@ -10,7 +10,7 @@ from PIL import Image
 import PyPDF2
 
 from app.main import app
-from app.db.models import User, Document, Tenant
+from app.db.models import User, Document
 from tests.conftest import TestingSessionLocal
 
 

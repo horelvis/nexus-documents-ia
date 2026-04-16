@@ -81,4 +81,4 @@ def test_ask_without_documents(client, normal_user_token_headers, mock_embedding
     assert response.status_code == 200
     content = response.json()
     assert "answer" in content
-    # Debería buscar en todos los documentos del tenant
+    # Debería buscar en todos los documentos accesibles

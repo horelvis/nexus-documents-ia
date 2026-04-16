@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.main import app # Import your FastAPI app
 from app.db.base_class import Base
-from app.db.models import User, Tenant, Document, Tag
+from app.db.models import User, Document, Tag
 from app.core.security import get_password_hash
 from app.api.dependencies import get_db, get_current_user, get_current_active_user, get_current_active_superuser
 from app.services.auth_service import AuthService
@@ -93,45 +93,19 @@ def db_session(test_db):
 
 
 @pytest.fixture
-def test_tenant(db_session):
-    """Create a test tenant"""
-    # Generate unique name to avoid duplicates
-    unique_id = str(uuid.uuid4())[:8]
-    tenant_name = f"Test Tenant {unique_id}"
-    bucket_name = f"test-bucket-{unique_id}"
-    
-    # Check if tenant already exists, if so return it
-    existing_tenant = db_session.query(Tenant).filter(Tenant.name == tenant_name).first()
-    if existing_tenant:
-        return existing_tenant
-    
-    tenant = Tenant(
-        id=uuid.uuid4(),
-        name=tenant_name,
-        description=f"A test tenant {unique_id}",
-        bucket_name=bucket_name,
-        is_active=True
-    )
-    db_session.add(tenant)
-    db_session.commit()
-    db_session.refresh(tenant)
-    return tenant
-
-
-@pytest.fixture
-def test_user(db_session, test_tenant):
+def test_user(db_session):
     """Create a test user"""
     # Generate unique email to avoid duplicates
     unique_id = str(uuid.uuid4())[:8]
     user_email = f"test-{unique_id}@example.com"
     clerk_user_id = f"test_clerk_{unique_id}"
-    
+
     # Check if user already exists, if so delete it first to avoid conflicts
     existing_user = db_session.query(User).filter(User.email == user_email).first()
     if existing_user:
         db_session.delete(existing_user)
         db_session.commit()
-    
+
     user = User(
         id=uuid.uuid4(),
         email=user_email,
@@ -139,7 +113,6 @@ def test_user(db_session, test_tenant):
         full_name=f"Test User {unique_id}",
         is_active=True,
         is_superuser=False,
-        tenant_id=test_tenant.id,
         clerk_user_id=clerk_user_id
     )
     db_session.add(user)
@@ -157,19 +130,19 @@ def test_user(db_session, test_tenant):
 
 
 @pytest.fixture
-def test_superuser(db_session, test_tenant):
+def test_superuser(db_session):
     """Create a test superuser"""
     # Generate unique email to avoid duplicates
     unique_id = str(uuid.uuid4())[:8]
     admin_email = f"admin-{unique_id}@example.com"
     clerk_user_id = f"admin_clerk_{unique_id}"
-    
+
     # Check if superuser already exists, if so delete it first to avoid conflicts
     existing_superuser = db_session.query(User).filter(User.email == admin_email).first()
     if existing_superuser:
         db_session.delete(existing_superuser)
         db_session.commit()
-    
+
     superuser = User(
         id=uuid.uuid4(),
         email=admin_email,
@@ -177,7 +150,6 @@ def test_superuser(db_session, test_tenant):
         full_name=f"Admin User {unique_id}",
         is_active=True,
         is_superuser=True,
-        tenant_id=test_tenant.id,
         clerk_user_id=clerk_user_id
     )
     db_session.add(superuser)
@@ -195,14 +167,14 @@ def test_superuser(db_session, test_tenant):
 
 
 @pytest.fixture
-def test_documents(db_session, test_tenant, test_user):
+def test_documents(db_session, test_user):
     """Create test documents with real temporary files"""
     import tempfile
     import os
-    
+
     documents = []
     temp_files = []
-    
+
     try:
         for i in range(3):
             # Create a temporary file with some content
@@ -211,7 +183,7 @@ def test_documents(db_session, test_tenant, test_user):
             temp_file.write(content)
             temp_file.close()
             temp_files.append(temp_file.name)
-            
+
             doc = Document(
                 id=uuid.uuid4(),
                 title=f"Test Document {i+1}",
@@ -220,19 +192,18 @@ def test_documents(db_session, test_tenant, test_user):
                 file_path=temp_file.name,
                 file_type="application/pdf",
                 file_size=len(content.encode('utf-8')),
-                tenant_id=test_tenant.id,
                 created_by=test_user.id,
                 indexed=1
             )
             documents.append(doc)
             db_session.add(doc)
-        
+
         db_session.commit()
         for doc in documents:
             db_session.refresh(doc)
-        
+
         yield documents
-        
+
     finally:
         # Clean up temporary files
         for temp_file_path in temp_files:
@@ -244,19 +215,18 @@ def test_documents(db_session, test_tenant, test_user):
 
 
 @pytest.fixture
-def test_tags(db_session, test_tenant):
+def test_tags(db_session):
     """Create test tags"""
     tags = []
     tag_names = ["python", "fastapi", "testing", "documentation", "api"]
-    
+
     for name in tag_names:
         tag = Tag(
             name=name,
-            tenant_id=test_tenant.id
         )
         tags.append(tag)
         db_session.add(tag)
-    
+
     db_session.commit()
     for tag in tags:
         db_session.refresh(tag)
@@ -473,19 +443,19 @@ def patch_services(mock_emma_service, mock_vector_service, mock_embedding_servic
 
 
 @pytest.fixture
-def real_storage_service(test_tenant):
+def real_storage_service():
     """
     Fixture para usar el StorageService real en tests de storage.
     Usa un bucket de test separado y se limpia después de cada test.
     """
     import os
     os.environ["TESTING"] = "true"  # Asegurar que está en modo testing
-    
+
     from app.services.storage_factory import StorageServiceFactory
-    storage = StorageServiceFactory.create_storage_service(tenant_id=str(test_tenant.id))
-    
+    storage = StorageServiceFactory.create_storage_service()
+
     yield storage
-    
+
     # Cleanup: limpiar el bucket de test después de cada test
     try:
         storage.cleanup_test_bucket()
@@ -494,19 +464,19 @@ def real_storage_service(test_tenant):
 
 
 @pytest.fixture
-def real_storage_service_with_cleanup(test_tenant):
+def real_storage_service_with_cleanup():
     """
     Fixture para usar el StorageService real con cleanup completo.
     Elimina completamente el bucket de test después del test.
     """
     import os
     os.environ["TESTING"] = "true"  # Asegurar que está en modo testing
-    
+
     from app.services.storage_factory import StorageServiceFactory
-    storage = StorageServiceFactory.create_storage_service(tenant_id=str(test_tenant.id))
-    
+    storage = StorageServiceFactory.create_storage_service()
+
     yield storage
-    
+
     # Cleanup completo: eliminar bucket de test
     try:
         storage.delete_test_bucket()
@@ -515,25 +485,25 @@ def real_storage_service_with_cleanup(test_tenant):
 
 
 @pytest.fixture
-def mock_storage_service(test_tenant):
+def mock_storage_service():
     """
     Fixture para usar el MockStorageService en tests.
     """
     import os
     os.environ["TESTING"] = "true"
     os.environ["USE_MOCK_STORAGE"] = "true"
-    
+
     from app.services.storage_factory import StorageServiceFactory
-    storage = StorageServiceFactory.create_storage_service(tenant_id=str(test_tenant.id))
-    
+    storage = StorageServiceFactory.create_storage_service()
+
     yield storage
-    
+
     # Cleanup
     try:
         storage.cleanup_test_bucket()
     except Exception:
         pass
-    
+
     # Reset environment
     if "USE_MOCK_STORAGE" in os.environ:
         del os.environ["USE_MOCK_STORAGE"]

@@ -42,7 +42,7 @@ async def test_extract_concepts_success():
         new_callable=AsyncMock,
         return_value={"derecho laboral": [0.1] * 1024, "ET": [0.2] * 1024, "Juan García": [0.3] * 1024},
     ):
-        result = await extract_concepts("derechos laborales de Juan García según ET", "tenant-1")
+        result = await extract_concepts("derechos laborales de Juan García según ET")
 
     assert "derecho laboral" in result.high_level
     assert "ET" in result.low_level
@@ -58,7 +58,7 @@ async def test_extract_concepts_llm_failure_falls_back():
         new_callable=AsyncMock,
         side_effect=Exception("LLM down"),
     ):
-        result = await extract_concepts("contratos de María López", "tenant-1")
+        result = await extract_concepts("contratos de María López")
 
     assert isinstance(result, ConceptResult)
     assert result.embeddings == {}

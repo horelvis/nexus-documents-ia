@@ -31,8 +31,9 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from app.core.auth_headers import extract_user_id, extract_user_roles
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -41,9 +42,6 @@ router = APIRouter()
 
 # Cache last report for /report endpoint
 _last_report: Optional[Dict[str, Any]] = None
-
-# Default tenant for E2E tests (on-premise default)
-_DEFAULT_TENANT = "00000000-0000-0000-0000-000000000001"
 
 
 # =============================================================================
@@ -244,15 +242,16 @@ async def run_infra_checks() -> Dict[str, Any]:
 # Tier 2 — Integration Checks
 # =============================================================================
 
-async def _check_hybrid_search(tenant_id: str) -> Dict[str, Any]:
+async def _check_hybrid_search(user_roles: List[str], user_id: str) -> Dict[str, Any]:
     """Verify Weaviate hybrid search returns results."""
     t0 = time.time()
     try:
         from app.clients.weaviate_client import get_weaviate_client
         client = get_weaviate_client()
         results = await client.hybrid_search(
-            tenant_id=tenant_id,
             query="documento",
+            user_roles=user_roles,
+            user_id=user_id,
             limit=3,
         )
         ms = (time.time() - t0) * 1000
@@ -357,13 +356,13 @@ async def _check_langfuse_prompt() -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_graph_query(tenant_id: str) -> Dict[str, Any]:
+async def _check_graph_query() -> Dict[str, Any]:
     """Verify knowledge-tree graph query works."""
     t0 = time.time()
     try:
         from app.clients.knowledge_tree_client import get_knowledge_tree_client
         client = get_knowledge_tree_client()
-        result = await client.get_structural_summary(tenant_id=tenant_id)
+        result = await client.get_structural_summary()
         ms = (time.time() - t0) * 1000
         summary = result.get("summary", "")
         return _ok(ms, f"summary: {len(summary)} chars")
@@ -371,7 +370,7 @@ async def _check_graph_query(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_memorag(tenant_id: str) -> Dict[str, Any]:
+async def _check_memorag(user_roles: List[str], user_id: str) -> Dict[str, Any]:
     """Verify MemoRAG recall via Weaviate hybrid search."""
     t0 = time.time()
     if not settings.memorag_enabled:
@@ -381,8 +380,9 @@ async def _check_memorag(tenant_id: str) -> Dict[str, Any]:
         service = get_memorag_service()
 
         recalled = await service.recall(
-            tenant_id=tenant_id,
             query="documento",
+            user_roles=user_roles,
+            user_id=user_id,
             limit=5,
         )
         ms = (time.time() - t0) * 1000
@@ -393,17 +393,17 @@ async def _check_memorag(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def run_integration_checks(tenant_id: str) -> Dict[str, Any]:
+async def run_integration_checks(user_roles: List[str], user_id: str) -> Dict[str, Any]:
     """Run all Tier 2 integration checks."""
     t0 = time.time()
 
     results = await asyncio.gather(
-        _check_hybrid_search(tenant_id),
+        _check_hybrid_search(user_roles, user_id),
         _check_llm_planner(),
         _check_llm_chat(),
         _check_langfuse_prompt(),
-        _check_graph_query(tenant_id),
-        _check_memorag(tenant_id),
+        _check_graph_query(),
+        _check_memorag(user_roles, user_id),
         _check_smtp_connection(),
         return_exceptions=True,
     )
@@ -436,7 +436,8 @@ async def _check_classify() -> Dict[str, Any]:
 
         state = await create_initial_react_state(
             query="Hola, buenos dias",
-            tenant_id=_DEFAULT_TENANT,
+            user_roles=["EVERYONE"],
+            user_id="diagnostics-probe",
         )
 
         from app.agents.langgraph.nodes.classify import classify_node
@@ -456,7 +457,7 @@ async def _check_classify() -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_smart_search(tenant_id: str) -> Dict[str, Any]:
+async def _check_smart_search(user_roles: List[str], user_id: str) -> Dict[str, Any]:
     """Verify SmartSearch returns results for a basic query."""
     t0 = time.time()
     try:
@@ -465,7 +466,7 @@ async def _check_smart_search(tenant_id: str) -> Dict[str, Any]:
         tool = SmartSearchTool()
         result = await tool.execute(
             arguments={"query": "documento", "scope": "documents", "limit": 3},
-            context={"tenant_id": tenant_id, "sector_config": {}},
+            context={"user_roles": user_roles, "user_id": user_id, "sector_config": {}},
         )
         ms = (time.time() - t0) * 1000
         if result.success:
@@ -477,7 +478,7 @@ async def _check_smart_search(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_smart_search_temporal(tenant_id: str) -> Dict[str, Any]:
+async def _check_smart_search_temporal(user_roles: List[str], user_id: str) -> Dict[str, Any]:
     """Verify SmartSearch date_from/date_to filters work."""
     t0 = time.time()
     try:
@@ -493,7 +494,7 @@ async def _check_smart_search_temporal(tenant_id: str) -> Dict[str, Any]:
                 "date_to": "2030-12-31",
                 "limit": 3,
             },
-            context={"tenant_id": tenant_id, "sector_config": {}},
+            context={"user_roles": user_roles, "user_id": user_id, "sector_config": {}},
         )
         ms = (time.time() - t0) * 1000
         if result.success:
@@ -507,7 +508,7 @@ async def _check_smart_search_temporal(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_smart_search_person(tenant_id: str) -> Dict[str, Any]:
+async def _check_smart_search_person(user_roles: List[str], user_id: str) -> Dict[str, Any]:
     """Verify SmartSearch person_filter works."""
     t0 = time.time()
     try:
@@ -521,7 +522,7 @@ async def _check_smart_search_person(tenant_id: str) -> Dict[str, Any]:
                 "person_filter": "__diagnostics_nonexistent__",
                 "limit": 3,
             },
-            context={"tenant_id": tenant_id, "sector_config": {}},
+            context={"user_roles": user_roles, "user_id": user_id, "sector_config": {}},
         )
         ms = (time.time() - t0) * 1000
         # With a nonexistent person, we expect 0 results (filter applied correctly)
@@ -539,33 +540,7 @@ async def _check_smart_search_person(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_smart_search_legislation(tenant_id: str) -> Dict[str, Any]:
-    """Verify SmartSearch can query PublicKnowledge (legislation scope)."""
-    t0 = time.time()
-    try:
-        from app.agents.langgraph.tools.smart_search import SmartSearchTool
-
-        tool = SmartSearchTool()
-        result = await tool.execute(
-            arguments={
-                "query": "despido improcedente plazo",
-                "scope": "legislation",
-                "limit": 3,
-            },
-            context={"tenant_id": tenant_id, "sector_config": {}},
-        )
-        ms = (time.time() - t0) * 1000
-        if result.success:
-            lines = result.output.count("──")
-            if lines > 0:
-                return _ok(ms, f"legislation search OK, ~{lines} result blocks")
-            return _ok(ms, "legislation search OK (0 results, collection may be empty)")
-        return _fail(ms, f"legislation search failed: {result.output[:100]}")
-    except Exception as e:
-        return _fail((time.time() - t0) * 1000, str(e)[:100])
-
-
-async def _check_graph_entity_query(tenant_id: str) -> Dict[str, Any]:
+async def _check_graph_entity_query() -> Dict[str, Any]:
     """Verify FalkorDB entity query via KTS documents-by-entity endpoint."""
     t0 = time.time()
     try:
@@ -574,7 +549,6 @@ async def _check_graph_entity_query(tenant_id: str) -> Dict[str, Any]:
         client = get_knowledge_tree_client()
         # Use a probe entity name — may return 0 results, but must not crash
         result = await client.get_documents_by_person(
-            tenant_id=tenant_id,
             person_name="__diagnostics_probe__",
         )
         ms = (time.time() - t0) * 1000
@@ -595,8 +569,10 @@ async def _check_triples_endpoint() -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 f"{settings.knowledge_tree_service_url}/triples/stats",
-                params={"tenant_id": "00000000-0000-0000-0000-000000000001"},
-                headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
+                headers={
+                    "X-API-Key": settings.MICROSERVICES_API_KEY,
+                    "X-User-Roles": "EVERYONE",
+                },
             )
             ms = (time.time() - t0) * 1000
             if resp.status_code == 200:
@@ -609,7 +585,7 @@ async def _check_triples_endpoint() -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_react_pipeline(tenant_id: str) -> Dict[str, Any]:
+async def _check_react_pipeline() -> Dict[str, Any]:
     """Run a full ReAct query (greeting, fast-path) to verify the pipeline."""
     t0 = time.time()
     try:
@@ -618,6 +594,7 @@ async def _check_react_pipeline(tenant_id: str) -> Dict[str, Any]:
         response = await execute_langgraph_query(
             query="Hola",
             user_id="diagnostics-probe",
+            user_roles=["EVERYONE"],
         )
         ms = (time.time() - t0) * 1000
         if response.success and response.answer:
@@ -627,7 +604,7 @@ async def _check_react_pipeline(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_user_memory(tenant_id: str) -> Dict[str, Any]:
+async def _check_user_memory() -> Dict[str, Any]:
     """Verify user memory read works (non-destructive)."""
     t0 = time.time()
     try:
@@ -640,7 +617,7 @@ async def _check_user_memory(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_generate_document(tenant_id: str) -> Dict[str, Any]:
+async def _check_generate_document() -> Dict[str, Any]:
     """Verify generate_document tool renders a DOCX and stores in Redis."""
     t0 = time.time()
     try:
@@ -660,7 +637,7 @@ async def _check_generate_document(tenant_id: str) -> Dict[str, Any]:
                 "modifications": "Test: cambiar fecha a 2030-01-01",
                 "document_title": "Test diagnostics",
             },
-            context={"tenant_id": tenant_id},
+            context={},
         )
         ms = (time.time() - t0) * 1000
 
@@ -700,7 +677,7 @@ async def _check_send_email_preview() -> Dict[str, Any]:
                 "body": "This is a diagnostics probe — not a real email.",
                 "confirmed": False,
             },
-            context={"tenant_id": _DEFAULT_TENANT},
+            context={},
         )
         ms = (time.time() - t0) * 1000
 
@@ -744,11 +721,11 @@ async def _check_generated_doc_download() -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_conversation_context(tenant_id: str) -> Dict[str, Any]:
+async def _check_conversation_context() -> Dict[str, Any]:
     """Verify conversation context flows correctly through the rewrite node.
 
     Simulates a multi-turn conversation:
-    1. First query establishes context ("¿cuántos contratos tengo?")
+    1. First query establishes context ("cuantos contratos tengo?")
     2. Follow-up query uses a pronoun reference ("cuales son?")
     3. Validates the rewrite node contextualizes the follow-up
 
@@ -764,11 +741,10 @@ async def _check_conversation_context(tenant_id: str) -> Dict[str, Any]:
         fake_state = {
             "query": "cuales son?",
             "messages": [
-                HumanMessage(content="¿cuántos contratos tengo?"),
+                HumanMessage(content="cuantos contratos tengo?"),
                 AIMessage(content="Tienes 4 contratos activos en tu sistema."),
                 HumanMessage(content="cuales son?"),
             ],
-            "tenant_id": tenant_id,
             "metadata": {},
         }
 
@@ -832,7 +808,7 @@ async def _check_main_api_health() -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_multi_turn_step_reset(tenant_id: str) -> Dict[str, Any]:
+async def _check_multi_turn_step_reset() -> Dict[str, Any]:
     """Verify current_step resets between turns (classify node).
 
     Catches: checkpointer leaking current_step across turns, which
@@ -848,7 +824,6 @@ async def _check_multi_turn_step_reset(tenant_id: str) -> Dict[str, Any]:
         fake_state = {
             "query": "test query",
             "messages": [HumanMessage(content="test query")],
-            "tenant_id": tenant_id,
             "current_step": 5,  # stale value from prior turn
             "is_complete": True,
             "tool_calls_history": [{"name": "smart_search"}],
@@ -878,7 +853,7 @@ async def _check_multi_turn_step_reset(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_knowledge_tree_integrity(tenant_id: str) -> Dict[str, Any]:
+async def _check_knowledge_tree_integrity() -> Dict[str, Any]:
     """Verify knowledge-tree-service TrustGraph is functional.
 
     Tests:
@@ -890,16 +865,19 @@ async def _check_knowledge_tree_integrity(tenant_id: str) -> Dict[str, Any]:
     """
     t0 = time.time()
     issues = []
+    stats = {}
     try:
         import httpx
         kts_url = settings.knowledge_tree_service_url
-        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
+        headers = {
+            "X-API-Key": settings.MICROSERVICES_API_KEY,
+            "X-User-Roles": "EVERYONE",
+        }
 
         async with httpx.AsyncClient(timeout=10) as client:
             # 1. Triples stats — verifies FalkorDB connection
             resp = await client.get(
                 f"{kts_url}/triples/stats",
-                params={"tenant_id": tenant_id},
                 headers=headers,
             )
             if resp.status_code != 200:
@@ -914,7 +892,7 @@ async def _check_knowledge_tree_integrity(tenant_id: str) -> Dict[str, Any]:
             # 2. SPO query — verifies Cypher execution against FalkorDB
             resp2 = await client.post(
                 f"{kts_url}/triples/query",
-                json={"tenant_id": tenant_id, "subject": "__probe__"},
+                json={"user_roles": ["EVERYONE"], "subject": "__probe__"},
                 headers=headers,
             )
             if resp2.status_code != 200:
@@ -923,7 +901,7 @@ async def _check_knowledge_tree_integrity(tenant_id: str) -> Dict[str, Any]:
             # 3. Context endpoint — verifies graph-to-LLM context generation
             resp3 = await client.post(
                 f"{kts_url}/triples/context",
-                json={"tenant_id": tenant_id, "query": "test"},
+                json={"user_roles": ["EVERYONE"]},
                 headers=headers,
             )
             if resp3.status_code != 200:
@@ -940,12 +918,12 @@ async def _check_knowledge_tree_integrity(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
+async def _check_multi_turn_pipeline() -> Dict[str, Any]:
     """Verify the ReAct pipeline works correctly on turn 2 of a conversation.
 
     Sends two queries to the SAME thread_id:
     1. "Hola" (greeting — fast-path or simple response)
-    2. "¿Cuántos documentos tengo?" (document_query — should trigger tools)
+    2. "Cuantos documentos tengo?" (document_query — should trigger tools)
 
     Catches: current_step/metadata leaking across turns via checkpointer,
     Quality Gate not firing on turn 2, anti-hallucination cleanup skipped.
@@ -961,6 +939,7 @@ async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
         resp1 = await execute_langgraph_query(
             query="Hola",
             user_id="diagnostics-probe",
+            user_roles=["EVERYONE"],
             thread_id=thread_id,
         )
         if not resp1.success:
@@ -969,8 +948,9 @@ async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
 
         # Turn 2: document query — must use tools (not respond without searching)
         resp2 = await execute_langgraph_query(
-            query="¿Cuántos documentos tengo?",
+            query="Cuantos documentos tengo?",
             user_id="diagnostics-probe",
+            user_roles=["EVERYONE"],
             thread_id=thread_id,
         )
         ms = (time.time() - t0) * 1000
@@ -979,7 +959,7 @@ async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
             return _fail(ms, f"Turn 2 failed: {resp2.answer[:60] if resp2.answer else 'no answer'}")
 
         # Check the answer doesn't contain "give up" phrases
-        _gave_up = ["no encontré", "no he encontrado", "no tengo acceso", "no puedo buscar"]
+        _gave_up = ["no encontre", "no he encontrado", "no tengo acceso", "no puedo buscar"]
         answer_lower = (resp2.answer or "").lower()
         gave_up = any(p in answer_lower for p in _gave_up)
 
@@ -994,14 +974,14 @@ async def _check_multi_turn_pipeline(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_graph_rag_entity_retrieval(tenant_id: str) -> Dict[str, Any]:
+async def _check_graph_rag_entity_retrieval() -> Dict[str, Any]:
     """Verify Weaviate TrustGraphEntities returns results."""
     t0 = time.time()
     try:
         from app.clients.weaviate_client import get_weaviate_client
         client = get_weaviate_client()
         results = await client.search_entities(
-            query="test", tenant_id=tenant_id, limit=1,
+            query="test", limit=1,
         )
         ms = (time.time() - t0) * 1000
         if isinstance(results, list):
@@ -1011,14 +991,13 @@ async def _check_graph_rag_entity_retrieval(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_graph_rag_subgraph_traversal(tenant_id: str) -> Dict[str, Any]:
+async def _check_graph_rag_subgraph_traversal() -> Dict[str, Any]:
     """Verify KTS /triples/neighbors returns valid response."""
     t0 = time.time()
     try:
         from app.clients.knowledge_tree_client import get_knowledge_tree_client
         client = get_knowledge_tree_client()
         result = await client.batch_neighbors(
-            tenant_id=tenant_id,
             seed_uris=["nouxcube://entity/default/test"],
             max_hops=1,
             max_edges=5,
@@ -1032,7 +1011,7 @@ async def _check_graph_rag_subgraph_traversal(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
+async def run_e2e_checks(user_roles: List[str], user_id: str) -> Dict[str, Any]:
     """Run all Tier 3 E2E pipeline checks (sequential — they use LLM)."""
     t0 = time.time()
 
@@ -1041,25 +1020,24 @@ async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
     # Run sequentially to avoid GPU contention
     for name, coro in [
         ("classify", _check_classify()),
-        ("smart_search", _check_smart_search(tenant_id)),
-        ("smart_search_temporal", _check_smart_search_temporal(tenant_id)),
-        ("smart_search_person", _check_smart_search_person(tenant_id)),
-        ("smart_search_legislation", _check_smart_search_legislation(tenant_id)),
-        ("graph_entity_query", _check_graph_entity_query(tenant_id)),
+        ("smart_search", _check_smart_search(user_roles, user_id)),
+        ("smart_search_temporal", _check_smart_search_temporal(user_roles, user_id)),
+        ("smart_search_person", _check_smart_search_person(user_roles, user_id)),
+        ("graph_entity_query", _check_graph_entity_query()),
         ("triples_endpoint", _check_triples_endpoint()),
-        ("react_pipeline", _check_react_pipeline(tenant_id)),
-        ("conversation_context", _check_conversation_context(tenant_id)),
-        ("user_memory", _check_user_memory(tenant_id)),
-        ("generate_document", _check_generate_document(tenant_id)),
+        ("react_pipeline", _check_react_pipeline()),
+        ("conversation_context", _check_conversation_context()),
+        ("user_memory", _check_user_memory()),
+        ("generate_document", _check_generate_document()),
         ("send_email_preview", _check_send_email_preview()),
         ("generated_doc_storage", _check_generated_doc_download()),
         ("list_sources", _check_list_sources()),
         ("main_api_health", _check_main_api_health()),
-        ("multi_turn_step_reset", _check_multi_turn_step_reset(tenant_id)),
-        ("knowledge_tree_integrity", _check_knowledge_tree_integrity(tenant_id)),
-        ("multi_turn_pipeline", _check_multi_turn_pipeline(tenant_id)),
-        ("graph_rag_entity_retrieval", _check_graph_rag_entity_retrieval(tenant_id)),
-        ("graph_rag_subgraph_traversal", _check_graph_rag_subgraph_traversal(tenant_id)),
+        ("multi_turn_step_reset", _check_multi_turn_step_reset()),
+        ("knowledge_tree_integrity", _check_knowledge_tree_integrity()),
+        ("multi_turn_pipeline", _check_multi_turn_pipeline()),
+        ("graph_rag_entity_retrieval", _check_graph_rag_entity_retrieval()),
+        ("graph_rag_subgraph_traversal", _check_graph_rag_subgraph_traversal()),
     ]:
         try:
             checks[name] = await asyncio.wait_for(coro, timeout=30)
@@ -1088,33 +1066,42 @@ async def diagnostics_infra():
 
 @router.get("/integration")
 async def diagnostics_integration(
-    tenant_id: str = Query(default=_DEFAULT_TENANT),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
 ):
     """Tier 2: Integration smoke tests (~15s)."""
-    return await run_integration_checks(tenant_id)
+    roles = user_roles if user_roles else ["EVERYONE"]
+    uid = user_id or "diagnostics-anonymous"
+    return await run_integration_checks(roles, uid)
 
 
 @router.get("/e2e")
 async def diagnostics_e2e(
-    tenant_id: str = Query(default=_DEFAULT_TENANT),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
 ):
     """Tier 3: E2E pipeline canary tests (~30s)."""
-    return await run_e2e_checks(tenant_id)
+    roles = user_roles if user_roles else ["EVERYONE"]
+    uid = user_id or "diagnostics-anonymous"
+    return await run_e2e_checks(roles, uid)
 
 
 @router.post("/run")
 async def diagnostics_run(
-    tenant_id: str = Query(default=_DEFAULT_TENANT),
     tiers: str = Query(default="1,2,3", description="Comma-separated tiers to run: 1,2,3"),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
 ):
     """Run selected diagnostic tiers and cache the report."""
     global _last_report
     t0 = time.time()
 
+    roles = user_roles if user_roles else ["EVERYONE"]
+    uid = user_id or "diagnostics-anonymous"
+
     tier_set = {t.strip() for t in tiers.split(",")}
     report = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "tenant_id": tenant_id,
         "tiers": {},
     }
 
@@ -1122,10 +1109,10 @@ async def diagnostics_run(
         report["tiers"]["infrastructure"] = await run_infra_checks()
 
     if "2" in tier_set:
-        report["tiers"]["integration"] = await run_integration_checks(tenant_id)
+        report["tiers"]["integration"] = await run_integration_checks(roles, uid)
 
     if "3" in tier_set:
-        report["tiers"]["e2e_pipeline"] = await run_e2e_checks(tenant_id)
+        report["tiers"]["e2e_pipeline"] = await run_e2e_checks(roles, uid)
 
     # Derive overall status
     tier_statuses = [t.get("status", "unknown") for t in report["tiers"].values()]

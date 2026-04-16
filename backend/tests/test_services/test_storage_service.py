@@ -53,7 +53,7 @@ class MockBucket:
 class MockGCSClient:
     def __init__(self):
         self.buckets = {
-            "test-bucket-test-tenant": MockBucket("test-bucket-test-tenant")
+            "test-bucket": MockBucket("test-bucket")
         }
     
     def get_bucket(self, name):
@@ -72,10 +72,10 @@ def test_init_storage_service(monkeypatch):
     monkeypatch.setattr("google.cloud.storage.Client", lambda **kwargs: MockGCSClient())
     
     # Ejecutar prueba
-    storage_service = StorageService(tenant_id="test-tenant")
+    storage_service = StorageService(user_id="test-user")
     
-    assert storage_service.tenant_id == "test-tenant"
-    assert storage_service.bucket_name == "test-bucket-test-tenant"
+    assert storage_service.user_id == "test-user"
+    assert storage_service.bucket_name is not None
 
 def test_generate_upload_signed_url(monkeypatch):
     """Prueba para generar URL firmada para carga"""
@@ -83,7 +83,7 @@ def test_generate_upload_signed_url(monkeypatch):
     monkeypatch.setattr("google.cloud.storage.Client", lambda **kwargs: MockGCSClient())
     
     # Ejecutar prueba
-    storage_service = StorageService(tenant_id="test-tenant")
+    storage_service = StorageService(user_id="test-user")
     url, expires_at = storage_service.generate_upload_signed_url(
         object_name="test/file.txt",
         content_type="text/plain"
@@ -102,7 +102,7 @@ def test_generate_download_signed_url(monkeypatch):
     monkeypatch.setattr("google.cloud.storage.Client", lambda **kwargs: MockGCSClient())
     
     # Ejecutar prueba
-    storage_service = StorageService(tenant_id="test-tenant")
+    storage_service = StorageService(user_id="test-user")
     url, expires_at = storage_service.generate_download_signed_url(
         object_name="test/file.txt"
     )
@@ -119,7 +119,7 @@ def test_upload_file(monkeypatch):
     monkeypatch.setattr("google.cloud.storage.Client", lambda **kwargs: MockGCSClient())
     
     # Ejecutar prueba
-    storage_service = StorageService(tenant_id="test-tenant")
+    storage_service = StorageService(user_id="test-user")
     
     # Archivo de prueba
     file_content = b"Test file content"
@@ -139,7 +139,7 @@ def test_download_file(monkeypatch):
     monkeypatch.setattr("google.cloud.storage.Client", lambda **kwargs: MockGCSClient())
     
     # Ejecutar prueba
-    storage_service = StorageService(tenant_id="test-tenant")
+    storage_service = StorageService(user_id="test-user")
     content = storage_service.download_file(object_name="test/file.txt")
     
     assert content == b"Test file content"
@@ -148,7 +148,7 @@ def test_download_nonexistent_file(monkeypatch):
     """Prueba para descargar archivo inexistente"""
     # Mock para el cliente GCS con blob inexistente
     mock_gcs_client = MockGCSClient()
-    mock_bucket = mock_gcs_client.buckets["test-bucket-test-tenant"]
+    mock_bucket = mock_gcs_client.buckets["test-bucket"]
     
     # Sobrescribir método blob para devolver un blob que no existe
     def mock_blob(name):
@@ -159,7 +159,7 @@ def test_download_nonexistent_file(monkeypatch):
     monkeypatch.setattr("google.cloud.storage.Client", lambda **kwargs: mock_gcs_client)
     
     # Ejecutar prueba
-    storage_service = StorageService(tenant_id="test-tenant")
+    storage_service = StorageService(user_id="test-user")
     content = storage_service.download_file(object_name="nonexistent/file.txt")
     
     assert content is None
@@ -170,7 +170,7 @@ def test_delete_file(monkeypatch):
     monkeypatch.setattr("google.cloud.storage.Client", lambda **kwargs: MockGCSClient())
     
     # Ejecutar prueba
-    storage_service = StorageService(tenant_id="test-tenant")
+    storage_service = StorageService(user_id="test-user")
     result = storage_service.delete_file(object_name="test/file.txt")
     
     assert result is True
@@ -181,7 +181,7 @@ def test_list_files(monkeypatch):
     monkeypatch.setattr("google.cloud.storage.Client", lambda **kwargs: MockGCSClient())
     
     # Ejecutar prueba
-    storage_service = StorageService(tenant_id="test-tenant")
+    storage_service = StorageService(user_id="test-user")
     files = storage_service.list_files(prefix="test/")
     
     assert isinstance(files, list)
