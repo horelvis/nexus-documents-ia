@@ -139,13 +139,12 @@ class KnowledgeExtractionService:
     async def extract_from_document(
         self,
         document_id: str,
-        tenant_id: str,
         extracted_entities: List[Dict[str, Any]],
         content: str,
         document_type: Optional[str] = None,
         acl_user_ids: Optional[List[str]] = None,
         acl_role_ids: Optional[List[str]] = None,
-        acl_everyone: bool = False
+        acl_everyone: bool = False,
     ) -> KnowledgeExtractionResult:
         """
         Extract and store knowledge from a document.
@@ -154,7 +153,6 @@ class KnowledgeExtractionService:
 
         Args:
             document_id: PostgreSQL document UUID
-            tenant_id: Tenant identifier
             extracted_entities: Raw entities from LangExtract
             content: Full document text
             document_type: Type of document (contract, invoice, etc.)
@@ -185,7 +183,6 @@ class KnowledgeExtractionService:
         start_time = time.time()
         result = KnowledgeExtractionResult(
             document_id=document_id,
-            tenant_id=tenant_id
         )
 
         try:
@@ -216,18 +213,16 @@ class KnowledgeExtractionService:
             # Step 4: Store in PostgreSQL and Weaviate
             stored_entities = await self._store_entities(
                 entities=normalized_entities,
-                tenant_id=tenant_id,
                 document_id=document_id,
                 acl_user_ids=acl_user_ids,
                 acl_role_ids=acl_role_ids,
-                acl_everyone=acl_everyone
+                acl_everyone=acl_everyone,
             )
 
             stored_relationships = await self._store_relationships(
                 relationships=relationships,
-                tenant_id=tenant_id,
                 document_id=document_id,
-                entity_map=stored_entities
+                entity_map=stored_entities,
             )
 
             # Update result
@@ -508,11 +503,10 @@ class KnowledgeExtractionService:
     async def _store_entities(
         self,
         entities: List[KnowledgeEntity],
-        tenant_id: str,
         document_id: str,
         acl_user_ids: Optional[List[str]] = None,
         acl_role_ids: Optional[List[str]] = None,
-        acl_everyone: bool = False
+        acl_everyone: bool = False,
     ) -> Dict[str, str]:
         """
         Store entities in Weaviate and knowledge-tree-service graph.
@@ -535,7 +529,6 @@ class KnowledgeExtractionService:
 
                 # Store in Weaviate _knowledge collection
                 await self._weaviate_service.add_knowledge_entity(
-                    tenant_id=tenant_id,
                     entity_id=entity_id,
                     entity_type=entity.entity_type,
                     entity_value=entity.entity_value,
@@ -545,9 +538,6 @@ class KnowledgeExtractionService:
                     source_document_id=document_id,
                     confidence=entity.extraction_confidence,
                     attributes=entity.attributes,
-                    acl_user_ids=acl_user_ids,
-                    acl_role_ids=acl_role_ids,
-                    acl_everyone=acl_everyone
                 )
 
                 entity_map[entity.entity_value] = entity_id
@@ -575,7 +565,6 @@ class KnowledgeExtractionService:
 
                 if chunk_texts:
                     kt_result = await knowledge_tree_legal_client.extract_triples(
-                        tenant_id=tenant_id,
                         document_id=document_id,
                         chunks=chunk_texts,
                     )
@@ -594,9 +583,8 @@ class KnowledgeExtractionService:
     async def _store_relationships(
         self,
         relationships: List[KnowledgeRelationship],
-        tenant_id: str,
         document_id: str,
-        entity_map: Dict[str, str]
+        entity_map: Dict[str, str],
     ) -> int:
         """
         Store relationships in the sector graph via knowledge-tree-service.
@@ -626,7 +614,6 @@ class KnowledgeExtractionService:
             from app.clients.knowledge_tree_client import knowledge_tree_legal_client
 
             result = await knowledge_tree_legal_client.store_entities(
-                tenant_id=tenant_id,
                 document_id=document_id,
                 entities=[],  # No new entities, just relationships
                 relationships=valid_rels,
@@ -642,8 +629,7 @@ class KnowledgeExtractionService:
 
     async def delete_document_knowledge(
         self,
-        tenant_id: str,
-        document_id: str
+        document_id: str,
     ) -> int:
         """Delete all knowledge entities from a document."""
         if not self._initialized:
@@ -651,8 +637,7 @@ class KnowledgeExtractionService:
 
         try:
             deleted = await self._weaviate_service.delete_knowledge_by_document(
-                tenant_id=tenant_id,
-                document_id=document_id
+                document_id=document_id,
             )
             logger.info(f"🗑️ Deleted {deleted} knowledge entities for document {document_id}")
             return deleted
@@ -663,26 +648,23 @@ class KnowledgeExtractionService:
 
     async def search_knowledge(
         self,
-        tenant_id: str,
         query: str,
         entity_types: Optional[List[str]] = None,
         domain: Optional[str] = None,
         limit: int = 10,
         user_id: Optional[str] = None,
-        user_role_ids: Optional[List[str]] = None,
-        is_admin: bool = False
+        user_roles: Optional[List[str]] = None,
+        is_admin: bool = False,
     ) -> List[Dict[str, Any]]:
         """Search knowledge entities semantically."""
         if not self._initialized:
             await self.initialize()
 
         return await self._weaviate_service.search_knowledge_entities(
-            tenant_id=tenant_id,
             query=query,
+            user_roles=user_roles or [],
             entity_types=entity_types,
             domain=domain,
             limit=limit,
-            user_id=user_id,
-            user_role_ids=user_role_ids,
-            is_admin=is_admin
+            is_admin=is_admin,
         )

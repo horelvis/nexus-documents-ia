@@ -17,8 +17,8 @@ Usage:
 
     # Cross-thread memory (any module):
     store = await get_store()
-    await store.aput(("user_facts", tenant_id, user_id), "identity/name", {"value": "Carlos"})
-    item = await store.aget(("user_facts", tenant_id, user_id), "identity/name")
+    await store.aput(("user_facts", user_id), "identity/name", {"value": "Carlos"})
+    item = await store.aget(("user_facts", user_id), "identity/name")
 
     # At shutdown:
     await close_checkpointer()

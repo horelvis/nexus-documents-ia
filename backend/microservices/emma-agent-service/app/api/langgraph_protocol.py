@@ -14,7 +14,7 @@ Endpoints:
     POST /api/threads/{thread_id}/history       Checkpoint history
     POST /api/threads/{thread_id}/runs/stream   Execute run with SSE streaming
 
-Auth: X-API-Key header (verify_api_key dependency) + X-Tenant-ID header.
+Auth: X-API-Key header (verify_api_key dependency).
 """
 
 import logging
@@ -150,7 +150,6 @@ async def get_info():
 async def create_thread(
     body: Optional[ThreadCreateRequest] = None,
     _: bool = Depends(verify_api_key),
-    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """Create a new conversation thread.
 
@@ -160,7 +159,6 @@ async def create_thread(
     """
     thread_id = str(uuid.uuid4())
     metadata = (body.metadata if body else {}) or {}
-    metadata["tenant_id"] = x_tenant_id
 
     return ThreadResponse(
         thread_id=thread_id,
@@ -171,16 +169,15 @@ async def create_thread(
 @router.get("/threads", response_model=List[ThreadResponse])
 async def list_threads(
     _: bool = Depends(verify_api_key),
-    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
     limit: int = 20,
     offset: int = 0,
 ):
-    """List threads for a tenant.
+    """List threads.
 
     Placeholder — returns empty list. Full implementation will query
-    emma_sessions table filtered by tenant_id.
+    emma_sessions table.
     """
-    # TODO: Query emma_sessions for this tenant
+    # TODO: Query emma_sessions
     return []
 
 
@@ -188,7 +185,6 @@ async def list_threads(
 async def get_thread(
     thread_id: str,
     _: bool = Depends(verify_api_key),
-    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """Get thread details.
 
@@ -212,7 +208,7 @@ async def get_thread(
     # Thread may not have state yet (created but no runs)
     return ThreadResponse(
         thread_id=thread_id,
-        metadata={"tenant_id": x_tenant_id},
+        metadata={},
     )
 
 
@@ -220,7 +216,6 @@ async def get_thread(
 async def get_thread_state(
     thread_id: str,
     _: bool = Depends(verify_api_key),
-    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
 ):
     """Get current state from the checkpointer.
 
@@ -301,7 +296,6 @@ async def get_thread_state(
 async def get_thread_history(
     thread_id: str,
     _: bool = Depends(verify_api_key),
-    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
     limit: int = 10,
 ):
     """Get checkpoint history for branch switching.
@@ -344,7 +338,6 @@ async def run_stream(
     thread_id: str,
     body: RunInput,
     _: bool = Depends(verify_api_key),
-    x_tenant_id: str = Header(..., alias="X-Tenant-ID"),
     x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
 ):
     """Execute a run with SSE streaming in LangGraph protocol format.

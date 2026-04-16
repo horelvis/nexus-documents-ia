@@ -104,7 +104,6 @@ class PromptRuleUpdate(BaseModel):
 class PromptRuleResponse(BaseModel):
     """Prompt rule response."""
     id: UUID
-    tenant_id: Optional[UUID] = None
     rule_name: str
     description: Optional[str] = None
     conditions: Dict[str, Any]
@@ -210,7 +209,6 @@ class GuardrailUpdate(BaseModel):
 class GuardrailResponse(BaseModel):
     """Guardrail response."""
     id: UUID
-    tenant_id: Optional[UUID] = None
     guardrail_name: str
     description: Optional[str] = None
     guardrail_type: GuardrailType

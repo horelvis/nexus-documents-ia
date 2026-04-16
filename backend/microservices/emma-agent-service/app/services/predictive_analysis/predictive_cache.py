@@ -1,13 +1,10 @@
 """
 Predictive Analysis Cache — Redis-backed storage for factors and results.
 
-Key format (single-tenant; tenant_id segment removed in Plan 3):
-    predictive:{session_id}:factors  → List[WeightedFactor]  (TTL: 1h)
-    predictive:result:{session_id}   → PredictionResult      (TTL: 7d)
-    predictive:meta:{session_id}     → session metadata      (TTL: 1h)
-
-Note: method signatures retain ``tenant_id`` for backwards compatibility
-with subgraph callers (Wave 6 scope). The argument is accepted but ignored.
+Key format:
+    predictive:{session_id}:factors  -> List[WeightedFactor]  (TTL: 1h)
+    predictive:result:{session_id}   -> PredictionResult      (TTL: 7d)
+    predictive:meta:{session_id}     -> session metadata      (TTL: 1h)
 """
 
 from __future__ import annotations
@@ -50,7 +47,7 @@ class PredictiveCache:
             self._redis = redis.from_url(
                 self._redis_url, encoding="utf-8", decode_responses=True
             )
-            logger.info("✅ PredictiveCache connected to Redis")
+            logger.info("PredictiveCache connected to Redis")
 
     async def close(self) -> None:
         if self._redis:
@@ -71,7 +68,7 @@ class PredictiveCache:
     # =========================================================================
 
     async def add_weighted_factor(
-        self, _tenant_id_unused: str, session_id: str, factor: WeightedFactor
+        self, session_id: str, factor: WeightedFactor
     ) -> int:
         await self.connect()
         key = self._factors_key(session_id)
@@ -79,14 +76,14 @@ class PredictiveCache:
         count = await self._redis.rpush(key, factor_json)
         await self._redis.expire(key, self._factors_ttl)
         logger.info(
-            f"📝 Added weighted factor #{factor.extraction_order} "
+            f"Added weighted factor #{factor.extraction_order} "
             f"(weight={factor.weight:.2f}, outcome={factor.outcome}) "
             f"to session {session_id[:16]}..."
         )
         return count
 
     async def get_weighted_factors(
-        self, _tenant_id_unused: str, session_id: str
+        self, session_id: str
     ) -> List[WeightedFactor]:
         await self.connect()
         key = self._factors_key(session_id)
@@ -97,10 +94,10 @@ class PredictiveCache:
                 data = json.loads(fj)
                 factors.append(WeightedFactor.from_dict(data))
             except (json.JSONDecodeError, KeyError) as e:
-                logger.warning(f"⚠️ Failed to deserialize factor: {e}")
+                logger.warning(f"Failed to deserialize factor: {e}")
         return factors
 
-    async def get_factors_count(self, _tenant_id_unused: str, session_id: str) -> int:
+    async def get_factors_count(self, session_id: str) -> int:
         await self.connect()
         key = self._factors_key(session_id)
         return await self._redis.llen(key)
@@ -110,7 +107,7 @@ class PredictiveCache:
     # =========================================================================
 
     async def store_result(
-        self, _tenant_id_unused: str, session_id: str, result: PredictionResult
+        self, session_id: str, result: PredictionResult
     ) -> None:
         await self.connect()
         key = self._result_key(session_id)
@@ -119,10 +116,10 @@ class PredictiveCache:
         # Serialize WeightedFactor objects
         result_dict["factors"] = [f.to_dict() if hasattr(f, "to_dict") else f for f in result.factors]
         await self._redis.set(key, json.dumps(result_dict, default=str), ex=self._result_ttl)
-        logger.info(f"📝 Stored prediction result for session {session_id[:16]}...")
+        logger.info(f"Stored prediction result for session {session_id[:16]}...")
 
     async def get_result(
-        self, _tenant_id_unused: str, session_id: str
+        self, session_id: str
     ) -> Optional[PredictionResult]:
         await self.connect()
         key = self._result_key(session_id)
@@ -138,14 +135,14 @@ class PredictiveCache:
     # =========================================================================
 
     async def store_session_metadata(
-        self, _tenant_id_unused: str, session_id: str, metadata: dict
+        self, session_id: str, metadata: dict
     ) -> None:
         await self.connect()
         key = self._meta_key(session_id)
         await self._redis.set(key, json.dumps(metadata, default=str), ex=self._factors_ttl)
 
     async def get_session_metadata(
-        self, _tenant_id_unused: str, session_id: str
+        self, session_id: str
     ) -> dict:
         await self.connect()
         key = self._meta_key(session_id)
@@ -156,7 +153,7 @@ class PredictiveCache:
     # Session management
     # =========================================================================
 
-    async def clear_session(self, _tenant_id_unused: str, session_id: str) -> bool:
+    async def clear_session(self, session_id: str) -> bool:
         await self.connect()
         keys = [
             self._factors_key(session_id),
@@ -164,16 +161,16 @@ class PredictiveCache:
             self._meta_key(session_id),
         ]
         await self._redis.delete(*keys)
-        logger.info(f"🗑️ Cleared predictive session {session_id[:16]}...")
+        logger.info(f"Cleared predictive session {session_id[:16]}...")
         return True
 
-    async def extend_ttl(self, _tenant_id_unused: str, session_id: str) -> bool:
+    async def extend_ttl(self, session_id: str) -> bool:
         await self.connect()
         key = self._factors_key(session_id)
         return await self._redis.expire(key, self._factors_ttl)
 
     async def get_ttl_remaining(
-        self, _tenant_id_unused: str, session_id: str
+        self, session_id: str
     ) -> Optional[int]:
         await self.connect()
         key = self._factors_key(session_id)
@@ -199,7 +196,7 @@ def _get_cache_lock() -> "asyncio.Lock":
 
 
 def get_predictive_cache() -> PredictiveCache:
-    """Get the singleton PredictiveCache (sync — init is cheap, no I/O)."""
+    """Get the singleton PredictiveCache (sync -- init is cheap, no I/O)."""
     global _predictive_cache
     if _predictive_cache is None:
         _predictive_cache = PredictiveCache()
@@ -207,7 +204,7 @@ def get_predictive_cache() -> PredictiveCache:
 
 
 async def get_predictive_cache_async() -> PredictiveCache:
-    """Get the singleton PredictiveCache (async — race-safe)."""
+    """Get the singleton PredictiveCache (async -- race-safe)."""
     global _predictive_cache
     if _predictive_cache is None:
         async with _get_cache_lock():

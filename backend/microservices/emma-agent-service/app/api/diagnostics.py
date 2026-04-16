@@ -789,21 +789,21 @@ async def _check_conversation_context(tenant_id: str) -> Dict[str, Any]:
         return _fail((time.time() - t0) * 1000, str(e)[:100])
 
 
-async def _check_list_sources(tenant_id: str) -> Dict[str, Any]:
-    """Verify list_sources tool returns tenant stats (not 404).
+async def _check_list_sources() -> Dict[str, Any]:
+    """Verify list_sources tool returns stats (not 404).
 
-    Catches: wrong URL in weaviate_client.get_tenant_stats(),
+    Catches: wrong URL in weaviate_client.get_stats(),
     Pydantic schema mismatches in collection stats endpoint.
     """
     t0 = time.time()
     try:
         from app.clients import get_weaviate_client
         client = get_weaviate_client()
-        stats = await client.get_tenant_stats(tenant_id)
+        stats = await client.get_stats()
         ms = (time.time() - t0) * 1000
 
         if "error" in stats and stats.get("document_count", 0) == 0:
-            return _fail(ms, f"get_tenant_stats error: {str(stats.get('error', ''))[:80]}")
+            return _fail(ms, f"get_stats error: {str(stats.get('error', ''))[:80]}")
         doc_count = stats.get("document_count", 0)
         return _ok(ms, f"{doc_count} chunks indexed")
     except Exception as e:
@@ -1053,7 +1053,7 @@ async def run_e2e_checks(tenant_id: str) -> Dict[str, Any]:
         ("generate_document", _check_generate_document(tenant_id)),
         ("send_email_preview", _check_send_email_preview()),
         ("generated_doc_storage", _check_generated_doc_download()),
-        ("list_sources", _check_list_sources(tenant_id)),
+        ("list_sources", _check_list_sources()),
         ("main_api_health", _check_main_api_health()),
         ("multi_turn_step_reset", _check_multi_turn_step_reset(tenant_id)),
         ("knowledge_tree_integrity", _check_knowledge_tree_integrity(tenant_id)),

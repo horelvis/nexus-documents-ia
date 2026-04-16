@@ -41,11 +41,6 @@ HEARTBEAT_DELIVERY_KEY = "emma:heartbeat:delivery"
 INSIGHTS_LIST_KEY = "emma:insights:list"
 INSIGHT_KEY_PREFIX = "emma:insights"
 
-# Legacy tenant placeholder passed to collaborators that still accept the arg
-# (context_gatherer, delivery_manager, priority_scorer, insight_evaluator).
-# Will be dropped when those modules are refactored in Plan 5.
-_LEGACY_TENANT_PLACEHOLDER = ""
-
 
 class HeartbeatService:
     """Orchestrates the Heartbeat System for proactive intelligence."""
@@ -70,9 +65,9 @@ class HeartbeatService:
         await context_gatherer.close()
         await delivery_manager.close()
 
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
     # Main Entry Point
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
 
     async def run(
         self,
@@ -93,7 +88,6 @@ class HeartbeatService:
 
         if not config.enabled and not force:
             return HeartbeatRunResponse(
-                tenant_id=_LEGACY_TENANT_PLACEHOLDER,
                 success=False,
                 error="Heartbeat is disabled",
             )
@@ -103,7 +97,6 @@ class HeartbeatService:
             should_run, reason = await self._should_run(config)
             if not should_run:
                 return HeartbeatRunResponse(
-                    tenant_id=_LEGACY_TENANT_PLACEHOLDER,
                     success=False,
                     error=reason,
                 )
@@ -112,7 +105,7 @@ class HeartbeatService:
 
         try:
             # 1. Gather context
-            context = await context_gatherer.gather(_LEGACY_TENANT_PLACEHOLDER)
+            context = await context_gatherer.gather()
 
             # 2. Evaluate with LLM (enabled_insight_types are already strings)
             evaluation = await insight_evaluator.evaluate(
@@ -122,7 +115,6 @@ class HeartbeatService:
             if evaluation.no_action_needed:
                 await self._update_run_timestamp(now, config)
                 return HeartbeatRunResponse(
-                    tenant_id=_LEGACY_TENANT_PLACEHOLDER,
                     success=True,
                     insights_generated=0,
                     insights_delivered=0,
@@ -136,7 +128,7 @@ class HeartbeatService:
 
             # 3. Convert candidates to insights
             insight_candidates = insight_evaluator.candidates_to_insights(
-                evaluation.insights, _LEGACY_TENANT_PLACEHOLDER
+                evaluation.insights
             )
 
             # 4. Score and filter by priority
@@ -149,14 +141,13 @@ class HeartbeatService:
 
             # 5. Deliver (with rate limiting)
             delivered, deferred = await delivery_manager.deliver_insights(
-                filtered_insights, config, _LEGACY_TENANT_PLACEHOLDER
+                filtered_insights, config
             )
 
             # 6. Update run timestamp
             await self._update_run_timestamp(now, config)
 
             return HeartbeatRunResponse(
-                tenant_id=_LEGACY_TENANT_PLACEHOLDER,
                 success=True,
                 insights_generated=len(evaluation.insights),
                 insights_delivered=len(delivered),
@@ -176,7 +167,6 @@ class HeartbeatService:
         except Exception as e:
             logger.error(f"Heartbeat run failed: {e}", exc_info=True)
             return HeartbeatRunResponse(
-                tenant_id=_LEGACY_TENANT_PLACEHOLDER,
                 success=False,
                 error=str(e),
             )
@@ -220,9 +210,9 @@ class HeartbeatService:
             "next_run_at": next_run.isoformat(),
         })
 
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
     # Configuration Management
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
 
     async def get_config(self) -> HeartbeatConfig:
         """Get heartbeat configuration."""
@@ -284,7 +274,6 @@ class HeartbeatService:
         insights_count = await r.llen(INSIGHTS_LIST_KEY)
 
         return HeartbeatStatusResponse(
-            tenant_id=_LEGACY_TENANT_PLACEHOLDER,
             enabled=config.enabled,
             last_run_at=last_run_at,
             next_run_at=next_run_at,
@@ -293,9 +282,9 @@ class HeartbeatService:
             config=config,
         )
 
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
     # Insight Management
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
 
     async def get_insights(
         self,
@@ -304,7 +293,7 @@ class HeartbeatService:
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
         """Get insights with optional filtering."""
-        insights = await delivery_manager.get_pending_insights(_LEGACY_TENANT_PLACEHOLDER, limit)
+        insights = await delivery_manager.get_pending_insights(limit)
 
         if status:
             insights = [i for i in insights if i.get("status") == status]
@@ -344,16 +333,16 @@ class HeartbeatService:
 
         return True
 
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
     # Digest Generation
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
 
     async def generate_digest(self) -> Dict[str, Any]:
         """Generate a daily digest of insights and activity.
 
         Typically called by Celery Beat at the configured digest_hour.
         """
-        context = await context_gatherer.gather(_LEGACY_TENANT_PLACEHOLDER)
+        context = await context_gatherer.gather()
 
         digest: Dict[str, Any] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -373,21 +362,21 @@ class HeartbeatService:
         if context.contracts_expiring_7d:
             for c in context.contracts_expiring_7d[:3]:
                 digest["highlights"].append(
-                    f"Contrato '{c.title}' vence en {c.days_until_expiry} días"
+                    f"Contrato '{c.title}' vence en {c.days_until_expiry} dias"
                 )
 
         if context.documents_indexed_24h:
             count = len(context.documents_indexed_24h)
-            digest["highlights"].append(f"{count} documentos indexados en las últimas 24h")
+            digest["highlights"].append(f"{count} documentos indexados en las ultimas 24h")
 
         if context.anomalies:
             digest["highlights"].append(
-                f"{len(context.anomalies)} anomalías detectadas requieren revisión"
+                f"{len(context.anomalies)} anomalias detectadas requieren revision"
             )
 
         if context.stale_analyses_7d > 0:
             digest["action_items"].append(
-                f"{context.stale_analyses_7d} análisis pendientes por más de 7 días"
+                f"{context.stale_analyses_7d} analisis pendientes por mas de 7 dias"
             )
 
         if context.pending_signatures > 0:

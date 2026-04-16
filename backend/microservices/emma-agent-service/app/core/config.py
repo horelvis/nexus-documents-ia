@@ -35,13 +35,6 @@ class Settings(BaseSettings):
     weaviate_service_timeout: int = int(os.getenv("WEAVIATE_SERVICE_TIMEOUT", "120"))
 
     # ==========================================================================
-    # Deployment Mode: Single-tenant vs Multi-tenant
-    # ==========================================================================
-    single_tenant_mode: bool = os.getenv("SINGLE_TENANT_MODE", "true").lower() == "true"
-    default_tenant_id: str = os.getenv("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
-    default_tenant_name: str = os.getenv("DEFAULT_TENANT_NAME", "NouxCubeIA Organization")
-
-    # ==========================================================================
     # LLM Configuration
     # ==========================================================================
     agents_enabled: bool = os.getenv("AGENTS_ENABLED", "true").lower() == "true"
@@ -134,9 +127,8 @@ class Settings(BaseSettings):
 
     # Concurrency Control
     llm_max_concurrent: int = int(os.getenv("LLM_MAX_CONCURRENT", "8"))
-    analysis_max_per_tenant: int = int(os.getenv("ANALYSIS_MAX_PER_TENANT", "3"))
+    analysis_max_concurrent: int = int(os.getenv("ANALYSIS_MAX_CONCURRENT", "3"))
     llm_queue_timeout: int = int(os.getenv("LLM_QUEUE_TIMEOUT", "90"))
-    tenant_isolation_enabled: bool = os.getenv("TENANT_ISOLATION_ENABLED", "true").lower() == "true"
 
     # ReAct Agent Loop
     react_max_observe_length: int = int(os.getenv("REACT_MAX_OBSERVE_LENGTH", "5000"))

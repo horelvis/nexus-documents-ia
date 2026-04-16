@@ -167,7 +167,6 @@ class ChannelRouter:
         config: Dict[str, Any],
         credentials: Optional[str],
         webhook_data: Dict[str, Any],
-        tenant_id: str,
     ) -> Dict[str, Any]:
         """Process an inbound message through Emma and respond.
 
@@ -214,13 +213,13 @@ class ChannelRouter:
         )
 
         # 3. Verify user pairing
-        pairing = await pairing_service.get_pairing(tenant_id, channel_type, sender_id)
+        pairing = await pairing_service.get_pairing(channel_type, sender_id)
         reply_to = parsed.get("channel_id") or parsed.get("chat_id") or sender_id
 
         if not pairing:
             # Send pairing instructions (friendlier tone for social channels)
             pairing_code = await pairing_service.generate_pairing_code(
-                tenant_id, channel_type, sender_id
+                channel_type, sender_id
             )
             await channel.send_message(
                 to=reply_to,
@@ -264,7 +263,6 @@ class ChannelRouter:
             from app.services.emma_background_service import emma_background_service
 
             result = await emma_background_service.channel_query(
-                tenant_id=tenant_id,
                 query=content,
                 channel_type=channel_type,
                 user_id=user_id,

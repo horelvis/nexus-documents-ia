@@ -47,12 +47,8 @@ class ContextGatherer:
             await self._redis.aclose()
             self._redis = None
 
-    async def gather(self, tenant_id: str = "") -> TenantContext:
+    async def gather(self) -> TenantContext:
         """Gather all context for the deployment.
-
-        Args:
-            tenant_id: Legacy placeholder, accepted for backwards compatibility
-                with Wave 3 callers (heartbeat_service). Ignored.
 
         Returns:
             TenantContext with all available data
@@ -61,7 +57,6 @@ class ContextGatherer:
 
         # Gather data in parallel where possible
         context = TenantContext(
-            tenant_id=tenant_id,
             gathered_at=now,
         )
 

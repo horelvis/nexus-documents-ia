@@ -216,7 +216,6 @@ class MCPTool(BaseTool):
             parameters=input_schema_to_parameters(self._tool_info.input_schema),
             category=self._category,
             requires_auth=False,
-            tenant_specific=True,
         )
 
     def get_params_class(self) -> Type[BaseModel]:
@@ -233,7 +232,7 @@ class MCPTool(BaseTool):
 
         Args:
             params: Validated parameters
-            context: Execution context with tenant info
+            context: Execution context
 
         Returns:
             ToolResult with execution outcome
@@ -248,7 +247,6 @@ class MCPTool(BaseTool):
             result = await self._client_manager.execute_tool(
                 tool_name=self._tool_info.name,
                 arguments=arguments,
-                tenant_id=context.tenant_id,
                 server_name=self._tool_info.server_name,
             )
 
@@ -340,22 +338,20 @@ class MCPToolAdapter:
 
         return None
 
-    async def get_tools_for_tenant(
+    async def get_available_tools(
         self,
-        tenant_id: str,
         category: Optional[str] = None
     ) -> List[MCPTool]:
         """
-        Get all MCP tools available for a tenant.
+        Get all available MCP tools.
 
         Args:
-            tenant_id: Tenant identifier
             category: Optional category filter
 
         Returns:
             List of MCPTool instances
         """
-        tool_infos = await self._client_manager.get_tools_for_tenant(tenant_id)
+        tool_infos = await self._client_manager.get_available_tools()
         tools = []
 
         for tool_info in tool_infos:

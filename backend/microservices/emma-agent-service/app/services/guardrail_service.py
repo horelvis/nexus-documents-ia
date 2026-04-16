@@ -94,12 +94,12 @@ class GuardrailService:
             self._http_client = httpx.AsyncClient(timeout=30.0)
         return self._http_client
 
-    async def _load_guardrails(self, tenant_id: Optional[UUID] = None, sector: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def _load_guardrails(self, sector: Optional[str] = None) -> List[Dict[str, Any]]:
         """Load guardrails: registry baseline merged with DB overrides."""
         import time as time_module
         from app.services.guardrail_registry import get_guardrails_for_sector
 
-        cache_key = (tenant_id, sector)
+        cache_key = sector
         now = time_module.time()
 
         if cache_key in self._guardrails_cache:
@@ -114,8 +114,6 @@ class GuardrailService:
         try:
             client = await self._get_http_client()
             headers = {"X-API-Key": settings.MICROSERVICES_API_KEY, "Content-Type": "application/json"}
-            if tenant_id:
-                headers["X-Tenant-ID"] = str(tenant_id)
             url = f"{settings.api_url}/api/v1/prompts/guardrails"
             params = {"active_only": "true"}
             if sector:
@@ -126,7 +124,7 @@ class GuardrailService:
             items = guardrails_data if isinstance(guardrails_data, list) else guardrails_data.get("guardrails", [])
             for g in items:
                 db_guardrails.append({
-                    "id": g.get("id"), "tenant_id": g.get("tenant_id"),
+                    "id": g.get("id"),
                     "guardrail_name": g.get("guardrail_name"), "description": g.get("description"),
                     "guardrail_type": g.get("guardrail_type"), "config": g.get("config", {}),
                     "action_on_match": g.get("action_on_match"), "applies_to": g.get("applies_to", []),
@@ -154,7 +152,7 @@ class GuardrailService:
 
         self._guardrails_cache[cache_key] = merged
         self._cache_time[cache_key] = now
-        logger.debug(f"Loaded {len(merged)} guardrails (registry={len(registry_guardrails)}, db={len(db_guardrails)}) for tenant={tenant_id}, sector={sector}")
+        logger.debug(f"Loaded {len(merged)} guardrails (registry={len(registry_guardrails)}, db={len(db_guardrails)}) for sector={sector}")
         return merged
 
     def _applies_to_agent(self, guardrail: Dict[str, Any], agent_name: Optional[str]) -> bool:
@@ -422,7 +420,6 @@ class GuardrailService:
         content: str,
         *,
         agent_name: Optional[str] = None,
-        tenant_id: Optional[UUID] = None,
         sector: Optional[str] = None,
     ) -> OverallValidationResult:
         """
@@ -431,7 +428,6 @@ class GuardrailService:
         Args:
             content: The LLM output to validate
             agent_name: The agent that produced the content (for filtering)
-            tenant_id: Tenant ID for tenant-specific guardrails
             sector: Active sector for sector-specific guardrails
 
         Returns:
@@ -441,7 +437,7 @@ class GuardrailService:
             return OverallValidationResult()
 
         start_time = time.time()
-        guardrails = await self._load_guardrails(tenant_id, sector)
+        guardrails = await self._load_guardrails(sector)
 
         results = []
         should_block = False
@@ -538,10 +534,9 @@ class GuardrailService:
         self,
         guardrail_id: UUID,
         content: str,
-        tenant_id: Optional[UUID] = None,
     ) -> Optional[GuardrailTestResult]:
         """Test a specific guardrail against content."""
-        guardrails = await self._load_guardrails(tenant_id)
+        guardrails = await self._load_guardrails()
 
         for guardrail in guardrails:
             if guardrail["id"] == guardrail_id:
@@ -575,17 +570,16 @@ class GuardrailService:
 
         return None
 
-    def invalidate_cache(self, tenant_id: Optional[UUID] = None, sector: Optional[str] = None) -> None:
+    def invalidate_cache(self, sector: Optional[str] = None) -> None:
         """Invalidate guardrails cache."""
-        cache_key = (tenant_id, sector)
-        if tenant_id is None and sector is None:
+        if sector is None:
             self._guardrails_cache.clear()
             self._cache_time.clear()
             logger.info("Invalidated all guardrails cache")
         else:
-            self._guardrails_cache.pop(cache_key, None)
-            self._cache_time.pop(cache_key, None)
-            logger.info(f"Invalidated guardrails cache for tenant={tenant_id}, sector={sector}")
+            self._guardrails_cache.pop(sector, None)
+            self._cache_time.pop(sector, None)
+            logger.info(f"Invalidated guardrails cache for sector={sector}")
 
     async def close(self) -> None:
         """Clean up resources."""

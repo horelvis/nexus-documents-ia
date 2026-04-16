@@ -13,7 +13,7 @@ Architecture:
     ┌─────────────────────────────────────────────────────────────────────────┐
     │  POST /emma/v2/query                                                     │
     │  └── Root Trace (trace_id, session_id=thread_id)                        │
-    │      ├── metadata: tenant_id, user_id, domain                            │
+    │      ├── metadata: user_id, domain                                       │
     │      │                                                                   │
     │      ├── [SIL Fast Path] (span: "sil.process_query")                    │
     │      │   └── Cypher execution, tokens_saved                             │
@@ -44,7 +44,6 @@ Usage:
         langfuse_context.update_current_observation(
             session_id=context.thread_id,
             user_id=context.user_id,
-            metadata={"tenant_id": context.tenant_id}
         )
         # ... implementation
 
@@ -283,7 +282,7 @@ def create_trace(
         name: Trace name (e.g., "emma.query")
         session_id: Session/conversation ID for grouping multi-turn interactions
         user_id: User identifier
-        metadata: Additional metadata (e.g., tenant_id, domain)
+        metadata: Additional metadata (e.g., domain)
         input: Input data (e.g., query string)
         tags: Tags for filtering (e.g., ["production", "labor-domain"])
         version: Application version
@@ -571,7 +570,6 @@ def shutdown_langfuse() -> None:
 
 def trace_emma_query(
     query: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
     domain: Optional[str] = None,
@@ -586,7 +584,6 @@ def trace_emma_query(
         session_id=thread_id,
         user_id=user_id,
         metadata={
-            "tenant_id": tenant_id,
             "domain": domain,
             "version": "2.0",
         },

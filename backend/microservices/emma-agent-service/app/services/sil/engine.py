@@ -36,7 +36,6 @@ class PreLLMEngine:
     async def process_query(
         self,
         query: str,
-        tenant_id: str,
         max_results: int = 20,
     ) -> SILResult:
         """
@@ -44,7 +43,6 @@ class PreLLMEngine:
 
         Args:
             query: User query
-            tenant_id: Tenant identifier
             max_results: Maximum results
 
         Returns:
@@ -55,7 +53,6 @@ class PreLLMEngine:
 
             # Delegate to knowledge-tree-service structural query endpoint
             response = await client.structural_query(
-                tenant_id=tenant_id,
                 query=query,
                 max_results=max_results,
             )

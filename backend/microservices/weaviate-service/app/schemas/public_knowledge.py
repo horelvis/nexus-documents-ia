@@ -234,7 +234,6 @@ class PublicSearchResponse(BaseModel):
 class CombinedSearchRequest(BaseModel):
     """Schema for searching both tenant and public knowledge bases"""
     query: str = Field(..., description="Search query")
-    tenant_id: str = Field(..., description="Tenant ID for private documents")
     limit: int = Field(default=10, ge=1, le=100, description="Max results per source")
 
     # Source selection

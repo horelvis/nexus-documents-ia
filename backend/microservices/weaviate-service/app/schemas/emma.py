@@ -30,9 +30,8 @@ class EmmaQuery(BaseModel):
     """Schema for Emma AI agentic queries"""
     query: str
     query_type: Optional[QueryType] = QueryType.SEARCH
-    tenant_id: str
     user_id: Optional[str] = Field(default=None, description="User ID for memory and personalization")
-    user_role_ids: Optional[List[str]] = Field(default=None, description="User role IDs for ACL filtering")
+    user_roles: List[str] = Field(default_factory=list, description="User roles for ACL filtering")
     is_admin: bool = Field(default=False, description="Whether user is admin (bypasses ACL)")
     session_id: Optional[str] = None
     collections: List[str] = Field(default_factory=list)
@@ -48,7 +47,6 @@ class EmmaQuery(BaseModel):
             "example": {
                 "query": "What are the most expensive items in the product catalog?",
                 "query_type": "analyze",
-                "tenant_id": "tenant-123",
                 "collections": ["products", "pricing"],
                 "max_iterations": 3,
                 "enable_learning": True,
@@ -94,7 +92,7 @@ class ToolExecution(BaseModel):
     tool_name: str
     parameters: Dict[str, Any]
     session_id: Optional[str] = None
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
     context: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 
@@ -110,7 +108,6 @@ class EmmaResponse(BaseModel):
     query: str
     answer: str
     session_id: str
-    tenant_id: str
     decision_path: List[str]
     tools_used: List[str]
     data: Optional[Dict[str, Any]] = None
@@ -128,7 +125,6 @@ class EmmaResponse(BaseModel):
                 "query": "What are the most expensive items?",
                 "answer": "Based on the product catalog analysis, here are the top 5 most expensive items...",
                 "session_id": "session-abc123",
-                "tenant_id": "tenant-123",
                 "decision_path": ["analyze_query", "select_collections", "execute_aggregation", "format_results"],
                 "tools_used": ["collection_analyzer", "aggregation_tool", "visualization_generator"],
                 "confidence_score": 0.95,
@@ -151,7 +147,6 @@ class FeedbackRequest(BaseModel):
     response: str
     rating: int = Field(ge=1, le=5)
     feedback_text: Optional[str] = None
-    tenant_id: str
     timestamp: datetime = Field(default_factory=datetime.now)
     improvement_suggestions: Optional[List[str]] = Field(default_factory=list)
 
@@ -162,7 +157,6 @@ class VisualizationRequest(BaseModel):
     data_type: str
     visualization_type: Optional[VisualizationType] = None
     title: Optional[str] = None
-    tenant_id: str
     preferences: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     class Config:
@@ -175,7 +169,6 @@ class VisualizationRequest(BaseModel):
                 "data_type": "product_list",
                 "visualization_type": "table",
                 "title": "Product Catalog",
-                "tenant_id": "tenant-123",
                 "preferences": {"sort_by": "price", "limit": 10}
             }
         }
@@ -186,7 +179,6 @@ class MigrationStatus(BaseModel):
     migration_id: str
     source_collection: str
     target_collection: str
-    tenant_id: str
     status: str  # pending, running, completed, failed
     progress_percentage: int = Field(ge=0, le=100)
     documents_migrated: int = 0
@@ -269,7 +261,6 @@ class AnnotatedPDFResponse(BaseModel):
 class AnalyzeWithAnnotationsRequest(BaseModel):
     """Request for document analysis with PDF annotations"""
     document_id: str
-    tenant_id: str
     analysis_type: str = "legal"
     include_recommendations: bool = True
 
@@ -343,7 +334,6 @@ class EmmaSessionResponse(BaseModel):
     id: str
     session_id: str
     user_id: str
-    tenant_id: str
     title: Optional[str] = None
     messages: List[EmmaMessageSchema]
     message_count: int

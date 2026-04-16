@@ -30,12 +30,11 @@ class LegalGraphService:
         if self._initialized:
             return
         self._initialized = True
-        logger.info("✅ LegalGraphService stub initialized")
+        logger.info("LegalGraphService stub initialized")
 
     async def search_legal_concepts(
         self,
         query: str,
-        tenant_id: str,
         limit: int = 10,
     ) -> List[Dict[str, Any]]:
         """Search for legal concepts related to query."""
@@ -43,7 +42,6 @@ class LegalGraphService:
             client = get_weaviate_client()
             # Delegate to weaviate-service
             results = await client.search_documents(
-                tenant_id=tenant_id,
                 query=query,
                 limit=limit,
                 filters={"document_type": "legal"}
@@ -56,7 +54,6 @@ class LegalGraphService:
     async def get_related_legislation(
         self,
         concept: str,
-        tenant_id: str,
     ) -> List[Dict[str, Any]]:
         """Get legislation related to a legal concept."""
         # Stub - returns empty list
@@ -65,7 +62,6 @@ class LegalGraphService:
     async def get_case_citations(
         self,
         document_id: str,
-        tenant_id: str,
     ) -> List[Dict[str, Any]]:
         """Get case citations for a document."""
         # Stub - returns empty list

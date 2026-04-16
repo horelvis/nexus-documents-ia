@@ -1,16 +1,15 @@
 """Explainability API — Knowledge graph + reasoning trace for the UI.
 
-GET /emma/explainability/graph       → Full tenant graph from FalkorDB (via KTS)
+GET /emma/explainability/graph       → Full knowledge graph from FalkorDB (via KTS)
 GET /emma/explainability/trace/{tid}/{idx} → Per-response reasoning trace (from Redis)
 """
 import json
 import logging
 import os
-from typing import Optional
 
 import httpx
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, HTTPException
 
 from app.core.config import settings
 
@@ -43,10 +42,8 @@ def _map_node_type(kts_type: str) -> str:
 
 
 @router.get("/graph")
-async def get_explainability_graph(
-    tenant_id: str = Query(..., description="Tenant identifier"),
-):
-    """Full tenant knowledge graph for 3D visualization.
+async def get_explainability_graph():
+    """Full knowledge graph for 3D visualization.
 
     Proxies to KTS /graph/structure and transforms to the frontend schema:
     ExplainabilityGraphResponse { nodes, edges, stats }
@@ -55,7 +52,6 @@ async def get_explainability_graph(
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 f"{KTS_URL}/tree/graph/structure",
-                params={"tenant_id": tenant_id},
                 headers=_kts_headers(),
             )
             response.raise_for_status()

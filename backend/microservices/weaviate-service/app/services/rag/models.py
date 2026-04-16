@@ -63,7 +63,6 @@ class RetrievedDocument:
     rerank_score: Optional[float] = None    # Cross-encoder rerank score
     rrf_score: Optional[float] = None       # Reciprocal Rank Fusion score
     document_type: Optional[str] = None
-    tenant_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     chunk_index: Optional[int] = None       # Position in original document
     total_chunks: Optional[int] = None      # Total chunks in document

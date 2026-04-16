@@ -1,7 +1,7 @@
 """Event schemas for Emma Reactive system.
 
 Events flow through Redis Streams between microservices.
-Each event carries a type, tenant context, and flexible payload.
+Each event carries a type and flexible payload.
 """
 import uuid
 from datetime import datetime, timezone
@@ -44,7 +44,6 @@ class EmmaEvent(BaseModel):
     """
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     event_type: str = Field(..., description="Dot-separated event type, e.g. 'document.indexed'")
-    tenant_id: str = Field(..., description="Tenant that owns this event")
     payload: Dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -58,7 +57,6 @@ class EmmaEvent(BaseModel):
         return {
             "event_id": self.event_id,
             "event_type": self.event_type,
-            "tenant_id": self.tenant_id,
             "payload": json.dumps(self.payload),
             "timestamp": self.timestamp,
             "source_service": self.source_service or "",
@@ -78,7 +76,6 @@ class EmmaEvent(BaseModel):
         return cls(
             event_id=decoded.get("event_id", ""),
             event_type=decoded.get("event_type", ""),
-            tenant_id=decoded.get("tenant_id", ""),
             payload=json.loads(payload_str) if payload_str else {},
             timestamp=decoded.get("timestamp", ""),
             source_service=decoded.get("source_service") or None,
@@ -89,14 +86,11 @@ class EmmaEvent(BaseModel):
 class EventFilter(BaseModel):
     """Filter criteria for matching events against triggers."""
     event_type: str
-    tenant_id: Optional[str] = None
     payload_filters: Dict[str, Any] = Field(default_factory=dict)
 
     def matches(self, event: EmmaEvent) -> bool:
         """Check if an event matches this filter."""
         if event.event_type != self.event_type:
-            return False
-        if self.tenant_id and event.tenant_id != self.tenant_id:
             return False
         for key, value in self.payload_filters.items():
             if event.payload.get(key) != value:

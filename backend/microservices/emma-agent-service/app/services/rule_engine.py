@@ -343,12 +343,8 @@ class RuleEngine:
         # For now, we return the modified prompt
         return result.strip()
 
-    def invalidate_cache(self, *args, **kwargs) -> None:
-        """Invalidate rules cache.
-
-        Accepts optional legacy positional/keyword args for backwards compat
-        (formerly took tenant_id) but ignores them.
-        """
+    def invalidate_cache(self, *_args, **_kwargs) -> None:
+        """Invalidate rules cache."""
         self._rules_cache = []
         self._cache_time = 0.0
         logger.info("🗑️ Invalidated rules cache")

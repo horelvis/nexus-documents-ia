@@ -12,9 +12,6 @@ This improves coverage for long documents (>50 pages) by:
 Reference: "I Rebuilt My RAG Pipeline 11 Times" - Hierarchical Retrieval section
 Paper: RLM (Recursive Language Models) - arXiv:2512.24601
 
-Single-tenant deployment (on-premise) — legacy `tenant_id` kwargs are
-accepted-and-ignored for backwards compat with Wave-3 upstream callers.
-ACL enforcement on summary search is deferred (roles-based filter TODO).
 """
 
 import logging
@@ -116,11 +113,8 @@ class HierarchicalIndexer:
             # Allow partial operation without LLM
             self._initialized = True
 
-    def get_summary_collection_name(
-        self,
-        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
-    ) -> str:
-        """Get the summary collection name (single-tenant)."""
+    def get_summary_collection_name(self) -> str:
+        """Get the summary collection name."""
         return SUMMARY_COLLECTION_NAME
 
     async def generate_document_summary(
@@ -131,7 +125,6 @@ class HierarchicalIndexer:
         document_type: str,
         total_chunks: int,
         metadata: Optional[Dict[str, Any]] = None,
-        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> Optional[DocumentSummary]:
         """
         Generate a document-level summary for hierarchical retrieval.
@@ -143,7 +136,6 @@ class HierarchicalIndexer:
             document_type: Type of document
             total_chunks: Number of chunks the document was split into
             metadata: Additional metadata
-            tenant_id: DEPRECATED, ignored (single-tenant deployment)
 
         Returns:
             DocumentSummary or None if generation fails
@@ -407,7 +399,6 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
         query: str,
         limit: int = 10,
         filters: Optional[Dict[str, Any]] = None,
-        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> List[DocumentSummary]:
         """
         Search document summaries for hierarchical retrieval.
@@ -416,14 +407,9 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
             query: Search query
             limit: Maximum results
             filters: Optional filters (document_type, etc.)
-            tenant_id: DEPRECATED, ignored (single-tenant deployment)
 
         Returns:
             List of matching DocumentSummary objects
-
-        Note: ACL enforcement (roles-based filter) is deferred. In single-tenant
-        mode, all summaries are currently visible — summaries inherit document
-        ACL via the parent document lookup. See Wave-8 follow-up.
         """
         if not settings.rag_hierarchical_enabled:
             return []
@@ -453,7 +439,7 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
 
             query_vector = result.vectors[0]
 
-            # Build filters (tenant_id filter removed — single-tenant deployment)
+            # Build optional filters
             import weaviate.classes.query as wq
 
             weaviate_filter = None
@@ -504,7 +490,6 @@ IMPORTANTE: Solo responde con el JSON, sin texto adicional."""
     async def delete_summary(
         self,
         document_id: str,
-        tenant_id: Optional[str] = None,  # deprecated, accepted-and-ignored
     ) -> bool:
         """Delete a document summary when document is deleted"""
         if not settings.rag_hierarchical_enabled:

@@ -38,7 +38,6 @@ async def get_weaviate() -> WeaviateService:
 class KnowledgeSearchRequest(BaseModel):
     """Request for knowledge search."""
     query: str = Field(..., description="Search query")
-    tenant_id: str = Field(..., description="Tenant identifier")
     entity_types: Optional[List[str]] = Field(None, description="Filter by entity types")
     domain: Optional[str] = Field(None, description="Filter by domain (legal, fiscal, hr)")
     limit: int = Field(10, ge=1, le=100, description="Maximum results")
@@ -73,7 +72,6 @@ class KnowledgeSearchResponse(BaseModel):
 
 class KnowledgeStatsResponse(BaseModel):
     """Response for knowledge statistics."""
-    tenant_id: str
     total_entities: int
     entities_by_type: Dict[str, int]
     entities_by_domain: Dict[str, int]
@@ -98,14 +96,12 @@ async def search_knowledge(
         weaviate = await get_weaviate()
 
         results = await weaviate.search_knowledge_entities(
-            tenant_id=request.tenant_id,
             query=request.query,
+            user_roles=request.user_role_ids or [],
             entity_types=request.entity_types,
             domain=request.domain,
             limit=request.limit,
-            user_id=request.user_id,
-            user_role_ids=request.user_role_ids,
-            is_admin=request.is_admin
+            is_admin=request.is_admin,
         )
 
         entities = [
@@ -125,14 +121,13 @@ async def search_knowledge(
 
 @router.get("/entities", response_model=List[KnowledgeEntityResponse])
 async def list_entities(
-    tenant_id: str = Query(..., description="Tenant identifier"),
     entity_type: Optional[str] = Query(None, description="Filter by entity type"),
     domain: Optional[str] = Query(None, description="Filter by domain"),
     limit: int = Query(50, ge=1, le=200, description="Maximum results"),
     _api_key: str = Depends(get_api_key)
 ):
     """
-    List knowledge entities for a tenant.
+    List knowledge entities.
 
     Returns entities filtered by type and/or domain.
     """
@@ -143,8 +138,8 @@ async def list_entities(
         entity_types = [entity_type] if entity_type else None
 
         results = await weaviate.search_knowledge_entities(
-            tenant_id=tenant_id,
             query="*",  # Match all
+            user_roles=[],
             entity_types=entity_types,
             domain=domain,
             limit=limit,
@@ -162,7 +157,6 @@ async def list_entities(
 @router.get("/entities/{entity_id}", response_model=KnowledgeEntityResponse)
 async def get_entity(
     entity_id: str,
-    tenant_id: str = Query(..., description="Tenant identifier"),
     _api_key: str = Depends(get_api_key)
 ):
     """
@@ -173,8 +167,8 @@ async def get_entity(
 
         # Search by entity_id
         results = await weaviate.search_knowledge_entities(
-            tenant_id=tenant_id,
             query=entity_id,
+            user_roles=[],
             limit=1,
             min_certainty=0.0,
             is_admin=True
@@ -197,7 +191,6 @@ async def get_entity(
 @router.delete("/entities/{entity_id}")
 async def delete_entity(
     entity_id: str,
-    tenant_id: str = Query(..., description="Tenant identifier"),
     _api_key: str = Depends(get_api_key)
 ):
     """
@@ -207,7 +200,6 @@ async def delete_entity(
         weaviate = await get_weaviate()
 
         success = await weaviate.delete_knowledge_entity(
-            tenant_id=tenant_id,
             entity_id=entity_id
         )
 
@@ -226,7 +218,6 @@ async def delete_entity(
 @router.delete("/documents/{document_id}/knowledge")
 async def delete_document_knowledge(
     document_id: str,
-    tenant_id: str = Query(..., description="Tenant identifier"),
     _api_key: str = Depends(get_api_key)
 ):
     """
@@ -236,7 +227,6 @@ async def delete_document_knowledge(
         weaviate = await get_weaviate()
 
         deleted_count = await weaviate.delete_knowledge_by_document(
-            tenant_id=tenant_id,
             document_id=document_id
         )
 
@@ -253,11 +243,10 @@ async def delete_document_knowledge(
 
 @router.get("/stats", response_model=KnowledgeStatsResponse)
 async def get_knowledge_stats(
-    tenant_id: str = Query(..., description="Tenant identifier"),
     _api_key: str = Depends(get_api_key)
 ):
     """
-    Get knowledge graph statistics for a tenant.
+    Get knowledge graph statistics.
 
     Combines data from multiple sources:
     1. Weaviate Knowledge collection (extracted entities)
@@ -271,8 +260,8 @@ async def get_knowledge_stats(
 
         # Get entities from Weaviate Knowledge collection
         results = await weaviate.search_knowledge_entities(
-            tenant_id=tenant_id,
             query="*",
+            user_roles=[],
             limit=1000,
             min_certainty=0.0,
             is_admin=True
@@ -305,7 +294,6 @@ async def get_knowledge_stats(
                 async with httpx.AsyncClient(timeout=15.0) as client:
                     resp = await client.get(
                         f"{tree_url}/tree/stats",
-                        params={"tenant_id": tenant_id},
                         headers={"X-API-Key": api_key},
                     )
                     if resp.status_code == 200:
@@ -336,7 +324,6 @@ async def get_knowledge_stats(
                 logger.warning(f"Could not get knowledge-tree-service stats: {tree_error}")
 
         return KnowledgeStatsResponse(
-            tenant_id=tenant_id,
             total_entities=total_entities,
             entities_by_type=entities_by_type,
             entities_by_domain=entities_by_domain

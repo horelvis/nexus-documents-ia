@@ -2,10 +2,10 @@
 MCP Client Manager - Connection Pool and Server Management.
 
 Manages connections to MCP servers, including:
-- Connection pooling (per tenant)
+- Connection pooling (per server)
 - Health checks and automatic reconnection
 - Tool discovery and caching
-- Request routing and load balancing
+- Request routing
 
 Architecture:
     ┌─────────────────────────────────────────────────────────────────┐
@@ -412,16 +412,14 @@ class MCPClientManager:
             return self._connections.get(server_name)
         return None
 
-    async def get_tools_for_tenant(
+    async def get_available_tools(
         self,
-        tenant_id: str,
         category: Optional[str] = None
     ) -> List[MCPToolInfo]:
         """
-        Get all MCP tools available for a tenant.
+        Get all available MCP tools.
 
         Args:
-            tenant_id: Tenant identifier
             category: Optional tool category filter
 
         Returns:
@@ -429,7 +427,7 @@ class MCPClientManager:
         """
         tools = []
 
-        for server_config in self.config.get_servers_for_tenant(tenant_id):
+        for server_config in self.config.get_enabled_servers():
             conn = self._connections.get(server_config.name)
             if conn and conn.connected:
                 server_tools = await conn.list_tools()
@@ -441,7 +439,6 @@ class MCPClientManager:
         self,
         tool_name: str,
         arguments: Dict[str, Any],
-        tenant_id: str,
         server_name: Optional[str] = None
     ) -> Any:
         """
@@ -450,14 +447,13 @@ class MCPClientManager:
         Args:
             tool_name: Name of the tool to execute
             arguments: Tool arguments
-            tenant_id: Tenant identifier (for access control)
             server_name: Optional specific server to use
 
         Returns:
             Tool execution result
 
         Raises:
-            ValueError: If tool not found or access denied
+            ValueError: If tool not found
             RuntimeError: If execution fails
         """
         # Get connection
@@ -469,9 +465,8 @@ class MCPClientManager:
         if not conn:
             raise ValueError(f"Tool not found: {tool_name}")
 
-        # Check tenant access
-        if not conn.server_config.is_accessible_by_tenant(tenant_id):
-            raise ValueError(f"Access denied to tool {tool_name} for tenant {tenant_id}")
+        if not conn.server_config.enabled:
+            raise ValueError(f"Server for tool {tool_name} is disabled")
 
         # Execute tool
         return await conn.call_tool(tool_name, arguments)

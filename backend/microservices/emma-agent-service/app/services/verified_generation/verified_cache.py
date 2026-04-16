@@ -4,13 +4,9 @@ Verified Context Cache for Agent Self-Verifies pattern.
 Provides Redis-backed storage for verified claims during document generation.
 Claims are stored per session with automatic TTL expiration.
 
-Key format (single-tenant): verified:{session_id}
+Key format: verified:{session_id}
 Type: Redis List (lpush/lrange for ordered claims)
 TTL: Configurable (default 3600 seconds)
-
-Plan 3 (multi-tenancy removal): tenant_id segment dropped from Redis keys.
-Public method ``tenant_id`` parameters retained for backwards compatibility
-with subgraph callers (Wave 6 scope) but ignored when computing keys.
 """
 
 from __future__ import annotations
@@ -43,13 +39,13 @@ class VerifiedContextCache:
         await cache.connect()
 
         # Add a verified claim
-        await cache.add_verified_claim(tenant_id, session_id, claim)
+        await cache.add_verified_claim(session_id, claim)
 
         # Get all verified claims
-        claims = await cache.get_verified_claims(tenant_id, session_id)
+        claims = await cache.get_verified_claims(session_id)
 
         # Clear session
-        await cache.clear_session(tenant_id, session_id)
+        await cache.clear_session(session_id)
     """
 
     # Key prefixes
@@ -83,7 +79,7 @@ class VerifiedContextCache:
                 encoding="utf-8",
                 decode_responses=True
             )
-            logger.info("✅ VerifiedContextCache connected to Redis")
+            logger.info("VerifiedContextCache connected to Redis")
 
     async def close(self) -> None:
         """Close Redis connection."""
@@ -91,7 +87,7 @@ class VerifiedContextCache:
             await self._redis.close()
             self._redis = None
 
-    def _make_claims_key(self, _tenant_id_unused: str, session_id: str) -> str:
+    def _make_claims_key(self, session_id: str) -> str:
         """Generate Redis key for claims list."""
         return f"{self.CLAIMS_KEY_PREFIX}:{session_id}"
 
@@ -99,30 +95,28 @@ class VerifiedContextCache:
         """Generate Redis key for verification job status."""
         return f"{self.JOB_KEY_PREFIX}:{job_id}"
 
-    def _make_meta_key(self, _tenant_id_unused: str, session_id: str) -> str:
+    def _make_meta_key(self, session_id: str) -> str:
         """Generate Redis key for session metadata."""
         return f"{self.CLAIMS_KEY_PREFIX}:meta:{session_id}"
 
     async def store_session_metadata(
         self,
-        tenant_id: str,
         session_id: str,
         metadata: dict,
     ) -> None:
         """Store session metadata (query, created_at, etc.) in Redis."""
         await self.connect()
-        key = self._make_meta_key(tenant_id, session_id)
+        key = self._make_meta_key(session_id)
         await self._redis.set(key, json.dumps(metadata), ex=self._ttl)
-        logger.info(f"📝 Stored session metadata for {session_id[:16]}...")
+        logger.info(f"Stored session metadata for {session_id[:16]}...")
 
     async def get_session_metadata(
         self,
-        tenant_id: str,
         session_id: str,
     ) -> dict:
         """Retrieve session metadata from Redis."""
         await self.connect()
-        key = self._make_meta_key(tenant_id, session_id)
+        key = self._make_meta_key(session_id)
         data = await self._redis.get(key)
         if data:
             return json.loads(data)
@@ -130,7 +124,6 @@ class VerifiedContextCache:
 
     async def add_verified_claim(
         self,
-        tenant_id: str,
         session_id: str,
         claim: VerifiedClaim
     ) -> int:
@@ -141,7 +134,6 @@ class VerifiedContextCache:
         This maintains the generation order for document assembly.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             claim: The verified claim to add
 
@@ -150,7 +142,7 @@ class VerifiedContextCache:
         """
         await self.connect()
 
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             # Serialize claim to JSON
@@ -163,7 +155,7 @@ class VerifiedContextCache:
             await self._redis.expire(key, self._ttl)
 
             logger.info(
-                f"📝 Added verified claim #{claim.generation_order} "
+                f"Added verified claim #{claim.generation_order} "
                 f"(confidence={claim.confidence:.2f}, status={claim.status.value}) "
                 f"to session {session_id[:16]}..."
             )
@@ -171,12 +163,11 @@ class VerifiedContextCache:
             return count
 
         except Exception as e:
-            logger.error(f"❌ Failed to add verified claim: {e}")
+            logger.error(f"Failed to add verified claim: {e}")
             raise
 
     async def get_verified_claims(
         self,
-        tenant_id: str,
         session_id: str
     ) -> List[VerifiedClaim]:
         """
@@ -185,7 +176,6 @@ class VerifiedContextCache:
         Returns claims in generation order (oldest first).
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
 
         Returns:
@@ -193,7 +183,7 @@ class VerifiedContextCache:
         """
         await self.connect()
 
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             # LRANGE 0 -1 gets all elements
@@ -206,30 +196,28 @@ class VerifiedContextCache:
                     claim = VerifiedClaim.from_dict(data)
                     claims.append(claim)
                 except (json.JSONDecodeError, KeyError) as e:
-                    logger.warning(f"⚠️ Failed to deserialize claim: {e}")
+                    logger.warning(f"Failed to deserialize claim: {e}")
                     continue
 
             logger.debug(
-                f"📖 Retrieved {len(claims)} verified claims "
+                f"Retrieved {len(claims)} verified claims "
                 f"for session {session_id[:16]}..."
             )
 
             return claims
 
         except Exception as e:
-            logger.error(f"❌ Failed to get verified claims: {e}")
+            logger.error(f"Failed to get verified claims: {e}")
             return []
 
     async def get_claims_count(
         self,
-        tenant_id: str,
         session_id: str
     ) -> int:
         """
         Get the number of verified claims in a session.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
 
         Returns:
@@ -237,24 +225,22 @@ class VerifiedContextCache:
         """
         await self.connect()
 
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             return await self._redis.llen(key)
         except Exception as e:
-            logger.error(f"❌ Failed to get claims count: {e}")
+            logger.error(f"Failed to get claims count: {e}")
             return 0
 
     async def get_latest_claim(
         self,
-        tenant_id: str,
         session_id: str
     ) -> Optional[VerifiedClaim]:
         """
         Get the most recently added claim.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
 
         Returns:
@@ -262,7 +248,7 @@ class VerifiedContextCache:
         """
         await self.connect()
 
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             # LINDEX -1 gets the last element
@@ -275,19 +261,17 @@ class VerifiedContextCache:
             return None
 
         except Exception as e:
-            logger.error(f"❌ Failed to get latest claim: {e}")
+            logger.error(f"Failed to get latest claim: {e}")
             return None
 
     async def clear_session(
         self,
-        tenant_id: str,
         session_id: str
     ) -> bool:
         """
         Clear all claims for a session.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
 
         Returns:
@@ -295,19 +279,18 @@ class VerifiedContextCache:
         """
         await self.connect()
 
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             await self._redis.delete(key)
-            logger.info(f"🗑️ Cleared verified claims for session {session_id[:16]}...")
+            logger.info(f"Cleared verified claims for session {session_id[:16]}...")
             return True
         except Exception as e:
-            logger.error(f"❌ Failed to clear session: {e}")
+            logger.error(f"Failed to clear session: {e}")
             return False
 
     async def extend_ttl(
         self,
-        tenant_id: str,
         session_id: str
     ) -> bool:
         """
@@ -316,7 +299,6 @@ class VerifiedContextCache:
         Call this periodically during generation to prevent expiration.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
 
         Returns:
@@ -324,25 +306,23 @@ class VerifiedContextCache:
         """
         await self.connect()
 
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             result = await self._redis.expire(key, self._ttl)
             return result
         except Exception as e:
-            logger.error(f"❌ Failed to extend TTL: {e}")
+            logger.error(f"Failed to extend TTL: {e}")
             return False
 
     async def get_ttl_remaining(
         self,
-        tenant_id: str,
         session_id: str
     ) -> Optional[int]:
         """
         Get remaining TTL for a session in seconds.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
 
         Returns:
@@ -350,13 +330,13 @@ class VerifiedContextCache:
         """
         await self.connect()
 
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             ttl = await self._redis.ttl(key)
             return ttl if ttl > 0 else None
         except Exception as e:
-            logger.error(f"❌ Failed to get TTL: {e}")
+            logger.error(f"Failed to get TTL: {e}")
             return None
 
     # =========================================================================
@@ -365,7 +345,6 @@ class VerifiedContextCache:
 
     async def remove_claim(
         self,
-        tenant_id: str,
         session_id: str,
         claim_id: str,
     ) -> bool:
@@ -377,7 +356,6 @@ class VerifiedContextCache:
         read all, filter, delete, and re-push.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             claim_id: ID of the claim to remove
 
@@ -385,7 +363,7 @@ class VerifiedContextCache:
             True if the claim was found and removed
         """
         await self.connect()
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             claims_json = await self._redis.lrange(key, 0, -1)
@@ -411,19 +389,18 @@ class VerifiedContextCache:
                     pipe.expire(key, self._ttl)
                 await pipe.execute()
                 logger.info(
-                    f"🗑️ Removed claim {claim_id[:16]}... "
+                    f"Removed claim {claim_id[:16]}... "
                     f"from session {session_id[:16]}..."
                 )
 
             return removed
 
         except Exception as e:
-            logger.error(f"❌ Failed to remove claim: {e}")
+            logger.error(f"Failed to remove claim: {e}")
             return False
 
     async def update_claim_text(
         self,
-        tenant_id: str,
         session_id: str,
         claim_id: str,
         new_text: str,
@@ -434,7 +411,6 @@ class VerifiedContextCache:
         Used by HITL review when a human edits a claim.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
             claim_id: ID of the claim to update
             new_text: New claim text
@@ -443,7 +419,7 @@ class VerifiedContextCache:
             True if the claim was found and updated
         """
         await self.connect()
-        key = self._make_claims_key(tenant_id, session_id)
+        key = self._make_claims_key(session_id)
 
         try:
             claims_json = await self._redis.lrange(key, 0, -1)
@@ -470,14 +446,14 @@ class VerifiedContextCache:
                     pipe.expire(key, self._ttl)
                 await pipe.execute()
                 logger.info(
-                    f"✏️ Updated claim {claim_id[:16]}... "
+                    f"Updated claim {claim_id[:16]}... "
                     f"in session {session_id[:16]}..."
                 )
 
             return updated
 
         except Exception as e:
-            logger.error(f"❌ Failed to update claim text: {e}")
+            logger.error(f"Failed to update claim text: {e}")
             return False
 
     # =========================================================================
@@ -511,7 +487,7 @@ class VerifiedContextCache:
             await self._redis.expire(key, 300)  # 5 min TTL for job status
 
         except Exception as e:
-            logger.error(f"❌ Failed to set job status: {e}")
+            logger.error(f"Failed to set job status: {e}")
 
     async def get_job_status(self, job_id: str) -> Optional[dict]:
         """
@@ -539,7 +515,7 @@ class VerifiedContextCache:
             return None
 
         except Exception as e:
-            logger.error(f"❌ Failed to get job status: {e}")
+            logger.error(f"Failed to get job status: {e}")
             return None
 
     # =========================================================================
@@ -548,21 +524,19 @@ class VerifiedContextCache:
 
     async def get_session_stats(
         self,
-        tenant_id: str,
         session_id: str
     ) -> dict:
         """
         Get statistics for a verification session.
 
         Args:
-            tenant_id: Tenant identifier
             session_id: Session identifier
 
         Returns:
             Dict with session statistics
         """
-        claims = await self.get_verified_claims(tenant_id, session_id)
-        ttl = await self.get_ttl_remaining(tenant_id, session_id)
+        claims = await self.get_verified_claims(session_id)
+        ttl = await self.get_ttl_remaining(session_id)
 
         if not claims:
             return {

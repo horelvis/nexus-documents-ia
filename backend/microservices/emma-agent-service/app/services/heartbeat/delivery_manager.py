@@ -5,12 +5,6 @@ Handles:
 - Rate limiting (max per day, per hour, minimum interval)
 - Channel selection based on priority and configuration
 - Batching low-priority insights into daily digests
-
-Plan 3 (multi-tenancy removal):
-- Redis keys no longer carry a tenant_id segment.
-- Public method ``tenant_id`` parameters are accepted for backwards
-  compatibility with Wave 3 callers (``heartbeat_service``) but are
-  ignored when computing keys.
 """
 import json
 import logging
@@ -57,15 +51,12 @@ class DeliveryManager:
         self,
         insights: List[ProactiveInsightCreate],
         config: HeartbeatConfig,
-        tenant_id: str = "",
     ) -> Tuple[List[ProactiveInsight], List[ProactiveInsightCreate]]:
         """Deliver insights respecting rate limits and quiet hours.
 
         Args:
             insights: Insights to deliver (already sorted by priority)
             config: Heartbeat configuration
-            tenant_id: Legacy placeholder kept for backwards compatibility
-                (passed through to ``ProactiveInsight.tenant_id`` only).
 
         Returns:
             Tuple of (delivered_insights, deferred_insights)
@@ -95,7 +86,7 @@ class DeliveryManager:
                     # High priority bypasses some limits
                     if stats["today_count"] < config.max_insights_per_day * 1.5:
                         delivered_insight = await self._deliver_single(
-                            insight, config, tenant_id
+                            insight, config
                         )
                         if delivered_insight:
                             delivered.append(delivered_insight)
@@ -109,7 +100,7 @@ class DeliveryManager:
                 continue
 
             # Deliver the insight
-            delivered_insight = await self._deliver_single(insight, config, tenant_id)
+            delivered_insight = await self._deliver_single(insight, config)
             if delivered_insight:
                 delivered.append(delivered_insight)
                 await self._update_delivery_stats(now)
@@ -178,7 +169,6 @@ class DeliveryManager:
         self,
         insight: ProactiveInsightCreate,
         config: HeartbeatConfig,
-        tenant_id: str,
     ) -> Optional[ProactiveInsight]:
         """Deliver a single insight via configured channels."""
         now = datetime.now(timezone.utc)
@@ -187,7 +177,6 @@ class DeliveryManager:
         insight_id = str(uuid.uuid4())
         delivered_insight = ProactiveInsight(
             id=insight_id,
-            tenant_id=tenant_id,
             insight_type=insight.insight_type,
             title=insight.title,
             summary=insight.summary,
@@ -438,13 +427,9 @@ class DeliveryManager:
 
     async def get_pending_insights(
         self,
-        tenant_id: str = "",
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Get list of recent insights.
-
-        ``tenant_id`` accepted for backwards compatibility; ignored.
-        """
+        """Get list of recent insights."""
         r = await self._get_redis()
 
         list_key = "emma:insights:list"
