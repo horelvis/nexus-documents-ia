@@ -103,20 +103,11 @@ export function DocumentsDataTable({
   canConvertToTemplate,
   convertLoadingId,
 }: DocumentsDataTableProps) {
-  // Get tenant ID from URL for localStorage keys
-  const tenantId = React.useMemo(() => {
-    if (typeof window !== 'undefined') {
-      const paths = window.location.pathname.split('/')
-      return paths[1] // Assuming URL pattern is /[tenantId]/documents
-    }
-    return ''
-  }, [])
-
   // Helper functions for localStorage
   const getStoredPreference = (key: string, defaultValue: any) => {
     if (typeof window === 'undefined') return defaultValue
     try {
-      const stored = localStorage.getItem(`documents_table_${tenantId}_${key}`)
+      const stored = localStorage.getItem(`documents_table_${key}`)
       return stored ? JSON.parse(stored) : defaultValue
     } catch {
       return defaultValue
@@ -126,7 +117,7 @@ export function DocumentsDataTable({
   const storePreference = (key: string, value: any) => {
     if (typeof window === 'undefined') return
     try {
-      localStorage.setItem(`documents_table_${tenantId}_${key}`, JSON.stringify(value))
+      localStorage.setItem(`documents_table_${key}`, JSON.stringify(value))
     } catch {
       // Ignore localStorage errors
     }

@@ -23,7 +23,6 @@ import {
   Monitor,
   Keyboard,
   HelpCircle,
-  Building2,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -52,7 +51,6 @@ export interface UserMenuUser {
   email?: string
   fullName?: string
   avatarUrl?: string
-  tenantId?: string
   planName?: string
 }
 
@@ -264,14 +262,6 @@ export function UserMenu({
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                  {user.tenantId && (
-                    <div className="flex items-center gap-1.5 pt-1">
-                      <Building2 className="h-3 w-3 text-muted-foreground" />
-                      <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                        {user.tenantId.slice(0, 8)}
-                      </span>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>

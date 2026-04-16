@@ -28,7 +28,6 @@ import { Loader2 } from "lucide-react"
 
 interface LayoutSwitcherProps {
   children: ReactNode
-  tenantId: string
 }
 
 /**
@@ -44,7 +43,7 @@ interface LayoutSwitcherProps {
  * - Standard header with breadcrumbs
  * - Document library and all features visible
  */
-export function LayoutSwitcher({ children, tenantId }: LayoutSwitcherProps) {
+export function LayoutSwitcher({ children }: LayoutSwitcherProps) {
   const isEmmaFullscreen = useEmmaFullscreenMode()
   const showDocumentLibrary = useFeature(Feature.DOCUMENT_LIBRARY_UI)
   const [isHydrated, setIsHydrated] = useState(false)
@@ -66,7 +65,7 @@ export function LayoutSwitcher({ children, tenantId }: LayoutSwitcherProps) {
   // Emma fullscreen mode: minimal UI, chat-centric
   if (isEmmaFullscreen) {
     return (
-      <EmmaFullscreenLayout tenantId={tenantId}>
+      <EmmaFullscreenLayout>
         {children}
       </EmmaFullscreenLayout>
     )
@@ -83,10 +82,10 @@ export function LayoutSwitcher({ children, tenantId }: LayoutSwitcherProps) {
       }
     >
       <TourGuide>
-        <AppSidebar variant="inset" tenantId={tenantId} />
+        <AppSidebar variant="inset" />
         <SidebarInset>
           <NavigationProgress />
-          <SiteHeader tenantId={tenantId} />
+          <SiteHeader />
           <div className="flex flex-1 flex-col min-h-0">
             <div className="@container/main flex flex-1 flex-col min-h-0">
               {children}

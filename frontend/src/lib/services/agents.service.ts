@@ -83,7 +83,7 @@ export class AgentsService {
       context: request.context ?? {},
     }
 
-    // Tenant/user resolution happens server-side (gateway injects tenant_id)
+    // User resolution happens server-side (gateway injects user context from JWT)
     const response = await this.apiClient.post<any>(
       API_CONFIG.ENDPOINTS.EMMA_QUERY,
       payload,

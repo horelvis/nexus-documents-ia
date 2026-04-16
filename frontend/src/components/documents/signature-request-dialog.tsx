@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams } from "next/navigation"
 import {
   Dialog,
   DialogContent,
@@ -54,8 +53,6 @@ export function SignatureRequestDialog({
   open,
   onOpenChange,
 }: SignatureRequestDialogProps) {
-  const params = useParams()
-  const tenantId = params.tenantId as string
   const { addNotification } = useNotifications()
   const agentService = useAgentService()
   const signatureService = useSignatureService()

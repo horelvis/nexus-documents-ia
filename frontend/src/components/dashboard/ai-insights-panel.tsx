@@ -9,11 +9,7 @@ import Link from "next/link"
 import { useDashboardService, type AIInsight } from "@/lib/services/dashboard.service"
 import { useTranslation } from "@/lib/i18n/hooks"
 
-interface AIInsightsPanelProps {
-  tenantId: string
-}
-
-export function AIInsightsPanel({ tenantId }: AIInsightsPanelProps) {
+export function AIInsightsPanel() {
   const { t } = useTranslation()
   const [insights, setInsights] = useState<AIInsight[]>([])
   const [isLoading, setIsLoading] = useState(true)

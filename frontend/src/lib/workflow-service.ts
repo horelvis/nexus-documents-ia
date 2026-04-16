@@ -14,7 +14,6 @@ export interface ProcessDefinition {
   version_tag?: string
   category?: string
   deployment_id: string
-  tenant_id?: string
   suspended: boolean
 }
 
@@ -23,7 +22,6 @@ export interface ProcessInstance {
   definition_id: string
   definition_key?: string
   business_key?: string
-  tenant_id?: string
   ended: boolean
   suspended: boolean
   variables?: Record<string, any>
@@ -45,7 +43,6 @@ export interface WorkflowTask {
   process_instance_id: string
   task_definition_key: string
   form_key?: string
-  tenant_id?: string
   suspended: boolean
   variables?: Record<string, any>
 }
@@ -76,7 +73,6 @@ export interface Deployment {
   name: string
   deployment_time?: string
   source?: string
-  tenant_id?: string
 }
 
 export interface WorkflowHealth {

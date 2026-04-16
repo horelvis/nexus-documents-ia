@@ -33,8 +33,7 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
     // Only handle onboarding redirects here if needed
     if (!isAllowedPath && backendUser) {
       if (!backendUser.onboarding_completed) {
-        const tenantId = backendUser.tenant_id || 'temp'
-        router.push(`/${tenantId}/onboarding`)
+        router.push(`/onboarding`)
         return
       }
     }
@@ -56,8 +55,7 @@ export function ProfileVerificationGuard({ children, fallback }: ProfileVerifica
   
   // Check for invalid tenant ID
   if (onboarding.error === 'INVALID_TENANT') {
-    const tenantId = backendUser?.tenant_id || 'default'
-    return <TenantNotFound tenantId={tenantId} onRetry={refetchUser} />
+    return <TenantNotFound onRetry={refetchUser} />
   }
   
   // Rutas permitidas o verificación pasada

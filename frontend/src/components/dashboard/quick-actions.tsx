@@ -27,7 +27,7 @@ interface QuickAction {
   primary?: boolean
 }
 
-export function QuickActions({ tenantId }: { tenantId: string }) {
+export function QuickActions() {
   const router = useRouter()
   const { openUploadDialog } = useUpload()
   const { t } = useTranslation()
@@ -47,7 +47,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: t('dashboard.quickActions.items.search.title'),
       description: t('dashboard.quickActions.items.search.description'),
       icon: IconSearch,
-      action: () => router.push(`/${tenantId}/search`),
+      action: () => router.push(`/search`),
       color: 'green'
     },
     {
@@ -55,7 +55,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: t('dashboard.quickActions.items.agents.title'),
       description: t('dashboard.quickActions.items.agents.description'),
       icon: IconRobot,
-      action: () => router.push(`/${tenantId}/chat`),
+      action: () => router.push(`/chat`),
       color: 'purple'
     },
     {
@@ -63,7 +63,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: t('dashboard.quickActions.items.team.title'),
       description: t('dashboard.quickActions.items.team.description'),
       icon: IconUsers,
-      action: () => router.push(`/${tenantId}/settings/team`),
+      action: () => router.push(`/settings/team`),
       color: 'orange'
     },
     {
@@ -71,7 +71,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: t('dashboard.quickActions.items.templates.title'),
       description: t('dashboard.quickActions.items.templates.description'),
       icon: IconFileText,
-      action: () => router.push(`/${tenantId}/templates`),
+      action: () => router.push(`/templates`),
       color: 'pink'
     },
     {
@@ -79,7 +79,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: t('dashboard.quickActions.items.folders.title'),
       description: t('dashboard.quickActions.items.folders.description'),
       icon: IconFolderPlus,
-      action: () => router.push(`/${tenantId}/documents`),
+      action: () => router.push(`/documents`),
       color: 'yellow'
     },
     {
@@ -87,7 +87,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: t('dashboard.quickActions.items.analytics.title'),
       description: t('dashboard.quickActions.items.analytics.description'),
       icon: IconChartBar,
-      action: () => router.push(`/${tenantId}/analytics`),
+      action: () => router.push(`/analytics`),
       color: 'indigo'
     },
     {
@@ -95,7 +95,7 @@ export function QuickActions({ tenantId }: { tenantId: string }) {
       title: t('dashboard.quickActions.items.settings.title'),
       description: t('dashboard.quickActions.items.settings.description'),
       icon: IconSettings,
-      action: () => router.push(`/${tenantId}/settings`),
+      action: () => router.push(`/settings`),
       color: 'gray'
     }
   ]

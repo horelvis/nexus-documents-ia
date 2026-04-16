@@ -228,7 +228,6 @@ interface HeartbeatConfig {
 }
 
 interface HeartbeatStatus {
-  tenant_id: string
   enabled: boolean
   last_run_at: string | null
   next_run_at: string | null

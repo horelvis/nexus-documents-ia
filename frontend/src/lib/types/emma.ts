@@ -212,7 +212,6 @@ export interface DoiValidation {
 
 export interface VerifiedGenerationMetadata {
   session_id: string
-  tenant_id?: string
   topic: string
   claims: VerifiedClaimInfo[]
   current_phase: 'generating' | 'verifying' | 'complete' | 'review'
@@ -279,7 +278,6 @@ export interface PredictiveFactorInfo {
 
 export interface PredictiveAnalysisMetadata {
   session_id: string
-  tenant_id?: string
   case_description: string
   factors: PredictiveFactorInfo[]
   current_phase: 'extracting' | 'verifying' | 'synthesizing' | 'complete'
@@ -464,7 +462,6 @@ export interface EmmaStreamEvent {
 export interface EmmaQueryRequest {
   query: string
   session_id: string
-  tenant_id: string
   enable_debug?: boolean
   context?: Record<string, any>
 }

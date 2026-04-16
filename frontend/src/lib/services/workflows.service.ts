@@ -95,7 +95,6 @@ export function useWorkflowsService() {
 
   const generateBPMN = useCallback(async (params: {
     process_description: string
-    tenant_id: string
     process_type: string
     context?: {
       duration?: string

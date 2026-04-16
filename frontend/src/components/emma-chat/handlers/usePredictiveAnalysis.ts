@@ -33,7 +33,6 @@ function hasValidToken(): boolean {
 
 interface PredictiveHandlerOptions {
   userId?: string
-  tenantId: string | null
   sessionId: string
   uploadTempDocument: (file: File) => Promise<{ upload_id: string; filename: string }>
   updateMessages: (updater: (prev: EmmaMessage[]) => EmmaMessage[]) => void
@@ -46,7 +45,6 @@ interface PredictiveHandlerOptions {
 export function usePredictiveAnalysisHandler(options: PredictiveHandlerOptions) {
   const {
     userId,
-    tenantId,
     sessionId,
     uploadTempDocument,
     updateMessages,
@@ -64,7 +62,7 @@ export function usePredictiveAnalysisHandler(options: PredictiveHandlerOptions) 
 
   const handlePredictiveAnalysis = useCallback(
     async (caseDescription: string, attachments?: Attachment[]) => {
-      if (!userId || !tenantId) return
+      if (!userId) return
 
       if (!hasValidToken()) {
         setError('Tu sesión ha expirado. Por favor inicia sesión nuevamente.')
@@ -93,7 +91,6 @@ export function usePredictiveAnalysisHandler(options: PredictiveHandlerOptions) 
         const predictiveMessageId = (Date.now() + 1).toString()
         const initialPredictive: PredictiveAnalysisMetadata = {
           session_id: sessionId,
-          tenant_id: tenantId || undefined,
           case_description: caseDescription,
           factors: [],
           current_phase: 'extracting',
@@ -164,7 +161,6 @@ export function usePredictiveAnalysisHandler(options: PredictiveHandlerOptions) 
         try {
           for await (const event of queryPredictiveStream({
             case_description: caseDescription,
-            tenant_id: tenantId,
             session_id: sessionId,
             context_document_ids: contextDocIds.length > 0 ? contextDocIds : undefined,
             uploaded_file_ids: uploadedFileIds.length > 0 ? uploadedFileIds : undefined,
@@ -326,7 +322,6 @@ export function usePredictiveAnalysisHandler(options: PredictiveHandlerOptions) 
     },
     [
       userId,
-      tenantId,
       sessionId,
       onAuthError,
       updateMessages,

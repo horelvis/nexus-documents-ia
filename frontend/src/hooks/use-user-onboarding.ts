@@ -76,8 +76,7 @@ export function useUserOnboarding() {
 
       // Redirect to onboarding if needed and not already there
       if (!hasCompletedOnboarding && pathname !== '/pricing' && !pathname.includes('/onboarding')) {
-        const tenantId = userData?.tenant_id || 'temp'
-        router.push(`/${tenantId}/onboarding`)
+        router.push(`/onboarding`)
       }
 
     } catch (error) {

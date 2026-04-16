@@ -42,7 +42,7 @@ const EXAMPLE_PROMPTS = [
 ]
 
 function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
-  const { user, tenantId, login } = useAuth()
+  const { user, login } = useAuth()
   const { uploadTempDocument } = useEmmaService()
 
   // ── Local state ──
@@ -64,7 +64,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
   )
   const { submit } = useStreamSubmit(stream, {
     userId: user?.id,
-    tenantId,
     deepReasoning,
     uploadTempDocument,
     onAuthError: login,
@@ -74,7 +73,7 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
   // ── Session ID ──
   const [sessionId] = useState(() => {
     if (typeof window !== 'undefined') {
-      const storageKey = `emma_session_${tenantId || 'default'}`
+      const storageKey = `emma_session_default`
       const stored = sessionStorage.getItem(storageKey)
       if (stored) return stored
       const newId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`
@@ -109,7 +108,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
   const { verifiedJobs, handleVerifiedGeneration, handleReviewSubmit } =
     useVerifiedGenerationHandler({
       userId: user?.id,
-      tenantId,
       sessionId,
       uploadTempDocument,
       updateMessages: setInjectedMessages,
@@ -121,7 +119,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 
   const { predictiveJobs, handlePredictiveAnalysis } = usePredictiveAnalysisHandler({
     userId: user?.id,
-    tenantId,
     sessionId,
     uploadTempDocument,
     updateMessages: setInjectedMessages,
@@ -174,13 +171,13 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 
   // Execute initial query
   useEffect(() => {
-    if (initialQuery && user?.id && tenantId && allMessages.length === 0) {
+    if (initialQuery && user?.id && allMessages.length === 0) {
       const timer = setTimeout(() => {
         submit(initialQuery)
       }, 500)
       return () => clearTimeout(timer)
     }
-  }, [initialQuery, user?.id, tenantId, allMessages.length, submit])
+  }, [initialQuery, user?.id, allMessages.length, submit])
 
   // ── Render ──
   return (
@@ -303,14 +300,12 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 // ── Exported wrapper: wraps Inner in EmmaStreamProvider ──
 
 export function EmmaChat(props: EmmaChatProps) {
-  const { tenantId } = useAuth()
   const [streamThreadId, setStreamThreadId] = useState<string | null>(null)
 
   return (
     <EmmaStreamProvider
       threadId={streamThreadId}
       onThreadId={setStreamThreadId}
-      tenantId={tenantId || ''}
     >
       <EmmaChatInner {...props} />
     </EmmaStreamProvider>

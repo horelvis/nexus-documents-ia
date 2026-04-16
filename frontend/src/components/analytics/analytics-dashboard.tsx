@@ -26,11 +26,7 @@ import { TrendsChart } from "./trends-chart"
 import { TopTagsChart } from "./top-tags-chart"
 import { useAnalyticsData } from "@/lib/hooks/use-analytics-data"
 
-interface AnalyticsDashboardProps {
-  tenantId: string
-}
-
-export function AnalyticsDashboard({ tenantId }: AnalyticsDashboardProps) {
+export function AnalyticsDashboard() {
   const [timeRange, setTimeRange] = useState<"7d" | "30d" | "90d">("30d")
   const [isRefreshing, setIsRefreshing] = useState(false)
 
@@ -41,7 +37,7 @@ export function AnalyticsDashboard({ tenantId }: AnalyticsDashboardProps) {
     isLoading,
     error,
     refetch
-  } = useAnalyticsData(tenantId, timeRange)
+  } = useAnalyticsData(timeRange)
 
   const handleRefresh = async () => {
     setIsRefreshing(true)

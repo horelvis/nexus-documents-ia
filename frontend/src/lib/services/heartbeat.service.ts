@@ -21,7 +21,6 @@ export interface SuggestedAction {
 
 export interface ProactiveInsight {
   id: string
-  tenant_id: string
   insight_type: string
   title: string
   summary: string

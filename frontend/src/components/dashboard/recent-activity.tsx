@@ -23,7 +23,7 @@ import { getFileIcon, getRelativeTime } from "@/lib/document-utils"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useTranslation } from "@/lib/i18n/hooks"
 
-export function RecentActivity({ tenantId }: { tenantId: string }) {
+export function RecentActivity() {
   const { t } = useTranslation()
   const [activities, setActivities] = useState<ActivityLog[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -107,9 +107,9 @@ export function RecentActivity({ tenantId }: { tenantId: string }) {
 
   const handleActivityClick = (activity: ActivityLog) => {
     if (activity.metadata?.document_id) {
-      router.push(`/${tenantId}/documents/${activity.metadata.document_id}`)
+      router.push(`/documents/${activity.metadata.document_id}`)
     } else {
-      router.push(`/${tenantId}/documents`)
+      router.push(`/documents`)
     }
   }
 
@@ -120,7 +120,7 @@ export function RecentActivity({ tenantId }: { tenantId: string }) {
           <CardTitle>{t('dashboard.recentActivity.title')}</CardTitle>
           <CardDescription>{t('dashboard.recentActivity.description')}</CardDescription>
         </div>
-        <Button variant="outline" size="sm" onClick={() => router.push(`/${tenantId}/documents`)}>
+        <Button variant="outline" size="sm" onClick={() => router.push(`/documents`)}>
           {t('dashboard.recentActivity.viewAll')}
         </Button>
       </CardHeader>

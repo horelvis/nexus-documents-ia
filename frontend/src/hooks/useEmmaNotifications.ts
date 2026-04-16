@@ -15,7 +15,6 @@ import { API_CONFIG } from "../lib/config";
 
 export interface EmmaNotification {
   id: string;
-  tenant_id: string;
   user_id: string;
   notification_type: string;
   title: string;

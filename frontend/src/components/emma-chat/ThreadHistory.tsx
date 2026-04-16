@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { SquarePen, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useAuth } from '@/contexts/auth-context'
 import { apiClient } from '@/lib/api-client'
 
 interface ThreadItem {
@@ -22,18 +21,15 @@ export function ThreadHistory({
   currentThreadId,
   onSelectThread,
 }: ThreadHistoryProps) {
-  const { tenantId } = useAuth()
   const [threads, setThreads] = useState<ThreadItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!tenantId) return
     setIsLoading(true)
     setError(null)
     apiClient.get<{ sessions: ThreadItem[] } | ThreadItem[]>('/emma/sessions', {
       params: { limit: 20 },
-      headers: { 'X-Tenant-ID': tenantId },
     }).then((response) => {
       if (response.error) {
         setError(response.error)
@@ -48,7 +44,7 @@ export function ThreadHistory({
     }).finally(() => {
       setIsLoading(false)
     })
-  }, [tenantId])
+  }, [])
 
   return (
     <div className="flex h-full w-64 flex-col border-r bg-muted/30">

@@ -24,14 +24,13 @@ export interface EntitySearchResponse {
 
 class EntitySearchService {
   async search(
-    tenantId: string,
     query: string,
     limit: number = 10,
   ): Promise<EntityMatch[]> {
     try {
       const response = await apiClient.post<EntitySearchResponse>(
         '/api/v1/weaviate/entities/search',
-        { query, tenant_id: tenantId, limit },
+        { query, limit },
       )
       return response.data?.entities ?? []
     } catch (error) {

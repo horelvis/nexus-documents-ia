@@ -8,11 +8,10 @@ import { Play, FileText, Clock, Loader2 } from "lucide-react"
 import { useWorkflowService } from "@/lib/workflow-service"
 
 interface WorkflowTemplatesProps {
-  tenantId: string
   onStartWorkflow: (workflowType: string, inputData: any) => Promise<void>
 }
 
-export function WorkflowTemplates({ tenantId, onStartWorkflow }: WorkflowTemplatesProps) {
+export function WorkflowTemplates({ onStartWorkflow }: WorkflowTemplatesProps) {
   const workflowService = useWorkflowService()
   const [isLoading, setIsLoading] = useState(true)
   const [definitions, setDefinitions] = useState<any[]>([])

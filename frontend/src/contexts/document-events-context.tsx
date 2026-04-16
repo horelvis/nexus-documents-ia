@@ -10,12 +10,10 @@ type UploadResult = {
 
 type DocumentEventPayloads = {
   "documents:updated": {
-    tenantId?: string
     source?: "upload" | "delete" | "edit" | "refresh"
     files?: UploadResult[]
   }
   "folders:updated": {
-    tenantId?: string
     source?: "create" | "delete" | "rename"
     folderPath?: string
   }

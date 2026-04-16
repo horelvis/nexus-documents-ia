@@ -306,7 +306,6 @@ export async function getUserInfo(accessToken: string): Promise<{
   preferred_username?: string
   given_name?: string
   family_name?: string
-  tenant_id?: string
 }> {
   const response = await fetch(OIDC_CONFIG.userinfoEndpoint, {
     headers: {

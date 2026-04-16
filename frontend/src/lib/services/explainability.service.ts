@@ -72,10 +72,10 @@ export interface ReasoningTraceResponse {
 import { apiClient } from "@/lib/api-client"
 
 export const explainabilityApi = {
-  /** GET /emma/explainability/graph — Full explainability graph for tenant */
-  async getExplainabilityGraph(tenantId: string) {
+  /** GET /emma/explainability/graph — Full explainability graph */
+  async getExplainabilityGraph() {
     return apiClient.get<ExplainabilityGraphResponse>(
-      `/emma/explainability/graph?tenant_id=${encodeURIComponent(tenantId)}`
+      `/emma/explainability/graph`
     )
   },
 

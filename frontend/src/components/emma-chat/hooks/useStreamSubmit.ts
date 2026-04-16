@@ -18,7 +18,6 @@ interface StreamLike {
 
 interface SubmitOptions {
   userId?: string
-  tenantId: string | null
   deepReasoning: boolean
   uploadTempDocument: (file: File) => Promise<{ upload_id: string; filename: string }>
   onAuthError?: () => void
@@ -44,7 +43,7 @@ export function useStreamSubmit(
   stream: StreamLike,
   options: SubmitOptions,
 ) {
-  const { userId, tenantId, deepReasoning, uploadTempDocument, onAuthError } = options
+  const { userId, deepReasoning, uploadTempDocument, onAuthError } = options
 
   // Retain uploaded file IDs across follow-up queries in the same session
   const sessionUploadIdsRef = useRef<string[]>([])
@@ -53,7 +52,7 @@ export function useStreamSubmit(
 
   const submit = useCallback(
     async (query: string, attachments?: Attachment[]) => {
-      if (!userId || !tenantId) return
+      if (!userId) return
 
       if (!hasValidToken()) {
         onAuthError?.()
@@ -63,7 +62,6 @@ export function useStreamSubmit(
       // Build configurable context
       const configurable: Record<string, unknown> = {
         user_id: userId,
-        tenant_id: tenantId,
         deep_reasoning: deepReasoning,
       }
 
@@ -123,7 +121,7 @@ export function useStreamSubmit(
         },
       )
     },
-    [stream, userId, tenantId, deepReasoning, uploadTempDocument, onAuthError],
+    [stream, userId, deepReasoning, uploadTempDocument, onAuthError],
   )
 
   return { submit }

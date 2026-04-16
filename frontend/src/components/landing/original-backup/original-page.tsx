@@ -23,8 +23,7 @@ export default function Home() {
   // Auto-redirect signed in users to dashboard
   useEffect(() => {
     if (isLoaded && isSignedIn && backendUser && !userLoading) {
-      const tenantId = backendUser.tenant_id
-      router.push(`/${tenantId}/dashboard`)
+      router.push(`/dashboard`)
     }
   }, [isLoaded, isSignedIn, backendUser, userLoading, router])
 

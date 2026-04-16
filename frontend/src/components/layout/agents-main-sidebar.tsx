@@ -25,7 +25,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { useRouter, useParams } from "next/navigation"
+import { useRouter } from "next/navigation"
 
 const data = {
   user: {
@@ -77,15 +77,9 @@ export function AgentsMainSidebar({
 }: AgentsMainSidebarProps & React.ComponentProps<typeof Sidebar>) {
   const { setOpen } = useSidebar()
   const router = useRouter()
-  const params = useParams()
-  const tenantId = params.tenantId as string
 
   const handleNavigation = (url: string) => {
-    if (tenantId) {
-      router.push(`/${tenantId}${url}`)
-    } else {
-      router.push(url)
-    }
+    router.push(url)
     setOpen(true)
   }
 

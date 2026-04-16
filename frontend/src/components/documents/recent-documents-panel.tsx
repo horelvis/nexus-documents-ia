@@ -17,15 +17,13 @@ import { useDocumentInsightsService, type RecentDocument } from "@/lib/services/
 import { getRelativeTime, formatFileSize } from "@/lib/document-utils"
 
 interface RecentDocumentsPanelProps {
-  tenantId: string
   limit?: number
   showHeader?: boolean
   className?: string
 }
 
-export function RecentDocumentsPanel({ 
-  tenantId, 
-  limit = 5, 
+export function RecentDocumentsPanel({
+  limit = 5,
   showHeader = true,
   className = ""
 }: RecentDocumentsPanelProps) {
@@ -60,7 +58,7 @@ export function RecentDocumentsPanel({
   }, [limit])
 
   const handleDocumentClick = (document: RecentDocument) => {
-    router.push(`/${tenantId}/documents/${document.id}/preview`)
+    router.push(`/documents/${document.id}/preview`)
   }
 
   const getFileIcon = (fileType: string) => {
@@ -238,7 +236,7 @@ export function RecentDocumentsPanel({
             <Button 
               variant="ghost" 
               className="w-full text-sm"
-              onClick={() => router.push(`/${tenantId}/documents`)}
+              onClick={() => router.push(`/documents`)}
             >
               View all documents
             </Button>

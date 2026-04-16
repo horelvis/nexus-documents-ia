@@ -62,18 +62,17 @@ export function PredictionResult({ metadata, className }: PredictionResultProps)
     disclaimer,
     execution_time_ms,
     session_id,
-    tenant_id,
   } = metadata
 
   const probabilityPct = Math.round((probability || 0) * 100)
 
   const downloadFile = async (format: 'pdf' | 'docx') => {
-    if (!session_id || !tenant_id) return
+    if (!session_id) return
     setIsDownloading(true)
     try {
       const blob = format === 'pdf'
-        ? await downloadPredictivePdf(session_id, tenant_id)
-        : await downloadPredictiveDocx(session_id, tenant_id)
+        ? await downloadPredictivePdf(session_id)
+        : await downloadPredictiveDocx(session_id)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url

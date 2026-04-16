@@ -30,7 +30,7 @@ interface SearchFilters {
   file_size_max?: number
 }
 
-export function useSearchFacets(tenantId: string) {
+export function useSearchFacets() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -43,7 +43,7 @@ export function useSearchFacets(tenantId: string) {
   const loadFacets = useCallback(async (query?: string, filters?: SearchFilters) => {
     setIsLoadingFacets(true)
     try {
-      const response = await fetch(`/${tenantId}/api/documents/facets`, {
+      const response = await fetch(`/api/documents/facets`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -69,7 +69,7 @@ export function useSearchFacets(tenantId: string) {
     } finally {
       setIsLoadingFacets(false)
     }
-  }, [tenantId, searchQuery, currentFilters])
+  }, [searchQuery, currentFilters])
 
   // Update URL with current filters
   const updateUrl = useCallback((filters: SearchFilters, query: string) => {

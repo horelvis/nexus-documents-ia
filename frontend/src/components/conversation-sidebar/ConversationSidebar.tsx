@@ -52,7 +52,6 @@ import { Input } from '@/components/ui'
 import { ScrollArea } from '@/components/ui'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui'
 import { cn } from '@/lib/utils'
-import { useAuth } from '@/contexts/auth-context'
 import { apiClient } from '@/lib/api-client'
 
 /** Backend session shape (from EmmaSessionListItem) */
@@ -99,7 +98,6 @@ export function ConversationSidebar({
   onDeleteConversation,
   onDeleteMultiple,
 }: ConversationSidebarProps) {
-  const { tenantId } = useAuth()
   const [conversations, setConversations] = useState<ConversationListItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -118,11 +116,9 @@ export function ConversationSidebar({
 
   // Load conversations from backend
   function loadConversations() {
-    if (!tenantId) return
     setIsLoading(true)
     apiClient.get<{ sessions: SessionItem[]; total: number }>('/emma/sessions', {
       params: { limit: 50 },
-      headers: { 'X-Tenant-ID': tenantId },
     }).then((response) => {
       if (response.data) {
         const sessions = response.data.sessions ?? response.data
@@ -148,7 +144,7 @@ export function ConversationSidebar({
     if (isOpen) {
       loadConversations()
     }
-  }, [isOpen, tenantId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOpen]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Exit selection mode when sidebar closes
   useEffect(() => {
@@ -161,12 +157,10 @@ export function ConversationSidebar({
   // Handle pin toggle
   const handleTogglePin = (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!tenantId) return
     const conv = conversations.find((c) => c.id === id)
     if (!conv) return
-    apiClient.patch(`/emma/sessions/${id}`, { is_pinned: !conv.pinned }, {
-      headers: { 'X-Tenant-ID': tenantId },
-    }).then(() => loadConversations())
+    apiClient.patch(`/emma/sessions/${id}`, { is_pinned: !conv.pinned })
+      .then(() => loadConversations())
   }
 
   // Handle rename
@@ -177,10 +171,9 @@ export function ConversationSidebar({
   }
 
   const handleSaveRename = (id: string) => {
-    if (editingTitle.trim() && tenantId) {
-      apiClient.patch(`/emma/sessions/${id}`, { title: editingTitle.trim() }, {
-        headers: { 'X-Tenant-ID': tenantId },
-      }).then(() => loadConversations())
+    if (editingTitle.trim()) {
+      apiClient.patch(`/emma/sessions/${id}`, { title: editingTitle.trim() })
+        .then(() => loadConversations())
     }
     setEditingId(null)
     setEditingTitle('')
@@ -199,10 +192,9 @@ export function ConversationSidebar({
   }
 
   const handleConfirmDelete = () => {
-    if (conversationToDelete && tenantId) {
-      apiClient.delete(`/emma/sessions/${conversationToDelete}`, {
-        headers: { 'X-Tenant-ID': tenantId },
-      }).then(() => {
+    if (conversationToDelete) {
+      apiClient.delete(`/emma/sessions/${conversationToDelete}`)
+        .then(() => {
         onDeleteConversation(conversationToDelete)
         loadConversations()
       })
@@ -242,10 +234,9 @@ export function ConversationSidebar({
   }
 
   const handleConfirmBulkDelete = () => {
-    if (!tenantId) return
     const ids = Array.from(selectedIds)
     Promise.all(
-      ids.map((id) => apiClient.delete(`/emma/sessions/${id}`, { headers: { 'X-Tenant-ID': tenantId } }))
+      ids.map((id) => apiClient.delete(`/emma/sessions/${id}`))
     ).then(() => {
       onDeleteMultiple?.(ids)
       setSelectedIds(new Set())
@@ -261,10 +252,9 @@ export function ConversationSidebar({
   }
 
   const handleConfirmDeleteAll = () => {
-    if (!tenantId) return
     const allIds = conversations.map((c) => c.id)
     Promise.all(
-      allIds.map((id) => apiClient.delete(`/emma/sessions/${id}`, { headers: { 'X-Tenant-ID': tenantId } }))
+      allIds.map((id) => apiClient.delete(`/emma/sessions/${id}`))
     ).then(() => {
       onDeleteMultiple?.(allIds)
       setSelectionMode(false)

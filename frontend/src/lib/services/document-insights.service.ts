@@ -15,7 +15,6 @@ export interface RecentDocument {
   updated_at?: string
   indexed: boolean
   category?: string
-  tenant_id: string
   created_by: string
   last_viewed_at?: string
 }

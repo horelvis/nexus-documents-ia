@@ -21,7 +21,7 @@ export interface WorkflowExecution {
   error?: string
 }
 
-export function useWorkflows(tenantId: string) {
+export function useWorkflows() {
   const workflowService = useWorkflowService()
 
   const [workflows, setWorkflows] = useState<WorkflowExecution[]>([])

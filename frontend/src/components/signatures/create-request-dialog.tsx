@@ -33,7 +33,6 @@ import { DocumentSearchCombobox } from '@/components/ui/document-search-combobox
 interface CreateSignatureRequestDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  tenantId: string
   documentId?: string
   onSuccess?: () => void
 }
@@ -41,7 +40,6 @@ interface CreateSignatureRequestDialogProps {
 export function CreateSignatureRequestDialog({
   open,
   onOpenChange,
-  tenantId,
   documentId: preselectedDocumentId,
   onSuccess,
 }: CreateSignatureRequestDialogProps) {

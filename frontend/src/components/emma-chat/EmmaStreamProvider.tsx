@@ -50,7 +50,6 @@ interface EmmaStreamProviderProps {
   assistantId?: string
   threadId: string | null
   onThreadId: (id: string) => void
-  tenantId: string
 }
 
 /**
@@ -70,7 +69,6 @@ export function EmmaStreamProvider({
   assistantId = 'emma-react',
   threadId,
   onThreadId,
-  tenantId,
 }: EmmaStreamProviderProps) {
   // Memoize token read so it doesn't re-evaluate on every render
   const token = useMemo(() => getSSOToken(), [])
@@ -78,10 +76,9 @@ export function EmmaStreamProvider({
   // Memoize headers to prevent useStream from recreating the client
   const defaultHeaders = useMemo(
     () => ({
-      'X-Tenant-ID': tenantId,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }),
-    [tenantId, token],
+    [token],
   )
 
   const apiUrl = useMemo(() => getApiUrl(), [])

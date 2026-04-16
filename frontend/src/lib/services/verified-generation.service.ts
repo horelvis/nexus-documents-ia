@@ -52,7 +52,6 @@ export interface VerifiedStreamEvent {
 
 export interface VerifiedGenerateParams {
   query: string
-  tenant_id: string
   session_id?: string
   max_claims?: number
   context_document_ids?: string[]
@@ -194,7 +193,6 @@ export interface ReviewDecision {
  */
 export async function* submitReviewAndResume(
   sessionId: string,
-  tenantId: string,
   decisions: ReviewDecision[],
 ): AsyncGenerator<VerifiedStreamEvent, void, unknown> {
   const token = getAccessToken()
@@ -206,7 +204,7 @@ export async function* submitReviewAndResume(
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${token || ''}`,
     },
-    body: JSON.stringify({ tenant_id: tenantId, decisions }),
+    body: JSON.stringify({ decisions }),
   })
 
   if (!response.ok) {

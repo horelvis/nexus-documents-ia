@@ -14,14 +14,12 @@ import { entitySearchService, type EntityMatch } from '@/lib/services/entity-sea
 import { ENTITY_TYPE_COLORS } from '@/app/knowledge-graph/components/explainability-theme'
 
 interface EntitySearchBarProps {
-  tenantId: string
   onSelect: (entity: EntityMatch) => void
   placeholder?: string
   className?: string
 }
 
 export function EntitySearchBar({
-  tenantId,
   onSelect,
   placeholder = 'Buscar entidades...',
   className = '',
@@ -43,7 +41,7 @@ export function EntitySearchBar({
     timerRef.current = setTimeout(async () => {
       setIsLoading(true)
       try {
-        const entities = await entitySearchService.search(tenantId, query, 10)
+        const entities = await entitySearchService.search(query, 10)
         setResults(entities)
         setIsOpen(true)
       } catch {
@@ -56,7 +54,7 @@ export function EntitySearchBar({
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [query, tenantId])
+  }, [query])
 
   function handleSelect(entity: EntityMatch) {
     setIsOpen(false)

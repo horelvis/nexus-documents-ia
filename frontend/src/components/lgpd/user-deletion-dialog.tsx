@@ -73,7 +73,6 @@ interface DeletionResult {
     errors: string[]
     tenant_deleted?: boolean
     tenant_name?: string
-    tenant_id?: string
     user_deletions?: Array<Record<string, unknown>>
   }
   lgpd_compliance: {

@@ -7,7 +7,6 @@ import { API_CONFIG } from '../config'
 
 export interface SiteGuest {
   id: string
-  tenant_id: string
   email: string
   name: string | null
   is_active: boolean
@@ -308,7 +307,6 @@ export class SiteGuestService {
 // =====================================
 
 export interface TenantSiteInfo {
-  tenant_id: string
   tenant_name: string
   slug: string
   site_enabled: boolean

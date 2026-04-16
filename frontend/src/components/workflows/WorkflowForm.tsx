@@ -17,12 +17,11 @@ import { X, Play, Loader2 } from "lucide-react"
 import { useWorkflowService } from "@/lib/workflow-service"
 
 interface WorkflowFormProps {
-  tenantId: string
   onSubmit: (workflowType: string, inputData: any) => Promise<void>
   onCancel: () => void
 }
 
-export function WorkflowForm({ tenantId, onSubmit, onCancel }: WorkflowFormProps) {
+export function WorkflowForm({ onSubmit, onCancel }: WorkflowFormProps) {
   const workflowService = useWorkflowService()
   const [isLoading, setIsLoading] = useState(false)
   const [definitions, setDefinitions] = useState<any[]>([])

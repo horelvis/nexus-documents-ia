@@ -82,7 +82,6 @@ export interface PropertySemantic {
 export interface ConnectorContentModel {
   id: string
   connector_id: string
-  tenant_id: string
   content_types: Record<string, Record<string, any>>
   aspects: Record<string, Record<string, any>>
   property_definitions?: Record<string, Record<string, any>>
@@ -105,7 +104,6 @@ export interface LevelSemantic {
 export interface LearnedFolderPattern {
   id: string
   connector_id: string
-  tenant_id: string
   path_pattern: string
   level_semantics: Record<string, Record<string, any>>
   example_paths?: string[]
@@ -120,7 +118,6 @@ export interface LearnedFolderPattern {
 export interface LearnedPropertyMapping {
   id: string
   connector_id: string
-  tenant_id: string
   source_property: string
   source_type?: string
   target_field: string
@@ -139,7 +136,6 @@ export interface LearnedPropertyMapping {
 export interface LearnedRelationshipType {
   id: string
   connector_id: string
-  tenant_id: string
   source_relationship: string
   relationship_category: RelationshipCategory
   kg_edge_type: string
@@ -162,7 +158,6 @@ export interface ChunkingConfig {
 export interface ConnectorIndexingStrategy {
   id: string
   connector_id: string
-  tenant_id: string
   document_type?: string
   mime_type_pattern?: string
   chunking_type: ChunkingType
@@ -181,7 +176,6 @@ export interface ConnectorIndexingStrategy {
 export interface DataLearningJob {
   id: string
   connector_id: string
-  tenant_id: string
   job_type: DataLearningJobType
   status: DataLearningJobStatus
   status_message?: string

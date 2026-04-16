@@ -176,7 +176,6 @@ export interface EmmaSession {
 }
 
 export interface EmmaChatProps {
-  tenantId?: string
   className?: string
   initialMessage?: string
   onClose?: () => void
@@ -188,7 +187,6 @@ export interface EmmaApiResponse {
   query: string
   answer: string | string[] | any
   session_id: string
-  tenant_id: string
   decision_path?: string[]
   tools_used?: string[]
   data?: any

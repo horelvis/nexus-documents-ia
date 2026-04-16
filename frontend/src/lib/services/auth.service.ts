@@ -38,7 +38,6 @@ export interface LoginResponse {
   user: BackendUser
   subscription: SubscriptionInfo
   permissions: UserPermissions
-  tenant_id: string
 }
 
 /**
