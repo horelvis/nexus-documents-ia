@@ -1373,12 +1373,22 @@ async def get_related_entities(
 async def get_collection_stats(
     _: bool = Depends(verify_api_key),
 ):
-    """Get collection statistics for the main documents collection."""
+    """Get collection statistics for the main documents collection.
+
+    Returns status=empty when the collection has not been provisioned yet
+    (fresh install, pre-indexing). The absence of a collection is a
+    legitimate zero-state, not an error.
+    """
+    collection = DOCUMENTS_COLLECTION
     try:
-        collection = DOCUMENTS_COLLECTION
+        if not weaviate_service.client.collections.exists(collection):
+            return {
+                "collection": collection,
+                "document_count": 0,
+                "status": "empty",
+            }
 
         info = await weaviate_service.get_collection_info(collection)
-
         return {
             "collection": collection,
             "document_count": info.objects_count if info else 0,
@@ -1388,6 +1398,8 @@ async def get_collection_stats(
     except Exception as e:
         logger.error(f"❌ Get collection stats failed: {e}", exc_info=True)
         return {
+            "collection": collection,
+            "document_count": 0,
             "error": str(e),
             "status": "error",
         }

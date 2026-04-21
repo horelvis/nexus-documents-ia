@@ -21,7 +21,6 @@ import {
   IconSchool,
   IconDatabase,
   IconDashboard,
-  IconBinaryTree,
   IconMessageCircle,
   IconFileText,
   IconBell,
@@ -122,11 +121,6 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       title: 'Base de Conocimiento',
       href: '/admin/public-knowledge',
       icon: IconDatabase,
-    },
-    {
-      title: 'Knowledge Tree',
-      href: '/admin/knowledge-tree',
-      icon: IconBinaryTree,
     },
     {
       title: 'Knowledge Graph',
