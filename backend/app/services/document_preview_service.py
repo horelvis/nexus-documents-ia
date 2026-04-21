@@ -20,18 +20,17 @@ logger = logging.getLogger(__name__)
 class DocumentPreviewService:
     """Servicio de preview usando Gotenberg como motor principal"""
 
-    def __init__(self, tenant_id: str, user_id: Optional[str] = None):
-        self.tenant_id = tenant_id
+    def __init__(self, user_id: Optional[str] = None):
         self.user_id = user_id
 
         # Initialize clients (both now use BaseHTTPClient internally)
-        self.gotenberg = GotenbergClient(tenant_id, user_id)
-        self.storage_service = AsyncStorageService(tenant_id, user_id)
-        self.temp_dir = Path(tempfile.gettempdir()) / "previews" / tenant_id
+        self.gotenberg = GotenbergClient(user_id=user_id)
+        self.storage_service = AsyncStorageService(user_id=user_id)
+        self.temp_dir = Path(tempfile.gettempdir()) / "previews"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
         # Cache directory for previews in storage
-        self.preview_storage_prefix = f"previews/{tenant_id}"
+        self.preview_storage_prefix = "previews"
 
         # Supported formats by category
         self.supported_formats = {
@@ -40,7 +39,7 @@ class DocumentPreviewService:
             'images': {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp'}
         }
 
-        logger.info(f"DocumentPreviewService initialized for tenant: {tenant_id}")
+        logger.info("DocumentPreviewService initialized")
 
     async def generate_preview(
         self,

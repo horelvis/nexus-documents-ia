@@ -28,7 +28,7 @@ class SafeMigration:
         
         logger.info(f"Creating database backup: {backup_file}")
         
-        cmd = f"docker exec {self.db_container} pg_dump -U postgres nexus_db > {backup_file}"
+        cmd = f"docker exec {self.db_container} pg_dump -U postgres nouxcube > {backup_file}"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         
         if result.returncode == 0:
@@ -43,9 +43,9 @@ class SafeMigration:
         logger.info(f"Restoring database from: {backup_file}")
         
         # Drop and recreate database
-        cmd1 = f"docker exec {self.db_container} psql -U postgres -c 'DROP DATABASE IF EXISTS nexus_db;'"
-        cmd2 = f"docker exec {self.db_container} psql -U postgres -c 'CREATE DATABASE nexus_db;'"
-        cmd3 = f"docker exec -i {self.db_container} psql -U postgres nexus_db < {backup_file}"
+        cmd1 = f"docker exec {self.db_container} psql -U postgres -c 'DROP DATABASE IF EXISTS nouxcube;'"
+        cmd2 = f"docker exec {self.db_container} psql -U postgres -c 'CREATE DATABASE nouxcube;'"
+        cmd3 = f"docker exec -i {self.db_container} psql -U postgres nouxcube < {backup_file}"
         
         for cmd in [cmd1, cmd2, cmd3]:
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -72,7 +72,7 @@ class SafeMigration:
         """Clean alembic_version table if needed"""
         logger.info("Cleaning alembic_version table...")
         
-        cmd = f"docker exec {self.db_container} psql -U postgres -d nexus_db -c 'TRUNCATE TABLE alembic_version;'"
+        cmd = f"docker exec {self.db_container} psql -U postgres -d nouxcube -c 'TRUNCATE TABLE alembic_version;'"
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         
         if result.returncode == 0:

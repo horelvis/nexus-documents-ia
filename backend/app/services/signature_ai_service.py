@@ -26,8 +26,7 @@ class SignatureAIService:
     Uses CAG service for AI operations.
     """
 
-    def __init__(self, tenant_id: UUID):
-        self.tenant_id = tenant_id
+    def __init__(self):
         self.pattern_learner = PatternLearner()
         self._cag_client = None
 
@@ -85,7 +84,6 @@ class SignatureAIService:
             analysis_result = await cag.analyze_document(
                 document_content=text_content[:50000],  # Limit content size
                 document_id=str(document_id),
-                tenant_id=str(self.tenant_id),
                 analysis_type="signature_placement"
             )
 
@@ -162,7 +160,6 @@ class SignatureAIService:
             for field in placed_fields:
                 placement = SignatureFieldPlacement(
                     document_id=document_id,
-                    tenant_id=self.tenant_id,
                     user_id=user_id,
                     field_type=field["type"],
                     signer_identifier=field.get("signer", "default"),
@@ -255,7 +252,6 @@ class SignatureAIService:
     ) -> List[Dict[str, Any]]:
         """Get learned patterns for a document type"""
         stmt = select(SignaturePlacementPattern).filter(
-            SignaturePlacementPattern.tenant_id == self.tenant_id,
             SignaturePlacementPattern.document_type == document_type,
             SignaturePlacementPattern.is_active == True
         ).order_by(SignaturePlacementPattern.confidence.desc())
@@ -323,7 +319,6 @@ class SignatureAIService:
         """Find similar documents that have been signed"""
         # Query for documents of same type with signature placements
         stmt = select(Document).join(SignatureFieldPlacement).filter(
-            Document.tenant_id == self.tenant_id,
             Document.category == document_type
         ).distinct().limit(5)
         
@@ -363,7 +358,6 @@ class SignatureAIService:
         # Check if similar pattern exists
         # For now, create new pattern
         pattern = SignaturePlacementPattern(
-            tenant_id=self.tenant_id,
             document_type=document_type,
             field_configurations=field_config,
             confidence=0.7,  # Initial confidence

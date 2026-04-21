@@ -184,7 +184,6 @@ class LGPDService {
    * Get LGPD deletion audit history for the tenant (admin only)
    */
   async getDeletionHistory(): Promise<{
-    tenant_id: string
     total_deletions: number
     deletions: DeletionAuditRecord[]
   }> {

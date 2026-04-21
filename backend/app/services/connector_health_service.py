@@ -289,16 +289,19 @@ class ConnectorHealthService:
         start_time: float
     ) -> HealthCheckResult:
         """Check SharePoint/OneDrive connector."""
-        tenant_id = config.get("tenant_id")
+        # Note: "tenant_id" here refers to the Azure AD directory identifier
+        # used to construct the Microsoft OAuth URL (third-party OAuth protocol,
+        # not our application multi-tenancy model). Preserved intentionally.
+        ms_tenant = config.get("tenant_id")  # noqa: tenant_removal
         client_id = config.get("client_id")
         client_secret = config.get("client_secret")
 
-        if not tenant_id or not client_id:
+        if not ms_tenant or not client_id:
             return HealthCheckResult(
                 status="unhealthy",
                 message="Missing required configuration",
                 response_time_ms=(time.time() - start_time) * 1000,
-                details={"missing_fields": [k for k in ["tenant_id", "client_id"] if not config.get(k)]}
+                details={"missing_fields": [k for k in ["tenant_id", "client_id"] if not config.get(k)]}  # noqa: tenant_removal
             )
 
         # If client_secret is configured, we could test app-only auth
@@ -307,7 +310,7 @@ class ConnectorHealthService:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     # Test token endpoint reachability
                     response = await client.post(
-                        f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token",
+                        f"https://login.microsoftonline.com/{ms_tenant}/oauth2/v2.0/token",
                         data={
                             "grant_type": "client_credentials",
                             "client_id": client_id,
@@ -321,7 +324,7 @@ class ConnectorHealthService:
                             status="healthy",
                             message="Successfully authenticated with Microsoft Graph",
                             response_time_ms=(time.time() - start_time) * 1000,
-                            details={"auth_type": "client_credentials", "tenant_id": tenant_id}
+                            details={"auth_type": "client_credentials", "tenant_id": ms_tenant}  # noqa: tenant_removal
                         )
                     else:
                         return HealthCheckResult(
@@ -342,7 +345,7 @@ class ConnectorHealthService:
             status="healthy",
             message="OAuth configuration valid (requires user authorization to test)",
             response_time_ms=(time.time() - start_time) * 1000,
-            details={"auth_type": "oauth", "tenant_id": tenant_id}
+            details={"auth_type": "oauth", "tenant_id": ms_tenant}  # noqa: tenant_removal
         )
 
     async def _check_s3(

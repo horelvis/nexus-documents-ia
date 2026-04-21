@@ -20,9 +20,6 @@ Example YAML configuration:
       - name: erp_api
         transport: http
         url: https://erp.company.com/mcp
-        tenant_whitelist:
-          - tenant-123
-          - tenant-456
         auth:
           type: oauth2
           client_id: ${ERP_CLIENT_ID}
@@ -126,14 +123,6 @@ class MCPServerConfig(BaseModel):
 
     # Access control
     enabled: bool = Field(default=True, description="Whether server is enabled")
-    tenant_whitelist: Optional[List[str]] = Field(
-        default=None,
-        description="If set, only these tenants can access this server"
-    )
-    tenant_blacklist: List[str] = Field(
-        default_factory=list,
-        description="Tenants that cannot access this server"
-    )
 
     # Authentication
     auth: MCPAuthConfig = Field(default_factory=MCPAuthConfig)
@@ -178,21 +167,6 @@ class MCPServerConfig(BaseModel):
                 result[key] = value
         return result
 
-    def is_accessible_by_tenant(self, tenant_id: str) -> bool:
-        """Check if tenant can access this server."""
-        if not self.enabled:
-            return False
-
-        # Check blacklist first
-        if tenant_id in self.tenant_blacklist:
-            return False
-
-        # If whitelist is set, tenant must be in it
-        if self.tenant_whitelist is not None:
-            return tenant_id in self.tenant_whitelist
-
-        return True
-
     def get_tool_name(self, original_name: str) -> str:
         """Get the potentially prefixed tool name."""
         if self.tool_prefix:
@@ -234,13 +208,6 @@ class MCPConfig(BaseModel):
             if server.name == name:
                 return server
         return None
-
-    def get_servers_for_tenant(self, tenant_id: str) -> List[MCPServerConfig]:
-        """Get all servers accessible by a tenant."""
-        return [
-            server for server in self.servers
-            if server.is_accessible_by_tenant(tenant_id)
-        ]
 
     def get_enabled_servers(self) -> List[MCPServerConfig]:
         """Get all enabled servers."""

@@ -52,7 +52,6 @@ def _create_task_session_factory():
 
 async def _generate_document_preview(
     document_id: str,
-    tenant_id: str,
     user_id: str,
     preview_type: str = "all",
     force_regenerate: bool = False,
@@ -67,7 +66,6 @@ async def _generate_document_preview(
         async with TaskSessionLocal() as db:
             stmt = select(Document).filter(
                 Document.id == document_id,
-                Document.tenant_id == tenant_id,
             )
             result = await db.execute(stmt)
             doc = result.scalar_one_or_none()
@@ -77,7 +75,6 @@ async def _generate_document_preview(
 
             async with httpx.AsyncClient(timeout=60.0) as http_client:
                 preview_service = DocumentPreviewService(
-                    tenant_id=str(tenant_id),
                     user_id=str(user_id),
                     http_client=http_client,
                 )
@@ -95,12 +92,11 @@ async def _generate_document_preview(
                             }
 
                     storage_service = await AsyncStorageServiceFactory.create_storage_service(
-                        str(tenant_id),
                         str(user_id),
                         db,
                     )
 
-                    source_path = doc.file_path or f"{tenant_id}/{document_id}/{doc.filename}"
+                    source_path = doc.file_path or f"{document_id}/{doc.filename}"
                     file_data = await storage_service.download_file(source_path)
                     if not file_data:
                         return {"success": False, "error": "Could not download original file"}
@@ -162,19 +158,17 @@ def _run_async(coro):
 @celery_app.task(name="preview.generate_document_preview")
 def generate_document_preview_task(
     document_id: str,
-    tenant_id: str,
     user_id: str,
     preview_type: str = "all",
     force_regenerate: bool = False,
 ) -> Dict[str, Any]:
     return _run_async(
-        _generate_document_preview(document_id, tenant_id, user_id, preview_type, force_regenerate)
+        _generate_document_preview(document_id, user_id, preview_type, force_regenerate)
     )
 
 
 async def _generate_preview_batch(
     document_ids: List[str],
-    tenant_id: str,
     user_id: str,
     preview_type: str = "all",
     batch_size: int = 5,
@@ -183,7 +177,7 @@ async def _generate_preview_batch(
     for i in range(0, len(document_ids), batch_size):
         batch = document_ids[i : i + batch_size]
         tasks = [
-            _generate_document_preview(doc_id, tenant_id, user_id, preview_type)
+            _generate_document_preview(doc_id, user_id, preview_type)
             for doc_id in batch
         ]
         batch_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -203,13 +197,12 @@ async def _generate_preview_batch(
 @celery_app.task(name="preview.generate_preview_batch")
 def generate_preview_batch_task(
     document_ids: List[str],
-    tenant_id: str,
     user_id: str,
     preview_type: str = "all",
     batch_size: int = 5,
 ) -> Dict[str, Any]:
     return _run_async(
-        _generate_preview_batch(document_ids, tenant_id, user_id, preview_type, batch_size)
+        _generate_preview_batch(document_ids, user_id, preview_type, batch_size)
     )
 
 
@@ -233,20 +226,14 @@ async def _auto_generate_missing_previews() -> Dict[str, Any]:
                 logger.info("No documents need preview generation")
                 return {"success": True, "message": "No documents need preview generation"}
 
-            tenant_docs: Dict[str, List[str]] = {}
-            for doc in documents:
-                tenant_id = str(doc.tenant_id)
-                tenant_docs.setdefault(tenant_id, []).append(str(doc.id))
-
-            total_queued = 0
-            for tenant_id, doc_ids in tenant_docs.items():
-                generate_preview_batch_task.delay(doc_ids, tenant_id, "system", "all", 5)
-                total_queued += len(doc_ids)
+            doc_ids = [str(doc.id) for doc in documents]
+            total_queued = len(doc_ids)
+            if doc_ids:
+                generate_preview_batch_task.delay(doc_ids, "system", "all", 5)
 
             logger.info("Queued %s documents for preview generation", total_queued)
             return {
                 "success": True,
-                "tenants_processed": len(tenant_docs),
                 "documents_queued": total_queued,
             }
     finally:

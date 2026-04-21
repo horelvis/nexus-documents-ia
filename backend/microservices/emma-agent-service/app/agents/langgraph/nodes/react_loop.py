@@ -92,7 +92,6 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
     """Build the system message with tools description and sector context."""
     registry = get_tool_registry()
     tools_desc = registry.get_tools_description(
-        tenant_id=state.get("tenant_id", ""),
         sector=state.get("sector"),
         features=state.get("features"),
         max_desc_chars=settings.react_tool_description_max_chars,
@@ -158,9 +157,8 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
 def _build_tool_context(state: ReActState, emit_sse=None) -> Dict[str, Any]:
     """Build minimal context dict for tool execution (avoids copying full state)."""
     ctx = {
-        "tenant_id": state.get("tenant_id", ""),
         "user_id": state.get("user_id"),
-        "user_role_ids": state.get("user_role_ids"),
+        "user_roles": state.get("user_roles", []),
         "is_admin": state.get("is_admin", False),
         "sector": state.get("sector"),
         "features": state.get("features"),
@@ -348,7 +346,6 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     else:
         registry = get_tool_registry()
         tools = registry.get_tools_for_context(
-            tenant_id=state.get("tenant_id", ""),
             sector=state.get("sector"),
             features=state.get("features"),
         )

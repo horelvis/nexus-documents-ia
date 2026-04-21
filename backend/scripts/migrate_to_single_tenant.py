@@ -30,7 +30,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 # Configuration
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://nexus_user:nexus_password@localhost:5432/nexus_db")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://nexus_user:nexus_password@localhost:5432/nouxcube")
 DEFAULT_TENANT_ID = UUID(os.getenv("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001"))
 DEFAULT_TENANT_NAME = os.getenv("DEFAULT_TENANT_NAME", "NouxCubeIA Organization")
 DEFAULT_TENANT_SLUG = os.getenv("DEFAULT_TENANT_SLUG", "nouxcube")

@@ -99,7 +99,6 @@ class KnowledgeExtractionResult(BaseModel):
     """Result of knowledge extraction from a document."""
 
     document_id: str
-    tenant_id: str
 
     # Extracted knowledge
     entities: List[KnowledgeEntity] = Field(default_factory=list)

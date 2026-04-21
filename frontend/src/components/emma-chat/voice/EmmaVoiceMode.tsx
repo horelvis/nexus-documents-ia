@@ -9,7 +9,6 @@ import { VoiceConnectionState } from './types'
 import { AlertCircle } from 'lucide-react'
 
 interface EmmaVoiceModeProps {
-  tenantId: string
   className?: string
   kokoroBaseUrl?: string
   kokoroVoice?: string
@@ -19,7 +18,6 @@ interface EmmaVoiceModeProps {
 }
 
 export function EmmaVoiceMode({
-  tenantId,
   className,
   kokoroBaseUrl = 'http://localhost:8880',
   kokoroVoice = 'af_bella',
@@ -43,7 +41,7 @@ export function EmmaVoiceMode({
     ttsProvider: 'gemini',
     kokoroBaseUrl,
     kokoroVoice,
-    systemPrompt: systemPrompt || `Eres Emma, una asistente de IA profesional especializada en análisis de documentos legales para el tenant ${tenantId}. Respondes en español de forma concisa, profesional y clara. Ayudas a los usuarios a entender sus documentos, identificar riesgos y proporcionar recomendaciones.`,
+    systemPrompt: systemPrompt || `Eres Emma, una asistente de IA profesional especializada en análisis de documentos legales. Respondes en español de forma concisa, profesional y clara. Ayudas a los usuarios a entender sus documentos, identificar riesgos y proporcionar recomendaciones.`,
     voiceName: 'Zephyr',
     onTranscript: (text) => {
       setTranscript(text)

@@ -24,19 +24,16 @@ def _verify_api_key(x_api_key: str = Header(None)):
 
 class AnalyzeDocumentRequest(BaseModel):
     document_id: str
-    tenant_id: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
     prompt_template: Optional[str] = None
     agent: Optional[str] = None
 
 
 class DailySummaryRequest(BaseModel):
-    tenant_id: str
     collections: Optional[List[str]] = None
 
 
 class ProactiveAnalysisRequest(BaseModel):
-    tenant_id: str
     analysis_type: str
     query: str
     context: Dict[str, Any] = Field(default_factory=dict)
@@ -51,7 +48,6 @@ async def analyze_document(
     _verify_api_key(x_api_key)
     return await emma_background_service.analyze_document(
         document_id=request.document_id,
-        tenant_id=request.tenant_id,
         prompt_template=request.prompt_template,
         agent=request.agent,
         metadata=request.metadata,
@@ -66,7 +62,6 @@ async def daily_summary(
     """Generate daily summary (called by Celery Beat)."""
     _verify_api_key(x_api_key)
     return await emma_background_service.generate_daily_summary(
-        tenant_id=request.tenant_id,
         collections=request.collections,
     )
 
@@ -79,7 +74,6 @@ async def proactive_analysis(
     """Run proactive analysis (called by trigger engine)."""
     _verify_api_key(x_api_key)
     return await emma_background_service.proactive_analysis(
-        tenant_id=request.tenant_id,
         analysis_type=request.analysis_type,
         query=request.query,
         context=request.context,

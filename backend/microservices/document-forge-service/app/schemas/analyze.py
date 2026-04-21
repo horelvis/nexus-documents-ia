@@ -47,7 +47,6 @@ class DetectedField(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
-    tenant_id: str
     user_id: str
     document_id: Optional[str] = Field(
         default=None, description="Fetch original DOCX from storage"

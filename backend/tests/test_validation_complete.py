@@ -22,7 +22,7 @@ import time
 import os
 
 from app.main import app
-from app.db.models import User, Tenant, Document
+from app.db.models import User, Document
 from app.core.security import get_password_hash
 from app.services.auth_service import AuthService
 
@@ -49,31 +49,7 @@ class TestValidationComplete:
             yield client
 
     @pytest.fixture(scope="class")
-    def test_tenant(self, db_session):
-        """Tenant de prueba único"""
-        unique_id = str(uuid.uuid4())[:8]
-        tenant_name = f"TestTenant_{unique_id}"
-        bucket_name = f"test-bucket-{unique_id}"
-
-        tenant = Tenant(
-            id=uuid.uuid4(),
-            name=tenant_name,
-            description=f"Tenant de validación {unique_id}",
-            bucket_name=bucket_name,
-            is_active=True
-        )
-        db_session.add(tenant)
-        db_session.commit()
-        db_session.refresh(tenant)
-
-        yield tenant
-
-        # Cleanup
-        db_session.delete(tenant)
-        db_session.commit()
-
-    @pytest.fixture(scope="class")
-    def clerk_test_users(self, test_tenant, db_session):
+    def clerk_test_users(self, db_session):
         """Usuarios de prueba con integración Clerk"""
         users_data = []
         created_users = []
@@ -108,7 +84,6 @@ class TestValidationComplete:
                 full_name=user_data["full_name"],
                 is_active=True,
                 is_superuser=user_data["is_superuser"],
-                tenant_id=test_tenant.id,
                 clerk_user_id=user_data["clerk_id"]
             )
             db_session.add(user)
@@ -141,9 +116,9 @@ class TestValidationComplete:
 
         print("✅ Sistema funcionando correctamente")
 
-    def test_02_clerk_user_creation(self, test_client, test_tenant, clerk_test_users):
+    def test_02_clerk_user_creation(self, test_client, clerk_test_users):
         """Test 2: Crear usuarios con integración Clerk"""
-        print("\n👤 Test 2: Creando usuarios con integración Clerk...")
+        print("\n Test 2: Creando usuarios con integracion Clerk...")
 
         users, users_data = clerk_test_users
 
@@ -151,10 +126,9 @@ class TestValidationComplete:
             # Verificar que el usuario se creó correctamente
             assert user.email == user_data["email"]
             assert user.clerk_user_id == user_data["clerk_id"]
-            assert user.tenant_id == test_tenant.id
             assert user.is_active == True
 
-            print(f"✅ Usuario {i+1} creado: {user.email} (Clerk ID: {user.clerk_user_id})")
+            print(f"  Usuario {i+1} creado: {user.email} (Clerk ID: {user.clerk_user_id})")
 
     def test_03_clerk_authentication_flow(self, test_client, clerk_test_users):
         """Test 3: Probar flujo de autenticación con Clerk"""
@@ -168,7 +142,6 @@ class TestValidationComplete:
                 "email": user_data["email"],
                 "password": "test_password_123",
                 "clerk_user_id": user_data["clerk_id"],
-                "tenant_id": str(user.tenant_id)
             }
 
             response = test_client.post("/api/v1/auth/login/clerk", json=login_data)
@@ -210,27 +183,21 @@ class TestValidationComplete:
 
             print(f"✅ Perfil accesible para: {user_data['email']}")
 
-    def test_05_tenant_isolation(self, test_client, test_tenant, clerk_test_users):
-        """Test 5: Verificar aislamiento de tenants"""
-        print("\n🏢 Test 5: Verificando aislamiento de tenants...")
+    def test_05_role_based_access(self, test_client, clerk_test_users):
+        """Test 5: Verificar acceso basado en roles"""
+        print("\n Test 5: Verificando acceso basado en roles...")
 
         users, users_data = clerk_test_users
 
-        # Todos los usuarios deben pertenecer al mismo tenant
-        for user in users:
-            assert user.tenant_id == test_tenant.id
+        # Verify superuser flag is set correctly
+        for user, user_data in zip(users, users_data):
+            assert user.is_superuser == user_data["is_superuser"]
 
-        # Crear un tenant diferente para verificar aislamiento
-        from app.db.models import Tenant
+        print("  Acceso basado en roles funcionando correctamente")
 
-        # Verificar que no se puede acceder a datos de otros tenants
-        # (Esto se probaría con consultas específicas)
-
-        print("✅ Aislamiento de tenants funcionando correctamente")
-
-    def test_06_document_operations(self, test_client, clerk_test_users, test_tenant):
+    def test_06_document_operations(self, test_client, clerk_test_users):
         """Test 6: Operaciones con documentos"""
-        print("\n📄 Test 6: Probando operaciones con documentos...")
+        print("\n Test 6: Probando operaciones con documentos...")
 
         users, users_data = clerk_test_users
         user = users[0]  # Usar el primer usuario
@@ -241,12 +208,11 @@ class TestValidationComplete:
 
         # Crear un documento de prueba
         doc_data = {
-            "title": "Documento de Prueba Validación",
-            "description": "Documento creado durante validación del sistema",
+            "title": "Documento de Prueba Validacion",
+            "description": "Documento creado durante validacion del sistema",
             "filename": "test_validation.pdf",
             "file_type": "application/pdf",
             "file_size": 1024,
-            "tenant_id": str(test_tenant.id)
         }
 
         response = test_client.post("/api/v1/documents/", json=doc_data, headers=headers)
@@ -350,9 +316,9 @@ class TestValidationComplete:
 
         print("✅ Validaciones de seguridad pasaron correctamente")
 
-    def test_10_cleanup_validation(self, test_client, clerk_test_users, test_tenant, db_session):
-        """Test 10: Validar cleanup automático"""
-        print("\n🧹 Test 10: Validando cleanup automático...")
+    def test_10_cleanup_validation(self, test_client, clerk_test_users, db_session):
+        """Test 10: Validar cleanup automatico"""
+        print("\n Test 10: Validando cleanup automatico...")
 
         users, users_data = clerk_test_users
 
@@ -361,14 +327,9 @@ class TestValidationComplete:
             db_user = db_session.query(User).filter(User.id == user.id).first()
             assert db_user is not None
 
-        # El cleanup se hace automáticamente en los fixtures
-        print("✅ Cleanup automático configurado correctamente")
-
-        # Verificar que el tenant existe
-        db_tenant = db_session.query(Tenant).filter(Tenant.id == test_tenant.id).first()
-        assert db_tenant is not None
-
-        print("✅ Todos los datos de prueba serán limpiados automáticamente")
+        # El cleanup se hace automaticamente en los fixtures
+        print("  Cleanup automatico configurado correctamente")
+        print("  Todos los datos de prueba seran limpiados automaticamente")
 
 
 # Función para ejecutar la validación completa

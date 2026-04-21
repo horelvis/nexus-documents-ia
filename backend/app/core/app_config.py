@@ -126,9 +126,6 @@ async def _initialize_database() -> None:
             f"checked_in={pool.checkedin()} overflow={pool.overflow()}"
         )
 
-        # Initialize default tenant for single-tenant mode
-        await _ensure_default_tenant()
-
     except Exception as e:
         logger.error(f"❌ Database connection failed: {e}")
         logger.error(f"🔍 Database: {_redact_database_url(settings.SQLALCHEMY_DATABASE_URI)}")
@@ -136,64 +133,6 @@ async def _initialize_database() -> None:
             "⚠️ Continuing without database - API will have limited functionality. "
             "Ensure the database is running and run 'alembic upgrade head' to initialize schema."
         )
-
-
-async def _ensure_default_tenant() -> None:
-    """
-    Ensure the default tenant exists in single-tenant mode.
-
-    In SINGLE_TENANT_MODE, this function creates the default tenant on first startup
-    if it doesn't already exist. All users will be auto-assigned to this tenant.
-
-    This is idempotent - safe to run multiple times.
-    """
-    if not settings.SINGLE_TENANT_MODE:
-        logger.info("🏢 Multi-tenant mode: skipping default tenant initialization")
-        return
-
-    try:
-        from uuid import UUID
-        from sqlalchemy.orm import Session
-        from app.db.models import Tenant
-        from app.db.database import SessionLocal
-
-        tenant_id = UUID(settings.DEFAULT_TENANT_ID)
-        tenant_name = settings.DEFAULT_TENANT_NAME
-        tenant_slug = settings.DEFAULT_TENANT_SLUG
-
-        with SessionLocal() as db:
-            # Check if tenant already exists
-            existing = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-
-            if existing:
-                logger.info(f"🏢 Single-tenant mode: using existing tenant '{existing.name}' ({existing.id})")
-            else:
-                # Create the default tenant with all required fields
-                bucket_name = f"nouxcube-{str(tenant_id).replace('-', '')[:12]}"
-                tenant = Tenant(
-                    id=tenant_id,
-                    name=tenant_name,
-                    slug=tenant_slug,
-                    bucket_name=bucket_name,
-                    is_active=True,
-                    auto_classification_enabled=True,
-                    auto_classification_k=7,
-                    auto_classification_min_confidence=0.6,
-                    site_enabled=False,
-                    settings={
-                        "deployment_mode": "single_tenant",
-                        "created_by": "system_initialization"
-                    }
-                )
-                db.add(tenant)
-                db.commit()
-                logger.info(f"🏢 Single-tenant mode: created default tenant '{tenant_name}' ({tenant_id})")
-                logger.info(f"   Bucket: {bucket_name}")
-
-        logger.info(f"🔧 SINGLE_TENANT_MODE=true | Tenant ID: {tenant_id}")
-
-    except Exception as e:
-        logger.warning(f"⚠️ Could not initialize default tenant: {e}")
 
 
 def configure_static_files(app: FastAPI) -> None:

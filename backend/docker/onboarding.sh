@@ -98,7 +98,7 @@ cmd_status() {
     info "Indexing status across all connectors:"
     echo ""
 
-    docker exec docker-db-1 psql -U nexus_user -d nexus_db -t -A -c "
+    docker exec docker-db-1 psql -U nexus_user -d nouxcube -t -A -c "
         SELECT
             c.name as connector,
             c.connector_type as type,
@@ -124,7 +124,7 @@ cmd_status() {
 
     # Check running sync jobs
     echo "  Active sync jobs:"
-    docker exec docker-db-1 psql -U nexus_user -d nexus_db -t -A -c "
+    docker exec docker-db-1 psql -U nexus_user -d nouxcube -t -A -c "
         SELECT connector_id, status, started_at
         FROM sync_jobs
         WHERE status = 'running'
@@ -148,7 +148,7 @@ cmd_sync() {
 
     # Determine connector type from DB
     local connector_type
-    connector_type=$(docker exec docker-db-1 psql -U nexus_user -d nexus_db -t -A -c "
+    connector_type=$(docker exec docker-db-1 psql -U nexus_user -d nouxcube -t -A -c "
         SELECT connector_type FROM connectors WHERE id = '$connector_id'
     " 2>/dev/null | tr -d '[:space:]')
 
@@ -189,7 +189,7 @@ cmd_sync_all() {
     info "Triggering sync for ALL connectors..."
     echo ""
 
-    docker exec docker-db-1 psql -U nexus_user -d nexus_db -t -A -c "
+    docker exec docker-db-1 psql -U nexus_user -d nouxcube -t -A -c "
         SELECT id, connector_type, name FROM connectors WHERE is_active = true ORDER BY name
     " 2>/dev/null | while IFS='|' read -r cid ctype cname; do
         info "  Syncing: $cname ($ctype) → $cid"

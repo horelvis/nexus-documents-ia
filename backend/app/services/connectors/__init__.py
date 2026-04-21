@@ -98,8 +98,7 @@ class ConnectorAdapterFactory:
         config = connector.config or {}
 
         logger.info(
-            f"Creating {connector_type} adapter for connector {connector.id} "
-            f"(tenant: {connector.tenant_id})"
+            f"Creating {connector_type} adapter for connector {connector.id}"
         )
 
         return adapter_class(connector=connector, config=config)

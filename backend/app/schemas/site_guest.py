@@ -41,7 +41,6 @@ class SiteGuestUpdate(BaseModel):
 class SiteGuestResponse(SiteGuestBase):
     """Schema for Site Guest responses."""
     id: UUID
-    tenant_id: UUID
     is_active: bool
     invited_by_user_id: Optional[UUID] = None
     invited_at: datetime
@@ -293,8 +292,12 @@ class GuestMeResponse(BaseModel):
 # =====================================
 
 class TenantSiteInfo(BaseModel):
-    """Schema for public tenant site info (resolved by slug)."""
-    tenant_id: UUID
+    """Schema for public site info (resolved by slug).
+
+    Retained as `TenantSiteInfo` for backwards compatibility with the
+    frontend client. In single-tenant mode the "tenant" concept collapses
+    to the single organization.
+    """
     tenant_name: str
     slug: str
     site_enabled: bool

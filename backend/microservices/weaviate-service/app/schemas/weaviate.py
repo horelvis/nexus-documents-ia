@@ -11,7 +11,6 @@ class DocumentCreate(BaseModel):
     title: str
     content: str
     metadata: Dict[str, Any] = Field(default_factory=dict)
-    tenant_id: str
     document_type: Optional[str] = "document"
     tags: List[str] = Field(default_factory=list)
     # Channel properties for RAG access control
@@ -57,7 +56,6 @@ class DocumentCreate(BaseModel):
                 "title": "Sample Document",
                 "content": "This is a sample document content for testing.",
                 "metadata": {"author": "John Doe", "category": "test"},
-                "tenant_id": "tenant-123",
                 "document_type": "pdf",
                 "tags": ["sample", "test"],
                 "channel_id": "",
@@ -74,7 +72,6 @@ class DocumentResponse(BaseModel):
     title: str
     content: str
     metadata: Dict[str, Any]
-    tenant_id: str
     document_type: str
     tags: List[str]
     created_at: datetime
@@ -101,11 +98,9 @@ class SearchRequest(BaseModel):
     query: str
     limit: int = Field(default=10, ge=1, le=100)
     offset: int = Field(default=0, ge=0, description="Number of results to skip (for pagination)")
-    tenant_id: str
-    # ACL fields for document-level access control
     user_id: Optional[str] = Field(default=None, description="User ID for channel and ACL access filtering")
-    user_role_ids: Optional[List[str]] = Field(default=None, description="User's role IDs for role-based ACL filtering")
-    is_admin: bool = Field(default=False, description="Admin users bypass ACL checks and see all tenant documents")
+    user_roles: List[str] = Field(default_factory=list, description="User roles for ACL filtering")
+    is_admin: bool = Field(default=False, description="Admin users bypass ACL checks")
     filters: Optional[Dict[str, Any]] = None
     search_type: str = Field(default="hybrid", pattern="^(vector|keyword|hybrid)$")
     alpha: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Hybrid search alpha: 0=keyword, 1=vector. Defaults to 0.7 if not set.")
@@ -130,9 +125,8 @@ class SearchRequest(BaseModel):
             "example": {
                 "query": "machine learning algorithms",
                 "limit": 10,
-                "tenant_id": "tenant-123",
                 "user_id": "user-456",
-                "user_role_ids": ["role-admin", "role-analyst"],
+                "user_roles": ["LEGAL", "ANALYST"],
                 "is_admin": False,
                 "search_type": "hybrid",
                 "min_similarity": 0.5,
@@ -150,14 +144,12 @@ class SearchResponse(BaseModel):
     total_results: int
     search_time_ms: int
     search_type: str
-    tenant_id: str
 
 
 class VectorQuery(BaseModel):
     """Schema for raw vector queries"""
     vector: List[float]
     limit: int = Field(default=10, ge=1, le=100)
-    tenant_id: str
     filters: Optional[Dict[str, Any]] = None
     include_vector: bool = False
 
@@ -170,20 +162,17 @@ class CollectionInfo(BaseModel):
     properties: List[Dict[str, Any]]
     vectorizer: Optional[str] = None
     created_at: datetime
-    tenant_id: Optional[str] = None
-    
     class Config:
         json_schema_extra = {
             "example": {
-                "name": "nexus_tenant123_documents",
-                "description": "Documents collection for tenant 123",
+                "name": "Nouxcube_documents",
+                "description": "Documents collection",
                 "objects_count": 150,
                 "properties": [
                     {"name": "title", "dataType": ["text"]},
                     {"name": "content", "dataType": ["text"]},
                     {"name": "metadata", "dataType": ["object"]}
                 ],
-                "vectorizer": "text2vec-transformers",
-                "tenant_id": "tenant-123"
+                "vectorizer": "text2vec-transformers"
             }
         }

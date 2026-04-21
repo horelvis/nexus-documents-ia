@@ -9,7 +9,7 @@ Evaluates rules stored in emma_prompt_rules table and applies actions:
 
 Usage:
     engine = get_rule_engine()
-    actions = await engine.evaluate(context, tenant_id)
+    actions = await engine.evaluate(context)
     modified_prompt = await engine.apply_actions(prompt, actions)
 """
 
@@ -90,9 +90,9 @@ class RuleEngine:
     """
 
     def __init__(self):
-        self._rules_cache: Dict[Optional[UUID], List[Dict[str, Any]]] = {}
+        self._rules_cache: List[Dict[str, Any]] = []
         self._cache_ttl = 300  # 5 minutes
-        self._cache_time: Dict[Optional[UUID], float] = {}
+        self._cache_time: float = 0.0
         self._jinja_env = Environment(loader=BaseLoader(), autoescape=False)
         self._http_client: Optional[httpx.AsyncClient] = None
 
@@ -102,17 +102,15 @@ class RuleEngine:
             self._http_client = httpx.AsyncClient(timeout=30.0)
         return self._http_client
 
-    async def _load_rules(self, tenant_id: Optional[UUID] = None) -> List[Dict[str, Any]]:
-        """Load active rules for tenant via Main API (HTTP proxy pattern)."""
+    async def _load_rules(self) -> List[Dict[str, Any]]:
+        """Load active rules via Main API (HTTP proxy pattern)."""
         import time
 
-        cache_key = tenant_id
         now = time.time()
 
         # Check cache
-        if cache_key in self._rules_cache:
-            if (now - self._cache_time.get(cache_key, 0)) < self._cache_ttl:
-                return self._rules_cache[cache_key]
+        if self._rules_cache and (now - self._cache_time) < self._cache_ttl:
+            return self._rules_cache
 
         try:
             client = await self._get_http_client()
@@ -120,8 +118,6 @@ class RuleEngine:
                 "X-API-Key": settings.MICROSERVICES_API_KEY,
                 "Content-Type": "application/json",
             }
-            if tenant_id:
-                headers["X-Tenant-ID"] = str(tenant_id)
 
             # Call Main API to get rules
             url = f"{settings.api_url}/api/v1/prompts/rules"
@@ -137,7 +133,6 @@ class RuleEngine:
             for r in items:
                 rules.append({
                     "id": r.get("id"),
-                    "tenant_id": r.get("tenant_id"),
                     "rule_name": r.get("rule_name"),
                     "description": r.get("description"),
                     "conditions": r.get("conditions", {}),
@@ -150,18 +145,18 @@ class RuleEngine:
                 })
 
             # Cache results
-            self._rules_cache[cache_key] = rules
-            self._cache_time[cache_key] = now
+            self._rules_cache = rules
+            self._cache_time = now
 
-            logger.debug(f"Loaded {len(rules)} rules for tenant {tenant_id} via Main API")
+            logger.debug(f"Loaded {len(rules)} rules via Main API")
             return rules
 
         except httpx.HTTPStatusError as e:
             logger.error(f"Main API returned error loading rules: {e.response.status_code}")
-            return self._rules_cache.get(cache_key, [])
+            return self._rules_cache
         except Exception as e:
             logger.error(f"Failed to load rules via Main API: {e}")
-            return self._rules_cache.get(cache_key, [])
+            return self._rules_cache
 
     def _match_condition(self, condition_value: Any, context_value: Any) -> bool:
         """
@@ -231,7 +226,6 @@ class RuleEngine:
     async def evaluate(
         self,
         context: RuleContext,
-        tenant_id: Optional[UUID] = None,
     ) -> RuleEvaluationResult:
         """
         Evaluate all rules against the given context.
@@ -245,7 +239,7 @@ class RuleEngine:
                 context_modifications={},
             )
 
-        rules = await self._load_rules(tenant_id)
+        rules = await self._load_rules()
         matched_rules = []
         actions = []
         context_mods = {}
@@ -254,7 +248,6 @@ class RuleEngine:
             if self._matches_rule(rule, context):
                 matched_rules.append(PromptRuleResponse(
                     id=rule["id"],
-                    tenant_id=rule["tenant_id"],
                     rule_name=rule["rule_name"],
                     description=rule.get("description"),
                     conditions=rule["conditions"],
@@ -350,22 +343,17 @@ class RuleEngine:
         # For now, we return the modified prompt
         return result.strip()
 
-    def invalidate_cache(self, tenant_id: Optional[UUID] = None) -> None:
-        """Invalidate rules cache for a tenant (or all if None)."""
-        if tenant_id is None:
-            self._rules_cache.clear()
-            self._cache_time.clear()
-            logger.info("🗑️ Invalidated all rules cache")
-        else:
-            self._rules_cache.pop(tenant_id, None)
-            self._cache_time.pop(tenant_id, None)
-            logger.info(f"🗑️ Invalidated rules cache for tenant {tenant_id}")
+    def invalidate_cache(self, *_args, **_kwargs) -> None:
+        """Invalidate rules cache."""
+        self._rules_cache = []
+        self._cache_time = 0.0
+        logger.info("🗑️ Invalidated rules cache")
 
     async def close(self) -> None:
         """Clean up resources."""
-        if self._db_session:
-            # Session factory doesn't need explicit closing
-            self._db_session = None
+        if self._http_client and not self._http_client.is_closed:
+            await self._http_client.aclose()
+            self._http_client = None
 
 
 # Singleton instance

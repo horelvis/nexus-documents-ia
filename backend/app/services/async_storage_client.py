@@ -85,14 +85,13 @@ class AsyncStorageClient(BaseHTTPClient):
     - Health checks
 
     Example:
-        client = AsyncStorageClient(tenant_id="t1", user_id="u1")
+        client = AsyncStorageClient(user_id="u1")
         result = await client.upload_file(file_bytes, "document.pdf")
         url, expires = await client.generate_download_signed_url(result["file_path"])
     """
 
     def __init__(
         self,
-        tenant_id: str,
         user_id: Optional[str] = None,
         bucket_name: Optional[str] = None
     ) -> None:
@@ -100,9 +99,8 @@ class AsyncStorageClient(BaseHTTPClient):
         Initialize the async storage client.
 
         Args:
-            tenant_id: Tenant ID (required for multi-tenant isolation)
             user_id: User ID (optional)
-            bucket_name: Bucket name (optional, will be obtained from tenant if not provided)
+            bucket_name: Bucket name (optional; defaults to the configured bucket)
         """
         # Try internal URL first, then external URL
         storage_url = getattr(
@@ -111,7 +109,6 @@ class AsyncStorageClient(BaseHTTPClient):
         )
         self.storage_url = storage_url.rstrip("/")
 
-        self.tenant_id = tenant_id
         self.user_id = user_id
         self.bucket_name = bucket_name
 
@@ -128,12 +125,12 @@ class AsyncStorageClient(BaseHTTPClient):
     def _build_headers(
         self,
         extra_headers: Optional[Dict[str, str]] = None,
-        tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        user_roles: Optional[list[str]] = None,
         request_id: Optional[str] = None,
     ) -> Dict[str, str]:
         """Override to add bucket name header."""
-        headers = super()._build_headers(extra_headers, tenant_id, user_id, request_id)
+        headers = super()._build_headers(extra_headers, user_id, user_roles, request_id)
 
         # Add bucket name if configured
         if self.bucket_name:
@@ -187,7 +184,6 @@ class AsyncStorageClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             "/api/v1/storage/upload",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             files=files,
             data=data if data else None,
@@ -211,7 +207,6 @@ class AsyncStorageClient(BaseHTTPClient):
             response = await self.request(
                 "GET",
                 f"/api/v1/storage/download/{file_path}",
-                tenant_id=self.tenant_id,
                 user_id=self.user_id,
             )
             logger.info(f"File downloaded successfully: {file_path}")
@@ -237,7 +232,6 @@ class AsyncStorageClient(BaseHTTPClient):
             await self.request(
                 "DELETE",
                 f"/api/v1/storage/delete/{file_path}",
-                tenant_id=self.tenant_id,
                 user_id=self.user_id,
             )
             logger.info(f"File deleted successfully: {file_path}")
@@ -263,7 +257,6 @@ class AsyncStorageClient(BaseHTTPClient):
             response = await self.request(
                 "GET",
                 f"/api/v1/storage/info/{file_path}",
-                tenant_id=self.tenant_id,
                 user_id=self.user_id,
             )
             result = response.json()
@@ -293,7 +286,6 @@ class AsyncStorageClient(BaseHTTPClient):
         response = await self.request(
             "GET",
             "/api/v1/storage/list",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             params={"prefix": prefix, "limit": limit},
         )
@@ -330,7 +322,6 @@ class AsyncStorageClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             "/api/v1/storage/signed-url/upload",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             json=payload,
         )
@@ -364,7 +355,6 @@ class AsyncStorageClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             f"/api/v1/storage/signed-url/download/{file_path}",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             params=params if params else None,
         )
@@ -395,7 +385,6 @@ class AsyncStorageClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             "/api/v1/storage/move",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             json=payload,
         )
@@ -414,7 +403,6 @@ class AsyncStorageClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             "/api/v1/storage/cleanup",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
         )
 
@@ -434,7 +422,6 @@ class AsyncStorageClient(BaseHTTPClient):
             response = await self.request(
                 "GET",
                 "/health",
-                tenant_id=self.tenant_id,
             )
             return response.json()
         except HTTPClientError as e:

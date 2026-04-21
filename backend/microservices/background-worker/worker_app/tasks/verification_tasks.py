@@ -50,7 +50,6 @@ def _run_async(coro):
 
 async def _search_weaviate_evidence(
     claim_text: str,
-    tenant_id: str,
     context_document_ids: Optional[List[str]] = None,
     collections: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
@@ -61,16 +60,13 @@ async def _search_weaviate_evidence(
 
     Args:
         claim_text: The claim to find evidence for
-        tenant_id: Tenant identifier
         context_document_ids: Optional specific documents to search
         collections: Optional collections to search
 
     Returns:
         List of evidence matches with similarity scores
     """
-    # Build collection name from tenant_id (format: Nouxcube_{tenant_id}_documents)
-    sanitized_tenant = tenant_id.replace("-", "_")
-    collection_name = collections[0] if collections else f"Nouxcube_{sanitized_tenant}_documents"
+    collection_name = collections[0] if collections else "Documents"
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -83,7 +79,6 @@ async def _search_weaviate_evidence(
                 },
                 json={
                     "query": claim_text,
-                    "tenant_id": tenant_id,
                     "limit": EVIDENCE_SEARCH_LIMIT,
                     "search_type": "hybrid",
                     "is_admin": True,  # Bypass ACL for verification
@@ -276,7 +271,6 @@ Evaluate if the claim is supported by the evidence. Respond with JSON only."""
 async def _verify_claim(
     claim_id: str,
     claim_text: str,
-    tenant_id: str,
     context_document_ids: Optional[List[str]] = None,
     collections: Optional[List[str]] = None,
     confidence_threshold: float = CONFIDENCE_THRESHOLD,
@@ -291,7 +285,6 @@ async def _verify_claim(
     Args:
         claim_id: Unique identifier for the claim
         claim_text: The claim text to verify
-        tenant_id: Tenant identifier
         context_document_ids: Optional document IDs to search
         collections: Optional collections to search
         confidence_threshold: Minimum confidence to accept
@@ -305,7 +298,6 @@ async def _verify_claim(
         # Step 1a: Search Weaviate for evidence
         evidence = await _search_weaviate_evidence(
             claim_text=claim_text,
-            tenant_id=tenant_id,
             context_document_ids=context_document_ids,
             collections=collections,
         )
@@ -399,7 +391,6 @@ def verify_claim_task(
     self,
     claim_id: str,
     claim_text: str,
-    tenant_id: str,
     context_document_ids: Optional[List[str]] = None,
     collections: Optional[List[str]] = None,
     confidence_threshold: float = CONFIDENCE_THRESHOLD,
@@ -414,7 +405,6 @@ def verify_claim_task(
     Args:
         claim_id: Unique identifier for the claim
         claim_text: The claim text to verify
-        tenant_id: Tenant identifier
         context_document_ids: Optional document IDs to search
         collections: Optional collections to search
         confidence_threshold: Minimum confidence to accept
@@ -424,8 +414,7 @@ def verify_claim_task(
         VerificationResult as dict
     """
     logger.info(
-        f"🔍 Starting claim verification: claim_id={claim_id[:16]}..., "
-        f"tenant={tenant_id}"
+        f"🔍 Starting claim verification: claim_id={claim_id[:16]}..."
     )
 
     try:
@@ -433,7 +422,6 @@ def verify_claim_task(
             _verify_claim(
                 claim_id=claim_id,
                 claim_text=claim_text,
-                tenant_id=tenant_id,
                 context_document_ids=context_document_ids,
                 collections=collections,
                 confidence_threshold=confidence_threshold,
@@ -474,7 +462,6 @@ def verify_claim_task(
 def batch_verify_claims_task(
     self,
     claims: List[Dict[str, str]],
-    tenant_id: str,
     context_document_ids: Optional[List[str]] = None,
     collections: Optional[List[str]] = None,
     confidence_threshold: float = CONFIDENCE_THRESHOLD,
@@ -487,7 +474,6 @@ def batch_verify_claims_task(
 
     Args:
         claims: List of {"id": str, "text": str} dicts
-        tenant_id: Tenant identifier
         context_document_ids: Optional document IDs to search
         collections: Optional collections to search
         confidence_threshold: Minimum confidence to accept
@@ -514,7 +500,6 @@ def batch_verify_claims_task(
             _verify_claim(
                 claim_id=claim_id,
                 claim_text=claim_text,
-                tenant_id=tenant_id,
                 context_document_ids=context_document_ids,
                 collections=collections,
                 confidence_threshold=confidence_threshold,

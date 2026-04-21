@@ -6,8 +6,7 @@ Each tool is designed to be used by AI agents through the MCP protocol.
 
 Tools follow the naming convention: alfresco_{operation}
 
-Configuration is loaded from the database using connector_id and tenant_id.
-Each tenant configures their Alfresco connector via the UI.
+Configuration is loaded from the database using connector_id.
 """
 
 import base64
@@ -15,7 +14,7 @@ import logging
 from typing import Any, Dict, Optional
 from uuid import UUID
 
-from ..core.config import get_connector, get_connectors_for_tenant
+from ..core.config import get_connector, get_all_connectors
 from ..services.alfresco_service import AlfrescoService
 
 logger = logging.getLogger(__name__)
@@ -26,27 +25,24 @@ _services: Dict[str, AlfrescoService] = {}
 
 async def _get_service(
     connector_id: str,
-    tenant_id: str,
 ) -> AlfrescoService:
     """
     Get or create Alfresco service for a connector.
 
     Args:
         connector_id: Connector UUID (from database)
-        tenant_id: Tenant UUID
 
     Returns:
         AlfrescoService instance
     """
-    # Parse UUIDs
+    # Parse UUID
     try:
         conn_uuid = UUID(connector_id)
-        tenant_uuid = UUID(tenant_id)
     except ValueError as e:
         raise ValueError(f"Invalid UUID format: {e}")
 
     # Load connector config from database
-    config = await get_connector(conn_uuid, tenant_uuid)
+    config = await get_connector(conn_uuid)
     if not config:
         raise ValueError(
             f"Alfresco connector not found or not active: {connector_id}"
@@ -69,7 +65,6 @@ async def _get_service(
 
 async def alfresco_search(
     connector_id: str,
-    tenant_id: str,
     query: str,
     skip: int = 0,
     max_items: int = 50,
@@ -78,28 +73,9 @@ async def alfresco_search(
 ) -> Dict[str, Any]:
     """
     Search documents in Alfresco using AFTS (Alfresco Full Text Search).
-
-    AFTS Query Examples:
-    - Simple text search: "financial report 2024"
-    - Property search: cm:name:"budget.pdf"
-    - Wildcard: "report*"
-    - Boolean: "contract AND signed"
-    - Phrase: "\"quarterly report\""
-
-    Args:
-        connector_id: Alfresco connector UUID (configured in tenant settings)
-        tenant_id: Tenant UUID
-        query: AFTS search query string
-        skip: Number of results to skip (for pagination)
-        max_items: Maximum number of results to return (default: 50, max: 100)
-        node_type: Filter by node type (e.g., "cm:content" for files only)
-        site_id: Restrict search to a specific Alfresco site
-
-    Returns:
-        Dict with 'nodes' list and 'pagination' info
     """
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         result = await service.search(
             query=query,
             skip=skip,
@@ -142,26 +118,13 @@ async def alfresco_search(
 
 async def alfresco_download(
     connector_id: str,
-    tenant_id: str,
     node_id: str,
     version_id: Optional[str] = None,
     return_base64: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Download document content from Alfresco.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        node_id: Document node ID (UUID)
-        version_id: Specific version to download (optional)
-        return_base64: If True, returns content as base64 string
-
-    Returns:
-        Dict with 'content' (base64 or raw), 'filename', and 'mime_type'
-    """
+    """Download document content from Alfresco."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         content, filename, mime_type = await service.download_content(
             node_id=node_id,
             version_id=version_id,
@@ -189,7 +152,6 @@ async def alfresco_download(
 
 async def alfresco_upload(
     connector_id: str,
-    tenant_id: str,
     parent_id: str,
     filename: str,
     content_base64: str,
@@ -200,27 +162,9 @@ async def alfresco_upload(
     major_version: bool = True,
     comment: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Upload a new document to Alfresco.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        parent_id: Parent folder node ID (use "-root-" for Company Home)
-        filename: Name for the new document
-        content_base64: File content as base64-encoded string
-        mime_type: MIME type (auto-detected from filename if not provided)
-        overwrite: If True, update existing file with same name
-        title: Document title (cm:title property)
-        description: Document description (cm:description property)
-        major_version: If True, creates major version (1.0)
-        comment: Version comment
-
-    Returns:
-        Dict with created node information
-    """
+    """Upload a new document to Alfresco."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
 
         # Decode base64 content
         content = base64.b64decode(content_base64)
@@ -263,7 +207,6 @@ async def alfresco_upload(
 
 async def alfresco_list(
     connector_id: str,
-    tenant_id: str,
     folder_id: str = "-root-",
     skip: int = 0,
     max_items: int = 50,
@@ -271,24 +214,9 @@ async def alfresco_list(
     folders_only: bool = False,
     order_by: str = "name ASC",
 ) -> Dict[str, Any]:
-    """
-    List contents of a folder in Alfresco.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        folder_id: Folder node ID (default: "-root-" for Company Home)
-        skip: Number of results to skip (for pagination)
-        max_items: Maximum number of results to return
-        files_only: If True, only return files (not folders)
-        folders_only: If True, only return folders (not files)
-        order_by: Sort order (e.g., "name ASC", "modifiedAt DESC")
-
-    Returns:
-        Dict with 'nodes' list and 'pagination' info
-    """
+    """List contents of a folder in Alfresco."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
 
         # Build where clause for filtering
         where = None
@@ -337,24 +265,12 @@ async def alfresco_list(
 
 async def alfresco_get_metadata(
     connector_id: str,
-    tenant_id: str,
     node_id: str,
     include_path: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Get detailed metadata for a node.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        node_id: Node ID (UUID)
-        include_path: Include full path information
-
-    Returns:
-        Dict with complete node metadata including properties
-    """
+    """Get detailed metadata for a node."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         node = await service.get_node(node_id, include_path=include_path)
 
         return {
@@ -384,26 +300,13 @@ async def alfresco_get_metadata(
 
 async def alfresco_get_versions(
     connector_id: str,
-    tenant_id: str,
     node_id: str,
     skip: int = 0,
     max_items: int = 20,
 ) -> Dict[str, Any]:
-    """
-    Get version history for a document.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        node_id: Document node ID
-        skip: Number of versions to skip
-        max_items: Maximum versions to return
-
-    Returns:
-        Dict with 'versions' list
-    """
+    """Get version history for a document."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         versions = await service.get_versions(
             node_id=node_id,
             skip=skip,
@@ -434,26 +337,13 @@ async def alfresco_get_versions(
 
 async def alfresco_move(
     connector_id: str,
-    tenant_id: str,
     node_id: str,
     target_folder_id: str,
     new_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Move a node to a different folder.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        node_id: Node ID to move
-        target_folder_id: Destination folder ID
-        new_name: New name for the node (optional)
-
-    Returns:
-        Dict with moved node information
-    """
+    """Move a node to a different folder."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         node = await service.move_node(
             node_id=node_id,
             target_parent_id=target_folder_id,
@@ -477,26 +367,13 @@ async def alfresco_move(
 
 async def alfresco_copy(
     connector_id: str,
-    tenant_id: str,
     node_id: str,
     target_folder_id: str,
     new_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Copy a node to a folder.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        node_id: Node ID to copy
-        target_folder_id: Destination folder ID
-        new_name: Name for the copy (optional, auto-generated if not specified)
-
-    Returns:
-        Dict with new (copied) node information
-    """
+    """Copy a node to a folder."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         node = await service.copy_node(
             node_id=node_id,
             target_parent_id=target_folder_id,
@@ -520,24 +397,12 @@ async def alfresco_copy(
 
 async def alfresco_delete(
     connector_id: str,
-    tenant_id: str,
     node_id: str,
     permanent: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Delete a node.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        node_id: Node ID to delete
-        permanent: If True, permanently delete (skip trash bin)
-
-    Returns:
-        Dict with success status
-    """
+    """Delete a node."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         await service.delete_node(node_id=node_id, permanent=permanent)
 
         return {
@@ -553,31 +418,13 @@ async def alfresco_delete(
 
 async def alfresco_update_metadata(
     connector_id: str,
-    tenant_id: str,
     node_id: str,
     properties: Dict[str, Any],
     new_name: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Update node properties/metadata.
-
-    Common properties:
-    - cm:title: Document title
-    - cm:description: Description
-    - cm:author: Author name
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        node_id: Node ID
-        properties: Property key-value pairs to update
-        new_name: New name for the node (optional)
-
-    Returns:
-        Dict with updated node information
-    """
+    """Update node properties/metadata."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         node = await service.update_properties(
             node_id=node_id,
             properties=properties,
@@ -600,28 +447,14 @@ async def alfresco_update_metadata(
 
 async def alfresco_create_folder(
     connector_id: str,
-    tenant_id: str,
     parent_id: str,
     name: str,
     title: Optional[str] = None,
     description: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Create a new folder.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        parent_id: Parent folder ID (use "-root-" for Company Home)
-        name: Folder name
-        title: Folder title (cm:title property)
-        description: Folder description (cm:description property)
-
-    Returns:
-        Dict with created folder information
-    """
+    """Create a new folder."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         node = await service.create_folder(
             parent_id=parent_id,
             name=name,
@@ -646,27 +479,12 @@ async def alfresco_create_folder(
 
 async def alfresco_get_sites(
     connector_id: str,
-    tenant_id: str,
     skip: int = 0,
     max_items: int = 50,
 ) -> Dict[str, Any]:
-    """
-    List available Alfresco sites.
-
-    Sites are collaborative workspaces in Alfresco that contain
-    document libraries, wikis, calendars, etc.
-
-    Args:
-        connector_id: Alfresco connector UUID
-        tenant_id: Tenant UUID
-        skip: Number of sites to skip
-        max_items: Maximum sites to return
-
-    Returns:
-        Dict with 'sites' list
-    """
+    """List available Alfresco sites."""
     try:
-        service = await _get_service(connector_id, tenant_id)
+        service = await _get_service(connector_id)
         sites = await service.get_sites(skip=skip, max_items=max_items)
 
         return {
@@ -688,27 +506,17 @@ async def alfresco_get_sites(
         return {"success": False, "error": str(e)}
 
 
-async def alfresco_list_connectors(
-    tenant_id: str,
-) -> Dict[str, Any]:
+async def alfresco_list_connectors() -> Dict[str, Any]:
     """
-    List all active Alfresco connectors for a tenant.
+    List all active Alfresco connectors.
 
     This tool helps discover which Alfresco instances are available.
-
-    Args:
-        tenant_id: Tenant UUID
-
-    Returns:
-        Dict with 'connectors' list containing id, name, description
     """
     try:
-        tenant_uuid = UUID(tenant_id)
-        connectors = await get_connectors_for_tenant(tenant_uuid)
+        connectors = await get_all_connectors()
 
         return {
             "success": True,
-            "tenant_id": tenant_id,
             "connectors": [
                 {
                     "id": str(c.connector_id),

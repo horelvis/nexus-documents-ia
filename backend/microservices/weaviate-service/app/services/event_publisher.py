@@ -31,7 +31,6 @@ async def _get_redis() -> aioredis.Redis:
 
 async def publish_event(
     event_type: str,
-    tenant_id: str,
     payload: Dict[str, Any],
     source_service: str = "weaviate-service",
     correlation_id: Optional[str] = None,
@@ -39,21 +38,20 @@ async def publish_event(
     """Publish an event to the Emma reactive event bus.
 
     Returns the stream message ID, or None if publishing fails.
-    This is fire-and-forget — failures are logged but don't raise.
+    This is fire-and-forget -- failures are logged but don't raise.
     """
     try:
         r = await _get_redis()
         data = {
             "event_id": str(uuid.uuid4()),
             "event_type": event_type,
-            "tenant_id": tenant_id,
             "payload": json.dumps(payload),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source_service": source_service,
             "correlation_id": correlation_id or "",
         }
         msg_id = await r.xadd(STREAM_KEY, data, maxlen=MAX_STREAM_LEN, approximate=True)
-        logger.info(f"Published event {event_type} for tenant {tenant_id}")
+        logger.info(f"Published event {event_type}")
         return msg_id.decode() if isinstance(msg_id, bytes) else msg_id
     except Exception as e:
         logger.warning(f"Failed to publish event {event_type}: {e}")

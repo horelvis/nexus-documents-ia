@@ -22,7 +22,6 @@ class EmmaBackgroundService:
     async def analyze_document(
         self,
         document_id: str,
-        tenant_id: str,
         prompt_template: Optional[str] = None,
         agent: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
@@ -31,7 +30,6 @@ class EmmaBackgroundService:
 
         Args:
             document_id: The document to analyze
-            tenant_id: Tenant context
             prompt_template: Custom prompt (may use {document_title} etc.)
             agent: Specific specialist agent to use
             metadata: Additional context (title, collection, tags, etc.)
@@ -51,7 +49,6 @@ class EmmaBackgroundService:
 
         return await self._execute_emma(
             query=query,
-            tenant_id=tenant_id,
             agent=agent,
             context={
                 "background_task": True,
@@ -62,17 +59,15 @@ class EmmaBackgroundService:
 
     async def generate_daily_summary(
         self,
-        tenant_id: str,
         collections: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
-        """Generate a daily summary of recent activity for a tenant."""
+        """Generate a daily summary of recent activity."""
         query = (
             "Genera un resumen ejecutivo de la actividad reciente: "
             "documentos nuevos, cambios importantes, y cualquier alerta relevante."
         )
         return await self._execute_emma(
             query=query,
-            tenant_id=tenant_id,
             context={
                 "background_task": True,
                 "trigger_type": "daily_summary",
@@ -82,7 +77,6 @@ class EmmaBackgroundService:
 
     async def proactive_analysis(
         self,
-        tenant_id: str,
         analysis_type: str,
         query: str,
         context: Optional[Dict[str, Any]] = None,
@@ -90,7 +84,6 @@ class EmmaBackgroundService:
         """Run a custom proactive analysis."""
         return await self._execute_emma(
             query=query,
-            tenant_id=tenant_id,
             context={
                 "background_task": True,
                 "trigger_type": "proactive_analysis",
@@ -101,7 +94,6 @@ class EmmaBackgroundService:
 
     async def channel_query(
         self,
-        tenant_id: str,
         query: str,
         channel_type: str,
         user_id: str,
@@ -140,7 +132,6 @@ class EmmaBackgroundService:
         # Execute through Emma with persistent session_id for conversation memory
         result = await self._execute_emma(
             query=query,
-            tenant_id=tenant_id,
             context=context,
             session_id=session_id,  # Pass session_id for memory persistence
         )
@@ -424,7 +415,6 @@ Respuesta a reescribir:
     async def _execute_emma(
         self,
         query: str,
-        tenant_id: str,
         agent: Optional[str] = None,
         context: Optional[Dict[str, Any]] = None,
         session_id: Optional[str] = None,
@@ -433,7 +423,6 @@ Respuesta a reescribir:
 
         Args:
             query: User query
-            tenant_id: Tenant identifier
             agent: Optional specific agent to use
             context: Optional context dict
             session_id: Optional session ID for conversation memory persistence.
@@ -448,7 +437,6 @@ Respuesta a reescribir:
 
             langgraph_result = await execute_langgraph_query(
                 query=query,
-                tenant_id=tenant_id,
                 user_id=context.get("user_id") if context else None,
                 thread_id=session_id,
                 context=context or {},

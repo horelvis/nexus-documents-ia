@@ -123,7 +123,6 @@ class RelationshipLearner:
         for source_rel, (kg_edge, category, include, depth) in STANDARD_RELATIONSHIP_MAPPINGS.items():
             rel_type = await self._create_or_update_relationship_type(
                 connector_id=connector_id,
-                tenant_id=connector.tenant_id,
                 source_relationship=source_rel,
                 kg_edge_type=kg_edge,
                 category=category,
@@ -141,7 +140,6 @@ class RelationshipLearner:
                 )
                 rel_type = await self._create_or_update_relationship_type(
                     connector_id=connector_id,
-                    tenant_id=connector.tenant_id,
                     source_relationship=assoc_name,
                     kg_edge_type=kg_edge,
                     category=category,
@@ -169,7 +167,6 @@ class RelationshipLearner:
     async def _create_or_update_relationship_type(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
         source_relationship: str,
         kg_edge_type: str,
         category: RelationshipCategory,
@@ -198,7 +195,6 @@ class RelationshipLearner:
             # Create new
             rel_type = LearnedRelationshipType(
                 connector_id=connector_id,
-                tenant_id=tenant_id,
                 source_relationship=source_relationship,
                 kg_edge_type=kg_edge_type,
                 relationship_category=category.value,

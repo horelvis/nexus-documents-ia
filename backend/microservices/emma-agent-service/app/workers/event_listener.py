@@ -52,7 +52,6 @@ async def _auto_index_to_falkordb(event: EmmaEvent):
 
     kts_payload = {
         "document_id": doc_id,
-        "tenant_id": event.tenant_id,
         "file_path": payload.get("file_path", ""),
         "connector_metadata": {
             "title": payload.get("title", ""),
@@ -91,7 +90,7 @@ async def _auto_index_to_falkordb(event: EmmaEvent):
 
 async def handle_event(event: EmmaEvent, msg_id: str):
     """Process a single event through the trigger engine."""
-    logger.info(f"Processing event: {event.event_type} [{event.tenant_id}] id={msg_id}")
+    logger.info(f"Processing event: {event.event_type} id={msg_id}")
 
     # Auto-index to FalkorDB on document.indexed (before triggers)
     if event.event_type == "document.indexed":

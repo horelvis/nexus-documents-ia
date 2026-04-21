@@ -172,14 +172,15 @@ class SearchEmailsTool(BaseTool[SearchEmailsParams]):
         context: ToolExecutionContext
     ) -> ToolResult:
         """
-        Search indexed emails for the tenant across ALL tenant collections.
+        Search indexed emails across the unified documents collection.
 
-        This searches in all collections belonging to the tenant, including
-        legacy collections with different naming conventions.
+        Single-tenant: collections are globally fixed (see
+        ``DOCUMENTS_COLLECTION`` in weaviate_service). Personal emails
+        are scoped by ``user_id`` filter — users only see their own mail.
 
         Args:
             params: Search parameters
-            context: Execution context with tenant_id
+            context: Execution context (user_id + user_roles)
 
         Returns:
             ToolResult with matching emails
@@ -191,16 +192,15 @@ class SearchEmailsTool(BaseTool[SearchEmailsParams]):
             weaviate = self._weaviate or WeaviateService()
             await weaviate.initialize()
 
-            # Get ALL collections for this tenant
-            tenant_collections = await weaviate.get_tenant_collections(context.tenant_id)
-            logger.info(f"Searching emails in {len(tenant_collections)} tenant collections: {tenant_collections}")
+            # Single-tenant: one global documents collection
+            from app.services.weaviate_service import DOCUMENTS_COLLECTION
+            search_collections = [DOCUMENTS_COLLECTION]
 
             # Build filters (will only be applied if collection has the property)
             filters = {"source_type": "gmail"}
 
             # PRIVACY: Emails are personal content - always filter by user_id
-            # This ensures users can only see their own emails, not emails
-            # belonging to other users in the same tenant
+            # This ensures users can only see their own emails.
             if context.user_id:
                 filters["user_id"] = context.user_id
                 logger.debug(f"Applying user_id filter for email privacy: {context.user_id[:8]}...")
@@ -213,11 +213,12 @@ class SearchEmailsTool(BaseTool[SearchEmailsParams]):
             if params.subject_contains:
                 filters["metadata.subject"] = params.subject_contains
 
-            # Search across all tenant collections
+            # Search the documents collection (gmail content is indexed there
+            # with source_type="gmail" for filtering).
             results = await weaviate.search_across_collections(
-                collections=tenant_collections,
+                collections=search_collections,
                 query=params.query,
-                tenant_id=context.tenant_id,
+                user_roles=context.user_roles,
                 limit=params.limit,
                 filters=filters,
                 search_type="hybrid"
@@ -260,11 +261,11 @@ class SearchEmailsTool(BaseTool[SearchEmailsParams]):
                     "emails": formatted_results,
                     "total_found": len(formatted_results),
                     "query": params.query,
-                    "collections_searched": len(tenant_collections)
+                    "collections_searched": len(search_collections)
                 },
                 metadata={
                     "source_type": "gmail",
-                    "tenant_id": context.tenant_id
+                    "user_id": context.user_id,
                 }
             )
 
@@ -361,11 +362,12 @@ class SearchDriveTool(BaseTool[SearchDriveParams]):
         context: ToolExecutionContext
     ) -> ToolResult:
         """
-        Search indexed Drive files for the tenant across ALL tenant collections.
+        Search indexed Google Drive files across the unified documents
+        collection.
 
         Args:
             params: Search parameters
-            context: Execution context
+            context: Execution context (user_id + user_roles)
 
         Returns:
             ToolResult with matching files
@@ -376,17 +378,14 @@ class SearchDriveTool(BaseTool[SearchDriveParams]):
             weaviate = self._weaviate or WeaviateService()
             await weaviate.initialize()
 
-            # Get ALL collections for this tenant
-            tenant_collections = await weaviate.get_tenant_collections(context.tenant_id)
-            logger.info(f"Searching Drive files in {len(tenant_collections)} tenant collections")
+            # Single-tenant: one global documents collection
+            from app.services.weaviate_service import DOCUMENTS_COLLECTION
+            search_collections = [DOCUMENTS_COLLECTION]
 
             # Build filters (will only be applied if collection has the property)
             filters = {"source_type": "google_drive"}
 
             # PRIVACY: Google Drive files are filtered by user_id by default.
-            # This means users see files they uploaded from their connected Drive.
-            # TODO: For shared folders/team drives, consider allowing tenant-wide
-            # access based on sharing permissions stored in metadata.
             if context.user_id:
                 filters["user_id"] = context.user_id
                 logger.debug(f"Applying user_id filter for Drive privacy: {context.user_id[:8]}...")
@@ -399,11 +398,11 @@ class SearchDriveTool(BaseTool[SearchDriveParams]):
             if params.folder:
                 filters["metadata.folder"] = params.folder
 
-            # Search across all tenant collections
+            # Search the documents collection
             results = await weaviate.search_across_collections(
-                collections=tenant_collections,
+                collections=search_collections,
                 query=params.query,
-                tenant_id=context.tenant_id,
+                user_roles=context.user_roles,
                 limit=params.limit,
                 filters=filters,
                 search_type="hybrid"
@@ -442,11 +441,11 @@ class SearchDriveTool(BaseTool[SearchDriveParams]):
                     "files": formatted_results,
                     "total_found": len(formatted_results),
                     "query": params.query,
-                    "collections_searched": len(tenant_collections)
+                    "collections_searched": len(search_collections)
                 },
                 metadata={
                     "source_type": "google_drive",
-                    "tenant_id": context.tenant_id
+                    "user_id": context.user_id,
                 }
             )
 
@@ -525,7 +524,8 @@ class SearchChannelTool(BaseTool[SearchChannelParams]):
         context: ToolExecutionContext
     ) -> ToolResult:
         """
-        Search content from a specific channel across ALL tenant collections.
+        Search content from a specific channel across the unified documents
+        collection.
         """
         call_id = context.metadata.get("call_id", "")
 
@@ -533,15 +533,14 @@ class SearchChannelTool(BaseTool[SearchChannelParams]):
             weaviate = self._weaviate or WeaviateService()
             await weaviate.initialize()
 
-            # Get ALL collections for this tenant
-            tenant_collections = await weaviate.get_tenant_collections(context.tenant_id)
-            logger.info(f"Searching channel {params.source_type} in {len(tenant_collections)} tenant collections")
+            # Single-tenant: one global documents collection
+            from app.services.weaviate_service import DOCUMENTS_COLLECTION
+            search_collections = [DOCUMENTS_COLLECTION]
 
             # Build filters (will only be applied if collection has the property)
             filters = {"source_type": params.source_type}
 
             # PRIVACY: Apply user_id filter for personal channels
-            # Channels that typically contain personal data should be filtered
             personal_channels = {"gmail", "outlook", "slack_dm", "personal_drive"}
             if params.source_type.lower() in personal_channels:
                 if context.user_id:
@@ -553,11 +552,11 @@ class SearchChannelTool(BaseTool[SearchChannelParams]):
             if params.filters:
                 filters.update(params.filters)
 
-            # Search across all tenant collections
+            # Search the documents collection
             results = await weaviate.search_across_collections(
-                collections=tenant_collections,
+                collections=search_collections,
                 query=params.query,
-                tenant_id=context.tenant_id,
+                user_roles=context.user_roles,
                 limit=params.limit,
                 filters=filters,
                 search_type="hybrid"
@@ -571,7 +570,7 @@ class SearchChannelTool(BaseTool[SearchChannelParams]):
                     "results": results,
                     "total_found": len(results),
                     "source_type": params.source_type,
-                    "collections_searched": len(tenant_collections)
+                    "collections_searched": len(search_collections)
                 }
             )
 

@@ -70,13 +70,11 @@ class FolderClassificationService:
 
     def __init__(
         self,
-        tenant_id: str,
         k: int = None,
         min_confidence: float = None,
         sglang_base_url: str = None,
         weaviate_url: str = None,
     ):
-        self.tenant_id = tenant_id
         self.k = k or self.DEFAULT_K
         self.min_confidence = min_confidence or self.DEFAULT_MIN_CONFIDENCE
         self.sglang_base_url = sglang_base_url or self.SGLANG_BASE_URL
@@ -94,11 +92,14 @@ class FolderClassificationService:
         """
         async with httpx.AsyncClient(timeout=30.0) as client:
             try:
-                # Use Weaviate service's search endpoint
+                # Use Weaviate service's search endpoint. Auto-classification
+                # runs in the background worker with no "current user", so the
+                # search spans all indexed documents — folder suggestions need
+                # the widest possible similarity pool, and folder paths are
+                # metadata (not ACL-sensitive content).
                 response = await client.post(
                     f"{self.weaviate_url}/api/v1/search",
                     json={
-                        "tenant_id": self.tenant_id,
                         "query": content[:2000],  # Use content as query
                         "limit": self.k * 2,  # Get extra to filter
                         "include_metadata": True,
@@ -312,7 +313,6 @@ JSON:"""
 # =============================================================================
 
 async def classify_document(
-    tenant_id: str,
     documento: Dict[str, Any],
     k: int = 7,
     min_confidence: float = 0.6,
@@ -321,7 +321,6 @@ async def classify_document(
     Convenience function to classify a document.
 
     Args:
-        tenant_id: Tenant identifier
         documento: Dict with filename, file_type, content, doc_id
         k: Number of similar documents to retrieve
         min_confidence: Minimum confidence threshold
@@ -330,7 +329,6 @@ async def classify_document(
         ClassificationResult
     """
     service = FolderClassificationService(
-        tenant_id=tenant_id,
         k=k,
         min_confidence=min_confidence,
     )

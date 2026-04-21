@@ -217,7 +217,6 @@ async def download_document_content(config: Dict[str, Any], node_id: str) -> byt
 async def _process_document(
     conn: asyncpg.Connection,
     entry: Dict[str, Any],
-    tenant_id: UUID,
     connector_id: UUID,
     owner_id: UUID,
     base_url: str,
@@ -235,7 +234,6 @@ async def _process_document(
     properties = entry.get("properties", {})
     path_info = entry.get("path", {})
     content_info = entry.get("content", {})
-    permissions_info = entry.get("permissions", {})
 
     # Build external path
     path_elements = path_info.get("elements", [])
@@ -260,20 +258,9 @@ async def _process_document(
     source_created = _parse_alfresco_date(properties.get("cm:created"))
     source_modified = _parse_alfresco_date(properties.get("cm:modified"))
 
-    # Extract Alfresco permissions → shared_with_users / shared_with_groups
-    shared_with_users = []
-    shared_with_groups = []
-    all_perms = (permissions_info.get("locallySet") or []) + (permissions_info.get("inherited") or [])
-    for perm in all_perms:
-        authority = perm.get("authorityId", "")
-        if authority.startswith("GROUP_"):
-            group_name = authority.removeprefix("GROUP_")
-            if group_name not in shared_with_groups:
-                shared_with_groups.append(group_name)
-        elif authority and authority not in shared_with_users:
-            shared_with_users.append(authority)
-    shared_users_json = json.dumps(shared_with_users)
-    shared_groups_json = json.dumps(shared_with_groups)
+    # Multi-tenancy removed: documents default to roles=["EVERYONE"].
+    # Alfresco per-node permissions (locallySet/inherited GROUP_*) are no longer
+    # mirrored into `shared_with_users`/`shared_with_groups` (dead legacy columns).
 
     # Check if document already exists
     existing = await conn.fetchrow(
@@ -299,16 +286,13 @@ async def _process_document(
                     size_bytes = $6,
                     file_extension = $7,
                     source_modified_at = $8,
-                    shared_with_users = $9::jsonb,
-                    shared_with_groups = $10::jsonb,
-                    updated_at = $11,
+                    updated_at = $9,
                     indexing_status = 'pending',
                     indexing_error = NULL
-                WHERE connector_id = $12 AND external_id = $13
+                WHERE connector_id = $10 AND external_id = $11
                 """,
                 title, description, external_path, external_url,
                 mime_type, size_bytes, file_extension, source_modified,
-                shared_users_json, shared_groups_json,
                 datetime.now(timezone.utc),
                 connector_id, node_id,
             )
@@ -324,39 +308,38 @@ async def _process_document(
                     size_bytes = $6,
                     file_extension = $7,
                     source_modified_at = $8,
-                    shared_with_users = $9::jsonb,
-                    shared_with_groups = $10::jsonb,
-                    updated_at = $11
-                WHERE connector_id = $12 AND external_id = $13
+                    updated_at = $9
+                WHERE connector_id = $10 AND external_id = $11
                 """,
                 title, description, external_path, external_url,
                 mime_type, size_bytes, file_extension, source_modified,
-                shared_users_json, shared_groups_json,
                 datetime.now(timezone.utc),
                 connector_id, node_id,
             )
         stats["items_updated"] += 1
     else:
         # Create new
+        import uuid as uuid_mod
+        doc_id = uuid_mod.uuid4()
         await conn.execute(
             """
             INSERT INTO indexed_documents (
-                id, tenant_id, connector_id, external_id, external_url,
-                external_path, owner_id, is_tenant_public, title,
+                id, connector_id, external_id, external_url,
+                external_path, owner_id, title,
                 description, mime_type, file_extension, size_bytes,
                 source_created_at, source_modified_at, indexing_status,
-                shared_with_users, shared_with_groups
+                roles
             ) VALUES (
-                $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14, $15, $16,
-                $17::jsonb, $18::jsonb
+                $1::uuid, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10, $11, $12, $13, $14,
+                $15
             )
             """,
-            node_id, tenant_id, connector_id, node_id, external_url,
-            external_path, owner_id, True, title,
+            doc_id, connector_id, node_id, external_url,
+            external_path, owner_id, title,
             description, mime_type, file_extension, size_bytes,
             source_created, source_modified, "pending",
-            shared_users_json, shared_groups_json,
+            ["EVERYONE"],
         )
         stats["items_new"] += 1
 
@@ -392,7 +375,7 @@ async def run_sync_job(
         # Get connector
         row = await conn.fetchrow(
             """
-            SELECT id, tenant_id, name, config, is_active, sync_enabled,
+            SELECT id, name, config, is_active, sync_enabled,
                    last_health_check, created_by_id, connector_type
             FROM connectors WHERE id = $1
             """,
@@ -415,14 +398,11 @@ async def run_sync_job(
         else:
             config = raw_config or {}
 
-        tenant_id = row["tenant_id"]
-
         # Get owner
         owner_id = row["created_by_id"]
         if not owner_id:
             admin_row = await conn.fetchrow(
-                "SELECT id FROM users WHERE tenant_id = $1 AND is_active = true LIMIT 1",
-                tenant_id,
+                "SELECT id FROM users WHERE is_active = true ORDER BY created_at LIMIT 1",
             )
             if admin_row:
                 owner_id = admin_row["id"]
@@ -469,7 +449,6 @@ async def run_sync_job(
                         await _process_document(
                             conn=conn,
                             entry=entry,
-                            tenant_id=tenant_id,
                             connector_id=UUID(connector_id),
                             owner_id=owner_id,
                             base_url=base_url,
@@ -559,7 +538,7 @@ async def run_index_pending_job(
     try:
         # Get connector
         row = await conn.fetchrow(
-            "SELECT id, tenant_id, config, is_active, connector_type FROM connectors WHERE id = $1",
+            "SELECT id, config, is_active, connector_type FROM connectors WHERE id = $1",
             UUID(connector_id),
         )
         if not row:
@@ -577,10 +556,10 @@ async def run_index_pending_job(
         limit = max_documents or 1000
         pending_docs = await conn.fetch(
             """
-            SELECT id, tenant_id, connector_id, external_id, external_url,
-                   external_path, owner_id, is_tenant_public, title, description,
+            SELECT id, connector_id, external_id, external_url,
+                   external_path, owner_id, title, description,
                    mime_type, file_extension, size_bytes, source_created_at,
-                   source_modified_at, shared_with_users, shared_with_groups
+                   source_modified_at, roles
             FROM indexed_documents
             WHERE connector_id = $1 AND indexing_status = 'pending'
             ORDER BY created_at
@@ -742,7 +721,6 @@ async def _index_single_document(
             file_bytes=content,
             filename=doc["title"],
             mime_type=doc["mime_type"],
-            tenant_id=str(doc["tenant_id"]),
             owner_id=str(doc["owner_id"]),
             metadata={
                 "external_id": doc["external_id"],
@@ -753,9 +731,7 @@ async def _index_single_document(
                 "source_modified_at": doc["source_modified_at"].isoformat() if doc["source_modified_at"] else None,
             },
             acl={
-                "is_tenant_public": doc["is_tenant_public"],
-                "shared_with_users": doc["shared_with_users"] or [],
-                "shared_with_groups": doc["shared_with_groups"] or [],
+                "roles": list(doc["roles"]) if doc["roles"] else ["EVERYONE"],
             },
         )
 
@@ -824,7 +800,6 @@ async def _send_to_weaviate_pipeline(
     file_bytes: bytes,
     filename: str,
     mime_type: Optional[str],
-    tenant_id: str,
     owner_id: str,
     metadata: Dict[str, Any],
     acl: Dict[str, Any],
@@ -845,7 +820,6 @@ async def _send_to_weaviate_pipeline(
         "file_bytes_base64": file_base64,
         "filename": filename,
         "mime_type": mime_type,
-        "tenant_id": tenant_id,
         "owner_id": owner_id,
         "metadata": metadata,
         "acl": acl,

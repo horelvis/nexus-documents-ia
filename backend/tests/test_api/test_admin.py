@@ -48,31 +48,29 @@ def test_list_users_unauthorized(client, normal_user_token_headers):
     # Mensaje puede variar, así que verificamos contenido general
     assert any(keyword in content["detail"].lower() for keyword in ["privilege", "permission", "forbidden", "unauthorized"]), f"Error detail '{content['detail']}' does not indicate an authorization error."
 
-def test_create_user(client, test_tenant, superuser_token_headers):
+def test_create_user(client, superuser_token_headers):
     """Prueba para crear un usuario (solo admin)"""
     user_data = {
         "email": "newadminuser@example.com",
         "password": "password123",
         "full_name": "New Admin User",
         "is_superuser": True,
-        "tenant_id": str(test_tenant.id)
     }
-    
+
     response = client.post(
         "/api/v1/admin/users",
         headers=superuser_token_headers,
         json=user_data
     )
-    
+
     print(f"DEBUG - Create user status: {response.status_code}")
     print(f"DEBUG - Create user content: {response.text}")
-    
+
     assert response.status_code == 200, f"Expected status 200 but got {response.status_code}. Response: {response.text}"
     content = response.json()
     assert content["email"] == user_data["email"], f"Expected email '{user_data['email']}', got '{content['email']}'"
     assert content["full_name"] == user_data["full_name"], f"Expected full_name '{user_data['full_name']}', got '{content['full_name']}'"
     assert content["is_superuser"] is user_data["is_superuser"], f"Expected is_superuser '{user_data['is_superuser']}', got '{content['is_superuser']}'"
-    assert content["tenant_id"] == user_data["tenant_id"], f"Expected tenant_id '{user_data['tenant_id']}', got '{content['tenant_id']}'"
 
 def test_create_user_duplicate_email(client, test_user, superuser_token_headers):
     """Prueba para crear un usuario con email duplicado"""
@@ -81,7 +79,6 @@ def test_create_user_duplicate_email(client, test_user, superuser_token_headers)
         "password": "password123",
         "full_name": "Duplicate Email User",
         "is_superuser": False,
-        "tenant_id": str(test_user.tenant_id)
     }
     
     response = client.post(
@@ -207,16 +204,12 @@ def test_get_system_stats(client, superuser_token_headers):
     assert response.status_code == 200, f"Expected status 200 but got {response.status_code}. Response: {response.text}"
     content = response.json()
     assert "users" in content, "Stats response should contain 'users' key"
-    assert "tenants" in content, "Stats response should contain 'tenants' key"
     assert "documents" in content, "Stats response should contain 'documents' key"
     assert "storage" in content, "Stats response should contain 'storage' key"
-    
+
     # Verificar estructura de 'users'
     assert "total" in content["users"], "'users' stats should contain 'total' key"
     assert "active" in content["users"], "'users' stats should contain 'active' key"
-    # Verificar estructura de 'tenants'
-    assert "total" in content["tenants"], "'tenants' stats should contain 'total' key"
-    assert "active" in content["tenants"], "'tenants' stats should contain 'active' key"
     # Verificar estructura de 'documents'
     assert "total" in content["documents"], "'documents' stats should contain 'total' key"
     assert "indexed" in content["documents"], "'documents' stats should contain 'indexed' key"

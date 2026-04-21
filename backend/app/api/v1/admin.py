@@ -9,9 +9,10 @@ from uuid import UUID
 import logging
 import os
 
-from app.api.async_dependencies import get_current_active_superuser_async
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import require_role
 from app.db.async_database import get_async_db
-from app.db.models import User, Tenant, Document, DocumentMetrics, DocumentView, IndexedDocument
+from app.db.models import User, Document, DocumentMetrics, DocumentView, IndexedDocument
 from sqlalchemy import text
 from app.schemas.user import UserUpdate, UserResponse
 from app.services.async_document_service import AsyncDocumentService
@@ -24,19 +25,13 @@ router = APIRouter()
 async def list_users(
     skip: int = 0,
     limit: int = 100,
-    tenant_id: Optional[UUID] = None,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Lista todos los usuarios del sistema (solo administradores).
     """
-    print(f"DEBUG - Current user: {current_user}")  # Agrega este print para depuración
-    
-    stmt = select(User)
-    if tenant_id:
-        stmt = stmt.filter(User.tenant_id == tenant_id)
-    stmt = stmt.offset(skip).limit(limit)
+    stmt = select(User).offset(skip).limit(limit)
     
     result = await db.execute(stmt)
     users = result.scalars().all()
@@ -51,7 +46,7 @@ async def list_users(
 async def get_user(
     user_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Obtiene información detallada de un usuario (solo administradores).
@@ -70,7 +65,7 @@ async def update_user(
     user_id: UUID,
     user_in: UserUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Actualiza un usuario existente (solo administradores).
@@ -92,17 +87,6 @@ async def update_user(
                 detail="El email ya está registrado"
             )
     
-    # Verificar que el tenant exista si se está cambiando
-    if user_in.tenant_id and user_in.tenant_id != user.tenant_id:
-        stmt = select(Tenant).filter(Tenant.id == user_in.tenant_id)
-        result = await db.execute(stmt)
-        tenant = result.scalar_one_or_none()
-        if not tenant:
-            raise HTTPException(
-                status_code=404,
-                detail="Tenant no encontrado"
-            )
-    
     # Actualizar campos (password excluded - managed by Clerk)
     update_data = user_in.model_dump(exclude_unset=True, exclude={"password"})
     for key, value in update_data.items():
@@ -119,7 +103,7 @@ async def update_user(
 async def delete_user(
     user_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Elimina un usuario (solo administradores).
@@ -131,7 +115,7 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
     # Evitar eliminar al propio usuario administrador
-    if str(user.id) == str(current_user.id):
+    if str(user.id) == str(current_user.sub):
         raise HTTPException(
             status_code=400,
             detail="No puedes eliminar tu propio usuario"
@@ -148,26 +132,14 @@ async def delete_user(
 async def list_all_documents(
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
-    tenant_id: Optional[UUID] = None,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Lista todos los documentos del sistema (solo administradores).
     """
-    # Si se proporciona tenant_id, usar ese tenant
-    # Si no, usar el tenant del usuario actual o el tenant por defecto
-    if tenant_id:
-        tenant_id_str = str(tenant_id)
-    else:
-        # Usar el tenant del usuario actual como fallback
-        tenant_id_str = str(current_user.tenant_id)
-    
-    document_service = await AsyncDocumentService.create(
-        tenant_id=tenant_id_str, 
-        user_id=str(current_user.id)
-    )
-    
+    document_service = await AsyncDocumentService.create(user=current_user, db=db)
+
     return await document_service.get_documents(
         db=db,
         page=page,
@@ -178,7 +150,7 @@ async def list_all_documents(
 @router.get("/stats", response_model=dict)
 async def get_system_stats(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Obtiene estadísticas generales del sistema (solo administradores).
@@ -191,15 +163,6 @@ async def get_system_stats(
     stmt = select(func.count(User.id)).filter(User.is_active == True)
     result = await db.execute(stmt)
     active_users = result.scalar() or 0
-    
-    # Contar tenants
-    stmt = select(func.count(Tenant.id))
-    result = await db.execute(stmt)
-    total_tenants = result.scalar() or 0
-    
-    stmt = select(func.count(Tenant.id)).filter(Tenant.is_active == True)
-    result = await db.execute(stmt)
-    active_tenants = result.scalar() or 0
     
     # Contar documentos - from Document table (direct uploads)
     stmt = select(func.count(Document.id))
@@ -271,10 +234,6 @@ async def get_system_stats(
             "total": total_users,
             "active": active_users
         },
-        "tenants": {
-            "total": total_tenants,
-            "active": active_tenants
-        },
         "documents": {
             "total": total_documents,
             "indexed": indexed_documents,
@@ -295,7 +254,7 @@ async def get_system_stats(
 @router.post("/init-ollama-model", response_model=dict)
 async def initialize_ollama_model(
     model_name: str = Body(..., embed=True),
-    current_user: User = Depends(get_current_active_superuser_async),
+    current_user: UserProfile = Depends(require_role("ADMIN")),
 ):
     """
     DEPRECATED: Ollama microservice was removed in favor of SGLang.
@@ -316,19 +275,18 @@ async def initialize_ollama_model(
 async def get_document_activity_stats(
     time_period_days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_async_db),
-    current_user = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """Obtiene estadísticas de actividad de documentos para el panel de administrador"""
     try:
-        tenant_id = str(current_user.tenant_id)
         cutoff_date = datetime.now() - timedelta(days=time_period_days)
-        
+
         # For now, return simplified stats since DocumentView might be a table
         # This would need to be adjusted based on actual model structure
         general_stats = None
         top_formats = []
         top_users = []
-        
+
         # Documentos más consultados
         stmt = select(
             Document.id,
@@ -337,7 +295,6 @@ async def get_document_activity_stats(
         ).join(
             DocumentMetrics, Document.id == DocumentMetrics.document_id
         ).filter(
-            Document.tenant_id == tenant_id,
             DocumentMetrics.query_count > 0
         ).order_by(
             desc(DocumentMetrics.query_count)
@@ -374,7 +331,7 @@ async def get_document_activity_stats(
 async def delete_all_documents(
     confirm: bool = Body(..., embed=True),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Elimina todos los documentos del tenant actual (solo administradores).
@@ -394,8 +351,9 @@ async def delete_all_documents(
             detail="Debe confirmar la operación estableciendo confirm=true"
         )
 
-    tenant_id = str(current_user.tenant_id)
-    logger.warning(f"🚨 Admin {current_user.id} initiating delete-all-documents for tenant {tenant_id}")
+    from app.core.config import settings
+    default_tid = settings.DEFAULT_TENANT_ID
+    logger.warning(f"🚨 Admin {current_user.sub} initiating delete-all-documents")
 
     results = {
         "weaviate_deleted": False,
@@ -409,7 +367,7 @@ async def delete_all_documents(
         # Step 1: Delete from vector store (Weaviate)
         from app.services.weaviate_client import weaviate_client
 
-        collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
+        collection_name = f"Nouxcube_{default_tid.replace('-', '_')}_documents"
         try:
             weaviate_deleted = await weaviate_client.delete_collection(collection_name)
             results["weaviate_deleted"] = weaviate_deleted
@@ -420,14 +378,14 @@ async def delete_all_documents(
         except Exception as e:
             logger.warning(f"⚠️ Could not delete vector collection: {e}")
 
-        # Step 2: Get all documents from 'documents' table (SaaS mode / direct uploads)
-        stmt = select(Document).filter(Document.tenant_id == tenant_id)
+        # Step 2: Get all documents from 'documents' table (direct uploads)
+        stmt = select(Document)
         result = await db.execute(stmt)
         documents = result.scalars().all()
 
         # Step 3: Delete files from storage (only for Document table which has file_path)
         from app.services.async_storage_service import AsyncStorageService
-        storage_service = AsyncStorageService(tenant_id, str(current_user.id))
+        storage_service = AsyncStorageService(default_tid, current_user.sub)
 
         for doc in documents:
             if doc.file_path:
@@ -444,12 +402,12 @@ async def delete_all_documents(
             await db.delete(doc)
             results["database_deleted"] += 1
 
-        # Step 5: Get all documents from 'indexed_documents' table (on-premise mode / connectors)
-        stmt = select(IndexedDocument).filter(IndexedDocument.tenant_id == tenant_id)
+        # Step 5: Get all documents from 'indexed_documents' table (connectors)
+        stmt = select(IndexedDocument)
         result = await db.execute(stmt)
         indexed_documents = result.scalars().all()
 
-        logger.info(f"📋 Found {len(indexed_documents)} indexed_documents to delete for tenant {tenant_id}")
+        logger.info(f"📋 Found {len(indexed_documents)} indexed_documents to delete")
 
         # Step 6: Delete indexed_documents records from database
         # Note: IndexedDocument stores documents from external connectors (Alfresco, SharePoint)
@@ -460,7 +418,7 @@ async def delete_all_documents(
 
         await db.commit()
 
-        # Step 7: Clear knowledge graph (FalkorDB) for this tenant
+        # Step 7: Clear knowledge graph (FalkorDB)
         results["knowledge_graph_cleared"] = False
         try:
             import httpx
@@ -470,11 +428,10 @@ async def delete_all_documents(
                 resp = await client.delete(
                     f"{knowledge_tree_url}/tree/graph/clear",
                     headers={"X-API-Key": api_key},
-                    params={"tenant_id": tenant_id},
                 )
                 results["knowledge_graph_cleared"] = resp.status_code == 200
                 if results["knowledge_graph_cleared"]:
-                    logger.info(f"✅ Cleared knowledge graph for tenant {tenant_id}")
+                    logger.info("✅ Cleared knowledge graph")
                 else:
                     logger.warning(f"⚠️ Could not clear knowledge graph: {resp.status_code}")
         except Exception as e:
@@ -483,7 +440,7 @@ async def delete_all_documents(
         total_deleted = results["database_deleted"] + results["indexed_documents_deleted"]
 
         logger.info(
-            f"✅ Delete-all-documents completed for tenant {tenant_id}: "
+            f"✅ Delete-all-documents completed: "
             f"weaviate={results['weaviate_deleted']}, "
             f"storage={results['storage_deleted']}, "
             f"documents={results['database_deleted']}, "
@@ -511,7 +468,7 @@ async def delete_all_documents(
 async def retry_failed_indexing(
     confirm: bool = Body(..., embed=True),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Reintentar indexado de todos los documentos fallidos del tenant (solo administradores).
@@ -529,8 +486,7 @@ async def retry_failed_indexing(
             detail="Debe confirmar la operación estableciendo confirm=true"
         )
 
-    tenant_id = str(current_user.tenant_id)
-    logger.warning(f"🔄 Admin {current_user.id} retrying failed indexing for tenant {tenant_id}")
+    logger.warning(f"🔄 Admin {current_user.sub} retrying failed indexing")
 
     try:
         from sqlalchemy import func, update
@@ -538,7 +494,6 @@ async def retry_failed_indexing(
         # Count failed documents before reset
         failed_count_result = await db.execute(
             select(func.count(IndexedDocument.id))
-            .where(IndexedDocument.tenant_id == tenant_id)
             .where(IndexedDocument.indexing_status == "failed")
         )
         failed_count = failed_count_result.scalar() or 0
@@ -553,7 +508,6 @@ async def retry_failed_indexing(
         # Reset failed documents to pending
         await db.execute(
             update(IndexedDocument)
-            .where(IndexedDocument.tenant_id == tenant_id)
             .where(IndexedDocument.indexing_status == "failed")
             .values(
                 indexing_status="pending",
@@ -562,9 +516,7 @@ async def retry_failed_indexing(
         )
         await db.commit()
 
-        logger.info(
-            f"✅ Reset {failed_count} failed documents to pending for tenant {tenant_id}"
-        )
+        logger.info(f"✅ Reset {failed_count} failed documents to pending")
 
         return {
             "success": True,
@@ -584,7 +536,7 @@ async def retry_failed_indexing(
 @router.post("/clear-vector-db", response_model=dict)
 async def clear_vector_database(
     confirm: bool = Body(..., embed=True),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Limpia la base de datos vectorial del tenant actual (solo administradores).
@@ -602,13 +554,14 @@ async def clear_vector_database(
             detail="Debe confirmar la operación estableciendo confirm=true"
         )
 
-    tenant_id = str(current_user.tenant_id)
-    logger.warning(f"🚨 Admin {current_user.id} initiating clear-vector-db for tenant {tenant_id}")
+    from app.core.config import settings
+    default_tid = settings.DEFAULT_TENANT_ID
+    logger.warning(f"🚨 Admin {current_user.sub} initiating clear-vector-db")
 
     try:
         from app.services.weaviate_client import weaviate_client
 
-        collection_name = f"Nouxcube_{tenant_id.replace('-', '_')}_documents"
+        collection_name = f"Nouxcube_{default_tid.replace('-', '_')}_documents"
         collections_cleared = []
 
         # Check if collection exists
@@ -633,7 +586,6 @@ async def clear_vector_database(
             "success": True,
             "message": "Vector database cleared successfully",
             "collections_cleared": collections_cleared,
-            "tenant_id": tenant_id
         }
 
     except HTTPException:
@@ -652,7 +604,7 @@ async def run_maintenance(
     clean_orphaned_files: bool = Body(True),
     rebuild_search_index: bool = Body(False),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_active_superuser_async)
+    current_user: UserProfile = Depends(require_role("ADMIN"))
 ):
     """
     Ejecuta operaciones de mantenimiento en el sistema (solo administradores).
@@ -660,8 +612,9 @@ async def run_maintenance(
     import time
     start_time = time.time()
     operations_performed = []
-    tenant_id = str(current_user.tenant_id)
-    
+    from app.core.config import settings
+    default_tid = settings.DEFAULT_TENANT_ID
+
     try:
         # 1. Optimize database tables
         if optimize_database:
@@ -669,7 +622,6 @@ async def run_maintenance(
                 # Run ANALYZE on tables
                 await db.execute(text("ANALYZE documents;"))
                 await db.execute(text("ANALYZE users;"))
-                await db.execute(text("ANALYZE tenants;"))
                 operations_performed.append("Database tables analyzed")
                 logger.info("Database tables optimized")
             except Exception as e:
@@ -679,11 +631,10 @@ async def run_maintenance(
         if clean_orphaned_files:
             try:
                 from app.services.async_storage_service import AsyncStorageService
-                storage_service = AsyncStorageService(tenant_id, str(current_user.id))
-                
+                storage_service = AsyncStorageService(default_tid, current_user.sub)
+
                 # Get all document file paths from database
                 stmt = select(Document.file_path).filter(
-                    Document.tenant_id == tenant_id,
                     Document.file_path.isnot(None)
                 )
                 result = await db.execute(stmt)
@@ -701,7 +652,7 @@ async def run_maintenance(
         if rebuild_search_index:
             try:
                 from app.services.reindex_service import ReindexService
-                reindex_service = ReindexService(tenant_id=tenant_id)
+                reindex_service = ReindexService()
                 
                 # Force reindex all documents
                 result = await reindex_service.reindex_all_missing()

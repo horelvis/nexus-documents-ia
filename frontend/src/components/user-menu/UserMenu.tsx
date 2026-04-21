@@ -60,7 +60,6 @@ export function UserMenu({ className }: UserMenuProps) {
         id: user.id,
         email: user.email,
         fullName: user.full_name,
-        tenantId: user.tenant_id,
         planName: 'Enterprise', // On-premise is always enterprise
       }
     : null

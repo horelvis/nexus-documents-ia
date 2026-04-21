@@ -4,11 +4,11 @@ Celery tasks for TrustGraph triple extraction.
 Task Flow:
     extract_document_task:
         1. POST to /extract/triples on knowledge-tree-service
-        2. Passes tenant_id, document_id, chunks, collection, and metadata
+        2. Passes document_id, chunks, collection, and metadata
         3. Retries up to 2 times on failure (10s delay)
 
-    reindex_tenant_task:
-        1. DELETE /triples/clear on knowledge-tree-service (wipes tenant graph)
+    reindex_graph_task:
+        1. DELETE /triples/clear on knowledge-tree-service (wipes graph)
         2. Logs that re-indexing will happen via the normal indexing pipeline
 """
 
@@ -46,7 +46,6 @@ def _get_headers() -> Dict[str, str]:
 )
 def extract_document_task(
     self,
-    tenant_id: str,
     document_id: str,
     chunks: List[str],
     collection: str = "default",
@@ -63,7 +62,6 @@ def extract_document_task(
     PROV-O provenance.
 
     Args:
-        tenant_id:     Tenant identifier (used as graph user).
         document_id:   Unique document ID.
         chunks:        Ordered list of text chunks from the document.
         collection:    Collection scope (default: "default").
@@ -80,7 +78,6 @@ def extract_document_task(
     """
     url = f"{KTS_URL}/extract/triples"
     payload = {
-        "tenant_id": tenant_id,
         "document_id": document_id,
         "chunks": chunks,
         "collection": collection,
@@ -91,8 +88,7 @@ def extract_document_task(
     }
 
     logger.info(
-        "trustgraph.extract_document: tenant=%s doc=%s chunks=%d collection=%s",
-        tenant_id,
+        "trustgraph.extract_document: doc=%s chunks=%d collection=%s",
         document_id,
         len(chunks),
         collection,
@@ -129,26 +125,24 @@ def extract_document_task(
 
 
 @celery_app.task(
-    name="trustgraph.reindex_tenant",
+    name="trustgraph.reindex_graph",
     bind=True,
     max_retries=0,
     time_limit=3600,
     soft_time_limit=3500,
 )
-def reindex_tenant_task(
+def reindex_graph_task(
     self,
-    tenant_id: str,
     collection: str = "default",
 ) -> Dict[str, Any]:
-    """Clear the TrustGraph for a tenant and trigger re-indexation.
+    """Clear the TrustGraph and trigger re-indexation.
 
-    Step 1: DELETEs all triples for the tenant via /triples/clear.
+    Step 1: DELETEs all triples via /triples/clear.
     Step 2: Logs that documents will be re-extracted by the indexing
             pipeline (each document.indexed event triggers
             trustgraph.extract_document via the event bus / Celery).
 
     Args:
-        tenant_id:  Tenant identifier whose graph will be wiped.
         collection: Collection scope (default: "default").
 
     Returns:
@@ -158,26 +152,23 @@ def reindex_tenant_task(
           message     — human-readable summary
     """
     url = f"{KTS_URL}/triples/clear"
-    params = {"tenant_id": tenant_id}
 
     logger.info(
-        "trustgraph.reindex_tenant: clearing graph for tenant=%s collection=%s",
-        tenant_id,
+        "trustgraph.reindex_graph: clearing graph collection=%s",
         collection,
     )
 
     try:
         with httpx.Client(timeout=CLEAR_TIMEOUT) as client:
-            response = client.delete(url, params=params, headers=_get_headers())
+            response = client.delete(url, headers=_get_headers())
 
         if response.status_code == 200:
             result = response.json()
             deleted = result.get("deleted", 0)
             logger.info(
-                "trustgraph.reindex_tenant: cleared %d nodes for tenant=%s — "
+                "trustgraph.reindex_graph: cleared %d nodes — "
                 "documents will be re-extracted as they are re-indexed via the pipeline",
                 deleted,
-                tenant_id,
             )
             return {
                 "success": True,
@@ -189,11 +180,11 @@ def reindex_tenant_task(
             }
         else:
             msg = f"KTS returned HTTP {response.status_code}: {response.text[:300]}"
-            logger.error("trustgraph.reindex_tenant: %s", msg)
+            logger.error("trustgraph.reindex_graph: %s", msg)
             return {"success": False, "deleted": 0, "message": msg}
 
     except Exception as exc:
         logger.exception(
-            "trustgraph.reindex_tenant: failed for tenant=%s: %s", tenant_id, exc
+            "trustgraph.reindex_graph: failed: %s", exc
         )
         return {"success": False, "deleted": 0, "message": str(exc)}

@@ -12,9 +12,10 @@ import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 import redis.asyncio as aioredis
 
+from app.core.auth_headers import extract_user_id
 from app.core.config import settings
 from app.services.notification_service import notification_service
 
@@ -25,29 +26,22 @@ router = APIRouter()
 WS_NOTIFICATION_CHANNEL = "emma:notifications:realtime"
 
 
-def _get_tenant_and_user(
-    x_tenant_id: Optional[str] = Header(None),
-    x_user_id: Optional[str] = Header(None),
-):
-    tenant_id = x_tenant_id or (settings.default_tenant_id if settings.single_tenant_mode else None)
-    if not tenant_id:
-        raise HTTPException(status_code=400, detail="X-Tenant-ID header required")
-    user_id = x_user_id or "system"
-    return tenant_id, user_id
+def _require_user_id(user_id: Optional[str]) -> str:
+    if not user_id:
+        return "system"
+    return user_id
 
 
 @router.get("/notifications")
 async def list_notifications(
     unread_only: bool = Query(False),
     limit: int = Query(50, le=200),
-    x_tenant_id: Optional[str] = Header(None),
-    x_user_id: Optional[str] = Header(None),
+    user_id: Optional[str] = Depends(extract_user_id),
 ):
     """List notifications for the current user."""
-    tenant_id, user_id = _get_tenant_and_user(x_tenant_id, x_user_id)
+    uid = _require_user_id(user_id)
     notifications = await notification_service.get_notifications(
-        tenant_id=tenant_id,
-        user_id=user_id,
+        user_id=uid,
         unread_only=unread_only,
         limit=limit,
     )
@@ -56,24 +50,22 @@ async def list_notifications(
 
 @router.get("/notifications/unread")
 async def unread_count(
-    x_tenant_id: Optional[str] = Header(None),
-    x_user_id: Optional[str] = Header(None),
+    user_id: Optional[str] = Depends(extract_user_id),
 ):
     """Get unread notification count."""
-    tenant_id, user_id = _get_tenant_and_user(x_tenant_id, x_user_id)
-    count = await notification_service.get_unread_count(tenant_id, user_id)
+    uid = _require_user_id(user_id)
+    count = await notification_service.get_unread_count(uid)
     return {"unread_count": count}
 
 
 @router.patch("/notifications/{notification_id}/read")
 async def mark_read(
     notification_id: str,
-    x_tenant_id: Optional[str] = Header(None),
-    x_user_id: Optional[str] = Header(None),
+    user_id: Optional[str] = Depends(extract_user_id),
 ):
     """Mark a notification as read."""
-    tenant_id, user_id = _get_tenant_and_user(x_tenant_id, x_user_id)
-    success = await notification_service.mark_read(tenant_id, user_id, notification_id)
+    uid = _require_user_id(user_id)
+    success = await notification_service.mark_read(uid, notification_id)
     if not success:
         raise HTTPException(status_code=404, detail="Notification not found")
     return {"success": True}
@@ -81,12 +73,11 @@ async def mark_read(
 
 @router.post("/notifications/read-all")
 async def mark_all_read(
-    x_tenant_id: Optional[str] = Header(None),
-    x_user_id: Optional[str] = Header(None),
+    user_id: Optional[str] = Depends(extract_user_id),
 ):
     """Mark all notifications as read."""
-    tenant_id, user_id = _get_tenant_and_user(x_tenant_id, x_user_id)
-    count = await notification_service.mark_all_read(tenant_id, user_id)
+    uid = _require_user_id(user_id)
+    count = await notification_service.mark_all_read(uid)
     return {"marked_read": count}
 
 
@@ -99,20 +90,12 @@ async def websocket_notifications(websocket: WebSocket):
     """WebSocket endpoint for real-time notification push.
 
     Clients connect here to receive notifications in real-time via Redis Pub/Sub.
-    Uses single-tenant defaults if no tenant/user specified.
     """
     await websocket.accept()
     logger.info("WebSocket client connected for notifications")
 
-    # Get tenant/user from query params or use defaults
-    tenant_id = websocket.query_params.get("tenant_id") or (
-        settings.default_tenant_id if settings.single_tenant_mode else None
-    )
+    # Get user from query params or use default
     user_id = websocket.query_params.get("user_id") or "system"
-
-    if not tenant_id:
-        await websocket.close(code=4000, reason="tenant_id required")
-        return
 
     # Connect to Redis Pub/Sub
     redis_client = aioredis.Redis(
@@ -125,7 +108,7 @@ async def websocket_notifications(websocket: WebSocket):
     try:
         # Subscribe to notification channel
         await pubsub.subscribe(WS_NOTIFICATION_CHANNEL)
-        logger.info(f"Subscribed to {WS_NOTIFICATION_CHANNEL} for tenant {tenant_id}")
+        logger.info(f"Subscribed to {WS_NOTIFICATION_CHANNEL} for user {user_id}")
 
         # Keep connection alive and forward messages
         while True:
@@ -139,10 +122,9 @@ async def websocket_notifications(websocket: WebSocket):
                 if message and message["type"] == "message":
                     try:
                         notification = json.loads(message["data"])
-                        # Filter by tenant/user
-                        if notification.get("tenant_id") == tenant_id:
-                            if notification.get("user_id") == user_id or notification.get("user_id") == "system":
-                                await websocket.send_json(notification)
+                        # Filter by user
+                        if notification.get("user_id") == user_id or notification.get("user_id") == "system":
+                            await websocket.send_json(notification)
                     except json.JSONDecodeError:
                         pass
 

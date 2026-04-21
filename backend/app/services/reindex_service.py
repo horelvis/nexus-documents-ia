@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 
+from app.core.auth.base import UserProfile
 from app.core.config import settings
 from app.db.models import Document
 from app.db.database import SessionLocal
@@ -21,15 +22,14 @@ logger = logging.getLogger(__name__)
 class ReindexService:
     """Service for managing document reindexing operations"""
     
-    def __init__(self, tenant_id: str = None, user_id: str = None):
-        self.tenant_id = tenant_id or settings.DEFAULT_TENANT
-        self.user_id = user_id
-        self.collection_name = f"Nouxcube_{self.tenant_id.replace('-', '_')}_documents"
+    def __init__(self, user: Optional[UserProfile] = None):
+        self.user: Optional[UserProfile] = user
+        self.collection_name = "Nouxcube_documents"
         self.storage_service = StorageServiceFactory.create_storage_service(
-            tenant_id=self.tenant_id,
-            user_id=self.user_id
+            settings.DEFAULT_TENANT,
+            user_id=user.sub if user else None,
         )
-        logger.info(f"ReindexService initialized for tenant: {self.tenant_id}")
+        logger.info("ReindexService initialized")
     
     async def get_documents_needing_reindex(self, db: Session) -> List[Document]:
         """
@@ -48,19 +48,13 @@ class ReindexService:
 
             # 1. Get documents in ERROR state
             error_documents = db.query(Document).filter(
-                and_(
-                    Document.tenant_id == self.tenant_id,
-                    Document.indexed == IndexingStatus.INDEXING_ERROR
-                )
+                Document.indexed == IndexingStatus.INDEXING_ERROR
             ).all()
             documents_needing_reindex.extend(error_documents)
 
             # 2. Get documents marked as INDEXED
             indexed_documents = db.query(Document).filter(
-                and_(
-                    Document.tenant_id == self.tenant_id,
-                    Document.indexed == IndexingStatus.INDEXED
-                )
+                Document.indexed == IndexingStatus.INDEXED
             ).all()
             
             logger.info(f"Found {len(error_documents)} ERROR docs and {len(indexed_documents)} INDEXED docs")
@@ -112,7 +106,7 @@ class ReindexService:
                 return False
             
             # Download file content from storage
-            file_path = document.file_path or f"{self.tenant_id}/{document.id}/{document.filename}"
+            file_path = document.file_path or f"{document.id}/{document.filename}"
             logger.info(f"Attempting to download file from path: {file_path}")
             
             try:
@@ -143,7 +137,7 @@ class ReindexService:
             try:
                 # Create a fresh document service instance
                 from app.services.document_service import DocumentService
-                doc_service = DocumentService(tenant_id=self.tenant_id, user_id=self.user_id)
+                doc_service = DocumentService(user=self.user)
                 
                 logger.info(f"Starting text extraction for document {document.id}")
                 
@@ -282,13 +276,11 @@ class ReindexService:
             Dictionary with reindexing results
         """
         try:
-            logger.info(f"Starting FORCED bulk reindexing for tenant {self.tenant_id}")
-            
+            logger.info("Starting FORCED bulk reindexing")
+
             with SessionLocal() as db:
-                # Get ALL documents for this tenant
-                all_documents = db.query(Document).filter(
-                    Document.tenant_id == self.tenant_id
-                ).all()
+                # Get ALL documents
+                all_documents = db.query(Document).all()
                 
                 if not all_documents:
                     return {
@@ -362,10 +354,7 @@ class ReindexService:
             
             with SessionLocal() as db:
                 documents = db.query(Document).filter(
-                    and_(
-                        Document.id.in_(document_ids),
-                        Document.tenant_id == self.tenant_id
-                    )
+                    Document.id.in_(document_ids)
                 ).all()
                 
                 if not documents:
@@ -416,38 +405,25 @@ class ReindexService:
         try:
             with SessionLocal() as db:
                 # Count documents by indexing status
-                total_docs = db.query(Document).filter(Document.tenant_id == self.tenant_id).count()
+                total_docs = db.query(Document).count()
                 indexed_docs = db.query(Document).filter(
-                    and_(
-                        Document.tenant_id == self.tenant_id,
-                        Document.indexed == IndexingStatus.INDEXED
-                    )
+                    Document.indexed == IndexingStatus.INDEXED
                 ).count()
                 processing_docs = db.query(Document).filter(
-                    and_(
-                        Document.tenant_id == self.tenant_id,
-                        Document.indexed == IndexingStatus.PROCESSING
-                    )
+                    Document.indexed == IndexingStatus.PROCESSING
                 ).count()
                 error_docs = db.query(Document).filter(
-                    and_(
-                        Document.tenant_id == self.tenant_id,
-                        Document.indexed == IndexingStatus.INDEXING_ERROR
-                    )
+                    Document.indexed == IndexingStatus.INDEXING_ERROR
                 ).count()
                 not_indexed_docs = db.query(Document).filter(
-                    and_(
-                        Document.tenant_id == self.tenant_id,
-                        Document.indexed == IndexingStatus.NOT_INDEXED
-                    )
+                    Document.indexed == IndexingStatus.NOT_INDEXED
                 ).count()
-                
+
                 # Check for missing documents in vector store
                 documents_needing_reindex = await self.get_documents_needing_reindex(db)
                 missing_from_vector_store = len(documents_needing_reindex)
-                
+
                 return {
-                    "tenant_id": self.tenant_id,
                     "total_documents": total_docs,
                     "indexed_documents": indexed_docs,
                     "processing_documents": processing_docs,
@@ -465,7 +441,6 @@ class ReindexService:
             logger.error(f"Error checking reindex status: {str(e)}")
             return {
                 "error": str(e),
-                "tenant_id": self.tenant_id
             }
     
     async def auto_reindex_failed_documents(self) -> Dict[str, Any]:
@@ -477,19 +452,16 @@ class ReindexService:
             Dictionary with auto-reindex results
         """
         try:
-            logger.info(f"Starting auto-reindex for tenant {self.tenant_id}")
-            
+            logger.info("Starting auto-reindex")
+
             with SessionLocal() as db:
                 # Find documents that have been in error state
                 error_documents = db.query(Document).filter(
-                    and_(
-                        Document.tenant_id == self.tenant_id,
-                        Document.indexed == IndexingStatus.INDEXING_ERROR
-                    )
+                    Document.indexed == IndexingStatus.INDEXING_ERROR
                 ).all()
-                
+
                 if not error_documents:
-                    logger.info(f"No documents in error state for tenant {self.tenant_id}")
+                    logger.info("No documents in error state")
                     return {
                         "total_documents": 0,
                         "success_count": 0,
@@ -524,11 +496,11 @@ class ReindexService:
                     "message": f"Auto-reindexed {success_count} of {len(error_documents)} error documents"
                 }
                 
-                logger.info(f"Auto-reindex completed for tenant {self.tenant_id}: {result}")
+                logger.info(f"Auto-reindex completed: {result}")
                 return result
-                
+
         except Exception as e:
-            logger.error(f"Error in auto-reindex for tenant {self.tenant_id}: {str(e)}")
+            logger.error(f"Error in auto-reindex: {str(e)}")
             return {
                 "total_documents": 0,
                 "success_count": 0,

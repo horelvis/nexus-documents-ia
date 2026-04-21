@@ -17,7 +17,7 @@ Architecture:
     │                    MCPClientManager                              │
     │  ┌────────────────────────────────────────────────────────────┐ │
     │  │  Connection Pool       │  Tool Discovery  │  Health Check  │ │
-    │  │  (per tenant)          │  & Registration  │  & Reconnect   │ │
+    │  │  (per server)          │  & Registration  │  & Reconnect   │ │
     │  └────────────────────────────────────────────────────────────┘ │
     └────────────────────────────────┬────────────────────────────────┘
                                      │
@@ -41,15 +41,14 @@ Usage:
     manager = MCPClientManager()
     await manager.initialize()
 
-    # Get tools for a tenant
-    tools = await manager.get_tools_for_tenant("tenant-123")
+    # Get available tools
+    tools = await manager.get_available_tools()
 
     # Execute a tool
     result = await manager.execute_tool(
-        server_name="storage",
         tool_name="storage_upload",
         arguments={"file_path": "doc.pdf", "content": b"..."},
-        tenant_id="tenant-123"
+        server_name="storage",
     )
 """
 

@@ -35,13 +35,6 @@ class Settings(BaseSettings):
     weaviate_service_timeout: int = int(os.getenv("WEAVIATE_SERVICE_TIMEOUT", "120"))
 
     # ==========================================================================
-    # Deployment Mode: Single-tenant vs Multi-tenant
-    # ==========================================================================
-    single_tenant_mode: bool = os.getenv("SINGLE_TENANT_MODE", "true").lower() == "true"
-    default_tenant_id: str = os.getenv("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
-    default_tenant_name: str = os.getenv("DEFAULT_TENANT_NAME", "NouxCubeIA Organization")
-
-    # ==========================================================================
     # LLM Configuration
     # ==========================================================================
     agents_enabled: bool = os.getenv("AGENTS_ENABLED", "true").lower() == "true"
@@ -134,9 +127,8 @@ class Settings(BaseSettings):
 
     # Concurrency Control
     llm_max_concurrent: int = int(os.getenv("LLM_MAX_CONCURRENT", "8"))
-    analysis_max_per_tenant: int = int(os.getenv("ANALYSIS_MAX_PER_TENANT", "3"))
+    analysis_max_concurrent: int = int(os.getenv("ANALYSIS_MAX_CONCURRENT", "3"))
     llm_queue_timeout: int = int(os.getenv("LLM_QUEUE_TIMEOUT", "90"))
-    tenant_isolation_enabled: bool = os.getenv("TENANT_ISOLATION_ENABLED", "true").lower() == "true"
 
     # ReAct Agent Loop
     react_max_observe_length: int = int(os.getenv("REACT_MAX_OBSERVE_LENGTH", "5000"))
@@ -293,7 +285,7 @@ class Settings(BaseSettings):
     text_extraction_service_timeout: int = int(os.getenv("TEXT_EXTRACTION_SERVICE_TIMEOUT", "60"))
 
     # Database (for session persistence)
-    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db")
+    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nouxcube")
 
     # LangGraph Checkpointer (PostgresSaver)
     # Enables: conversation continuity, time travel, HITL interrupts
@@ -302,7 +294,7 @@ class Settings(BaseSettings):
     # PostgreSQL (graph queries routed via knowledge-tree-service to FalkorDB)
     postgres_host: str = os.getenv("POSTGRES_SERVER", os.getenv("POSTGRES_HOST", "db"))
     postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
-    postgres_db: str = os.getenv("POSTGRES_DB", "nexus_db")
+    postgres_db: str = os.getenv("POSTGRES_DB", "nouxcube")
     postgres_user: str = os.getenv("POSTGRES_USER", "nexus_user")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "nexus_password")
 

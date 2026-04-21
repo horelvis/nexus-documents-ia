@@ -9,18 +9,12 @@ This is the central service that coordinates:
 Usage:
     from app.services.heartbeat import heartbeat_service
 
-    # Run heartbeat for a tenant
-    result = await heartbeat_service.run(tenant_id)
-
-    # Get status
-    status = await heartbeat_service.get_status(tenant_id)
-
-    # Update configuration
-    await heartbeat_service.update_config(tenant_id, {"enabled": False})
+    result = await heartbeat_service.run()
+    status = await heartbeat_service.get_status()
+    await heartbeat_service.update_config(update)
 """
 import json
 import logging
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -32,7 +26,6 @@ from app.schemas.heartbeat import (
     HeartbeatConfigUpdate,
     HeartbeatRunResponse,
     HeartbeatStatusResponse,
-    ProactiveInsight,
 )
 
 from .context_gatherer import context_gatherer
@@ -41,6 +34,12 @@ from .insight_evaluator import insight_evaluator
 from .priority_scorer import priority_scorer
 
 logger = logging.getLogger(__name__)
+
+# Single-tenant deployment — Redis keys for heartbeat state are global.
+HEARTBEAT_CONFIG_KEY = "emma:heartbeat:config"
+HEARTBEAT_DELIVERY_KEY = "emma:heartbeat:delivery"
+INSIGHTS_LIST_KEY = "emma:insights:list"
+INSIGHT_KEY_PREFIX = "emma:insights"
 
 
 class HeartbeatService:
@@ -66,19 +65,17 @@ class HeartbeatService:
         await context_gatherer.close()
         await delivery_manager.close()
 
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
     # Main Entry Point
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
 
     async def run(
         self,
-        tenant_id: str,
         force: bool = False,
     ) -> HeartbeatRunResponse:
-        """Run a heartbeat evaluation for a tenant.
+        """Run a heartbeat evaluation.
 
         Args:
-            tenant_id: Tenant to evaluate
             force: If True, bypass interval checks
 
         Returns:
@@ -87,30 +84,28 @@ class HeartbeatService:
         now = datetime.now(timezone.utc)
 
         # Get configuration
-        config = await self.get_config(tenant_id)
+        config = await self.get_config()
 
         if not config.enabled and not force:
             return HeartbeatRunResponse(
-                tenant_id=tenant_id,
                 success=False,
-                error="Heartbeat is disabled for this tenant",
+                error="Heartbeat is disabled",
             )
 
         # Check if enough time has passed since last run
         if not force:
-            should_run, reason = await self._should_run(tenant_id, config)
+            should_run, reason = await self._should_run(config)
             if not should_run:
                 return HeartbeatRunResponse(
-                    tenant_id=tenant_id,
                     success=False,
                     error=reason,
                 )
 
-        logger.info(f"Running heartbeat for tenant {tenant_id}")
+        logger.info("Running heartbeat")
 
         try:
             # 1. Gather context
-            context = await context_gatherer.gather(tenant_id)
+            context = await context_gatherer.gather()
 
             # 2. Evaluate with LLM (enabled_insight_types are already strings)
             evaluation = await insight_evaluator.evaluate(
@@ -118,9 +113,8 @@ class HeartbeatService:
             )
 
             if evaluation.no_action_needed:
-                await self._update_run_timestamp(tenant_id, now, config)
+                await self._update_run_timestamp(now, config)
                 return HeartbeatRunResponse(
-                    tenant_id=tenant_id,
                     success=True,
                     insights_generated=0,
                     insights_delivered=0,
@@ -134,10 +128,10 @@ class HeartbeatService:
 
             # 3. Convert candidates to insights
             insight_candidates = insight_evaluator.candidates_to_insights(
-                evaluation.insights, tenant_id
+                evaluation.insights
             )
 
-            # 4. Score and filter by priority (pass tenant-specific weights)
+            # 4. Score and filter by priority
             scored_insights = priority_scorer.score_insights(
                 insight_candidates, context, config.type_priorities
             )
@@ -147,14 +141,13 @@ class HeartbeatService:
 
             # 5. Deliver (with rate limiting)
             delivered, deferred = await delivery_manager.deliver_insights(
-                filtered_insights, config, tenant_id
+                filtered_insights, config
             )
 
             # 6. Update run timestamp
-            await self._update_run_timestamp(tenant_id, now, config)
+            await self._update_run_timestamp(now, config)
 
             return HeartbeatRunResponse(
-                tenant_id=tenant_id,
                 success=True,
                 insights_generated=len(evaluation.insights),
                 insights_delivered=len(delivered),
@@ -172,23 +165,20 @@ class HeartbeatService:
             )
 
         except Exception as e:
-            logger.error(f"Heartbeat run failed for {tenant_id}: {e}", exc_info=True)
+            logger.error(f"Heartbeat run failed: {e}", exc_info=True)
             return HeartbeatRunResponse(
-                tenant_id=tenant_id,
                 success=False,
                 error=str(e),
             )
 
     async def _should_run(
         self,
-        tenant_id: str,
         config: HeartbeatConfig,
     ) -> tuple[bool, str]:
         """Check if heartbeat should run based on interval."""
         r = await self._get_redis()
-        key = f"emma:heartbeat:config:{tenant_id}"
 
-        last_run_str = await r.hget(key, "last_run_at")
+        last_run_str = await r.hget(HEARTBEAT_CONFIG_KEY, "last_run_at")
         if not last_run_str:
             return True, ""
 
@@ -207,32 +197,28 @@ class HeartbeatService:
 
     async def _update_run_timestamp(
         self,
-        tenant_id: str,
         now: datetime,
         config: HeartbeatConfig,
     ):
         """Update the last run timestamp and schedule next run."""
         r = await self._get_redis()
-        key = f"emma:heartbeat:config:{tenant_id}"
 
         next_run = now + timedelta(hours=config.run_interval_hours)
 
-        await r.hset(key, mapping={
+        await r.hset(HEARTBEAT_CONFIG_KEY, mapping={
             "last_run_at": now.isoformat(),
             "next_run_at": next_run.isoformat(),
         })
 
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
     # Configuration Management
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
 
-    async def get_config(self, tenant_id: str) -> HeartbeatConfig:
-        """Get heartbeat configuration for a tenant."""
+    async def get_config(self) -> HeartbeatConfig:
+        """Get heartbeat configuration."""
         r = await self._get_redis()
-        key = f"emma:heartbeat:config:{tenant_id}"
 
-        # Try Redis first
-        config_str = await r.hget(key, "config")
+        config_str = await r.hget(HEARTBEAT_CONFIG_KEY, "config")
         if config_str:
             try:
                 config_data = json.loads(config_str)
@@ -240,16 +226,14 @@ class HeartbeatService:
             except Exception:
                 pass
 
-        # Return defaults
         return HeartbeatConfig()
 
     async def update_config(
         self,
-        tenant_id: str,
         update: HeartbeatConfigUpdate,
     ) -> HeartbeatConfig:
-        """Update heartbeat configuration for a tenant."""
-        current = await self.get_config(tenant_id)
+        """Update heartbeat configuration."""
+        current = await self.get_config()
 
         # Apply updates
         update_dict = update.model_dump(exclude_unset=True)
@@ -258,22 +242,17 @@ class HeartbeatService:
 
         new_config = HeartbeatConfig(**current_dict)
 
-        # Save to Redis
         r = await self._get_redis()
-        key = f"emma:heartbeat:config:{tenant_id}"
-
-        await r.hset(key, "config", json.dumps(new_config.model_dump()))
+        await r.hset(HEARTBEAT_CONFIG_KEY, "config", json.dumps(new_config.model_dump()))
 
         return new_config
 
-    async def get_status(self, tenant_id: str) -> HeartbeatStatusResponse:
-        """Get current status of heartbeat for a tenant."""
-        config = await self.get_config(tenant_id)
+    async def get_status(self) -> HeartbeatStatusResponse:
+        """Get current status of heartbeat."""
+        config = await self.get_config()
 
         r = await self._get_redis()
-        key = f"emma:heartbeat:config:{tenant_id}"
-
-        data = await r.hgetall(key)
+        data = await r.hgetall(HEARTBEAT_CONFIG_KEY)
 
         last_run_at = None
         next_run_at = None
@@ -289,15 +268,12 @@ class HeartbeatService:
                 pass
 
         # Get delivery stats
-        delivery_key = f"emma:heartbeat:delivery:{tenant_id}"
-        delivery_data = await r.hgetall(delivery_key)
+        delivery_data = await r.hgetall(HEARTBEAT_DELIVERY_KEY)
 
         # Count pending insights
-        insights_key = f"emma:insights:{tenant_id}:list"
-        insights_count = await r.llen(insights_key)
+        insights_count = await r.llen(INSIGHTS_LIST_KEY)
 
         return HeartbeatStatusResponse(
-            tenant_id=tenant_id,
             enabled=config.enabled,
             last_run_at=last_run_at,
             next_run_at=next_run_at,
@@ -306,21 +282,19 @@ class HeartbeatService:
             config=config,
         )
 
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
     # Insight Management
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
 
     async def get_insights(
         self,
-        tenant_id: str,
         status: Optional[str] = None,
         insight_type: Optional[str] = None,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Get insights for a tenant with optional filtering."""
-        insights = await delivery_manager.get_pending_insights(tenant_id, limit)
+        """Get insights with optional filtering."""
+        insights = await delivery_manager.get_pending_insights(limit)
 
-        # Apply filters
         if status:
             insights = [i for i in insights if i.get("status") == status]
         if insight_type:
@@ -330,13 +304,12 @@ class HeartbeatService:
 
     async def update_insight_status(
         self,
-        tenant_id: str,
         insight_id: str,
         status: str,
     ) -> bool:
         """Update the status of an insight."""
         r = await self._get_redis()
-        key = f"emma:insights:{tenant_id}:{insight_id}"
+        key = f"{INSIGHT_KEY_PREFIX}:{insight_id}"
 
         raw = await r.get(key)
         if not raw:
@@ -360,24 +333,18 @@ class HeartbeatService:
 
         return True
 
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
     # Digest Generation
-    # ─────────────────────────────────────────────────────────────────
+    # -------------------------------------------------------------------
 
-    async def generate_digest(
-        self,
-        tenant_id: str,
-    ) -> Dict[str, Any]:
+    async def generate_digest(self) -> Dict[str, Any]:
         """Generate a daily digest of insights and activity.
 
-        This is typically called by Celery Beat at the configured digest_hour.
+        Typically called by Celery Beat at the configured digest_hour.
         """
-        config = await self.get_config(tenant_id)
-        context = await context_gatherer.gather(tenant_id)
+        context = await context_gatherer.gather()
 
-        # Build digest content
-        digest = {
-            "tenant_id": tenant_id,
+        digest: Dict[str, Any] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "summary": {
                 "documents_indexed_24h": len(context.documents_indexed_24h),
@@ -392,26 +359,24 @@ class HeartbeatService:
             "action_items": [],
         }
 
-        # Add highlights
         if context.contracts_expiring_7d:
             for c in context.contracts_expiring_7d[:3]:
                 digest["highlights"].append(
-                    f"Contrato '{c.title}' vence en {c.days_until_expiry} días"
+                    f"Contrato '{c.title}' vence en {c.days_until_expiry} dias"
                 )
 
         if context.documents_indexed_24h:
             count = len(context.documents_indexed_24h)
-            digest["highlights"].append(f"{count} documentos indexados en las últimas 24h")
+            digest["highlights"].append(f"{count} documentos indexados en las ultimas 24h")
 
         if context.anomalies:
             digest["highlights"].append(
-                f"{len(context.anomalies)} anomalías detectadas requieren revisión"
+                f"{len(context.anomalies)} anomalias detectadas requieren revision"
             )
 
-        # Add action items
         if context.stale_analyses_7d > 0:
             digest["action_items"].append(
-                f"{context.stale_analyses_7d} análisis pendientes por más de 7 días"
+                f"{context.stale_analyses_7d} analisis pendientes por mas de 7 dias"
             )
 
         if context.pending_signatures > 0:

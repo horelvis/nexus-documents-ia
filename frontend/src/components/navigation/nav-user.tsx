@@ -22,7 +22,7 @@ import {
 import { useUser, useClerk } from "@clerk/nextjs"
 import { useApiClient } from "@/lib/api-client"
 import { useState } from "react"
-import { useParams, useRouter } from "next/navigation"
+import { useRouter } from "next/navigation"
 import { useUserContext } from "@/contexts/user-context"
 import { useLanguage } from "@/contexts/language-context"
 import { Badge } from "@/components/ui/badge"
@@ -56,10 +56,7 @@ export function NavUser({
   const { t, language, setLanguage, availableLanguages } = useLanguage()
   const apiClient = useApiClient()
   const router = useRouter()
-  const params = useParams()
   const [isLoadingBilling, setIsLoadingBilling] = useState(false)
-
-  const tenantId = params.tenantId as string
 
   // Use Clerk user data as primary source
   const clerkEmail = clerkUser?.primaryEmailAddress?.emailAddress || ''
@@ -80,7 +77,6 @@ export function NavUser({
     email: user.email,
     fullName: user.name,
     avatarUrl: user.avatar,
-    tenantId: tenantId,
     planName: getPlanBadge().name,
   }
 
@@ -107,9 +103,7 @@ export function NavUser({
     const userPlan = backendUser?.subscription_plan || 'free'
 
     if (userPlan === 'free') {
-      if (tenantId) {
-        router.push(`/${tenantId}/billing`)
-      }
+      router.push(`/billing`)
       return
     }
 
@@ -121,32 +115,22 @@ export function NavUser({
         window.open(response.data.portal_url, '_blank')
       } else {
         console.error('No portal URL received')
-        if (tenantId) {
-          router.push(`/${tenantId}/billing`)
-        }
+        router.push(`/billing`)
       }
     } catch (error) {
       console.error('Error opening billing portal:', error)
-      if (tenantId) {
-        router.push(`/${tenantId}/billing`)
-      }
+      router.push(`/billing`)
     } finally {
       setIsLoadingBilling(false)
     }
   }
 
   const handleViewPlans = () => {
-    if (tenantId) {
-      router.push(`/${tenantId}/plans`)
-    }
+    router.push(`/plans`)
   }
 
   const handleNavigate = (href: string) => {
-    if (tenantId) {
-      router.push(`/${tenantId}${href}`)
-    } else {
-      router.push(href)
-    }
+    router.push(href)
   }
 
   // Safe translation helper for keys that might not exist

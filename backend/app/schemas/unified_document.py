@@ -58,7 +58,8 @@ class UnifiedDocument:
     - All IDs are UUIDs for consistency with PostgreSQL
     - `file_bytes` is Optional - allows for lazy loading (discovery vs download)
     - `content_hash` enables deduplication across sources
-    - ACL fields support both user-level and role-based access control
+    - ACL is role-based: each document carries `roles=["EVERYONE"]` (default)
+      or a list of KeyCloak roles such as `["LEGAL", "HR"]`.
 
     Example Usage:
         # From Alfresco adapter
@@ -70,8 +71,8 @@ class UnifiedDocument:
             external_url="https://alfresco/share/...",
             filename="contract.pdf",
             mime_type="application/pdf",
-            tenant_id=tenant.id,
             owner_id=admin.id,
+            roles=["EVERYONE"],
         )
     """
 
@@ -101,12 +102,9 @@ class UnifiedDocument:
     source_created_at: Optional[datetime] = None
     source_modified_at: Optional[datetime] = None
 
-    # === Tenant and ACL ===
-    tenant_id: UUID = field(default_factory=lambda: UUID(int=0))
+    # === Ownership and ACL ===
     owner_id: UUID = field(default_factory=lambda: UUID(int=0))
-    is_tenant_public: bool = False        # Visible to all tenant users
-    acl_user_ids: List[UUID] = field(default_factory=list)
-    acl_role_ids: List[str] = field(default_factory=list)
+    roles: List[str] = field(default_factory=lambda: ["EVERYONE"])
 
     # === Processing State ===
     indexing_status: IndexingStatus = IndexingStatus.PENDING
@@ -156,11 +154,8 @@ class UnifiedDocument:
             "custom_metadata": self.custom_metadata,
             "source_created_at": self.source_created_at.isoformat() if self.source_created_at else None,
             "source_modified_at": self.source_modified_at.isoformat() if self.source_modified_at else None,
-            "tenant_id": str(self.tenant_id),
             "owner_id": str(self.owner_id),
-            "is_tenant_public": self.is_tenant_public,
-            "acl_user_ids": [str(uid) for uid in self.acl_user_ids],
-            "acl_role_ids": self.acl_role_ids,
+            "roles": self.roles,
             "indexing_status": self.indexing_status.value,
             "indexing_error": self.indexing_error,
             "weaviate_id": str(self.weaviate_id) if self.weaviate_id else None,

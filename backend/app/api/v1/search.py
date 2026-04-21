@@ -12,8 +12,9 @@ import logging
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
-from app.db.models import User, Document
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
+from app.db.models import Document
 from app.services.search_service import SearchService
 from app.services.weaviate_client import weaviate_client
 from app.services.reindex_service import ReindexService
@@ -38,8 +39,7 @@ async def search_elasticsearch(
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     SIMPLE Elasticsearch search - no fallbacks
@@ -58,16 +58,14 @@ async def search_elasticsearch(
         filters["date_to"] = date_to
 
     # Build user context for ACL filtering
-    user_role_ids = [str(role.id) for role in current_user.roles] if current_user.roles else []
     user_context = SearchUserContext(
-        user_id=str(current_user.id),
-        role_ids=user_role_ids,
-        is_admin=current_user.is_admin
+        user_id=str(current_user.sub),
+        role_ids=current_user.roles or [],
+        is_admin="admin" in (current_user.roles or []),
     )
 
     # Direct Elasticsearch microservice search with ACL filtering
     results = await elasticsearch_client.hybrid_search(
-        tenant_id=tenant_id,
         query=query,
         limit=limit,
         filters=filters,
@@ -83,8 +81,7 @@ async def search_database(
     limit: int = Query(10, ge=1, le=100),
     tags: Optional[List[str]] = Query(None),
     category: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     SIMPLE database search - no fallbacks
@@ -99,8 +96,6 @@ async def search_database(
         with SessionLocal() as db:
             stmt = select(Document).options(
                 selectinload(Document.tags)
-            ).filter(
-                Document.tenant_id == tenant_id
             )
 
             # Apply search filter - METADATA ONLY (no content search in DB)
@@ -138,7 +133,6 @@ async def search_database(
                             "created_at": doc.created_at.isoformat() if doc.created_at else None,
                             "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
                             "indexed": str(doc.indexed) if doc.indexed is not None else "false",
-                            "tenant_id": str(doc.tenant_id),
                             "tags": [tag.name for tag in doc.tags] if doc.tags else []
                         },
                         "score": 1.0,  # Database doesn't provide relevance scoring
@@ -163,8 +157,7 @@ async def search_documents(
     tags: Optional[List[str]] = Query(None),
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Unified search endpoint using the appropriate backend.
@@ -184,16 +177,15 @@ async def search_documents(
     """
     try:
         # Build user context for ACL filtering
-        user_role_ids = [str(role.id) for role in current_user.roles] if current_user.roles else []
         user_context = UnifiedUserContext(
-            user_id=str(current_user.id),
-            role_ids=user_role_ids,
-            is_admin=current_user.is_admin
+            user_id=str(current_user.sub),
+            role_ids=current_user.roles or [],
+            is_admin="admin" in (current_user.roles or []),
         )
 
         # Database-only search (fallback)
         if search_type == "database":
-            return await search_database(query, limit, tags, None, current_user, tenant_id)
+            return await search_database(query, limit, tags, None, current_user)
 
         # Prepare filters
         filters = {}
@@ -205,7 +197,7 @@ async def search_documents(
             filters["date_to"] = date_to
 
         # Use UnifiedSearchService (auto-selects ES or Weaviate based on feature flags)
-        unified_service = UnifiedSearchService(tenant_id=tenant_id)
+        unified_service = UnifiedSearchService()
 
         # Determine actual search type
         actual_search_type = search_type
@@ -231,7 +223,7 @@ async def search_documents(
         # Fallback to database if no results
         if search_type == "auto":
             logger.info("No results from unified search, trying database fallback")
-            return await search_database(query, limit, tags, None, current_user, tenant_id)
+            return await search_database(query, limit, tags, None, current_user)
 
         return []
 
@@ -239,7 +231,7 @@ async def search_documents(
         logger.error(f"Search endpoint error: {e}")
         # Fallback to database on any error
         try:
-            return await search_database(query, limit, tags, None, current_user, tenant_id)
+            return await search_database(query, limit, tags, None, current_user)
         except Exception:
             return []
 
@@ -248,14 +240,13 @@ async def search_documents(
 async def get_search_analytics(
     date_from: Optional[str] = Query(None),
     date_to: Optional[str] = Query(None),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get comprehensive search and document analytics from Elasticsearch
     """
     try:
-        search_service = SearchService(tenant_id)
+        search_service = SearchService()
         analytics = await search_service.get_search_analytics(date_from, date_to)
         return {
             "success": True,
@@ -272,14 +263,13 @@ async def get_search_analytics(
 @router.get("/suggest-type", response_model=dict)
 async def suggest_search_type(
     query: str = Query(..., description="Query to analyze"),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Suggest optimal search type based on query characteristics
     """
     try:
-        search_service = SearchService(tenant_id)
+        search_service = SearchService()
         suggested_type = await search_service.suggest_search_type(query)
         return {
             "success": True,
@@ -302,13 +292,12 @@ async def suggest_search_type(
 @router.post("/ask", response_model=dict)
 async def ask_documents(
     message: ChatMessage,
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Responde a una pregunta basada en los documentos.
     """
-    search_service = SearchService(tenant_id=tenant_id)
+    search_service = SearchService()
     
     # Convertir UUID a string si es necesario
     doc_ids = [str(doc_id) for doc_id in message.doc_ids] if message.doc_ids else None
@@ -323,8 +312,7 @@ async def ask_documents(
 
 @router.get("/health", response_model=dict)
 async def check_search_system_health(
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Verifica la salud del sistema de búsqueda semántica.
@@ -337,8 +325,7 @@ async def check_search_system_health(
 
 @router.post("/fix-embedding-model", response_model=dict)
 async def fix_embedding_model(
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Endpoint removido - el modelo de embeddings ahora es manejado por el microservicio de Weaviate.
@@ -351,26 +338,24 @@ async def fix_embedding_model(
 
 @router.get("/reindex/status", response_model=dict)
 async def get_reindex_status(
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Obtiene el estado del reindexado para el tenant actual.
     """
-    reindex_service = ReindexService(tenant_id=tenant_id)
+    reindex_service = ReindexService()
     status = await reindex_service.check_reindex_status()
     return status
 
 
 @router.post("/reindex/all", response_model=dict)
 async def reindex_all_documents(
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Reindexa todos los documentos que faltan en el vector store.
     """
-    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
+    reindex_service = ReindexService(user_id=str(current_user.sub))
     result = await reindex_service.reindex_all_missing()
     return result
 
@@ -378,8 +363,7 @@ async def reindex_all_documents(
 @router.post("/reindex/force", response_model=dict)
 async def force_reindex_all_documents(
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Fuerza el reindexado de TODOS los documentos del tenant.
@@ -388,31 +372,29 @@ async def force_reindex_all_documents(
     # Esta operación es pesada, la ejecutamos en background
     background_tasks.add_task(
         reindex_all_documents_background,
-        tenant_id=tenant_id,
         force=True
     )
-    
+
     return {
         "message": "Reindexing started in background",
         "status": "processing",
-        "tenant_id": tenant_id
     }
 
 
-async def reindex_all_documents_background(tenant_id: str, force: bool = False):
+async def reindex_all_documents_background(force: bool = False):
     """Background task to reindex all documents"""
     try:
-        reindex_service = ReindexService(tenant_id=tenant_id)
-        
+        reindex_service = ReindexService()
+
         if force:
             # Force reindex all documents
-            logger.info(f"Starting forced reindex for tenant {tenant_id}")
+            logger.info("Starting forced reindex")
             await reindex_service.reindex_all_force()
         else:
             # Regular reindex of missing documents
             await reindex_service.reindex_all_missing()
-            
-        logger.info(f"Reindexing completed for tenant {tenant_id}")
+
+        logger.info("Reindexing completed")
     except Exception as e:
         logger.error(f"Error in background reindexing: {e}")
 
@@ -420,8 +402,7 @@ async def reindex_all_documents_background(tenant_id: str, force: bool = False):
 @router.post("/reindex/documents", response_model=dict)
 async def reindex_specific_documents(
     document_ids: List[str],
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Reindexa documentos específicos por sus IDs.
@@ -429,15 +410,14 @@ async def reindex_specific_documents(
     if not document_ids:
         raise HTTPException(status_code=400, detail="Document IDs list cannot be empty")
     
-    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
+    reindex_service = ReindexService(user_id=str(current_user.sub))
     result = await reindex_service.reindex_specific_documents(document_ids)
     return result
 
 
 @router.post("/fix-and-reindex", response_model=dict)
 async def fix_collection_and_reindex(
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Endpoint removido - los problemas de dimensiones ahora son manejados por el microservicio de Weaviate.
@@ -450,13 +430,12 @@ async def fix_collection_and_reindex(
 
 @router.post("/auto-reindex", response_model=dict)
 async def auto_reindex_failed_documents(
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Automáticamente reindexa documentos que tienen errores de indexación.
     """
-    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
+    reindex_service = ReindexService(user_id=str(current_user.sub))
     result = await reindex_service.auto_reindex_failed_documents()
     return result
 
@@ -464,7 +443,7 @@ async def auto_reindex_failed_documents(
 @router.post("/auto-reindex/start-global", response_model=dict)
 async def start_global_auto_reindex(
     background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user_async)
+    current_user: UserProfile = Depends(get_current_user_async)
 ):
     """
     Inicia la tarea automática de reindexado para todos los tenants.
@@ -488,19 +467,17 @@ async def start_global_auto_reindex(
 
 @router.post("/auto-reindex/run-once", response_model=dict)
 async def run_auto_reindex_once(
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Ejecuta una sola vez el auto-reindex para el tenant actual.
     """
     from app.tasks.auto_reindex_task import auto_reindex_task
     
-    reindex_service = ReindexService(tenant_id=tenant_id, user_id=str(current_user.id))
+    reindex_service = ReindexService(user_id=str(current_user.sub))
     result = await reindex_service.auto_reindex_failed_documents()
     
     return {
-        "message": "Auto-reindex completed for current tenant",
-        "tenant_id": tenant_id,
+        "message": "Auto-reindex completed",
         "result": result
     }

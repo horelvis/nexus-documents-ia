@@ -4,7 +4,6 @@ import { useApiClient } from '../api-client'
 
 export interface LearningProfile {
   user_id: string
-  tenant_id: string
   response_style: 'balanced' | 'detailed' | 'concise'
   expertise_level: 'general' | 'technical' | 'expert'
   preferred_language: string
@@ -42,7 +41,6 @@ export interface UserContext {
 
 export interface LearningStats {
   user_id: string
-  tenant_id: string
   total_queries: number
   total_document_views: number
   frequent_queries_count: number
@@ -80,7 +78,7 @@ export function useLearningService() {
   }
 
   const getRankingWeights = async () => {
-    return apiClient.get<{ user_id: string; tenant_id: string; weights: RankingWeights }>(
+    return apiClient.get<{ user_id: string; weights: RankingWeights }>(
       `${LEARNING_BASE}/ranking-weights`
     )
   }

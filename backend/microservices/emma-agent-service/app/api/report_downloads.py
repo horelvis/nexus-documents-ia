@@ -61,7 +61,6 @@ async def generate_report_document(
         meta = json.loads(meta_raw)
         entity_label = meta.get("entity_label", "entidad")
         report_type = meta.get("report_type", "informe")
-        tenant_id = meta.get("tenant_id", "")
 
         # Determine title
         title = body.title or f"Informe {report_type.capitalize()} — {entity_label}"
@@ -83,7 +82,6 @@ async def generate_report_document(
         if body.mode == "template" and body.template_document_id:
             docx_bytes = await _generate_via_forge(
                 template_document_id=body.template_document_id,
-                tenant_id=tenant_id,
                 title=title,
                 report_text=report_text,
             )
@@ -115,7 +113,6 @@ async def generate_report_document(
 
 async def _generate_via_forge(
     template_document_id: str,
-    tenant_id: str,
     title: str,
     report_text: str,
 ) -> Optional[bytes]:
@@ -133,7 +130,6 @@ async def _generate_via_forge(
                 f"{forge_url}/analyze",
                 json={
                     "document_id": template_document_id,
-                    "tenant_id": tenant_id,
                     "user_intent": title,
                 },
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY},

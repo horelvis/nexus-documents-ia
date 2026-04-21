@@ -43,7 +43,6 @@ export interface ExternalDBConfig {
 
 export interface Channel {
   id: string
-  tenant_id: string
   created_by: string
   name: string
   description: string | null

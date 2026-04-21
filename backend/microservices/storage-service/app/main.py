@@ -38,13 +38,13 @@ async def health():
 
 
 @app.post("/files/{path:path}")
-async def upload_file(path: str, request: Request, tenant_id: str = "default"):
+async def upload_file(path: str, request: Request):
     """Upload file bytes to MinIO."""
     content = await request.body()
     if not content:
         raise HTTPException(400, "Empty body")
 
-    object_name = f"{tenant_id}/{path}"
+    object_name = path
     content_type = request.headers.get("content-type", "application/octet-stream")
 
     result = await minio_storage.upload(object_name, content, content_type)
@@ -52,9 +52,9 @@ async def upload_file(path: str, request: Request, tenant_id: str = "default"):
 
 
 @app.get("/files/{path:path}")
-async def download_file(path: str, tenant_id: str = "default"):
+async def download_file(path: str):
     """Download file bytes from MinIO."""
-    object_name = f"{tenant_id}/{path}"
+    object_name = path
     content = await minio_storage.download(object_name)
     if content is None:
         raise HTTPException(404, "File not found")
@@ -62,9 +62,9 @@ async def download_file(path: str, tenant_id: str = "default"):
 
 
 @app.delete("/files/{path:path}")
-async def delete_file(path: str, tenant_id: str = "default"):
+async def delete_file(path: str):
     """Delete file from MinIO."""
-    object_name = f"{tenant_id}/{path}"
+    object_name = path
     success = await minio_storage.delete(object_name)
     if not success:
         raise HTTPException(404, "File not found")
@@ -72,9 +72,9 @@ async def delete_file(path: str, tenant_id: str = "default"):
 
 
 @app.head("/files/{path:path}")
-async def file_exists(path: str, tenant_id: str = "default"):
+async def file_exists(path: str):
     """Check if file exists in MinIO."""
-    object_name = f"{tenant_id}/{path}"
+    object_name = path
     exists = await minio_storage.exists(object_name)
     if not exists:
         raise HTTPException(404)

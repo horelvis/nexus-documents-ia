@@ -110,11 +110,11 @@ if container_running "docker-db-1"; then
     docker exec docker-db-1 psql -U nexus_user -d postgres -c "
         SELECT pg_terminate_backend(pg_stat_activity.pid)
         FROM pg_stat_activity
-        WHERE pg_stat_activity.datname = 'nexus_db' AND pid <> pg_backend_pid();
+        WHERE pg_stat_activity.datname = 'nouxcube' AND pid <> pg_backend_pid();
     " 2>/dev/null || true
 
-    docker exec docker-db-1 psql -U nexus_user -d postgres -c "DROP DATABASE IF EXISTS nexus_db;" 2>/dev/null
-    docker exec docker-db-1 psql -U nexus_user -d postgres -c "CREATE DATABASE nexus_db OWNER nexus_user;" 2>/dev/null
+    docker exec docker-db-1 psql -U nexus_user -d postgres -c "DROP DATABASE IF EXISTS nouxcube;" 2>/dev/null
+    docker exec docker-db-1 psql -U nexus_user -d postgres -c "CREATE DATABASE nouxcube OWNER nexus_user;" 2>/dev/null
 
     echo -e "  ${GREEN}PostgreSQL reset${NC}"
 else

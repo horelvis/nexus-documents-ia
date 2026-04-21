@@ -40,7 +40,6 @@ interface User {
   id: string
   email: string
   full_name?: string
-  tenant_id: string
   is_active: boolean
   onboarding_completed: boolean
 }
@@ -49,7 +48,6 @@ interface AuthContextType {
   isLoaded: boolean
   isAuthenticated: boolean
   user: User | null
-  tenantId: string | null
   roles: string[]
   isAdmin: boolean
   login: () => Promise<void>
@@ -425,7 +423,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoaded,
       isAuthenticated,
       user,
-      tenantId: user?.tenant_id || null,
       roles,
       isAdmin,
       login,

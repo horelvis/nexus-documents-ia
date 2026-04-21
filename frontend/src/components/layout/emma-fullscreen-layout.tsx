@@ -27,13 +27,11 @@ import { cn } from "@/lib/utils"
 
 interface EmmaFullscreenLayoutProps {
   children: ReactNode
-  tenantId: string
   className?: string
 }
 
 export function EmmaFullscreenLayout({
   children,
-  tenantId,
   className,
 }: EmmaFullscreenLayoutProps) {
   const { backendUser, handleLogout } = useUserContext()
@@ -53,7 +51,7 @@ export function EmmaFullscreenLayout({
       <header className="h-14 border-b flex items-center justify-between px-4 shrink-0">
         {/* Logo and Brand */}
         <Link
-          href={`/${tenantId}/emma`}
+          href={`/emma`}
           className="flex items-center gap-3 hover:opacity-80 transition-opacity"
         >
           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
@@ -66,14 +64,14 @@ export function EmmaFullscreenLayout({
         <div className="flex items-center gap-2">
           {/* Connectors */}
           <Button variant="ghost" size="icon" asChild title="Conectores">
-            <Link href={`/${tenantId}/connectors`}>
+            <Link href={`/connectors`}>
               <Plug className="h-5 w-5" />
             </Link>
           </Button>
 
           {/* Settings */}
           <Button variant="ghost" size="icon" asChild title="Configuración">
-            <Link href={`/${tenantId}/settings`}>
+            <Link href={`/settings`}>
               <Settings className="h-5 w-5" />
             </Link>
           </Button>
@@ -109,7 +107,7 @@ export function EmmaFullscreenLayout({
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
-                <Link href={`/${tenantId}/settings/profile`}>
+                <Link href={`/settings/profile`}>
                   <Settings className="mr-2 h-4 w-4" />
                   Configuración
                 </Link>
@@ -139,13 +137,11 @@ export function EmmaFullscreenLayout({
  */
 export function EmmaFullscreenLayoutSimple({
   children,
-  tenantId,
   user,
   onLogout,
   className,
 }: {
   children: ReactNode
-  tenantId: string
   user?: { name?: string; email?: string; picture?: string }
   onLogout?: () => void
   className?: string
@@ -164,7 +160,7 @@ export function EmmaFullscreenLayoutSimple({
       {/* Minimal Header */}
       <header className="h-14 border-b flex items-center justify-between px-4 shrink-0">
         <Link
-          href={`/${tenantId}/emma`}
+          href={`/emma`}
           className="flex items-center gap-3 hover:opacity-80 transition-opacity"
         >
           <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10">
@@ -175,13 +171,13 @@ export function EmmaFullscreenLayoutSimple({
 
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" asChild title="Conectores">
-            <Link href={`/${tenantId}/connectors`}>
+            <Link href={`/connectors`}>
               <Plug className="h-5 w-5" />
             </Link>
           </Button>
 
           <Button variant="ghost" size="icon" asChild title="Configuración">
-            <Link href={`/${tenantId}/settings`}>
+            <Link href={`/settings`}>
               <Settings className="h-5 w-5" />
             </Link>
           </Button>

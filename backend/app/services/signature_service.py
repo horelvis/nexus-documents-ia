@@ -208,36 +208,29 @@ class SignatureService:
     # =====================================
     
     def create_provider(
-        self, 
-        provider_data: SignatureProviderCreate, 
-        tenant_id: UUID
+        self,
+        provider_data: SignatureProviderCreate,
     ) -> SignatureProvider:
         """Crear un proveedor de firma"""
         try:
             # Verificar que el proveedor no exista ya
             existing = self.db.query(SignatureProvider).filter(
-                and_(
-                    SignatureProvider.tenant_id == tenant_id,
-                    SignatureProvider.provider_name == provider_data.provider_name
-                )
+                SignatureProvider.provider_name == provider_data.provider_name
             ).first()
-            
+
             if existing:
-                raise ValueError(f"Provider {provider_data.provider_name} already exists for this tenant")
-            
+                raise ValueError(f"Provider {provider_data.provider_name} already exists")
+
             # Encriptar credenciales
             encrypted_creds = self._encrypt_credentials(provider_data.credentials)
-            
+
             # Si es el primer proveedor, marcarlo como default
             is_default = provider_data.is_default
             if not is_default:
-                existing_providers = self.db.query(SignatureProvider).filter(
-                    SignatureProvider.tenant_id == tenant_id
-                ).count()
+                existing_providers = self.db.query(SignatureProvider).count()
                 is_default = existing_providers == 0
-            
+
             provider = SignatureProvider(
-                tenant_id=tenant_id,
                 provider_name=provider_data.provider_name,
                 display_name=provider_data.display_name,
                 encrypted_credentials=encrypted_creds,
@@ -245,44 +238,38 @@ class SignatureService:
                 is_active=provider_data.is_active,
                 is_default=is_default
             )
-            
+
             self.db.add(provider)
             self.db.commit()
             self.db.refresh(provider)
-            
-            logger.info(f"Created signature provider {provider.id} for tenant {tenant_id}")
+
+            logger.info(f"Created signature provider {provider.id}")
             return provider
-            
+
         except Exception as e:
             self.db.rollback()
             logger.error(f"Error creating signature provider: {str(e)}")
             raise
-    
-    def get_provider(self, provider_id: UUID, tenant_id: UUID) -> Optional[SignatureProvider]:
+
+    def get_provider(self, provider_id: UUID) -> Optional[SignatureProvider]:
         """Obtener un proveedor"""
         return self.db.query(SignatureProvider).filter(
-            and_(
-                SignatureProvider.id == provider_id,
-                SignatureProvider.tenant_id == tenant_id
-            )
+            SignatureProvider.id == provider_id
         ).first()
-    
-    def get_providers(self, tenant_id: UUID, is_active: bool = True) -> List[SignatureProvider]:
-        """Obtener proveedores del tenant"""
-        query = self.db.query(SignatureProvider).filter(
-            SignatureProvider.tenant_id == tenant_id
-        )
-        
+
+    def get_providers(self, is_active: bool = True) -> List[SignatureProvider]:
+        """Obtener proveedores"""
+        query = self.db.query(SignatureProvider)
+
         if is_active is not None:
             query = query.filter(SignatureProvider.is_active == is_active)
-        
+
         return query.order_by(desc(SignatureProvider.is_default)).all()
-    
-    def get_default_provider(self, tenant_id: UUID) -> Optional[SignatureProvider]:
+
+    def get_default_provider(self) -> Optional[SignatureProvider]:
         """Obtener proveedor por defecto"""
         return self.db.query(SignatureProvider).filter(
             and_(
-                SignatureProvider.tenant_id == tenant_id,
                 SignatureProvider.is_active == True,
                 SignatureProvider.is_default == True
             )
@@ -293,21 +280,19 @@ class SignatureService:
     # =====================================
     
     def create_signature_request(
-        self, 
-        request_data: SignatureRequestCreate, 
-        tenant_id: UUID, 
+        self,
+        request_data: SignatureRequestCreate,
         user_id: UUID
     ) -> SignatureRequest:
         """Crear solicitud de firma"""
         try:
             # Obtener proveedor
-            provider = self.get_provider(request_data.provider_id, tenant_id)
+            provider = self.get_provider(request_data.provider_id)
             if not provider or not provider.is_active:
                 raise ValueError("Invalid or inactive signature provider")
-            
+
             # Crear solicitud en base de datos
             signature_request = SignatureRequest(
-                tenant_id=tenant_id,
                 provider_id=request_data.provider_id,
                 created_by=user_id,
                 title=request_data.title,
@@ -359,15 +344,12 @@ class SignatureService:
             logger.error(f"Error creating signature request: {str(e)}")
             raise
     
-    def send_signature_request(self, request_id: UUID, tenant_id: UUID) -> bool:
+    def send_signature_request(self, request_id: UUID) -> bool:
         """Enviar solicitud de firma al proveedor"""
         try:
             # Obtener solicitud
             request = self.db.query(SignatureRequest).filter(
-                and_(
-                    SignatureRequest.id == request_id,
-                    SignatureRequest.tenant_id == tenant_id
-                )
+                SignatureRequest.id == request_id
             ).first()
             
             if not request:
@@ -448,31 +430,24 @@ class SignatureService:
             raise Exception(f"Failed to send signature request: {str(e)}")
     
     def get_signature_request(
-        self, 
-        request_id: UUID, 
-        tenant_id: UUID
+        self,
+        request_id: UUID,
     ) -> Optional[SignatureRequest]:
         """Obtener solicitud de firma"""
         return self.db.query(SignatureRequest).filter(
-            and_(
-                SignatureRequest.id == request_id,
-                SignatureRequest.tenant_id == tenant_id
-            )
+            SignatureRequest.id == request_id
         ).first()
-    
+
     def get_signature_requests(
-        self, 
-        tenant_id: UUID,
+        self,
         user_id: Optional[UUID] = None,
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0
     ) -> List[SignatureRequest]:
         """Obtener solicitudes de firma"""
-        query = self.db.query(SignatureRequest).filter(
-            SignatureRequest.tenant_id == tenant_id
-        )
-        
+        query = self.db.query(SignatureRequest)
+
         if user_id:
             query = query.filter(SignatureRequest.created_by == user_id)
         
@@ -482,13 +457,12 @@ class SignatureService:
         return query.order_by(desc(SignatureRequest.created_at)).offset(offset).limit(limit).all()
     
     def update_signature_status(
-        self, 
-        request_id: UUID, 
-        tenant_id: UUID
+        self,
+        request_id: UUID,
     ) -> Optional[SignatureRequest]:
         """Actualizar estado desde el proveedor"""
         try:
-            request = self.get_signature_request(request_id, tenant_id)
+            request = self.get_signature_request(request_id)
             if not request or not request.external_id:
                 return None
             
@@ -532,31 +506,27 @@ class SignatureService:
     # =====================================
     
     def handle_webhook(
-        self, 
-        provider_name: str, 
-        payload: Dict[str, Any], 
+        self,
+        provider_name: str,
+        payload: Dict[str, Any],
         signature: str,
-        tenant_id: UUID
     ) -> bool:
         """Manejar webhook de proveedor"""
         try:
             # Verificar firma del webhook
-            if not self._verify_webhook_signature(provider_name, payload, signature, tenant_id):
+            if not self._verify_webhook_signature(provider_name, payload, signature):
                 logger.warning(f"Invalid webhook signature from {provider_name}")
                 return False
-            
+
             # Procesar evento según el proveedor
             external_id = payload.get("external_id") or payload.get("envelope_id") or payload.get("id")
             if not external_id:
                 logger.warning("No external_id found in webhook payload")
                 return False
-            
+
             # Buscar solicitud
             request = self.db.query(SignatureRequest).filter(
-                and_(
-                    SignatureRequest.external_id == external_id,
-                    SignatureRequest.tenant_id == tenant_id
-                )
+                SignatureRequest.external_id == external_id
             ).first()
             
             if not request:
@@ -591,20 +561,16 @@ class SignatureService:
             return False
     
     def _verify_webhook_signature(
-        self, 
-        provider_name: str, 
-        payload: Dict[str, Any], 
+        self,
+        provider_name: str,
+        payload: Dict[str, Any],
         signature: str,
-        tenant_id: UUID
     ) -> bool:
         """Verificar firma HMAC del webhook"""
         try:
             # Obtener proveedor
             provider = self.db.query(SignatureProvider).filter(
-                and_(
-                    SignatureProvider.tenant_id == tenant_id,
-                    SignatureProvider.provider_name == provider_name
-                )
+                SignatureProvider.provider_name == provider_name
             ).first()
             
             if not provider:
@@ -653,13 +619,12 @@ class SignatureService:
         self.db.add(event)
     
     def download_signed_document(
-        self, 
-        request_id: UUID, 
-        tenant_id: UUID
+        self,
+        request_id: UUID,
     ) -> Optional[bytes]:
         """Descargar documento firmado"""
         try:
-            request = self.get_signature_request(request_id, tenant_id)
+            request = self.get_signature_request(request_id)
             if not request or request.status != 'completed':
                 return None
             

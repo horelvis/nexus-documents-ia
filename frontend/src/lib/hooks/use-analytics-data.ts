@@ -52,7 +52,7 @@ interface TrendsData {
   total_storage_added: number
 }
 
-export function useAnalyticsData(tenantId: string, timeRange: "7d" | "30d" | "90d" = "30d") {
+export function useAnalyticsData(timeRange: "7d" | "30d" | "90d" = "30d") {
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null)
   const [facetsData, setFacetsData] = useState<FacetData | null>(null)
   const [trendsData, setTrendsData] = useState<TrendsData | null>(null)
@@ -61,7 +61,7 @@ export function useAnalyticsData(tenantId: string, timeRange: "7d" | "30d" | "90
 
   const fetchDashboardStats = useCallback(async () => {
     try {
-      const response = await fetch(`/${tenantId}/api/dashboard/stats`)
+      const response = await fetch(`/api/dashboard/stats`)
       if (!response.ok) {
         throw new Error(`Failed to fetch dashboard stats: ${response.statusText}`)
       }
@@ -71,11 +71,11 @@ export function useAnalyticsData(tenantId: string, timeRange: "7d" | "30d" | "90
       console.error('Error fetching dashboard stats:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch dashboard stats')
     }
-  }, [tenantId])
+  }, [])
 
   const fetchFacetsData = useCallback(async () => {
     try {
-      const response = await fetch(`/${tenantId}/api/documents/facets`, {
+      const response = await fetch(`/api/documents/facets`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -96,11 +96,11 @@ export function useAnalyticsData(tenantId: string, timeRange: "7d" | "30d" | "90
       console.error('Error fetching facets data:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch facets data')
     }
-  }, [tenantId])
+  }, [])
 
   const fetchTrendsData = useCallback(async () => {
     try {
-      const response = await fetch(`/${tenantId}/api/dashboard/analytics/trends?period=${timeRange}`)
+      const response = await fetch(`/api/dashboard/analytics/trends?period=${timeRange}`)
       if (!response.ok) {
         throw new Error(`Failed to fetch trends: ${response.statusText}`)
       }
@@ -110,7 +110,7 @@ export function useAnalyticsData(tenantId: string, timeRange: "7d" | "30d" | "90
       console.error('Error fetching trends data:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch trends data')
     }
-  }, [tenantId, timeRange])
+  }, [timeRange])
 
   const refetch = useCallback(async () => {
     setIsLoading(true)

@@ -49,7 +49,6 @@ export interface AskDocumentsResponse {
 }
 
 export interface ReindexStatusResponse {
-  tenant_id: string
   total_documents: number
   indexed_documents: number
   indexing_documents: number
@@ -133,7 +132,7 @@ export function useSearchService() {
   }
 
   const runAutoReindexOnce = async () => {
-    return apiClient.post<{ message: string; tenant_id: string; result: ReindexResponse }>('/search/auto-reindex/run-once')
+    return apiClient.post<{ message: string; result: ReindexResponse }>('/search/auto-reindex/run-once')
   }
 
   const startGlobalAutoReindex = async () => {

@@ -33,7 +33,6 @@ async def test_graph_recall_produces_context():
 
         result = await _graph_recall(
             query="contratos de Juan García",
-            tenant_id="test-tenant",
             sector_config={"entity_patterns": {"persona": [r"([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)"]}},
         )
 
@@ -51,7 +50,7 @@ async def test_graph_recall_returns_none_when_disabled():
     with patch("app.agents.langgraph.nodes.memory_recall.settings") as mock_settings:
         mock_settings.graph_context_enabled = False
         result = await _graph_recall(
-            query="contratos", tenant_id="t", sector_config=None,
+            query="contratos", sector_config=None,
         )
 
     assert result is None
@@ -69,7 +68,7 @@ async def test_graph_recall_returns_none_on_failure():
         mock_client_fn.return_value = client
 
         result = await _graph_recall(
-            query="contratos", tenant_id="t", sector_config=None,
+            query="contratos", sector_config=None,
         )
 
     assert result is None
@@ -98,7 +97,7 @@ async def test_graph_recall_respects_token_budget():
             mock_settings.graphrag_include_legal = True
 
             result = await _graph_recall(
-                query="test", tenant_id="t", sector_config=None,
+                query="test", sector_config=None,
             )
 
     if result:
@@ -119,7 +118,6 @@ async def test_graph_recall_summary_only_when_no_entities():
 
         result = await _graph_recall(
             query="cuantos documentos hay",
-            tenant_id="test-tenant",
             sector_config=None,
         )
 
@@ -136,7 +134,6 @@ async def test_memory_recall_node_produces_graph_context():
 
     state = {
         "query": "contratos de Juan García",
-        "tenant_id": "test-tenant",
         "sector_config": {"entity_patterns": {"persona": [r"([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+)"]}},
     }
 
@@ -178,7 +175,6 @@ async def test_build_system_message_includes_graph_context():
     from app.agents.langgraph.nodes.react_loop import _build_system_message
 
     state = {
-        "tenant_id": "test",
         "sector": "legal",
         "features": {},
         "query": "test",
@@ -205,7 +201,6 @@ async def test_build_system_message_omits_graph_context_when_none():
     from app.agents.langgraph.nodes.react_loop import _build_system_message
 
     state = {
-        "tenant_id": "test",
         "sector": "",
         "features": {},
         "query": "hola",

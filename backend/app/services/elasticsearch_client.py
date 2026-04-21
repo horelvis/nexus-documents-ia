@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 class SearchUserContext:
     """User context for search operations (stub)."""
     user_id: str = ""
-    tenant_id: str = ""
     roles: List[str] = None
 
     def __post_init__(self):

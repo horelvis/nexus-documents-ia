@@ -143,7 +143,6 @@ class ChannelUpdate(BaseModel):
 class ChannelResponse(ChannelBase):
     """Schema for channel response."""
     id: UUID
-    tenant_id: UUID
     created_by: UUID
     channel_type: ChannelType
     configuration: Dict[str, Any]

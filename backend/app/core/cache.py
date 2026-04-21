@@ -491,11 +491,6 @@ def user_cache_key(user_id: str, suffix: str) -> str:
     return cache_key("user", user_id, suffix)
 
 
-def tenant_cache_key(tenant_id: str, suffix: str) -> str:
-    """Generate a tenant-specific cache key"""
-    return cache_key("tenant", tenant_id, suffix)
-
-
 def document_cache_key(document_id: str, suffix: str) -> str:
     """Generate a document-specific cache key"""
     return cache_key("document", document_id, suffix)
@@ -572,13 +567,6 @@ def invalidate_user_cache(user_id: str):
     logger.info(f"Invalidated cache for user {user_id}")
 
 
-def invalidate_tenant_cache(tenant_id: str):
-    """Invalidate all cache entries for a tenant"""
-    pattern = f"tenant:{tenant_id}:*"
-    cache.invalidate_pattern(pattern)
-    logger.info(f"Invalidated cache for tenant {tenant_id}")
-
-
 def invalidate_document_cache(document_id: str):
     """Invalidate all cache entries for a document"""
     pattern = f"document:{document_id}:*"
@@ -651,17 +639,6 @@ def invalidate_user_related_cache(user_id: str):
     logger.info(f"Invalidated user-related cache for user {user_id}")
 
 
-def invalidate_tenant_related_cache(tenant_id: str):
-    """Invalidate all tenant-related cache entries"""
-    patterns = [
-        f"tenant:{tenant_id}:*",
-        f"query:*:*{tenant_id}*",  # Queries that might involve this tenant
-    ]
-    for pattern in patterns:
-        cache.invalidate_pattern(pattern)
-    logger.info(f"Invalidated tenant-related cache for tenant {tenant_id}")
-
-
 def invalidate_document_related_cache(document_id: str):
     """Invalidate all document-related cache entries"""
     patterns = [
@@ -688,22 +665,6 @@ async def warm_cache_for_user(user_id: str, user_service):
         logger.info(f"Warmed cache for user {user_id}")
     except Exception as e:
         logger.warning(f"Failed to warm cache for user {user_id}: {str(e)}")
-
-
-async def warm_cache_for_tenant(tenant_id: str, tenant_service):
-    """Pre-populate cache with commonly accessed tenant data"""
-    try:
-        # Cache tenant stats
-        stats = await tenant_service.get_tenant_stats(tenant_id)
-        cache.set(f"tenant:{tenant_id}:stats", stats, ttl=300)  # 5 minutes
-
-        # Cache tenant users count
-        users_count = await tenant_service.get_users_count(tenant_id)
-        cache.set(f"tenant:{tenant_id}:users_count", users_count, ttl=600)  # 10 minutes
-
-        logger.info(f"Warmed cache for tenant {tenant_id}")
-    except Exception as e:
-        logger.warning(f"Failed to warm cache for tenant {tenant_id}: {str(e)}")
 
 
 # Cache statistics and monitoring

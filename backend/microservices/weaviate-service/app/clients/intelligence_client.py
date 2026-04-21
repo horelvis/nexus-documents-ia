@@ -97,7 +97,6 @@ class LangExtractResult:
 async def extract_from_bytes(
     file_bytes: bytes,
     filename: str,
-    tenant_id: str = "",
     user_id: str = "",
     strategy: str = "auto",
 ) -> TextExtractResult:
@@ -128,7 +127,6 @@ async def extract_from_bytes(
 async def extract_from_url(
     file_url: str,
     filename: str,
-    tenant_id: str = "",
     user_id: str = "",
     strategy: str = "auto",
 ) -> TextExtractResult:
@@ -325,11 +323,11 @@ class OCRResult:
 class IntelligenceExtractClient:
     """Drop-in replacement for TextExtractClient in the indexing pipeline."""
 
-    async def extract_from_bytes(self, file_bytes, filename, tenant_id="", user_id="", strategy="auto"):
-        return await extract_from_bytes(file_bytes, filename, tenant_id, user_id, strategy)
+    async def extract_from_bytes(self, file_bytes, filename, user_id="", strategy="auto"):
+        return await extract_from_bytes(file_bytes, filename, user_id, strategy)
 
-    async def extract_from_url(self, file_url, filename, tenant_id="", user_id="", strategy="auto"):
-        return await extract_from_url(file_url, filename, tenant_id, user_id, strategy)
+    async def extract_from_url(self, file_url, filename, user_id="", strategy="auto"):
+        return await extract_from_url(file_url, filename, user_id, strategy)
 
     async def extract_with_ocr(
         self,
@@ -338,7 +336,6 @@ class IntelligenceExtractClient:
         use_hybrid: bool = False,
         preprocess: bool = True,
         dpi: int = 300,
-        tenant_id: str = "",
     ) -> "OCRResult":
         """OCR fallback via intelligence-docs-service /extract endpoint.
 
@@ -351,7 +348,6 @@ class IntelligenceExtractClient:
             result = await extract_from_bytes(
                 file_bytes=file_bytes,
                 filename="document.pdf",
-                tenant_id=tenant_id,
                 strategy="auto",
             )
             elapsed = (_time.time() - start) * 1000

@@ -5,7 +5,6 @@ import { ApiResponse } from "@/lib/types"
 export interface SharedDocument {
   id: string
   document_id: string
-  tenant_id: string
   created_by: string
   share_token: string
   share_url: string

@@ -231,7 +231,7 @@ class VerifiedDocumentService:
             trace = create_trace(
                 "verified.generate_document",
                 session_id=session_id,
-                metadata={"tenant_id": str(request.tenant_id)},
+                metadata={"user_id": str(request.user_id) if request.user_id else ""},
                 input={"query": request.query[:500]},
                 tags=["verified-generation"],
             )
@@ -280,7 +280,6 @@ class VerifiedDocumentService:
 
         initial_state = create_initial_state(
             session_id=session_id,
-            tenant_id=request.tenant_id,
             user_id=request.user_id,
             query=request.query,
             mode="verified",
@@ -378,18 +377,12 @@ class VerifiedDocumentService:
     async def resume_after_review(
         self,
         session_id: str,
-        tenant_id: str,
         review_decisions: list[dict],
     ) -> AsyncGenerator[VerificationEvent, None]:
-        """
-        Resume verified generation after HITL review.
-
-        Submits human decisions and streams the remaining events
-        (review_submitted + document_complete).
+        """Resume verified generation after HITL review.
 
         Args:
             session_id: Session ID (also used as thread_id)
-            tenant_id: Tenant identifier
             review_decisions: List of {claim_id, action, edited_text}
 
         Yields:

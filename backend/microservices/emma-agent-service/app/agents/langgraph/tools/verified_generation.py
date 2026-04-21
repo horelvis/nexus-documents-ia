@@ -71,7 +71,7 @@ class VerifiedGenerationTool(EmmaTool):
         source_document_ids = arguments.get("source_document_ids", [])
         auto_correct = arguments.get("auto_correct", True)
 
-        tenant_id = context.get("tenant_id", "")
+        user_roles = context.get("user_roles", [])
         user_id = context.get("user_id")
         emit_sse = context.get("emit_sse")
 
@@ -92,7 +92,7 @@ class VerifiedGenerationTool(EmmaTool):
         from app.agents.langgraph.subgraphs.verified_gen.graph import get_verified_gen_graph
 
         initial_state = create_verified_gen_state(
-            tenant_id=tenant_id,
+            user_roles=user_roles,
             user_id=user_id,
             query=query,
             max_claims=context.get("max_claims", 20),

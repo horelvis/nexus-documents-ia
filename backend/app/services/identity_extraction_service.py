@@ -65,7 +65,6 @@ class IdentityExtractionService:
         db: AsyncSession,
         file_bytes: bytes,
         filename: str,
-        tenant_id: str,
         user_id: str,
         document_type: Optional[str] = None,
         purpose: str = "identity_verification",
@@ -80,7 +79,6 @@ class IdentityExtractionService:
             db: Database session
             file_bytes: Document file content
             filename: Original filename
-            tenant_id: Tenant identifier
             user_id: User performing the extraction
             document_type: Expected document type (auto-detected if not provided)
             purpose: Purpose for processing (GDPR requirement)
@@ -96,7 +94,6 @@ class IdentityExtractionService:
         # Log audit: extraction started
         await self._log_audit(
             db=db,
-            tenant_id=tenant_id,
             user_id=user_id,
             action="extraction_started",
             purpose=purpose,
@@ -112,13 +109,11 @@ class IdentityExtractionService:
                 filename=filename,
                 document_type=document_type,
                 purpose=purpose,
-                tenant_id=tenant_id,
             )
 
             if not result.get("success"):
                 await self._log_audit(
                     db=db,
-                    tenant_id=tenant_id,
                     user_id=user_id,
                     action="extraction_failed",
                     purpose=purpose,
@@ -135,7 +130,6 @@ class IdentityExtractionService:
             # Store in database
             extraction_id = await self._store_extraction(
                 db=db,
-                tenant_id=tenant_id,
                 user_id=user_id,
                 result=result,
                 purpose=purpose,
@@ -145,7 +139,6 @@ class IdentityExtractionService:
             # Log audit: extraction completed
             await self._log_audit(
                 db=db,
-                tenant_id=tenant_id,
                 user_id=user_id,
                 action="extraction_completed",
                 purpose=purpose,
@@ -167,7 +160,6 @@ class IdentityExtractionService:
             logger.error(f"Identity extraction failed: {e}")
             await self._log_audit(
                 db=db,
-                tenant_id=tenant_id,
                 user_id=user_id,
                 action="extraction_error",
                 purpose=purpose,
@@ -179,7 +171,6 @@ class IdentityExtractionService:
         self,
         db: AsyncSession,
         extraction_id: str,
-        tenant_id: str,
         user_id: str,
         purpose: str,
         ip_address: Optional[str] = None,
@@ -194,9 +185,9 @@ class IdentityExtractionService:
                 SELECT id, document_type, issuing_country, extracted_data,
                        confidence_score, retention_until, created_at
                 FROM identity_document_extractions
-                WHERE id = :id AND tenant_id = :tenant_id
+                WHERE id = :id
             """),
-            {"id": extraction_id, "tenant_id": tenant_id}
+            {"id": extraction_id}
         )
         row = result.fetchone()
 
@@ -206,7 +197,6 @@ class IdentityExtractionService:
         # Log access
         await self._log_audit(
             db=db,
-            tenant_id=tenant_id,
             user_id=user_id,
             action="view",
             purpose=purpose,
@@ -228,7 +218,6 @@ class IdentityExtractionService:
         self,
         db: AsyncSession,
         extraction_id: str,
-        tenant_id: str,
         user_id: str,
         reason: str = "user_request",
     ) -> bool:
@@ -238,7 +227,6 @@ class IdentityExtractionService:
         # Log deletion request
         await self._log_audit(
             db=db,
-            tenant_id=tenant_id,
             user_id=user_id,
             action="deletion_requested",
             purpose=reason,
@@ -248,9 +236,9 @@ class IdentityExtractionService:
         result = await db.execute(
             text("""
                 DELETE FROM identity_document_extractions
-                WHERE id = :id AND tenant_id = :tenant_id
+                WHERE id = :id
             """),
-            {"id": extraction_id, "tenant_id": tenant_id}
+            {"id": extraction_id}
         )
         await db.commit()
 
@@ -259,7 +247,6 @@ class IdentityExtractionService:
         if deleted:
             await self._log_audit(
                 db=db,
-                tenant_id=tenant_id,
                 user_id=user_id,
                 action="deleted",
                 purpose=reason,
@@ -281,17 +268,14 @@ class IdentityExtractionService:
             text("""
                 DELETE FROM identity_document_extractions
                 WHERE retention_until < NOW()
-                RETURNING id, tenant_id
+                RETURNING id
             """)
         )
         deleted_rows = result.fetchall()
         await db.commit()
 
         for row in deleted_rows:
-            logger.info(
-                f"GDPR: Auto-deleted expired extraction {row[0]} "
-                f"from tenant {row[1]}"
-            )
+            logger.info(f"GDPR: Auto-deleted expired extraction {row[0]}")
 
         return len(deleted_rows)
 
@@ -301,7 +285,6 @@ class IdentityExtractionService:
         filename: str,
         document_type: Optional[str],
         purpose: str,
-        tenant_id: str,
     ) -> Dict[str, Any]:
         """Call langextract-service for OCR/extraction"""
         async with httpx.AsyncClient(timeout=120.0) as client:
@@ -309,7 +292,6 @@ class IdentityExtractionService:
                 f"{self.langextract_url}/identity/extract",
                 headers={
                     "X-API-Key": self.api_key,
-                    "X-Tenant-ID": tenant_id,
                 },
                 files={"file": (filename, file_bytes)},
                 data={
@@ -337,7 +319,6 @@ class IdentityExtractionService:
     async def _store_extraction(
         self,
         db: AsyncSession,
-        tenant_id: str,
         user_id: str,
         result: Dict[str, Any],
         purpose: str,
@@ -361,17 +342,16 @@ class IdentityExtractionService:
             db_result = await db.execute(
                 text("""
                     INSERT INTO identity_document_extractions (
-                        tenant_id, document_type, issuing_country,
+                        document_type, issuing_country,
                         extracted_data, confidence_score, ocr_engine,
                         retention_until, consent_purpose, created_by
                     ) VALUES (
-                        :tenant_id, :document_type, :issuing_country,
+                        :document_type, :issuing_country,
                         :extracted_data, :confidence_score, :ocr_engine,
                         :retention_until, :consent_purpose, :created_by
                     ) RETURNING id
                 """),
                 {
-                    "tenant_id": tenant_id,
                     "document_type": result.get("document_type", "unknown"),
                     "issuing_country": result.get("issuing_country"),
                     "extracted_data": json.dumps(extracted_data),
@@ -394,7 +374,6 @@ class IdentityExtractionService:
     async def _log_audit(
         self,
         db: AsyncSession,
-        tenant_id: str,
         user_id: str,
         action: str,
         purpose: str,
@@ -409,16 +388,15 @@ class IdentityExtractionService:
             await db.execute(
                 text("""
                     INSERT INTO identity_extraction_audit_log (
-                        extraction_id, tenant_id, user_id, action,
+                        extraction_id, user_id, action,
                         purpose, fields_accessed, ip_address, user_agent, metadata
                     ) VALUES (
-                        :extraction_id, :tenant_id, :user_id, :action,
+                        :extraction_id, :user_id, :action,
                         :purpose, :fields_accessed, :ip_address, :user_agent, :metadata
                     )
                 """),
                 {
                     "extraction_id": extraction_id,
-                    "tenant_id": tenant_id,
                     "user_id": user_id,
                     "action": action,
                     "purpose": purpose,

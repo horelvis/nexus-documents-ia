@@ -81,9 +81,8 @@ class GenerateDocumentTool(EmmaTool):
         from langchain_core.messages import SystemMessage, HumanMessage
         from app.agents.llm_models import get_chat_model
 
-        tenant_id = context.get("tenant_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
+        user_roles = context.get("user_roles", [])
+        user_id = context.get("user_id")
 
         source_document_id = arguments["source_document_id"]
         modifications = arguments["modifications"]
@@ -93,8 +92,9 @@ class GenerateDocumentTool(EmmaTool):
         client = get_weaviate_client()
         try:
             doc = await client.get_document_content(
-                tenant_id=tenant_id,
                 document_id=source_document_id,
+                user_roles=user_roles,
+                user_id=user_id,
                 include_chunks=False,
             )
         except Exception as e:
@@ -208,7 +208,7 @@ class GenerateDocumentTool(EmmaTool):
                 "title": document_title,
                 "source_document_id": source_document_id,
                 "source_title": source_title,
-                "tenant_id": tenant_id,
+                "user_id": user_id,
                 "modifications": modifications,
                 "content_text": generated_text[:5000],
                 "size_bytes": len(docx_bytes),

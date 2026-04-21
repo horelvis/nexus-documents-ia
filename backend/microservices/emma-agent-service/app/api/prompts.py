@@ -20,6 +20,7 @@ from uuid import UUID
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 
+from app.core.auth_headers import extract_user_id, extract_user_roles
 from app.core.config import settings
 from app.services.prompt_composer import get_prompt_composer
 from app.services.rule_engine import get_rule_engine, RuleContext
@@ -65,7 +66,8 @@ MAIN_API_URL = settings.api_url  # e.g., "http://api:8000"
 async def _call_main_api(
     method: str,
     path: str,
-    tenant_id: Optional[UUID] = None,
+    user_id: Optional[str] = None,
+    user_roles: Optional[List[str]] = None,
     json_data: Optional[Dict] = None,
     params: Optional[Dict] = None,
 ) -> Dict[str, Any]:
@@ -74,8 +76,10 @@ async def _call_main_api(
         "X-API-Key": settings.MICROSERVICES_API_KEY,
         "Content-Type": "application/json",
     }
-    if tenant_id:
-        headers["X-Tenant-ID"] = str(tenant_id)
+    if user_id:
+        headers["X-User-Id"] = str(user_id)
+    if user_roles:
+        headers["X-User-Roles"] = ",".join(user_roles)
 
     url = f"{MAIN_API_URL}/api/v1/prompts{path}"
 
@@ -105,16 +109,6 @@ async def _call_main_api(
 # DEPENDENCIES
 # ══════════════════════════════════════════════════════════════════════════════
 
-def get_tenant_id(x_tenant_id: Optional[str] = Header(None)) -> Optional[UUID]:
-    """Extract tenant ID from header."""
-    if x_tenant_id:
-        try:
-            return UUID(x_tenant_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid tenant ID format")
-    return None
-
-
 def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
     """Verify microservices API key."""
     if x_api_key != settings.MICROSERVICES_API_KEY:
@@ -129,14 +123,16 @@ def verify_api_key(x_api_key: str = Header(..., alias="X-API-Key")):
 @router.post("/rules", response_model=PromptRuleResponse)
 async def create_rule(
     rule: PromptRuleCreate,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Create a new prompt injection rule."""
     result = await _call_main_api(
         "POST",
         "/rules",
-        tenant_id=tenant_id,
+        user_id=user_id,
+        user_roles=user_roles,
         json_data={
             "rule_name": rule.rule_name,
             "description": rule.description,
@@ -149,22 +145,24 @@ async def create_rule(
     )
 
     # Invalidate local cache
-    get_rule_engine().invalidate_cache(tenant_id)
+    get_rule_engine().invalidate_cache(None)
 
     return result
 
 
 @router.get("/rules", response_model=PromptRuleListResponse)
 async def list_rules(
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     active_only: bool = Query(True),
     _: bool = Depends(verify_api_key),
 ):
-    """List prompt rules for tenant."""
+    """List prompt rules."""
     rules = await _call_main_api(
         "GET",
         "/rules",
-        tenant_id=tenant_id,
+        user_id=user_id,
+        user_roles=user_roles,
         params={"active_only": active_only},
     )
     return PromptRuleListResponse(rules=rules, total=len(rules))
@@ -174,7 +172,8 @@ async def list_rules(
 async def update_rule(
     rule_id: UUID,
     rule: PromptRuleUpdate,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Update an existing prompt rule."""
@@ -197,12 +196,13 @@ async def update_rule(
     result = await _call_main_api(
         "PUT",
         f"/rules/{rule_id}",
-        tenant_id=tenant_id,
+        user_id=user_id,
+        user_roles=user_roles,
         json_data=update_data,
     )
 
     # Invalidate local cache
-    get_rule_engine().invalidate_cache(tenant_id)
+    get_rule_engine().invalidate_cache(None)
 
     return result
 
@@ -210,18 +210,20 @@ async def update_rule(
 @router.delete("/rules/{rule_id}")
 async def delete_rule(
     rule_id: UUID,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Delete (deactivate) a prompt rule."""
     result = await _call_main_api(
         "DELETE",
         f"/rules/{rule_id}",
-        tenant_id=tenant_id,
+        user_id=user_id,
+        user_roles=user_roles,
     )
 
     # Invalidate local cache
-    get_rule_engine().invalidate_cache(tenant_id)
+    get_rule_engine().invalidate_cache(None)
 
     return result
 
@@ -229,7 +231,8 @@ async def delete_rule(
 @router.post("/rules/evaluate", response_model=RuleEvaluationResult)
 async def evaluate_rules(
     context: RuleEvaluationRequest,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Evaluate rules against a mock context for testing."""
@@ -246,7 +249,7 @@ async def evaluate_rules(
         )
 
         engine = get_rule_engine()
-        result = await engine.evaluate(rule_context, tenant_id)
+        result = await engine.evaluate(rule_context, None)
 
         return result
 
@@ -262,14 +265,16 @@ async def evaluate_rules(
 @router.post("/guardrails", response_model=GuardrailResponse)
 async def create_guardrail(
     guardrail: GuardrailCreate,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Create a new guardrail."""
     result = await _call_main_api(
         "POST",
         "/guardrails",
-        tenant_id=tenant_id,
+        user_id=user_id,
+        user_roles=user_roles,
         json_data={
             "guardrail_name": guardrail.guardrail_name,
             "description": guardrail.description,
@@ -283,22 +288,24 @@ async def create_guardrail(
     )
 
     # Invalidate local cache
-    get_guardrail_service().invalidate_cache(tenant_id)
+    get_guardrail_service().invalidate_cache(None)
 
     return result
 
 
 @router.get("/guardrails", response_model=GuardrailListResponse)
 async def list_guardrails(
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     active_only: bool = Query(True),
     _: bool = Depends(verify_api_key),
 ):
-    """List guardrails for tenant."""
+    """List guardrails."""
     guardrails = await _call_main_api(
         "GET",
         "/guardrails",
-        tenant_id=tenant_id,
+        user_id=user_id,
+        user_roles=user_roles,
         params={"active_only": active_only},
     )
     return GuardrailListResponse(guardrails=guardrails, total=len(guardrails))
@@ -308,7 +315,8 @@ async def list_guardrails(
 async def update_guardrail(
     guardrail_id: UUID,
     guardrail: GuardrailUpdate,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Update an existing guardrail."""
@@ -333,12 +341,13 @@ async def update_guardrail(
     result = await _call_main_api(
         "PUT",
         f"/guardrails/{guardrail_id}",
-        tenant_id=tenant_id,
+        user_id=user_id,
+        user_roles=user_roles,
         json_data=update_data,
     )
 
     # Invalidate local cache
-    get_guardrail_service().invalidate_cache(tenant_id)
+    get_guardrail_service().invalidate_cache(None)
 
     return result
 
@@ -346,18 +355,20 @@ async def update_guardrail(
 @router.delete("/guardrails/{guardrail_id}")
 async def delete_guardrail(
     guardrail_id: UUID,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Delete (deactivate) a guardrail."""
     result = await _call_main_api(
         "DELETE",
         f"/guardrails/{guardrail_id}",
-        tenant_id=tenant_id,
+        user_id=user_id,
+        user_roles=user_roles,
     )
 
     # Invalidate local cache
-    get_guardrail_service().invalidate_cache(tenant_id)
+    get_guardrail_service().invalidate_cache(None)
 
     return result
 
@@ -365,7 +376,8 @@ async def delete_guardrail(
 @router.post("/guardrails/test", response_model=GuardrailTestResponse)
 async def test_guardrails(
     request: GuardrailTestRequest,
-    tenant_id: Optional[UUID] = Depends(get_tenant_id),
+    user_roles: List[str] = Depends(extract_user_roles),
+    user_id: Optional[str] = Depends(extract_user_id),
     _: bool = Depends(verify_api_key),
 ):
     """Test all applicable guardrails against sample content."""
@@ -376,7 +388,6 @@ async def test_guardrails(
         result = await service.validate(
             request.content,
             agent_name=request.agent_name,
-            tenant_id=tenant_id,
         )
 
         elapsed_ms = (time.time() - start_time) * 1000

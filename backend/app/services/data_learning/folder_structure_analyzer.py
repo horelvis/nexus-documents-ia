@@ -162,7 +162,6 @@ class FolderStructureAnalyzer:
                     # Create new
                     folder_pattern = LearnedFolderPattern(
                         connector_id=connector_id,
-                        tenant_id=connector.tenant_id,
                         path_pattern=pattern_info["pattern"],
                         level_semantics=pattern_info["level_semantics"],
                         example_paths=pattern_info["examples"][:5],

@@ -1,9 +1,11 @@
 """POST /persist — store generated document permanently in GCS + Weaviate."""
 
 import logging
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.auth_headers import extract_user_id, extract_user_roles
 from app.core.security import verify_api_key
 from app.schemas.session import PersistRequest, PersistResponse, SessionStatus
 from app.services.session_store import get_session_store
@@ -16,6 +18,8 @@ router = APIRouter()
 @router.post("/persist", response_model=PersistResponse)
 async def persist_document(
     request: PersistRequest,
+    user_roles: List[str] = Depends(extract_user_roles),
+    header_user_id: Optional[str] = Depends(extract_user_id),
     _api_key: str = Depends(verify_api_key),
 ):
     """Store generated document permanently in GCS and index in Weaviate."""
@@ -57,13 +61,13 @@ async def persist_document(
     # Persist to GCS + Weaviate
     storage = get_storage_service()
     result = await storage.persist(
-        tenant_id=request.tenant_id,
         user_id=request.user_id,
         document_title=doc_title,
         docx_bytes=docx_bytes,
         pdf_bytes=pdf_bytes,
         folder_path=request.folder_path,
         index_in_weaviate=request.index_in_weaviate,
+        user_roles=user_roles,
     )
 
     # Update session status

@@ -65,7 +65,6 @@ def get_session(
 @router.get("/", response_model=TemplateEditSessionListResponse)
 def list_sessions(
     user_id: str | None = Query(default=None),
-    tenant_id: str | None = Query(default=None),
     include_completed: bool = Query(default=False),
     include_expired: bool = Query(default=False),
     db: Session = Depends(get_db),
@@ -73,7 +72,6 @@ def list_sessions(
     sessions = template_edit_session_service.list_sessions(
         db,
         user_id=user_id,
-        tenant_id=tenant_id,
         include_completed=include_completed,
         include_expired=include_expired,
     )
@@ -100,7 +98,6 @@ def create_session(
         template_file_mime=payload.template_file_mime,
         user_id=payload.user_id,
         user_email=payload.user_email,
-        tenant_id=payload.tenant_id,
         google_doc_id=payload.google_doc_id,
         google_doc_url=payload.google_doc_url,
         google_doc_edit_url=payload.google_doc_edit_url,

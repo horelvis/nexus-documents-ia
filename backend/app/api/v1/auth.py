@@ -41,7 +41,6 @@ def _serialize_user(user: User) -> dict:
         "is_superuser": user.is_superuser,
         "onboarding_completed": user.onboarding_completed,
         "stripe_customer_id": user.stripe_customer_id,
-        "tenant_id": str(user.tenant_id),
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
         "subscription_plan": getattr(user, 'subscription_plan', 'trial'),
@@ -258,7 +257,6 @@ async def login(
         user=_serialize_user(user),
         subscription=subscription,
         permissions=permissions,
-        tenant_id=str(user.tenant_id)
     )
 
 

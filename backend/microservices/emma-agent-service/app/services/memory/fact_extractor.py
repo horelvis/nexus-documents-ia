@@ -9,7 +9,7 @@ Two-stage pipeline:
     Stage 2 (LLM, ~200ms, optional): Inferred facts from conversation context
 
 Usage:
-    await extract_and_save_facts(tenant_id, user_id, user_message, assistant_response)
+    await extract_and_save_facts(user_id, user_message, assistant_response)
 """
 
 import json
@@ -162,7 +162,6 @@ async def _extract_inferred_facts(
 # ─── Main entrypoint ─────────────────────────────────────────────────
 
 async def extract_and_save_facts(
-    tenant_id: str,
     user_id: str,
     user_message: str,
     assistant_response: str,
@@ -187,7 +186,7 @@ async def extract_and_save_facts(
         if forget:
             category, fact_key = forget
             if category == "__clear_all__":
-                await service.clear_user_facts(tenant_id, user_id)
+                await service.clear_user_facts(user_id)
                 logger.info(f"User {user_id[:8]}... requested full memory clear")
                 return
             else:
@@ -198,12 +197,12 @@ async def extract_and_save_facts(
                         """
                         UPDATE emma_user_memory_facts
                         SET is_active = false, updated_at = now()
-                        WHERE tenant_id = $1::uuid AND user_id = $2
-                          AND category = $3 AND fact_key = $4 AND is_active = true
+                        WHERE user_id = $1
+                          AND category = $2 AND fact_key = $3 AND is_active = true
                         """,
-                        tenant_id, user_id, category, fact_key,
+                        user_id, category, fact_key,
                     )
-                await service._invalidate_cache(tenant_id, user_id)
+                await service._invalidate_cache(user_id)
                 logger.info(f"User {user_id[:8]}... requested forget [{category}/{fact_key}]")
                 return
 
@@ -224,7 +223,7 @@ async def extract_and_save_facts(
 
         # Enforce max facts limit
         max_facts = getattr(settings, "user_memory_max_facts", 50)
-        existing = await service.get_user_facts(tenant_id, user_id)
+        existing = await service.get_user_facts(user_id)
         if len(existing) >= max_facts:
             logger.debug(f"User {user_id[:8]}... at max facts limit ({max_facts}), skipping save")
             return
@@ -232,7 +231,6 @@ async def extract_and_save_facts(
         # Save facts
         for fact in all_facts:
             await service.save_fact(
-                tenant_id=tenant_id,
                 user_id=user_id,
                 category=fact["category"],
                 fact_key=fact["fact_key"],

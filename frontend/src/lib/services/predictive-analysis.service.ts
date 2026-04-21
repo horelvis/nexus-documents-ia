@@ -47,7 +47,6 @@ export interface PredictiveStreamEvent {
 
 export interface PredictiveAnalyzeParams {
   case_description: string
-  tenant_id: string
   session_id?: string
   max_factors?: number
   sector_override?: string
@@ -141,9 +140,9 @@ function parseSsePart(part: string): PredictiveStreamEvent | null {
 /**
  * Download prediction PDF report.
  */
-export async function downloadPredictivePdf(sessionId: string, tenantId: string): Promise<Blob> {
+export async function downloadPredictivePdf(sessionId: string): Promise<Blob> {
   const token = getAccessToken()
-  const url = `${STREAMING_API_URL}/emma/predictive/analysis/${sessionId}/pdf?tenant_id=${encodeURIComponent(tenantId)}`
+  const url = `${STREAMING_API_URL}/emma/predictive/analysis/${sessionId}/pdf`
 
   const response = await fetch(url, {
     headers: {
@@ -161,9 +160,9 @@ export async function downloadPredictivePdf(sessionId: string, tenantId: string)
 /**
  * Download prediction DOCX report.
  */
-export async function downloadPredictiveDocx(sessionId: string, tenantId: string): Promise<Blob> {
+export async function downloadPredictiveDocx(sessionId: string): Promise<Blob> {
   const token = getAccessToken()
-  const url = `${STREAMING_API_URL}/emma/predictive/analysis/${sessionId}/docx?tenant_id=${encodeURIComponent(tenantId)}`
+  const url = `${STREAMING_API_URL}/emma/predictive/analysis/${sessionId}/docx`
 
   const response = await fetch(url, {
     headers: {

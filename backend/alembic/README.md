@@ -106,14 +106,14 @@ alembic upgrade head
 ### Skip Failed Migration
 ```bash
 # Mark migration as complete without running it
-docker compose exec db psql -U postgres -d nexus_db -c "UPDATE alembic_version SET version_num = 'revision_id';"
+docker compose exec db psql -U postgres -d nouxcube -c "UPDATE alembic_version SET version_num = 'revision_id';"
 ```
 
 ### Reset Migration State
 ```bash
 # DANGER: Only in development!
-docker compose exec db psql -U postgres -d nexus_db -c "DELETE FROM alembic_version;"
-docker compose exec db psql -U postgres -d nexus_db -c "INSERT INTO alembic_version VALUES ('initial_revision_id');"
+docker compose exec db psql -U postgres -d nouxcube -c "DELETE FROM alembic_version;"
+docker compose exec db psql -U postgres -d nouxcube -c "INSERT INTO alembic_version VALUES ('initial_revision_id');"
 ```
 
 ## 🎯 Best Practices

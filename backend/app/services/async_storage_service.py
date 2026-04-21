@@ -13,19 +13,17 @@ class AsyncStorageService:
     Provides interface for document management via microservice.
     """
     
-    def __init__(self, tenant_id: str, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
+    def __init__(self, user_id: Optional[str] = None, bucket_name: Optional[str] = None):
         """
         Initialize the async storage service using the microservice.
-        
+
         Args:
-            tenant_id: Tenant ID
             user_id: User ID (optional)
             bucket_name: Bucket name (optional)
         """
-        self.tenant_id = tenant_id
         self.user_id = user_id
-        self.bucket_name = bucket_name or f"storage-service-{tenant_id}"
-        self.client = AsyncStorageClient(tenant_id, user_id, self.bucket_name)
+        self.bucket_name = bucket_name or "storage-service"
+        self.client = AsyncStorageClient(user_id, self.bucket_name)
     
     async def upload_file(
         self, 
@@ -72,23 +70,13 @@ class AsyncStorageService:
             File content as bytes or None if not found
         """
         try:
-            # If object_name includes tenant prefix, remove it
-            # Expected format: tenant-{id}/user-{id}/filename or tenant-{id}/system/filename
             file_path = object_name
-            
-            # Remove tenant prefix if present
-            if object_name.startswith(f"tenant-{self.tenant_id}/"):
-                # Remove "tenant-{id}/" from beginning
-                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
-                
-                # If includes user prefix, remove it too
-                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
-                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
-                elif path_without_tenant.startswith("system/"):
-                    file_path = path_without_tenant[len("system/"):]
-                else:
-                    file_path = path_without_tenant
-            
+
+            if self.user_id and file_path.startswith(f"user-{self.user_id}/"):
+                file_path = file_path[len(f"user-{self.user_id}/"):]
+            elif file_path.startswith("system/"):
+                file_path = file_path[len("system/"):]
+
             content = await self.client.download_file(file_path)
             
             # Fallback: if not found with full path, try filename only
@@ -122,22 +110,13 @@ class AsyncStorageService:
             True if deleted successfully, False otherwise
         """
         try:
-            # If object_name includes tenant prefix, remove it
             file_path = object_name
-            
-            # Remove tenant prefix if present
-            if object_name.startswith(f"tenant-{self.tenant_id}/"):
-                # Remove "tenant-{id}/" from beginning
-                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
-                
-                # If includes user prefix, remove it too
-                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
-                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
-                elif path_without_tenant.startswith("system/"):
-                    file_path = path_without_tenant[len("system/"):]
-                else:
-                    file_path = path_without_tenant
-            
+
+            if self.user_id and file_path.startswith(f"user-{self.user_id}/"):
+                file_path = file_path[len(f"user-{self.user_id}/"):]
+            elif file_path.startswith("system/"):
+                file_path = file_path[len("system/"):]
+
             success = await self.client.delete_file(file_path)
             
             # Fallback: if not found with full path, try filename only
@@ -241,22 +220,13 @@ class AsyncStorageService:
             Tuple with signed URL and expiration date
         """
         try:
-            # If object_name includes tenant prefix, remove it
             file_path = object_name
-            
-            # Remove tenant prefix if present
-            if object_name.startswith(f"tenant-{self.tenant_id}/"):
-                # Remove "tenant-{id}/" from beginning
-                path_without_tenant = object_name[len(f"tenant-{self.tenant_id}/"):]
-                
-                # If includes user prefix, remove it too
-                if self.user_id and path_without_tenant.startswith(f"user-{self.user_id}/"):
-                    file_path = path_without_tenant[len(f"user-{self.user_id}/"):]
-                elif path_without_tenant.startswith("system/"):
-                    file_path = path_without_tenant[len("system/"):]
-                else:
-                    file_path = path_without_tenant
-            
+
+            if self.user_id and file_path.startswith(f"user-{self.user_id}/"):
+                file_path = file_path[len(f"user-{self.user_id}/"):]
+            elif file_path.startswith("system/"):
+                file_path = file_path[len("system/"):]
+
             try:
                 url, expires_at = await self.client.generate_download_signed_url(
                     file_path=file_path,

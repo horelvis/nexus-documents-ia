@@ -198,8 +198,8 @@ def _route_from_decompose(state: ReActState):
     reads (11 fields), instead of copying the full ~30-field state. This
     reduces memory when spawning N workers in parallel.
 
-    Worker reads: swarm_current_task, swarm_worker_id, query, tenant_id,
-    sector, sector_config, features, user_id, user_role_ids, is_admin,
+    Worker reads: swarm_current_task, swarm_worker_id, query,
+    sector, sector_config, features, user_id, user_roles, is_admin,
     thread_id, metadata.
 
     Returns:
@@ -219,9 +219,8 @@ def _route_from_decompose(state: ReActState):
     worker_base = {
         # Fields the worker reads
         "query": state.get("query", ""),
-        "tenant_id": state.get("tenant_id", ""),
         "user_id": state.get("user_id"),
-        "user_role_ids": state.get("user_role_ids"),
+        "user_roles": state.get("user_roles", []),
         "is_admin": state.get("is_admin", False),
         "sector": state.get("sector"),
         "sector_config": state.get("sector_config"),
@@ -285,44 +284,15 @@ async def get_react_graph(force_new: bool = False):
 
 async def execute_react_query(
     query: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
-    user_role_ids: Optional[list] = None,
+    user_roles: Optional[list] = None,
     is_admin: bool = False,
     thread_id: Optional[str] = None,
     conversation_history: Optional[list] = None,
     context: Optional[Dict[str, Any]] = None,
     max_steps: int = 10,
 ) -> Dict[str, Any]:
-    """Execute a query using the ReAct agent graph.
-
-    High-level API for executing queries through the ReAct graph.
-
-    Args:
-        query: User's query
-        tenant_id: Tenant ID for ACL
-        user_id: Optional user ID
-        user_role_ids: Optional role IDs
-        is_admin: Admin bypass flag
-        thread_id: Optional conversation thread ID
-        conversation_history: Previous conversation messages
-        context: Request context (document_id, social_channel_mode, etc.)
-        max_steps: Maximum ReAct iterations (default: 10)
-
-    Returns:
-        Dict with success, answer, sources, thread_id, metadata
-    """
-    if not tenant_id or not tenant_id.strip():
-        return {
-            "success": False,
-            "answer": "Error: tenant_id is required",
-            "sources": [],
-            "thread_id": thread_id or "",
-            "fast_path": False,
-            "latency_ms": 0,
-            "metadata": {"error": "tenant_id_required"},
-        }
-
+    """Execute a query using the ReAct agent graph."""
     from .state import create_initial_react_state
     from langchain_core.messages import HumanMessage, AIMessage
 
@@ -350,9 +320,8 @@ async def execute_react_query(
     # Create initial state (async — loads user memory from DB/Redis)
     initial_state = await create_initial_react_state(
         query=query,
-        tenant_id=tenant_id,
         user_id=user_id,
-        user_role_ids=user_role_ids,
+        user_roles=user_roles or [],
         is_admin=is_admin,
         thread_id=thread_id,
         conversation_history=langchain_history,

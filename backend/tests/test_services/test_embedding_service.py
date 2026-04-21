@@ -119,7 +119,7 @@ def test_search(monkeypatch):
     result = embedding_service.search(
         query="test query",
         limit=5,
-        filters={"tenant_id": "test-tenant"}
+        filters={"user_id": "test-user"}
     )
     
     assert isinstance(result, list)
@@ -131,7 +131,7 @@ def test_search(monkeypatch):
     embedding_service.vector_service.search_similar.assert_called_once()
     args, kwargs = embedding_service.vector_service.search_similar.call_args
     assert kwargs["limit"] == 5
-    assert kwargs["filter_by"] == {"tenant_id": "test-tenant"}
+    assert kwargs["filter_by"] == {"user_id": "test-user"}
 
 def test_delete_document(monkeypatch):
     """Prueba para eliminar documento del vector store"""

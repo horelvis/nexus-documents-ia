@@ -63,7 +63,7 @@ class KnowledgeReportTool(EmmaTool):
         entity_uri = arguments["entity_uri"]
         report_type = arguments.get("report_type", "entity_profile")
         language = arguments.get("language", "es")
-        tenant_id = context.get("tenant_id", "")
+        user_id = context.get("user_id")
         emit_sse = context.get("emit_sse")
 
         kts_url = settings.knowledge_tree_service_url.rstrip("/")
@@ -84,7 +84,6 @@ class KnowledgeReportTool(EmmaTool):
                 resp = await client.post(
                     f"{kts_url}/graph/assemble",
                     json={
-                        "tenant_id": tenant_id,
                         "entity_uri": entity_uri,
                         "report_type": report_type,
                     },
@@ -194,7 +193,7 @@ class KnowledgeReportTool(EmmaTool):
                     "entity_uri": entity_uri,
                     "entity_label": entity_label,
                     "report_type": report_type,
-                    "tenant_id": tenant_id,
+                    "user_id": user_id,
                     "sources": sources,
                     "trust_summary": trust,
                 }),

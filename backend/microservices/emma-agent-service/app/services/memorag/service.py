@@ -27,33 +27,24 @@ class MemoRAGService:
 
     async def recall(
         self,
-        tenant_id: str,
         query: str,
+        user_roles: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
         limit: int = 20,
         domain: Optional[str] = None,
         semantic_type: Optional[str] = None,
     ) -> List[RecallItem]:
-        """Recall relevant document chunks via Weaviate hybrid search.
-
-        Args:
-            tenant_id: Tenant identifier.
-            query: Natural-language query.
-            limit: Maximum results to return.
-            domain: Optional domain filter (legal, medical, ...).
-            semantic_type: Optional semantic type filter (contrato, factura, ...).
-
-        Returns:
-            List[RecallItem] compatible with the legacy interface.
-        """
+        """Recall relevant document chunks via Weaviate hybrid search."""
         try:
             from app.clients.weaviate_client import get_weaviate_client
 
             client = get_weaviate_client()
             results = await client.hybrid_search(
-                tenant_id=tenant_id,
                 query=query,
+                user_roles=user_roles or [],
+                user_id=user_id,
                 limit=limit,
-                alpha=0.5,  # balanced hybrid
+                alpha=0.5,
                 domain_filter=domain,
                 semantic_type_filter=semantic_type,
             )
@@ -73,7 +64,6 @@ class MemoRAGService:
 
     async def memorize(
         self,
-        tenant_id: str,
         document_id: str,
         document_text: str,
         filename: str = "",

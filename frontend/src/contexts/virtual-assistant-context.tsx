@@ -75,7 +75,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
   }, [])
 
   const loadWelcomeMessage = useCallback(async () => {
-    if (!currentConversation || currentConversation.messages.length > 0 || !backendUser?.tenant_id) {
+    if (!currentConversation || currentConversation.messages.length > 0 || !backendUser) {
       return
     }
 
@@ -87,7 +87,6 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       const result = await emmaSendMessage(
         "Genera un mensaje de bienvenida personalizado. Menciona cuántos documentos tiene el usuario si los hay.",
         currentConversation.id,
-        backendUser.tenant_id,
         false,
         { is_welcome: true }
       )
@@ -131,10 +130,10 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
     } finally {
       setIsLoading(false)
     }
-  }, [currentConversation, backendUser?.tenant_id, emmaSendMessage])
+  }, [currentConversation, backendUser, emmaSendMessage])
 
   const sendMessage = useCallback(async (content: string, _useStreaming: boolean = false) => {
-    if (!currentConversation || !backendUser?.tenant_id) return
+    if (!currentConversation || !backendUser) return
 
     setIsLoading(true)
     setError(null)
@@ -161,7 +160,6 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       const result = await emmaSendMessage(
         content,
         currentConversation.id,
-        backendUser.tenant_id,
         false // debug mode off for regular users
       )
 
@@ -229,7 +227,7 @@ export function VirtualAssistantProvider({ children }: { children: ReactNode }) 
       setIsStreaming(false)
       abortControllerRef.current = null
     }
-  }, [currentConversation, backendUser?.tenant_id, emmaSendMessage])
+  }, [currentConversation, backendUser, emmaSendMessage])
 
   const stopStreaming = useCallback(() => {
     if (abortControllerRef.current) {

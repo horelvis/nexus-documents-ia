@@ -192,7 +192,7 @@ def main() -> None:
     parser.add_argument("--db-port", type=int, default=5432)
     parser.add_argument("--db-user", default="nexus_user")
     parser.add_argument("--db-password", default="nexus_password")
-    parser.add_argument("--db-name", default="nexus_db")
+    parser.add_argument("--db-name", default="nouxcube")
     parser.add_argument("--session-limit", type=int, default=500)
     parser.add_argument("--message-limit", type=int, default=2000)
     parser.add_argument("--output", default="scripts/benchmark_results/rag_phase3_real_shadow.json")

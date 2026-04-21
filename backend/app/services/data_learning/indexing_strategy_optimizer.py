@@ -151,7 +151,6 @@ class IndexingStrategyOptimizer:
         # 1. Create default strategy for all documents
         default_strategy = await self._create_or_update_strategy(
             connector_id=connector_id,
-            tenant_id=connector.tenant_id,
             document_type=None,
             mime_type_pattern=None,
             chunking_type=ChunkingType.SEMANTIC,
@@ -174,7 +173,6 @@ class IndexingStrategyOptimizer:
 
                 strategy = await self._create_or_update_strategy(
                     connector_id=connector_id,
-                    tenant_id=connector.tenant_id,
                     document_type=type_name,
                     mime_type_pattern=None,
                     chunking_type=chunking,
@@ -200,7 +198,6 @@ class IndexingStrategyOptimizer:
         for mime_type, chunking, priority in mime_strategies:
             strategy = await self._create_or_update_strategy(
                 connector_id=connector_id,
-                tenant_id=connector.tenant_id,
                 document_type=None,
                 mime_type_pattern=mime_type,
                 chunking_type=chunking,
@@ -226,7 +223,6 @@ class IndexingStrategyOptimizer:
     async def _create_or_update_strategy(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
         document_type: Optional[str],
         mime_type_pattern: Optional[str],
         chunking_type: ChunkingType,
@@ -273,7 +269,6 @@ class IndexingStrategyOptimizer:
             # Create new
             strategy = ConnectorIndexingStrategy(
                 connector_id=connector_id,
-                tenant_id=tenant_id,
                 document_type=document_type,
                 mime_type_pattern=mime_type_pattern,
                 chunking_type=chunking_type.value,
@@ -415,7 +410,6 @@ class IndexingStrategyOptimizer:
         create: ConnectorIndexingStrategyCreate,
     ) -> ConnectorIndexingStrategy:
         """Create a new indexing strategy."""
-        # Get connector for tenant_id
         result = await self.db.execute(
             select(Connector).where(Connector.id == connector_id)
         )
@@ -425,7 +419,6 @@ class IndexingStrategyOptimizer:
 
         strategy = ConnectorIndexingStrategy(
             connector_id=connector_id,
-            tenant_id=connector.tenant_id,
             document_type=create.document_type,
             mime_type_pattern=create.mime_type_pattern,
             chunking_type=create.chunking_type.value,

@@ -96,7 +96,6 @@ export function classifyError(error: unknown): EmmaError {
 export interface EmmaQuery {
   query: string
   session_id: string
-  tenant_id: string
   context?: Record<string, unknown>
   enable_debug?: boolean
   deep_reasoning?: boolean
@@ -106,7 +105,6 @@ export interface EmmaResponse {
   query: string
   answer: string
   session_id: string
-  tenant_id: string
   decision_path: string[]
   tools_used: string[]
   data: unknown
@@ -478,24 +476,21 @@ export function useEmmaService() {
   const sendMessage = async (
     message: string,
     sessionId: string,
-    tenantId: string,
     enableDebug = false,
     context?: Record<string, unknown>
   ): Promise<EmmaResponse> => {
     return queryEmma({
       query: message,
       session_id: sessionId,
-      tenant_id: tenantId,
       enable_debug: enableDebug,
       context
     })
   }
 
-  const getWelcomeMessage = async (sessionId: string, tenantId: string): Promise<EmmaResponse> => {
+  const getWelcomeMessage = async (sessionId: string): Promise<EmmaResponse> => {
     return queryEmma({
       query: "Genera un mensaje de bienvenida personalizado para el usuario",
       session_id: sessionId,
-      tenant_id: tenantId,
       context: { is_welcome: true }
     })
   }
@@ -507,7 +502,6 @@ export function useEmmaService() {
   async function* resumeQueryStreamGenerator(
     threadId: string,
     resumeValue: string | Record<string, unknown>,
-    tenantId: string,
     userId?: string,
   ): AsyncGenerator<EmmaStreamEvent, void, unknown> {
     const token = getAccessToken()
@@ -522,7 +516,6 @@ export function useEmmaService() {
       body: JSON.stringify({
         thread_id: threadId,
         resume_value: resumeValue,
-        tenant_id: tenantId,
         user_id: userId || undefined,
       })
     })

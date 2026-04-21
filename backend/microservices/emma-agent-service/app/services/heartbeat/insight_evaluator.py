@@ -56,7 +56,7 @@ class InsightEvaluator:
         """Fallback system prompt when Langfuse and YAML are both unavailable."""
         return """Eres Emma, un asistente de IA especializado en gestión documental legal.
 
-Tu tarea es analizar el contexto de un tenant y generar insights proactivos que sean:
+Tu tarea es analizar el contexto del despliegue y generar insights proactivos que sean:
 1. ACCIONABLES: El usuario debe poder tomar una acción concreta
 2. RELEVANTES: Solo genera insights si hay algo importante que comunicar
 3. PRIORIZADOS: Asigna urgencia basada en el impacto real
@@ -153,7 +153,7 @@ FORMATO DE RESPUESTA (JSON):
 
         # Build context summary
         parts = [
-            f"## Contexto del Tenant: {context.tenant_id}",
+            "## Contexto del Despliegue",
             f"Fecha de evaluación: {context.gathered_at.strftime('%Y-%m-%d %H:%M')}",
             f"Tipos de insight habilitados: {types_str}",
             "",
@@ -267,11 +267,10 @@ FORMATO DE RESPUESTA (JSON):
     def candidates_to_insights(
         self,
         candidates: List[LLMInsightCandidate],
-        tenant_id: str,
     ) -> List[ProactiveInsightCreate]:
         """Convert LLM candidates to ProactiveInsightCreate objects.
 
-        Insight types are passed through as strings directly — no enum
+        Insight types are passed through as strings directly -- no enum
         mapping needed. This allows the LLM to generate any type defined
         in the Langfuse prompt without code changes.
         """
@@ -288,7 +287,6 @@ FORMATO DE RESPUESTA (JSON):
             ]
 
             insights.append(ProactiveInsightCreate(
-                tenant_id=tenant_id,
                 insight_type=candidate.insight_type,  # Pass string directly
                 title=candidate.title[:255],
                 summary=candidate.summary[:500] if candidate.summary else "",

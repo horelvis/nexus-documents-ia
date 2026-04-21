@@ -71,7 +71,7 @@ registry = CollectorRegistry()
 http_requests_total = Counter(
     'nexus_http_requests_total',
     'Total number of HTTP requests',
-    ['method', 'endpoint', 'status_code', 'tenant_id'],
+    ['method', 'endpoint', 'status_code'],
     registry=registry
 )
 
@@ -99,20 +99,20 @@ http_response_size_bytes = Histogram(
 
 # Database connection pool metrics
 db_connections_active = Gauge(
-    'nexus_db_connections_active',
+    'nouxcube_db_connections_active',
     'Number of active database connections',
     registry=registry
 )
 
 db_connections_idle = Gauge(
-    'nexus_db_connections_idle',
+    'nouxcube_db_connections_idle',
     'Number of idle database connections',
     registry=registry
 )
 
 # Database query metrics
 db_query_duration_seconds = Histogram(
-    'nexus_db_query_duration_seconds',
+    'nouxcube_db_query_duration_seconds',
     'Database query duration in seconds',
     ['query_type', 'table'],
     buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
@@ -120,7 +120,7 @@ db_query_duration_seconds = Histogram(
 )
 
 db_query_errors_total = Counter(
-    'nexus_db_query_errors_total',
+    'nouxcube_db_query_errors_total',
     'Total number of database query errors',
     ['query_type', 'error_type'],
     registry=registry
@@ -162,7 +162,7 @@ cache_hit_rate = Gauge(
 document_operations_total = Counter(
     'nexus_document_operations_total',
     'Total number of document operations',
-    ['operation', 'tenant_id', 'file_type'],
+    ['operation', 'file_type'],
     registry=registry
 )
 
@@ -223,7 +223,7 @@ tenant_count = Gauge(
 document_count_total = Gauge(
     'nexus_document_count_total',
     'Total number of documents',
-    ['tenant_id', 'status'],
+    ['status'],
     registry=registry
 )
 
@@ -231,7 +231,7 @@ document_count_total = Gauge(
 user_count_total = Gauge(
     'nexus_user_count_total',
     'Total number of users',
-    ['tenant_id', 'status'],
+    ['status'],
     registry=registry
 )
 
@@ -276,7 +276,7 @@ high_memory_usage = Gauge(
 
 # Database connection issues
 db_connection_errors_total = Counter(
-    'nexus_db_connection_errors_total',
+    'nouxcube_db_connection_errors_total',
     'Total number of database connection errors',
     registry=registry
 )
@@ -338,7 +338,6 @@ class MetricsMiddleware:
                 method=method,
                 endpoint=path,
                 status_code=str(response_status[0]),
-                tenant_id="unknown"  # TODO: Extract from request headers
             ).inc()
 
             http_request_duration_seconds.labels(
@@ -428,8 +427,8 @@ def update_business_metrics():
             result = conn.execute(text("SELECT COUNT(*) FROM users WHERE is_active = false"))
             users_inactive = result.fetchone()[0]
 
-            user_count_total.labels(tenant_id="all", status="active").set(users_active)
-            user_count_total.labels(tenant_id="all", status="inactive").set(users_inactive)
+            user_count_total.labels(status="active").set(users_active)
+            user_count_total.labels(status="inactive").set(users_inactive)
 
             # Document count by status
             result = conn.execute(text("SELECT COUNT(*) FROM documents WHERE indexed = 1"))
@@ -438,8 +437,8 @@ def update_business_metrics():
             result = conn.execute(text("SELECT COUNT(*) FROM documents WHERE indexed = 0"))
             docs_not_indexed = result.fetchone()[0]
 
-            document_count_total.labels(tenant_id="all", status="indexed").set(docs_indexed)
-            document_count_total.labels(tenant_id="all", status="not_indexed").set(docs_not_indexed)
+            document_count_total.labels(status="indexed").set(docs_indexed)
+            document_count_total.labels(status="not_indexed").set(docs_not_indexed)
 
     except Exception as e:
         logger.error(f"Error updating business metrics: {str(e)}")

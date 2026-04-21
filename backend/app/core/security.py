@@ -11,6 +11,13 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
-def get_tenant_collection_name(tenant_id: str, collection_type: str = "documents") -> str:
-    """Generate tenant-specific collection name for Weaviate"""
-    return f"nexus_{tenant_id}_{collection_type}".lower().replace("-", "_")
+def get_collection_name(collection_type: str = "documents") -> str:
+    """Generate the Weaviate collection name for the deployment.
+
+    In single-tenant mode the collection namespace collapses to a single
+    deployment-wide name keyed only by the collection type. Uses the
+    Weaviate v4 class-name convention (PascalCase-ish with an underscore
+    separator) matching the existing collection references in
+    weaviate-service (e.g., "Nouxcube_documents").
+    """
+    return f"Nouxcube_{collection_type}"

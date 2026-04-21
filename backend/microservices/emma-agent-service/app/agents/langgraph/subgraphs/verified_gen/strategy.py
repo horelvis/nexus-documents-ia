@@ -46,11 +46,11 @@ class VerifiedStrategy:
             await self._cache.connect()
 
         # Clear prior session
-        await self._cache.clear_session(state["tenant_id"], state["session_id"])
+        await self._cache.clear_session("", state["session_id"])
 
         # Store session metadata
         await self._cache.store_session_metadata(
-            state["tenant_id"],
+            "",
             state["session_id"],
             {
                 "query": state["query"],
@@ -66,7 +66,7 @@ class VerifiedStrategy:
 
         # Get verified claims from Redis for context
         verified_claims = await self._cache.get_verified_claims(
-            state["tenant_id"], state["session_id"]
+            "", state["session_id"]
         )
 
         claim_position = len(verified_claims) + 1
@@ -219,7 +219,7 @@ class VerifiedStrategy:
     async def check_completion(self, state: dict, source_context: str) -> bool:
         """LLM completion check via WriterAgent."""
         verified_claims = await self._cache.get_verified_claims(
-            state["tenant_id"], state["session_id"]
+            "", state["session_id"]
         )
         return await self._writer.check_completion(
             query=state["query"],
@@ -284,9 +284,9 @@ class VerifiedStrategy:
         )
 
         await self._cache.add_verified_claim(
-            state["tenant_id"], state["session_id"], verified_claim
+            "", state["session_id"], verified_claim
         )
-        await self._cache.extend_ttl(state["tenant_id"], state["session_id"])
+        await self._cache.extend_ttl("", state["session_id"])
 
         reason = evaluation.get("reason", "")
 
@@ -339,7 +339,7 @@ class VerifiedStrategy:
         from app.core.langfuse_config import langfuse_context
 
         final_claims = await self._cache.get_verified_claims(
-            state["tenant_id"], state["session_id"]
+            "", state["session_id"]
         )
 
         # DOI validation results from source document (pre-validated at initialization)
@@ -373,7 +373,7 @@ class VerifiedStrategy:
 
         # Update session metadata (enrich for recovery)
         existing_meta = await self._cache.get_session_metadata(
-            state["tenant_id"], state["session_id"]
+            "", state["session_id"]
         )
         existing_meta["status"] = "completed"
         existing_meta["document_text"] = document_text
@@ -387,7 +387,7 @@ class VerifiedStrategy:
         existing_meta["source_filenames"] = source_filenames
         existing_meta["source_summary"] = source_summary
         await self._cache.store_session_metadata(
-            state["tenant_id"], state["session_id"], existing_meta
+            "", state["session_id"], existing_meta
         )
 
         # Langfuse scores

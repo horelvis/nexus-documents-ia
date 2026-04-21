@@ -56,12 +56,12 @@ class PredictiveStrategy:
         self._config = get_predictive_config(sector_override)
 
         # Clear prior session
-        await self._cache.clear_session(state["tenant_id"], state["session_id"])
+        await self._cache.clear_session("", state["session_id"])
 
         # Store session metadata
         from datetime import datetime, timezone
         await self._cache.store_session_metadata(
-            state["tenant_id"],
+            "",
             state["session_id"],
             {
                 "case_description": state["query"],
@@ -75,7 +75,7 @@ class PredictiveStrategy:
         """Extract next factor via FactorAgent."""
         # Get existing weighted factors from Redis for LLM context
         existing_factors = await self._cache.get_weighted_factors(
-            state["tenant_id"], state["session_id"]
+            "", state["session_id"]
         )
 
         # Build rejected factors list from all_extracted_items
@@ -172,7 +172,7 @@ class PredictiveStrategy:
     async def check_completion(self, state: dict, source_context: str) -> bool:
         """LLM completion check via FactorAgent."""
         existing_factors = await self._cache.get_weighted_factors(
-            state["tenant_id"], state["session_id"]
+            "", state["session_id"]
         )
         return await self._factor_agent.check_completion(
             case_description=state["query"],
@@ -191,9 +191,9 @@ class PredictiveStrategy:
         weighted: WeightedFactor = evaluation["_weighted_factor"]
 
         await self._cache.add_weighted_factor(
-            state["tenant_id"], state["session_id"], weighted
+            "", state["session_id"], weighted
         )
-        await self._cache.extend_ttl(state["tenant_id"], state["session_id"])
+        await self._cache.extend_ttl("", state["session_id"])
 
         # Serialize supporting matches for frontend display
         serialized_matches = [
@@ -255,7 +255,7 @@ class PredictiveStrategy:
         from app.core.langfuse_config import langfuse_context
 
         final_factors = await self._cache.get_weighted_factors(
-            state["tenant_id"], state["session_id"]
+            "", state["session_id"]
         )
 
         execution_time_ms = state.get("execution_time_ms", 0)
@@ -270,7 +270,7 @@ class PredictiveStrategy:
 
         # Store result in cache
         await self._cache.store_result(
-            state["tenant_id"], state["session_id"], result
+            "", state["session_id"], result
         )
 
         # Langfuse scores

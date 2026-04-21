@@ -168,7 +168,7 @@ async def _call_llm(query: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
-async def _batch_embed(concepts: List[str], tenant_id: str) -> Dict[str, List[float]]:
+async def _batch_embed(concepts: List[str]) -> Dict[str, List[float]]:
     """Batch embed a list of concept strings via intelligence-docs-service.
 
     Calls POST /embed with `texts` + `task=retrieval.query`.
@@ -194,7 +194,6 @@ async def _batch_embed(concepts: List[str], tenant_id: str) -> Dict[str, List[fl
                 json={"texts": concepts, "task": "retrieval.query"},
                 headers={
                     "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-Tenant-ID": tenant_id,
                 },
             )
             response.raise_for_status()
@@ -270,7 +269,7 @@ def _parse_concepts_json(content: str) -> Optional[Dict[str, List[str]]]:
 # ---------------------------------------------------------------------------
 
 
-async def extract_concepts(query: str, tenant_id: str) -> ConceptResult:
+async def extract_concepts(query: str) -> ConceptResult:
     """Decompose a query into high-level themes and low-level entities.
 
     Pipeline:
@@ -282,8 +281,7 @@ async def extract_concepts(query: str, tenant_id: str) -> ConceptResult:
     Falls back to regex extraction (no embeddings) on any LLM failure.
 
     Args:
-        query:     User query string to decompose.
-        tenant_id: Tenant identifier (passed to embed service for auth).
+        query: User query string to decompose.
 
     Returns:
         ConceptResult with concepts and optional embeddings.
@@ -304,7 +302,7 @@ async def extract_concepts(query: str, tenant_id: str) -> ConceptResult:
         low_level = parsed["low_level_keywords"]
         all_concepts = list(dict.fromkeys(high_level + low_level))  # deduplicate, preserve order
 
-        embeddings = await _batch_embed(all_concepts, tenant_id)
+        embeddings = await _batch_embed(all_concepts)
 
         return ConceptResult(
             high_level=high_level,

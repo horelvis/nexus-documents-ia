@@ -219,13 +219,6 @@ class ApiClient {
     }
   }
 
-  /**
-   * Set tenant ID for multi-tenant requests
-   */
-  setTenantId(tenantId: string): void {
-    this.client.defaults.headers.common['X-Tenant-ID'] = tenantId
-  }
-
   private handleError<T>(error: unknown): ApiResponse<T> {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError<{ detail?: string; message?: string }>

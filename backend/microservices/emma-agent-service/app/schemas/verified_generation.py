@@ -257,7 +257,6 @@ class VerifiedDocumentRequest(BaseModel):
     Request to generate a verified document.
     """
     query: str = Field(..., description="The generation query/prompt")
-    tenant_id: str = Field(..., description="Tenant identifier for document isolation")
     session_id: Optional[str] = Field(
         default=None,
         description="Session ID for caching (auto-generated if not provided)"
@@ -324,7 +323,6 @@ class VerifiedDocumentRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "query": "Genera un resumen del contrato con ACME incluyendo obligaciones y fechas clave",
-                "tenant_id": "tenant-123",
                 "max_claims": 10,
                 "confidence_threshold": 0.75,
                 "context_document_ids": ["doc-abc", "doc-def"]
@@ -415,7 +413,6 @@ class VerificationSessionStatus(BaseModel):
     Status of an ongoing or completed verification session.
     """
     session_id: str
-    tenant_id: str
     status: str  # "in_progress", "completed", "error"
     claims_processed: int
     claims_total: int
@@ -429,7 +426,6 @@ class VerificationSessionStatus(BaseModel):
 class SessionClaimsResponse(BaseModel):
     """Response containing verified claims for a session."""
     session_id: str
-    tenant_id: str
     claims: List[VerifiedClaim]
     total_claims: int
     cache_ttl_remaining_seconds: Optional[int] = None
@@ -456,7 +452,6 @@ class ReviewDecision(BaseModel):
 
 class ReviewSubmission(BaseModel):
     """Human review decisions submitted to resume generation."""
-    tenant_id: str = Field(..., description="Tenant identifier")
     decisions: List[ReviewDecision] = Field(
         ...,
         description="One decision per claim that needs review",

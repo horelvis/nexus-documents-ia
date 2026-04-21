@@ -112,7 +112,6 @@ async def generate_document_memory(
 
 
 async def generate_and_store_memory(
-    tenant_id: str,
     document_id: str,
     document_text: str,
     filename: str = "",
@@ -140,7 +139,6 @@ async def generate_and_store_memory(
         client = get_knowledge_tree_client()
 
         result = await client.store_memory(
-            tenant_id=tenant_id,
             document_id=document_id,
             summary=memory["summary"],
             key_entities=memory["key_entities"],

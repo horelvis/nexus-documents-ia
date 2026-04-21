@@ -10,7 +10,7 @@ Key Design Decisions:
    - Maintains proper conversation threading
 
 2. ACL context is explicit in state
-   - tenant_id, user_id, role_ids, is_admin
+   - user_id, user_roles, is_admin
    - Passed to all nodes for consistent access control
 
 3. Execution plan drives agent routing
@@ -123,14 +123,11 @@ class RAGState(TypedDict, total=False):
     # =========================================================================
     # ACL Context (from ExecutionContext)
     # =========================================================================
-    # All operations are tenant-scoped
-    tenant_id: str
-
     # Optional user for fine-grained ACL
     user_id: Optional[str]
 
-    # User's role IDs for permission checks
-    user_role_ids: Optional[List[str]]
+    # User's roles for ACL filtering (use allowed_roles() helper for EVERYONE wildcard)
+    user_roles: List[str]
 
     # Admin bypass flag
     is_admin: bool
@@ -215,7 +212,7 @@ class RAGState(TypedDict, total=False):
     # =========================================================================
     # Knowledge Source Routing
     # =========================================================================
-    # Source of knowledge: tenant_documents, public_knowledge, hybrid
+    # Source of knowledge: tenant_documents, hybrid
     knowledge_source: Optional[str]
 
     # Confidence in knowledge source classification
@@ -272,30 +269,14 @@ class RAGState(TypedDict, total=False):
 # DEPRECATED: Only used by rlm_processor. Will be removed when rlm_processor migrates to ReActState.
 def create_initial_state(
     query: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
-    user_role_ids: Optional[List[str]] = None,
+    user_roles: Optional[List[str]] = None,
     is_admin: bool = False,
     thread_id: Optional[str] = None,
     conversation_history: Optional[List[BaseMessage]] = None,
     request_context: Optional[Dict[str, Any]] = None,
 ) -> RAGState:
-    """
-    Create initial state for a RAG graph execution.
-
-    Args:
-        query: User's query
-        tenant_id: Tenant ID for ACL
-        user_id: Optional user ID for fine-grained ACL
-        user_role_ids: Optional list of user role IDs
-        is_admin: Whether user is admin (bypasses ACL)
-        thread_id: Optional conversation thread ID
-        conversation_history: Optional prior conversation messages
-        request_context: Optional request context (document_id, attachments, etc.)
-
-    Returns:
-        Initialized RAGState ready for graph execution
-    """
+    """Create initial state for a RAG graph execution."""
     # Generate thread ID if not provided
     if thread_id is None:
         thread_id = str(uuid.uuid4())
@@ -336,9 +317,8 @@ def create_initial_state(
         thread_id=thread_id,
 
         # ACL Context
-        tenant_id=tenant_id,
         user_id=user_id,
-        user_role_ids=user_role_ids or [],
+        user_roles=user_roles or [],
         is_admin=is_admin,
 
         # Retrieval (populated by retrieve node)
@@ -468,9 +448,8 @@ class ReActState(TypedDict, total=False):
     # =========================================================================
     # ACL Context (same as RAGState)
     # =========================================================================
-    tenant_id: str
     user_id: Optional[str]
-    user_role_ids: Optional[List[str]]
+    user_roles: List[str]
     is_admin: bool
 
     # =========================================================================
@@ -583,9 +562,8 @@ class ReActState(TypedDict, total=False):
 
 async def create_initial_react_state(
     query: str,
-    tenant_id: str,
     user_id: Optional[str] = None,
-    user_role_ids: Optional[List[str]] = None,
+    user_roles: Optional[List[str]] = None,
     is_admin: bool = False,
     thread_id: Optional[str] = None,
     conversation_history: Optional[List[BaseMessage]] = None,
@@ -608,9 +586,8 @@ async def create_initial_react_state(
 
     Args:
         query: User's query
-        tenant_id: Tenant ID for ACL
         user_id: Optional user ID
-        user_role_ids: Optional role IDs
+        user_roles: Optional roles for ACL filtering
         is_admin: Admin bypass flag
         thread_id: Conversation thread ID
         conversation_history: Prior conversation messages (ignored when checkpointer active)
@@ -672,7 +649,7 @@ async def create_initial_react_state(
         try:
             from app.services.memory.user_facts import get_user_facts_service
             facts_service = get_user_facts_service()
-            user_memory = await facts_service.format_facts_for_prompt(tenant_id, user_id)
+            user_memory = await facts_service.format_facts_for_prompt(user_id)
         except Exception as e:
             import logging
             logging.getLogger(__name__).debug(f"User memory load skipped: {e}")
@@ -684,9 +661,8 @@ async def create_initial_react_state(
         thread_id=thread_id,
 
         # ACL
-        tenant_id=tenant_id,
         user_id=user_id,
-        user_role_ids=user_role_ids or [],
+        user_roles=user_roles or [],
         is_admin=is_admin,
 
         # Config (unified — knowledge graph provides dynamic context)

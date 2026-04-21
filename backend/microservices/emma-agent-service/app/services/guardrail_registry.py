@@ -236,8 +236,7 @@ def get_guardrails_for_sector(sector: Optional[str] = None) -> List[Dict[str, An
     for entry in GUARDRAIL_ENTRIES:
         if entry.sector is None or entry.sector == sector:
             applicable.append({
-                "id": f"registry:{entry.name}",  # Synthetic ID for registry entries
-                "tenant_id": None,
+                "id": f"registry:{entry.name}",
                 "guardrail_name": entry.name,
                 "description": entry.description,
                 "guardrail_type": entry.guardrail_type,

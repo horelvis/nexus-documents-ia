@@ -23,12 +23,11 @@ class TextExtractionResult:
 class TextExtractionClient(BaseHTTPClient):
     """HTTP client wrapper for the text extraction microservice."""
 
-    def __init__(self, tenant_id: str, user_id: Optional[str] = None) -> None:
+    def __init__(self, user_id: Optional[str] = None) -> None:
         self.base_url = (settings.TEXT_EXTRACTION_SERVICE_URL or "").rstrip("/")
         if not self.base_url:
             raise ValueError("TEXT_EXTRACTION_SERVICE_URL is not configured")
 
-        self.tenant_id = tenant_id
         self.user_id = user_id
         super().__init__(
             service_name="text-extraction",
@@ -65,7 +64,6 @@ class TextExtractionClient(BaseHTTPClient):
         response = await self.request(
             "POST",
             "/extract",
-            tenant_id=self.tenant_id,
             user_id=self.user_id,
             files=files,
             data=data,

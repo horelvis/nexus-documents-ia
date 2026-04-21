@@ -3,13 +3,13 @@ Authentication module for NouxCubeIA.
 
 This module provides unified authentication functionality:
 - Pluggable auth providers (Clerk, OIDC, SAML, LDAP)
-- Provider factory for tenant-specific configuration
+- Provider factory for the (single) deployment configuration
 - Typed authentication exceptions
 
 Usage (new - provider pattern):
     from app.core.auth import AuthProviderFactory
 
-    provider = await AuthProviderFactory.get_for_tenant(tenant_id, db)
+    provider = await AuthProviderFactory.get_default(db)
     identity = await provider.verify_token(token)
 
 Usage (legacy - Clerk direct):

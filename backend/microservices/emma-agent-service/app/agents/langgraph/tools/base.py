@@ -93,7 +93,7 @@ class EmmaTool(ABC):
 
         Args:
             arguments: Dict parsed from LLM tool_call arguments
-            context: Current ReActState (tenant_id, sector, etc.)
+            context: Current ReActState (user_roles, user_id, sector, etc.)
 
         Returns:
             ToolResult with output text, sources, and success status

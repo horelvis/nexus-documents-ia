@@ -12,7 +12,7 @@ Usage:
     from app.services.unified_document_query import UnifiedDocumentQuery
 
     # In an async endpoint:
-    query = UnifiedDocumentQuery(db, tenant_id)
+    query = UnifiedDocumentQuery(db, user)
 
     # Get total document count
     total = await query.count_documents()
@@ -34,6 +34,8 @@ from uuid import UUID
 from sqlalchemy import and_, case, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import filter_visible_to_user
 from app.db.models import Document, IndexedDocument
 
 logger = logging.getLogger(__name__)
@@ -54,7 +56,6 @@ class UnifiedDocument:
     Maps fields from both tables to a common structure.
     """
     id: UUID
-    tenant_id: UUID
     title: str
     filename: Optional[str] = None
     description: Optional[str] = None
@@ -89,7 +90,6 @@ class UnifiedDocument:
 
     # Access control (for IndexedDocument)
     owner_id: Optional[UUID] = None
-    is_tenant_public: bool = False
 
     def __post_init__(self):
         if self.tags is None:
@@ -100,7 +100,6 @@ class UnifiedDocument:
         """Create UnifiedDocument from Document model."""
         return cls(
             id=doc.id,
-            tenant_id=doc.tenant_id,
             title=doc.title or doc.filename,
             filename=doc.filename,
             description=doc.description,
@@ -118,7 +117,6 @@ class UnifiedDocument:
             category=doc.category,
             tags=[tag.name for tag in doc.tags] if hasattr(doc, 'tags') and doc.tags else [],
             owner_id=doc.created_by,
-            is_tenant_public=True,  # Document table docs are tenant-visible
         )
 
     @classmethod
@@ -126,7 +124,6 @@ class UnifiedDocument:
         """Create UnifiedDocument from IndexedDocument model."""
         return cls(
             id=doc.id,
-            tenant_id=doc.tenant_id,
             title=doc.title,
             filename=doc.title,  # IndexedDocument uses title as filename
             description=doc.description,
@@ -147,14 +144,12 @@ class UnifiedDocument:
             updated_at=doc.updated_at,
             folder_path=doc.external_path,
             owner_id=doc.owner_id,
-            is_tenant_public=doc.is_tenant_public,
         )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             "id": str(self.id),
-            "tenant_id": str(self.tenant_id),
             "title": self.title,
             "filename": self.filename,
             "description": self.description,
@@ -189,7 +184,7 @@ class UnifiedDocumentQuery:
     def __init__(
         self,
         db: AsyncSession,
-        tenant_id: Union[str, UUID],
+        user: Optional[UserProfile] = None,
         source: DocumentSource = DocumentSource.BOTH,
     ):
         """
@@ -197,12 +192,18 @@ class UnifiedDocumentQuery:
 
         Args:
             db: Async database session
-            tenant_id: Tenant ID to filter by
+            user: Current user profile for ACL filtering (None = admin/background scope)
             source: Which table(s) to query (default: both)
         """
         self.db = db
-        self.tenant_id = UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
+        self.user = user
         self.source = source
+
+    def _apply_doc_acl(self, query):
+        """Apply role-based ACL filter to Document queries when user scoped."""
+        if self.user is not None:
+            return filter_visible_to_user(query, self.user)
+        return query
 
     async def count_documents(
         self,
@@ -235,7 +236,7 @@ class UnifiedDocumentQuery:
                 func.sum(case((Document.indexed == 1, 1), else_=0)).label('indexed'),
                 func.sum(case((Document.indexed == 0, 1), else_=0)).label('processing'),
                 func.sum(case((Document.indexing_error != None, 1), else_=0)).label('error'),
-            ).where(Document.tenant_id == self.tenant_id)
+            )
 
             doc_result = await self.db.execute(doc_query)
             doc_row = doc_result.one()
@@ -253,7 +254,7 @@ class UnifiedDocumentQuery:
                 func.sum(case((IndexedDocument.indexing_status == 'indexed', 1), else_=0)).label('indexed'),
                 func.sum(case((IndexedDocument.indexing_status.in_(['pending', 'processing']), 1), else_=0)).label('processing'),
                 func.sum(case((IndexedDocument.indexing_status == 'failed', 1), else_=0)).label('error'),
-            ).where(IndexedDocument.tenant_id == self.tenant_id)
+            )
 
             idx_result = await self.db.execute(idx_query)
             idx_row = idx_result.one()
@@ -283,7 +284,7 @@ class UnifiedDocumentQuery:
         if self.source in (DocumentSource.UPLOAD, DocumentSource.BOTH):
             doc_query = select(
                 func.coalesce(func.sum(Document.file_size), 0)
-            ).where(Document.tenant_id == self.tenant_id)
+            )
 
             doc_result = await self.db.execute(doc_query)
             result["uploads_bytes"] = doc_result.scalar() or 0
@@ -293,7 +294,7 @@ class UnifiedDocumentQuery:
         if self.source in (DocumentSource.CONNECTOR, DocumentSource.BOTH):
             idx_query = select(
                 func.coalesce(func.sum(IndexedDocument.size_bytes), 0)
-            ).where(IndexedDocument.tenant_id == self.tenant_id)
+            )
 
             idx_result = await self.db.execute(idx_query)
             result["connectors_bytes"] = idx_result.scalar() or 0
@@ -318,11 +319,8 @@ class UnifiedDocumentQuery:
 
         # Try Document table first
         if self.source in (DocumentSource.UPLOAD, DocumentSource.BOTH):
-            doc_query = select(Document).where(
-                and_(
-                    Document.id == doc_id,
-                    Document.tenant_id == self.tenant_id,
-                )
+            doc_query = self._apply_doc_acl(
+                select(Document).where(Document.id == doc_id)
             )
             doc_result = await self.db.execute(doc_query)
             doc = doc_result.scalar_one_or_none()
@@ -332,10 +330,7 @@ class UnifiedDocumentQuery:
         # Try IndexedDocument table
         if self.source in (DocumentSource.CONNECTOR, DocumentSource.BOTH):
             idx_query = select(IndexedDocument).where(
-                and_(
-                    IndexedDocument.id == doc_id,
-                    IndexedDocument.tenant_id == self.tenant_id,
-                )
+                IndexedDocument.id == doc_id,
             )
             idx_result = await self.db.execute(idx_query)
             idx_doc = idx_result.scalar_one_or_none()
@@ -375,7 +370,7 @@ class UnifiedDocumentQuery:
 
         # Get from Document table
         if self.source in (DocumentSource.UPLOAD, DocumentSource.BOTH):
-            doc_filters = [Document.tenant_id == self.tenant_id]
+            doc_filters = []
 
             if indexed_only:
                 doc_filters.append(Document.indexed == 1)
@@ -389,14 +384,20 @@ class UnifiedDocumentQuery:
                     )
                 )
 
-            # Count
-            count_query = select(func.count(Document.id)).where(and_(*doc_filters))
+            # Count (ACL-scoped if user present)
+            count_base = select(func.count(Document.id))
+            if doc_filters:
+                count_base = count_base.where(and_(*doc_filters))
+            count_query = self._apply_doc_acl(count_base)
             count_result = await self.db.execute(count_query)
             doc_count = count_result.scalar() or 0
             total += doc_count
 
             # Get documents
-            doc_query = select(Document).where(and_(*doc_filters))
+            doc_base = select(Document)
+            if doc_filters:
+                doc_base = doc_base.where(and_(*doc_filters))
+            doc_query = self._apply_doc_acl(doc_base)
 
             # Order
             order_col = getattr(Document, order_by, Document.created_at)
@@ -409,7 +410,7 @@ class UnifiedDocumentQuery:
 
         # Get from IndexedDocument table
         if self.source in (DocumentSource.CONNECTOR, DocumentSource.BOTH):
-            idx_filters = [IndexedDocument.tenant_id == self.tenant_id]
+            idx_filters = []
 
             if indexed_only:
                 idx_filters.append(IndexedDocument.indexing_status == "indexed")
@@ -419,13 +420,17 @@ class UnifiedDocumentQuery:
                 idx_filters.append(IndexedDocument.title.ilike(f"%{search_term}%"))
 
             # Count
-            count_query = select(func.count(IndexedDocument.id)).where(and_(*idx_filters))
+            count_query = select(func.count(IndexedDocument.id))
+            if idx_filters:
+                count_query = count_query.where(and_(*idx_filters))
             count_result = await self.db.execute(count_query)
             idx_count = count_result.scalar() or 0
             total += idx_count
 
             # Get documents
-            idx_query = select(IndexedDocument).where(and_(*idx_filters))
+            idx_query = select(IndexedDocument)
+            if idx_filters:
+                idx_query = idx_query.where(and_(*idx_filters))
 
             # Order
             order_col = getattr(IndexedDocument, order_by, IndexedDocument.created_at)
@@ -470,14 +475,9 @@ class UnifiedDocumentQuery:
 
         # From Document table
         if self.source in (DocumentSource.UPLOAD, DocumentSource.BOTH):
-            doc_query = (
+            doc_query = self._apply_doc_acl(
                 select(Document)
-                .where(
-                    and_(
-                        Document.tenant_id == self.tenant_id,
-                        Document.created_at >= cutoff,
-                    )
-                )
+                .where(Document.created_at >= cutoff)
                 .order_by(Document.created_at.desc())
                 .limit(limit)
             )
@@ -489,12 +489,7 @@ class UnifiedDocumentQuery:
         if self.source in (DocumentSource.CONNECTOR, DocumentSource.BOTH):
             idx_query = (
                 select(IndexedDocument)
-                .where(
-                    and_(
-                        IndexedDocument.tenant_id == self.tenant_id,
-                        IndexedDocument.created_at >= cutoff,
-                    )
-                )
+                .where(IndexedDocument.created_at >= cutoff)
                 .order_by(IndexedDocument.created_at.desc())
                 .limit(limit)
             )
@@ -523,7 +518,6 @@ class UnifiedDocumentQuery:
                     Document.folder_path,
                     func.count(Document.id).label("count")
                 )
-                .where(Document.tenant_id == self.tenant_id)
                 .group_by(Document.folder_path)
             )
             doc_result = await self.db.execute(doc_query)
@@ -538,7 +532,6 @@ class UnifiedDocumentQuery:
                     IndexedDocument.external_path,
                     func.count(IndexedDocument.id).label("count")
                 )
-                .where(IndexedDocument.tenant_id == self.tenant_id)
                 .group_by(IndexedDocument.external_path)
             )
             idx_result = await self.db.execute(idx_query)
@@ -552,19 +545,19 @@ class UnifiedDocumentQuery:
 # Convenience function for quick access
 async def get_unified_document_count(
     db: AsyncSession,
-    tenant_id: Union[str, UUID],
+    user: Optional[UserProfile] = None,
 ) -> int:
-    """Quick helper to get total document count for a tenant."""
-    query = UnifiedDocumentQuery(db, tenant_id)
+    """Quick helper to get total document count."""
+    query = UnifiedDocumentQuery(db, user)
     counts = await query.count_documents()
     return counts["total"]
 
 
 async def get_unified_document(
     db: AsyncSession,
-    tenant_id: Union[str, UUID],
     document_id: Union[str, UUID],
+    user: Optional[UserProfile] = None,
 ) -> Optional[UnifiedDocument]:
     """Quick helper to get a document by ID."""
-    query = UnifiedDocumentQuery(db, tenant_id)
+    query = UnifiedDocumentQuery(db, user)
     return await query.get_document_by_id(document_id)

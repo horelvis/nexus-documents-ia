@@ -130,7 +130,6 @@ class GoogleDriveTokenService:
         else:
             record = GoogleDriveToken(
                 user_id=user.id,
-                tenant_id=user.tenant_id,
                 google_user_id=userinfo.get("sub", ""),
                 google_email=userinfo.get("email", user.email),
                 scopes=scopes,

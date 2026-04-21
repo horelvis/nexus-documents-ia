@@ -23,9 +23,7 @@ from typing import Any, Dict, List, Optional, Type
 from pydantic import BaseModel, Field
 
 from app.services.weaviate_service import WeaviateService
-from app.services.rag.rag_pipeline import RAGPipeline
 from app.schemas.weaviate import SearchRequest
-from app.core.security import get_tenant_collection_name
 
 from .base import (
     BaseTool,
@@ -165,7 +163,7 @@ class SearchDocumentsTool(BaseTool[SearchDocumentsParams]):
 
         Args:
             params: Search parameters
-            context: Execution context with tenant_id
+            context: Execution context with user_roles / user_id
 
         Returns:
             ToolResult with matching documents
@@ -186,11 +184,11 @@ class SearchDocumentsTool(BaseTool[SearchDocumentsParams]):
             # Create SearchRequest for the service
             search_request = SearchRequest(
                 query=params.query,
-                tenant_id=context.tenant_id,
+                user_roles=context.user_roles,
                 limit=params.limit,
                 filters=filters if filters else None,
                 search_type="hybrid",
-                user_id=context.user_id
+                user_id=context.user_id,
             )
 
             # Perform search using SearchRequest
@@ -317,15 +315,15 @@ class HybridSearchTool(BaseTool[HybridSearchParams]):
             weaviate = self._weaviate or WeaviateService()
             await weaviate.initialize()
 
-            # Get collection name for tenant
-            collection_name = get_tenant_collection_name(context.tenant_id)
+            # Single-tenant deployment: the unified documents collection.
+            from app.services.weaviate_service import DOCUMENTS_COLLECTION
 
             results = await weaviate.hybrid_search(
                 query=params.query,
-                collection_name=collection_name,
-                tenant_id=context.tenant_id,
+                collection_name=DOCUMENTS_COLLECTION,
+                user_roles=context.user_roles,
                 limit=params.limit,
-                alpha=params.alpha
+                alpha=params.alpha,
             )
 
             formatted_docs = []
@@ -381,10 +379,8 @@ class RAGQueryTool(BaseTool[RAGQueryParams]):
     def __init__(
         self,
         weaviate_service: Optional[WeaviateService] = None,
-        rag_pipeline: Optional[RAGPipeline] = None
     ):
         self._weaviate = weaviate_service
-        self._rag_pipeline = rag_pipeline
 
     @property
     def name(self) -> str:
@@ -448,10 +444,10 @@ class RAGQueryTool(BaseTool[RAGQueryParams]):
             # Create SearchRequest
             search_request = SearchRequest(
                 query=params.question,
-                tenant_id=context.tenant_id,
+                user_roles=context.user_roles,
                 limit=params.max_chunks,
                 search_type="hybrid",
-                user_id=context.user_id
+                user_id=context.user_id,
             )
 
             # Retrieve relevant chunks using SearchRequest

@@ -27,7 +27,9 @@ from sqlalchemy import func, select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
+from app.core.auth.acl import filter_visible_to_user
 from app.db.async_database import get_async_db
 from app.db.models import (
     User, Document, IndexedDocument,
@@ -139,7 +141,6 @@ async def verify_microservice_api_key(
 
 
 async def get_source_content_from_weaviate(
-    tenant_id: str,
     document_id: str,
 ) -> Optional[dict]:
     """
@@ -148,7 +149,6 @@ async def get_source_content_from_weaviate(
     Calls the weaviate-service endpoint to retrieve all chunks and concatenate them.
 
     Args:
-        tenant_id: Tenant identifier
         document_id: Document ID (indexed_document_id or document_id)
 
     Returns:
@@ -157,7 +157,7 @@ async def get_source_content_from_weaviate(
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(
-                f"{WEAVIATE_SERVICE_URL}/weaviate/documents/{tenant_id}/{document_id}/content",
+                f"{WEAVIATE_SERVICE_URL}/weaviate/documents/{document_id}/content",
                 headers={"X-API-Key": MICROSERVICES_API_KEY},
             )
 
@@ -179,7 +179,6 @@ async def get_source_content_from_weaviate(
 async def trigger_podcast_generation(
     audio_id: UUID,
     notebook_id: UUID,
-    tenant_id: UUID,
     sources: List[dict],
     config: dict,
 ):
@@ -191,7 +190,6 @@ async def trigger_podcast_generation(
                 json={
                     "audio_id": str(audio_id),
                     "notebook_id": str(notebook_id),
-                    "tenant_id": str(tenant_id),
                     "sources": sources,
                     "config": config,
                 },
@@ -211,7 +209,6 @@ async def trigger_podcast_generation(
 async def trigger_presentation_generation(
     presentation_id: UUID,
     notebook_id: UUID,
-    tenant_id: UUID,
     sources: List[dict],
     config: dict,
 ):
@@ -223,7 +220,6 @@ async def trigger_presentation_generation(
                 json={
                     "presentation_id": str(presentation_id),
                     "notebook_id": str(notebook_id),
-                    "tenant_id": str(tenant_id),
                     "sources": sources,
                     "config": config,
                 },
@@ -374,7 +370,7 @@ async def update_presentation_status_internal(
 async def create_notebook(
     notebook_data: NotebookCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Create a new notebook.
@@ -382,8 +378,7 @@ async def create_notebook(
     Creates an empty notebook that can have documents added as sources.
     """
     notebook = Notebook(
-        tenant_id=current_user.tenant_id,
-        user_id=current_user.id,
+        user_id=UUID(current_user.sub),
         title=notebook_data.title,
         description=notebook_data.description,
         emoji=notebook_data.emoji or "📓",
@@ -394,7 +389,7 @@ async def create_notebook(
     await db.commit()
     await db.refresh(notebook)
 
-    logger.info(f"Notebook created: {notebook.id} by user {current_user.id}")
+    logger.info(f"Notebook created: {notebook.id} by user {UUID(current_user.sub)}")
 
     return NotebookResponse.model_validate(notebook)
 
@@ -402,7 +397,7 @@ async def create_notebook(
 @router.get("", response_model=NotebookListResponse)
 async def list_notebooks(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     page: int = Query(1, ge=1, description="Page number"),
     per_page: int = Query(20, ge=1, le=100, description="Items per page"),
     search: Optional[str] = Query(None, description="Search in title and description"),
@@ -415,10 +410,7 @@ async def list_notebooks(
     """
     # Base query - user's notebooks only
     query = select(Notebook).where(
-        and_(
-            Notebook.user_id == current_user.id,
-            Notebook.tenant_id == current_user.tenant_id,
-        )
+        Notebook.user_id == UUID(current_user.sub)
     )
 
     # Filter archived
@@ -459,7 +451,7 @@ async def list_notebooks(
 @router.get("/stats", response_model=NotebookStatsResponse)
 async def get_notebook_stats(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get statistics for user's notebooks.
@@ -469,7 +461,7 @@ async def get_notebook_stats(
     # Count notebooks
     notebooks_query = select(func.count()).select_from(Notebook).where(
         and_(
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
             Notebook.is_archived == False,
         )
     )
@@ -484,7 +476,7 @@ async def get_notebook_stats(
         func.sum(Notebook.chat_count).label("total_chats"),
     ).where(
         and_(
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
             Notebook.is_archived == False,
         )
     )
@@ -494,7 +486,7 @@ async def get_notebook_stats(
     # Get recent activity
     recent_query = select(Notebook).where(
         and_(
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
             Notebook.is_archived == False,
         )
     ).order_by(Notebook.last_activity_at.desc()).limit(5)
@@ -516,7 +508,7 @@ async def get_notebook_stats(
 async def get_notebook(
     notebook_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get notebook details with sources and recent activity.
@@ -532,7 +524,7 @@ async def get_notebook(
     ).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
 
@@ -571,7 +563,7 @@ async def update_notebook(
     notebook_id: UUID,
     update_data: NotebookUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Update notebook properties.
@@ -581,7 +573,7 @@ async def update_notebook(
     query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     result = await db.execute(query)
@@ -615,7 +607,7 @@ async def update_notebook(
 async def delete_notebook(
     notebook_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Delete a notebook and all its contents.
@@ -625,7 +617,7 @@ async def delete_notebook(
     query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     result = await db.execute(query)
@@ -655,7 +647,7 @@ async def add_source(
     source_data: NotebookSourceAdd,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Add a document as a source to the notebook.
@@ -666,7 +658,7 @@ async def add_source(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -684,11 +676,9 @@ async def add_source(
     word_count = 0
 
     if source_data.document_id:
-        doc_query = select(Document).where(
-            and_(
-                Document.id == source_data.document_id,
-                Document.tenant_id == current_user.tenant_id,
-            )
+        doc_query = filter_visible_to_user(
+            select(Document).where(Document.id == source_data.document_id),
+            current_user,
         )
         doc_result = await db.execute(doc_query)
         document = doc_result.scalar_one_or_none()
@@ -705,10 +695,7 @@ async def add_source(
 
     elif source_data.indexed_document_id:
         idx_query = select(IndexedDocument).where(
-            and_(
-                IndexedDocument.id == source_data.indexed_document_id,
-                IndexedDocument.tenant_id == current_user.tenant_id,
-            )
+            IndexedDocument.id == source_data.indexed_document_id
         )
         idx_result = await db.execute(idx_query)
         indexed_doc = idx_result.scalar_one_or_none()
@@ -772,7 +759,7 @@ async def add_source(
 async def list_sources(
     notebook_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List all sources in a notebook.
@@ -781,7 +768,7 @@ async def list_sources(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -807,7 +794,7 @@ async def remove_source(
     notebook_id: UUID,
     source_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Remove a source from the notebook.
@@ -816,7 +803,7 @@ async def remove_source(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -867,7 +854,7 @@ async def generate_audio(
     request: AudioGenerateRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Start podcast audio generation for the notebook.
@@ -881,7 +868,7 @@ async def generate_audio(
     ).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -921,7 +908,6 @@ async def generate_audio(
 
     # Fetch content from Weaviate for each source
     sources_data = []
-    tenant_id = str(current_user.tenant_id)
 
     for source in notebook.sources:
         # Determine which document ID to use
@@ -934,7 +920,7 @@ async def generate_audio(
             continue
 
         # Fetch full content from Weaviate
-        weaviate_content = await get_source_content_from_weaviate(tenant_id, doc_id)
+        weaviate_content = await get_source_content_from_weaviate(doc_id)
 
         if weaviate_content:
             sources_data.append({
@@ -970,7 +956,6 @@ async def generate_audio(
     success = await trigger_podcast_generation(
         audio_id=audio.id,
         notebook_id=notebook_id,
-        tenant_id=current_user.tenant_id,
         sources=sources_data,
         config=request.config.model_dump(),
     )
@@ -991,7 +976,7 @@ async def generate_audio(
 async def list_audios(
     notebook_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List all generated audios for a notebook.
@@ -1000,7 +985,7 @@ async def list_audios(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1026,7 +1011,7 @@ async def get_audio(
     notebook_id: UUID,
     audio_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get details of a specific audio generation.
@@ -1035,7 +1020,7 @@ async def get_audio(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1069,7 +1054,7 @@ async def get_audio_status(
     notebook_id: UUID,
     audio_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get the status of an audio generation.
@@ -1109,7 +1094,7 @@ async def delete_audio(
     notebook_id: UUID,
     audio_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Delete a generated audio.
@@ -1118,7 +1103,7 @@ async def delete_audio(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1169,7 +1154,7 @@ async def generate_presentation(
     request: PresentationGenerateRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Start PowerPoint presentation generation for the notebook.
@@ -1183,7 +1168,7 @@ async def generate_presentation(
     ).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1223,7 +1208,6 @@ async def generate_presentation(
 
     # Fetch content from Weaviate for each source
     sources_data = []
-    tenant_id = str(current_user.tenant_id)
 
     for source in notebook.sources:
         # Determine which document ID to use
@@ -1236,7 +1220,7 @@ async def generate_presentation(
             continue
 
         # Fetch full content from Weaviate
-        weaviate_content = await get_source_content_from_weaviate(tenant_id, doc_id)
+        weaviate_content = await get_source_content_from_weaviate(doc_id)
 
         if weaviate_content:
             sources_data.append({
@@ -1272,7 +1256,6 @@ async def generate_presentation(
     success = await trigger_presentation_generation(
         presentation_id=presentation.id,
         notebook_id=notebook_id,
-        tenant_id=current_user.tenant_id,
         sources=sources_data,
         config=request.config.model_dump(),
     )
@@ -1292,7 +1275,7 @@ async def generate_presentation(
 async def list_presentations(
     notebook_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     List all generated presentations for a notebook.
@@ -1301,7 +1284,7 @@ async def list_presentations(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1328,7 +1311,7 @@ async def get_presentation(
     notebook_id: UUID,
     presentation_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get details of a specific presentation generation.
@@ -1337,7 +1320,7 @@ async def get_presentation(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1372,7 +1355,7 @@ async def get_presentation_status(
     notebook_id: UUID,
     presentation_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get the status of a presentation generation.
@@ -1412,7 +1395,7 @@ async def delete_presentation(
     notebook_id: UUID,
     presentation_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Delete a generated presentation.
@@ -1421,7 +1404,7 @@ async def delete_presentation(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1467,8 +1450,7 @@ async def download_presentation(
     notebook_id: UUID,
     presentation_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    current_tenant_id: UUID = Depends(get_current_tenant_id_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Download a generated PPTX presentation file.
@@ -1477,7 +1459,7 @@ async def download_presentation(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1513,7 +1495,7 @@ async def download_presentation(
 
     # Build file path
     filename = f"presentation_{presentation_id}.pptx"
-    file_path = Path(LOCAL_STORAGE_PATH) / f"tenant-{current_tenant_id}" / "presentations" / str(presentation_id) / filename
+    file_path = Path(LOCAL_STORAGE_PATH) / "presentations" / str(presentation_id) / filename
 
     if not file_path.exists():
         logger.error(f"Presentation file not found: {file_path}")
@@ -1538,7 +1520,7 @@ async def create_chat(
     notebook_id: UUID,
     chat_data: NotebookChatCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Create a new chat session for Q&A with notebook sources.
@@ -1547,7 +1529,7 @@ async def create_chat(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1562,7 +1544,7 @@ async def create_chat(
     # Create chat
     chat = NotebookChat(
         notebook_id=notebook_id,
-        user_id=current_user.id,
+        user_id=UUID(current_user.sub),
         title=chat_data.title,
         messages=[],
         message_count=0,
@@ -1586,7 +1568,7 @@ async def create_chat(
 async def list_chats(
     notebook_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
     include_archived: bool = Query(False),
 ):
     """
@@ -1596,7 +1578,7 @@ async def list_chats(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1627,7 +1609,7 @@ async def get_chat(
     notebook_id: UUID,
     chat_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get a specific chat session with all messages.
@@ -1636,7 +1618,7 @@ async def get_chat(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1671,7 +1653,7 @@ async def send_message(
     chat_id: UUID,
     message: NotebookChatMessage,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Send a message to the chat and get an AI response.
@@ -1685,7 +1667,7 @@ async def send_message(
     ).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)
@@ -1764,7 +1746,7 @@ async def delete_chat(
     notebook_id: UUID,
     chat_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Delete a chat session.
@@ -1773,7 +1755,7 @@ async def delete_chat(
     notebook_query = select(Notebook).where(
         and_(
             Notebook.id == notebook_id,
-            Notebook.user_id == current_user.id,
+            Notebook.user_id == UUID(current_user.sub),
         )
     )
     notebook_result = await db.execute(notebook_query)

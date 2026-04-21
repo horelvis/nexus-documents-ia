@@ -21,8 +21,8 @@ from app.agents.langgraph.state import merge_dicts, merge_lists
 class VerifiedGenState(TypedDict, total=False):
     # === Session ===
     session_id: str
-    tenant_id: str
     user_id: Optional[str]
+    user_roles: List[str]
 
     # === Input ===
     query: str                          # User query / document topic
@@ -76,8 +76,8 @@ class VerifiedGenState(TypedDict, total=False):
 def create_verified_gen_state(
     *,
     session_id: Optional[str] = None,
-    tenant_id: str,
     user_id: Optional[str] = None,
+    user_roles: Optional[List[str]] = None,
     query: str,
     max_claims: int = 20,
     confidence_threshold: float = 0.7,
@@ -90,8 +90,8 @@ def create_verified_gen_state(
     """Create initial state for a verified generation sub-graph execution."""
     return VerifiedGenState(
         session_id=session_id or str(uuid.uuid4()),
-        tenant_id=tenant_id,
         user_id=user_id,
+        user_roles=user_roles or [],
         query=query,
         source_context="",
         uploaded_texts=uploaded_texts or [],

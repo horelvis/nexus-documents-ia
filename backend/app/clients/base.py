@@ -113,8 +113,8 @@ class BaseHTTPClient:
     def _build_headers(
         self,
         extra_headers: Optional[Dict[str, str]] = None,
-        tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        user_roles: Optional[list[str]] = None,
         request_id: Optional[str] = None,
     ) -> Dict[str, str]:
         """Build request headers with API key and context"""
@@ -124,10 +124,10 @@ class BaseHTTPClient:
         }
 
         # Add context headers
-        if tenant_id:
-            headers["X-Tenant-ID"] = str(tenant_id)
         if user_id:
             headers["X-User-ID"] = str(user_id)
+        if user_roles:
+            headers["X-User-Roles"] = ",".join(user_roles)
         if request_id:
             headers["X-Request-ID"] = str(request_id)
             headers.setdefault("X-Correlation-ID", str(request_id))
@@ -216,8 +216,8 @@ class BaseHTTPClient:
         method: str,
         endpoint: str,
         *,
-        tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
+        user_roles: Optional[list[str]] = None,
         request_id: Optional[str] = None,
         headers: Optional[Dict[str, str]] = None,
         **kwargs
@@ -228,8 +228,8 @@ class BaseHTTPClient:
         Args:
             method: HTTP method (GET, POST, PUT, DELETE, etc.)
             endpoint: API endpoint (e.g., /api/v1/documents)
-            tenant_id: Tenant ID for X-Tenant-ID header
             user_id: User ID for X-User-ID header
+            user_roles: KeyCloak role names for X-User-Roles header
             request_id: Request ID for X-Request-ID header
             headers: Additional headers
             **kwargs: Additional httpx request arguments (json, data, params, etc.)
@@ -246,7 +246,7 @@ class BaseHTTPClient:
             AuthorizationError: Access forbidden
         """
         url = f"{self.base_url}{endpoint}"
-        request_headers = self._build_headers(headers, tenant_id, user_id, request_id)
+        request_headers = self._build_headers(headers, user_id=user_id, user_roles=user_roles, request_id=request_id)
         if "json" in kwargs and "Content-Type" not in request_headers:
             request_headers["Content-Type"] = "application/json"
 
@@ -254,7 +254,7 @@ class BaseHTTPClient:
         log_kwargs = {k: v for k, v in kwargs.items() if k not in ('data', 'content', 'files')}
         logger.debug(
             f"HTTP {method} {url} | service={self.service_name} "
-            f"tenant={tenant_id} user={user_id[:8] if user_id else None}... "
+            f"user={user_id[:8] if user_id else None}... "
             f"kwargs={list(log_kwargs.keys())}"
         )
 

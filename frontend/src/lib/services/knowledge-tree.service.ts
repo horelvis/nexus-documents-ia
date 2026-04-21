@@ -229,12 +229,11 @@ export const knowledgeTreeApi = {
 
   /** GET /triples/top-entities — Entities with highest degree centrality */
   async getTopEntities(
-    tenantId: string,
     limit: number = 10,
   ): Promise<Array<{ uri: string; degree: number }>> {
     try {
       const response = await apiClient.get<Array<{ uri: string; degree: number }>>(
-        `${BASE}/triples/top-entities?tenant_id=${encodeURIComponent(tenantId)}&limit=${limit}`,
+        `${BASE}/triples/top-entities?limit=${limit}`,
       )
       return response.data ?? []
     } catch (error) {
@@ -245,7 +244,6 @@ export const knowledgeTreeApi = {
 
   /** POST /triples/neighbors — BFS subgraph via triple store */
   async getTripleNeighbors(
-    tenantId: string,
     seedUris: string[],
     maxHops: number = 2,
     maxEdges: number = 150,
@@ -255,7 +253,6 @@ export const knowledgeTreeApi = {
       const response = await apiClient.post<TripleNeighborsResponse>(
         `${BASE}/triples/neighbors`,
         {
-          tenant_id: tenantId,
           seed_uris: seedUris,
           max_hops: maxHops,
           max_edges: maxEdges,
@@ -271,13 +268,12 @@ export const knowledgeTreeApi = {
 
   /** POST /triples/query — Get all triples for a specific entity */
   async getEntityTriples(
-    tenantId: string,
     entityUri: string,
   ): Promise<Triple[]> {
     try {
       const response = await apiClient.post<{ triples: Triple[] }>(
         `${BASE}/triples/query`,
-        { tenant_id: tenantId, subject_uri: entityUri, limit: 100 },
+        { subject_uri: entityUri, limit: 100 },
       )
       return response.data?.triples ?? []
     } catch (error) {

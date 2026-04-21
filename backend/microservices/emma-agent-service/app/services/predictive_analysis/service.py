@@ -143,7 +143,7 @@ class PredictiveAnalysisService:
         with trace_context(
             "predictive.analyze",
             session_id=session_id,
-            metadata={"tenant_id": str(request.tenant_id), "sector": sector},
+            metadata={"user_id": str(request.user_id) if request.user_id else "", "sector": sector},
             input={"case_description": request.case_description[:500]},
             tags=["predictive", f"sector:{sector}"],
         ):
@@ -169,7 +169,6 @@ class PredictiveAnalysisService:
 
             initial_state = create_initial_state(
                 session_id=session_id,
-                tenant_id=request.tenant_id,
                 user_id=request.user_id,
                 query=request.case_description,
                 mode="predictive",
@@ -237,7 +236,7 @@ class PredictiveAnalysisService:
         session_id = data.get("session_id", "")
 
         # Reconstruct result from cache
-        result = await self._cache.get_result(request.tenant_id, session_id)
+        result = await self._cache.get_result(session_id)
         if not result:
             raise Exception("Result not found in cache")
 
@@ -254,7 +253,7 @@ class PredictiveAnalysisService:
     async def _get_source_context(
         self,
         query: str,
-        tenant_id: str,
+        user_roles: Optional[List[str]] = None,
         document_ids: Optional[List[str]] = None,
         collections: Optional[List[str]] = None,
         uploaded_texts: Optional[list[dict]] = None,
@@ -272,11 +271,7 @@ class PredictiveAnalysisService:
 
         # Priority 2: Weaviate
         if not context_parts:
-            sanitized_tenant = tenant_id.replace("-", "_")
-            collection_name = (
-                collections[0] if collections
-                else f"Nouxcube_{sanitized_tenant}_documents"
-            )
+            collection_name = collections[0] if collections else "Nouxcube_documents"
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     response = await client.post(
@@ -287,7 +282,7 @@ class PredictiveAnalysisService:
                         },
                         json={
                             "query": query,
-                            "tenant_id": tenant_id,
+                            "user_roles": user_roles or [],
                             "limit": 10,
                             "search_type": "hybrid",
                             "is_admin": True,
@@ -307,7 +302,7 @@ class PredictiveAnalysisService:
     async def _search_evidence(
         self,
         factor: PredictionFactor,
-        tenant_id: str,
+        user_roles: Optional[List[str]] = None,
         collections: Optional[List[str]] = None,
         uploaded_texts: Optional[list[dict]] = None,
         config: Optional[PredictiveConfig] = None,
@@ -316,15 +311,9 @@ class PredictiveAnalysisService:
         similarity_threshold = settings.predictive_similarity_threshold
         evidence: list[dict] = []
 
-        # Weaviate search
-        sanitized_tenant = tenant_id.replace("-", "_")
-        safe_tenant = ''.join(c for c in tenant_id if c.isalnum())[:32]
         candidate_collections = (
             [collections[0]] if collections
-            else [
-                f"Nouxcube_{sanitized_tenant}_documents",
-                f"Nouxcube_{safe_tenant}_knowledge",
-            ]
+            else ["Nouxcube_documents", "Nouxcube_knowledge"]
         )
 
         try:
@@ -338,7 +327,7 @@ class PredictiveAnalysisService:
                         },
                         json={
                             "query": factor.description,
-                            "tenant_id": tenant_id,
+                            "user_roles": user_roles or [],
                             "limit": 5,
                             "search_type": "hybrid",
                             "is_admin": True,

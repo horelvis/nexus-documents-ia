@@ -41,7 +41,6 @@ class QueueService:
     async def enqueue_preview_generation(
         self,
         document_id: str,
-        tenant_id: str,
         user_id: str,
         preview_type: str = "all",
         force_regenerate: bool = False,
@@ -49,7 +48,6 @@ class QueueService:
     ) -> Optional[str]:
         payload = {
             "document_id": document_id,
-            "tenant_id": tenant_id,
             "user_id": user_id,
             "preview_type": preview_type,
             "force_regenerate": force_regenerate,
@@ -60,7 +58,6 @@ class QueueService:
     async def enqueue_preview_batch(
         self,
         document_ids: List[str],
-        tenant_id: str,
         user_id: str,
         preview_type: str = "all",
         batch_size: int = 5,
@@ -68,7 +65,6 @@ class QueueService:
     ) -> Optional[str]:
         payload = {
             "document_ids": document_ids,
-            "tenant_id": tenant_id,
             "user_id": user_id,
             "preview_type": preview_type,
             "batch_size": batch_size,
@@ -124,17 +120,15 @@ class QueueService:
     async def enqueue_team_invitation(
         self,
         invitation_id: str,
-        tenant_id: str,
     ) -> Optional[str]:
-        payload = {"invitation_id": invitation_id, "tenant_id": tenant_id}
+        payload = {"invitation_id": invitation_id}
         return await self._post("/tasks/email/team-invitation", payload)
 
     async def enqueue_document_share_notification(
         self,
         share_id: str,
-        tenant_id: str,
     ) -> Optional[str]:
-        payload = {"share_id": share_id, "tenant_id": tenant_id}
+        payload = {"share_id": share_id}
         return await self._post("/tasks/email/share-notification", payload)
 
     async def enqueue_password_reset(
@@ -149,13 +143,11 @@ class QueueService:
     async def enqueue_index_retry(
         self,
         document_id: str,
-        tenant_id: str,
         user_id: Optional[str] = None,
         priority: str = "default",
     ) -> Optional[str]:
         payload = {
             "document_id": document_id,
-            "tenant_id": tenant_id,
             "user_id": user_id,
             "priority": priority,
         }

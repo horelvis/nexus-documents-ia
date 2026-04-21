@@ -151,7 +151,6 @@ export type ConnectorHealthStatus = 'healthy' | 'degraded' | 'unhealthy' | 'unkn
 
 export interface Connector {
   id: string
-  tenant_id: string
   name: string
   description: string | null
   connector_type: ConnectorType

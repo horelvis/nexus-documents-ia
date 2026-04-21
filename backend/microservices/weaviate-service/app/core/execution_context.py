@@ -3,13 +3,16 @@ Execution Context for Agent Framework Tools.
 
 This module provides thread-safe context variables that are automatically
 available to all @ai_function tools during execution, eliminating the need
-for LLMs to extract and pass tenant_id correctly.
+for LLMs to extract and pass user identity correctly.
 
 ARCHITECTURE:
 ┌─────────────────────────────────────────────────────────────┐
 │                    EmmaCoordinator.execute()                 │
 │                                                             │
-│  1. set_execution_context(tenant_id="xxx", user_id="yyy")   │
+│  1. set_execution_context(                                  │
+│         user_id="yyy",                                      │
+│         user_roles=["LEGAL", "SALES"],                      │
+│     )                                                       │
 │                          │                                   │
 │                          ▼                                   │
 │  ┌─────────────────────────────────────────────────────────┐│
@@ -19,8 +22,9 @@ ARCHITECTURE:
 │  │  ┌───────────────────────────────────────────────────┐  ││
 │  │  │         @ai_function semantic_search()            │  ││
 │  │  │                                                   │  ││
-│  │  │  # LLM might pass tenant_id="123" (wrong!)        │  ││
-│  │  │  tenant_id = get_tenant_id()  # Returns "xxx" ✓   │  ││
+│  │  │  # Get the authenticated roles from context        │  ││
+│  │  │  user_roles = get_user_roles_or_default()          │  ││
+│  │  │  # → ["LEGAL", "SALES", "EVERYONE"]                │  ││
 │  │  │                                                   │  ││
 │  │  └───────────────────────────────────────────────────┘  ││
 │  └─────────────────────────────────────────────────────────┘│
@@ -29,23 +33,19 @@ ARCHITECTURE:
 └─────────────────────────────────────────────────────────────┘
 
 Usage in @ai_function tools:
-    from app.core.execution_context import get_tenant_id, get_user_id
+    from app.core.execution_context import get_user_id, get_user_roles_or_default
 
     @ai_function
-    async def semantic_search(
-        query: str,
-        tenant_id: str,  # LLM provides this, but we override it
-        ...
-    ) -> str:
-        # Get the REAL tenant_id from execution context
-        actual_tenant_id = get_tenant_id() or tenant_id
+    async def semantic_search(query: str, ...) -> str:
+        user_id = get_user_id()
+        user_roles = get_user_roles_or_default()
         ...
 
 Usage in EmmaCoordinator:
     from app.core.execution_context import set_execution_context, clear_execution_context
 
-    async def execute(self, query, tenant_id, ...):
-        set_execution_context(tenant_id=tenant_id, user_id=user_id)
+    async def execute(self, query, user_id, user_roles, ...):
+        set_execution_context(user_id=user_id, user_roles=user_roles)
         try:
             result = await self._emma.run(...)
         finally:
@@ -54,14 +54,15 @@ Usage in EmmaCoordinator:
 
 import logging
 from contextvars import ContextVar
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
+
+from app.core.auth_headers import EVERYONE_ROLE, allowed_roles
 
 logger = logging.getLogger(__name__)
 
 # Context variables for execution
-_tenant_id_var: ContextVar[Optional[str]] = ContextVar('tenant_id', default=None)
 _user_id_var: ContextVar[Optional[str]] = ContextVar('user_id', default=None)
-_user_role_ids_var: ContextVar[Optional[list]] = ContextVar('user_role_ids', default=None)
+_user_roles_var: ContextVar[Optional[List[str]]] = ContextVar('user_roles', default=None)
 _is_admin_var: ContextVar[bool] = ContextVar('is_admin', default=False)
 _session_id_var: ContextVar[Optional[str]] = ContextVar('session_id', default=None)
 _document_id_var: ContextVar[Optional[str]] = ContextVar('document_id', default=None)
@@ -69,13 +70,12 @@ _extra_context_var: ContextVar[Dict[str, Any]] = ContextVar('extra_context', def
 
 
 def set_execution_context(
-    tenant_id: str,
     user_id: Optional[str] = None,
-    user_role_ids: Optional[list] = None,
+    user_roles: Optional[List[str]] = None,
     is_admin: bool = False,
     session_id: Optional[str] = None,
     document_id: Optional[str] = None,
-    **extra: Any
+    **extra: Any,
 ) -> None:
     """
     Set execution context for the current async task.
@@ -84,21 +84,18 @@ def set_execution_context(
     called during this execution, regardless of how deeply nested.
 
     Args:
-        tenant_id: Tenant identifier (REQUIRED)
-        user_id: Optional user identifier
-        user_role_ids: Optional list of role IDs the user belongs to (for ACL filtering)
+        user_id: Authenticated user identifier
+        user_roles: List of KeyCloak role names the user belongs to (ACL)
         is_admin: Whether the user is an admin (bypasses ACL checks)
         session_id: Optional session identifier
         document_id: Optional focus document ID (for document-specific queries)
         **extra: Additional context values
     """
-    _tenant_id_var.set(tenant_id)
-
     if user_id:
         _user_id_var.set(user_id)
 
-    if user_role_ids:
-        _user_role_ids_var.set(user_role_ids)
+    if user_roles is not None:
+        _user_roles_var.set(list(user_roles))
 
     _is_admin_var.set(is_admin)
 
@@ -111,7 +108,10 @@ def set_execution_context(
     if extra:
         _extra_context_var.set(extra)
 
-    logger.debug(f"🔐 Execution context set: tenant={tenant_id}, user={user_id}, doc={document_id}, roles={len(user_role_ids or [])}, admin={is_admin}")
+    logger.debug(
+        f"🔐 Execution context set: user={user_id}, doc={document_id}, "
+        f"roles={len(user_roles or [])}, admin={is_admin}"
+    )
 
 
 def clear_execution_context() -> None:
@@ -120,9 +120,8 @@ def clear_execution_context() -> None:
 
     Call this in a finally block after execution completes.
     """
-    _tenant_id_var.set(None)
     _user_id_var.set(None)
-    _user_role_ids_var.set(None)
+    _user_roles_var.set(None)
     _is_admin_var.set(False)
     _session_id_var.set(None)
     _document_id_var.set(None)
@@ -131,71 +130,52 @@ def clear_execution_context() -> None:
     logger.debug("🔓 Execution context cleared")
 
 
-def get_tenant_id() -> Optional[str]:
-    """
-    Get the current tenant_id from execution context.
-
-    Returns:
-        Tenant ID if set, None otherwise
-    """
-    return _tenant_id_var.get()
-
-
 def get_user_id() -> Optional[str]:
-    """
-    Get the current user_id from execution context.
-
-    Returns:
-        User ID if set, None otherwise
-    """
+    """Get the current user_id from execution context (may be None)."""
     return _user_id_var.get()
 
 
-def get_user_role_ids() -> Optional[list]:
-    """
-    Get the current user's role IDs from execution context.
+def get_user_id_or_raise() -> str:
+    """Get the current user_id or raise if not set."""
+    user_id = _user_id_var.get()
+    if not user_id:
+        raise RuntimeError(
+            "user_id not found in execution context. "
+            "Ensure set_execution_context() was called before executing tools."
+        )
+    return user_id
 
-    These role IDs are used for ACL filtering - documents shared
-    with any of these roles will be accessible to the user.
 
-    Returns:
-        List of role IDs if set, None otherwise
+def get_user_roles() -> Optional[List[str]]:
+    """Return the raw user roles list (or None if not set)."""
+    return _user_roles_var.get()
+
+
+def get_user_roles_or_default() -> List[str]:
+    """Return the user roles folded with the EVERYONE wildcard.
+
+    If no roles are set in the execution context, returns a list
+    containing only the EVERYONE sentinel so that public documents
+    are still reachable.
     """
-    return _user_role_ids_var.get()
+    roles = _user_roles_var.get()
+    if roles is None:
+        return [EVERYONE_ROLE]
+    return allowed_roles(roles)
 
 
 def get_is_admin() -> bool:
-    """
-    Get whether the current user is an admin.
-
-    Admin users bypass ACL checks and can see all documents
-    within their tenant.
-
-    Returns:
-        True if user is admin, False otherwise
-    """
+    """Whether the current user is an admin (bypasses ACL checks)."""
     return _is_admin_var.get()
 
 
 def get_session_id() -> Optional[str]:
-    """
-    Get the current session_id from execution context.
-
-    Returns:
-        Session ID if set, None otherwise
-    """
+    """Get the current session_id from execution context."""
     return _session_id_var.get()
 
 
 def get_document_id() -> Optional[str]:
-    """
-    Get the focus document_id from execution context.
-
-    This is set when the user is querying about a specific document.
-
-    Returns:
-        Document ID if set, None otherwise
-    """
+    """Get the focus document_id from execution context."""
     return _document_id_var.get()
 
 
@@ -203,26 +183,12 @@ def resolve_document_id(llm_provided: Optional[str] = None) -> Optional[str]:
     """
     Resolve document_id with priority: context > LLM provided.
 
-    Similar to resolve_tenant_id, this ensures the context-provided
-    document_id takes precedence over whatever the LLM might have passed.
-
-    Args:
-        llm_provided: The document_id the LLM passed (may be wrong/placeholder)
-
-    Returns:
-        The correct document_id from context, or llm_provided as fallback,
-        or None if no document_id is available
-
-    Example:
-        @ai_function
-        async def analyze_document(document_id: str, ...) -> str:
-            actual_doc_id = resolve_document_id(document_id)
-            # actual_doc_id is guaranteed to be from trusted context if available
+    Ensures the context-provided document_id takes precedence over
+    whatever the LLM might have passed.
     """
     context_doc_id = _document_id_var.get()
 
     if context_doc_id:
-        # Log if LLM tried to use a different document_id
         if llm_provided and llm_provided != context_doc_id:
             logger.debug(
                 f"🔒 document_id resolved: LLM passed '{llm_provided}', "
@@ -231,7 +197,6 @@ def resolve_document_id(llm_provided: Optional[str] = None) -> Optional[str]:
         return context_doc_id
 
     if llm_provided:
-        # Check if it looks like a placeholder (common LLM hallucinations)
         placeholders = ['contract_', 'doc_', 'document_', '12345', '67890', 'example', 'test']
         is_placeholder = any(p in llm_provided.lower() for p in placeholders)
         if is_placeholder:
@@ -245,77 +210,5 @@ def resolve_document_id(llm_provided: Optional[str] = None) -> Optional[str]:
 
 
 def get_extra_context() -> Dict[str, Any]:
-    """
-    Get additional context values.
-
-    Returns:
-        Dictionary with extra context values
-    """
+    """Get additional context values."""
     return _extra_context_var.get()
-
-
-def get_tenant_id_or_raise() -> str:
-    """
-    Get tenant_id or raise an error if not set.
-
-    Use this in tools that REQUIRE tenant isolation.
-
-    Returns:
-        Tenant ID
-
-    Raises:
-        RuntimeError: If tenant_id is not set in context
-    """
-    tenant_id = _tenant_id_var.get()
-    if not tenant_id:
-        raise RuntimeError(
-            "tenant_id not found in execution context. "
-            "Ensure set_execution_context() was called before executing tools."
-        )
-    return tenant_id
-
-
-def resolve_tenant_id(llm_provided: Optional[str] = None) -> str:
-    """
-    Resolve tenant_id with priority: context > LLM provided.
-
-    This is the main function @ai_function tools should use.
-    It ensures the context-provided tenant_id takes precedence
-    over whatever the LLM might have passed.
-
-    Args:
-        llm_provided: The tenant_id the LLM passed (may be wrong)
-
-    Returns:
-        The correct tenant_id from context, or llm_provided as fallback
-
-    Raises:
-        ValueError: If no tenant_id is available from any source
-
-    Example:
-        @ai_function
-        async def semantic_search(tenant_id: str, ...) -> str:
-            actual_tenant_id = resolve_tenant_id(tenant_id)
-            # actual_tenant_id is guaranteed to be from trusted context
-    """
-    context_tenant_id = _tenant_id_var.get()
-
-    if context_tenant_id:
-        # Log if LLM tried to use a different tenant_id (DEBUG level - expected behavior)
-        # The LLM often invents placeholder values like "tenant-123" which we safely override
-        if llm_provided and llm_provided != context_tenant_id:
-            logger.debug(
-                f"🔒 tenant_id resolved: LLM passed '{llm_provided}', "
-                f"using context '{context_tenant_id}'"
-            )
-        return context_tenant_id
-
-    if llm_provided:
-        logger.warning(
-            f"⚠️ No execution context set, using LLM-provided tenant_id: {llm_provided}"
-        )
-        return llm_provided
-
-    raise ValueError(
-        "No tenant_id available. Neither execution context nor LLM provided one."
-    )

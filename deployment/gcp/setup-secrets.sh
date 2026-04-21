@@ -43,7 +43,7 @@ echo "🗄️ Setting up database secrets..."
 create_secret "db-user" "nexus_user"
 create_secret "db-pass" "$(openssl rand -base64 32)"
 create_secret "db-host" "10.0.0.3"  # Internal IP, will be updated after Cloud SQL creation
-create_secret "db-name" "nexus_db"
+create_secret "db-name" "nouxcube"
 
 # Application secrets
 echo "🔑 Setting up application secrets..."

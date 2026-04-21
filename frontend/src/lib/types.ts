@@ -21,7 +21,6 @@ export interface User {
   full_name?: string
   is_active: boolean
   is_superuser: boolean
-  tenant_id: string
   created_at: string
   updated_at: string
 }
@@ -90,7 +89,6 @@ export interface Document {
   status?: 'uploading' | 'processing' | 'processed' | 'error' | 'active' // Keep for backward compatibility
   summary?: string
   language?: string
-  tenant_id: string
   created_by: string | any // Allow object for populated user
   user_id?: string // Keep for backward compatibility
   created_at: string
@@ -184,7 +182,6 @@ export interface BackendUser {
   is_team_member?: boolean
   is_admin?: boolean
   onboarding_completed: boolean
-  tenant_id: string
   clerk_user_id?: string
   stripe_customer_id?: string
   created_at: string
@@ -232,7 +229,6 @@ export interface LoginResponse {
   user: BackendUser
   subscription: SubscriptionInfo
   permissions: UserPermissions
-  tenant_id: string
 }
 
 export interface OnboardingStatus {
@@ -285,11 +281,9 @@ export interface AuthGuardProps {
 }
 
 export interface SiteHeaderProps {
-  tenantId?: string
 }
 
 export interface AppSidebarProps {
-  tenantId?: string
   variant?: "sidebar" | "floating" | "inset"
   side?: "left" | "right"
   collapsible?: "offcanvas" | "icon" | "none"
@@ -486,7 +480,6 @@ export interface PermissionSet {
 export interface DocumentACL {
   id: string
   document_id: string
-  tenant_id: string
   grantee_type: GranteeType
   grantee_id?: string
   can_view: boolean
@@ -569,7 +562,6 @@ export interface CheckPermissionResponse {
 export interface DocumentACLAudit {
   id: string
   document_id: string
-  tenant_id: string
   acl_id?: string
   action: ACLAction
   grantee_type: GranteeType
@@ -592,7 +584,6 @@ export interface DocumentACLAudit {
  */
 export interface DocumentACLAuditListResponse {
   document_id?: string
-  tenant_id: string
   audits: DocumentACLAudit[]
   total: number
   page: number

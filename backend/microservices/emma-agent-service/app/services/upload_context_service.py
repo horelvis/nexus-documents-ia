@@ -31,7 +31,6 @@ class UploadContextService:
     async def save_upload(
         self,
         *,
-        tenant_id: str,
         user_id: str,
         filename: str,
         content_type: str,
@@ -43,7 +42,6 @@ class UploadContextService:
         extraction = await client.extract_text(
             file_bytes=file_bytes,
             filename=filename,
-            tenant_id=tenant_id,
             user_id=user_id,
         )
 
@@ -63,7 +61,6 @@ class UploadContextService:
 
         payload = {
             "id": upload_id,
-            "tenant_id": tenant_id,
             "user_id": user_id,
             "filename": filename,
             "content_type": content_type,

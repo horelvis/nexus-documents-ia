@@ -18,16 +18,13 @@ class TextExtractionClient(BaseHTTPClient):
         *,
         file_bytes: bytes,
         filename: str,
-        tenant_id: Optional[str] = None,
         user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         headers = {
             "X-API-Key": settings.MICROSERVICES_API_KEY or "",
         }
-        if tenant_id:
-            headers["X-Tenant-ID"] = tenant_id
         if user_id:
-            headers["X-User-ID"] = user_id
+            headers["X-User-Id"] = user_id
 
         files = {
             "file": (filename, file_bytes),

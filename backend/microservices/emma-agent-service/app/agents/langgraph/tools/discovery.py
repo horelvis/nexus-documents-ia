@@ -3,12 +3,11 @@ Emma ReAct Agent — List Sources Tool (Discovery)
 
 Enables the agent to discover what data sources are available before
 deciding which tools to use. This is especially useful when the agent
-doesn't know if the tenant has connectors, legislation, or web search.
+doesn't know if the tenant has connectors or web search.
 
 Returns:
 - Active connectors (type, name, last sync)
 - Weaviate collection stats (document count)
-- BOE legislation availability
 - Web search status
 """
 
@@ -28,7 +27,7 @@ class ListSourcesInput(BaseModel):
 
 
 class ListSourcesTool(EmmaTool):
-    """Discover available data sources for the current tenant."""
+    """Discover available data sources."""
 
     @property
     def name(self) -> str:
@@ -39,7 +38,7 @@ class ListSourcesTool(EmmaTool):
         return (
             "Descubre las fuentes de datos disponibles: documentos indexados, "
             "conectores activos (SharePoint, Alfresco, Google Drive), "
-            "legislación BOE, y búsqueda web. Usa esto cuando no sepas "
+            "y búsqueda web. Usa esto cuando no sepas "
             "qué fuentes tiene el usuario."
         )
 
@@ -51,17 +50,13 @@ class ListSourcesTool(EmmaTool):
         from app.clients.weaviate_client import get_weaviate_client
         from app.services.web_search import get_web_search_client
 
-        tenant_id = context.get("tenant_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
-
         lines = ["**Fuentes de datos disponibles:**\n"]
         data: Dict[str, Any] = {}
 
-        # 1. Tenant document stats
+        # 1. Document stats
         try:
             client = get_weaviate_client()
-            stats = await client.get_tenant_stats(tenant_id=tenant_id)
+            stats = await client.get_stats()
             doc_count = stats.get("total_documents", stats.get("document_count", 0))
             lines.append(f"📄 **Documentos indexados**: {doc_count}")
             if stats.get("collections"):
@@ -71,28 +66,11 @@ class ListSourcesTool(EmmaTool):
                     lines.append(f"   - {col_name}: {col_count} documentos")
             data["documents"] = {"count": doc_count, "available": doc_count > 0}
         except Exception as e:
-            logger.warning(f"Could not get tenant stats: {e}")
+            logger.warning(f"Could not get stats: {e}")
             lines.append("📄 **Documentos**: No se pudo obtener información")
             data["documents"] = {"available": True, "error": str(e)}
 
-        # 2. Legislation (always available if PublicKnowledge exists)
-        try:
-            pk_results = await client.search_public_knowledge(
-                query="legislación",
-                limit=1,
-            )
-            legislation_available = len(pk_results) > 0
-            if legislation_available:
-                lines.append("⚖️ **Legislación BOE**: Disponible (leyes españolas vigentes)")
-            else:
-                lines.append("⚖️ **Legislación BOE**: No indexada")
-            data["legislation"] = {"available": legislation_available}
-        except Exception as e:
-            logger.debug(f"PublicKnowledge check failed: {e}")
-            lines.append("⚖️ **Legislación BOE**: No disponible")
-            data["legislation"] = {"available": False}
-
-        # 3. Web search
+        # 2. Web search
         try:
             web_client = get_web_search_client()
             web_enabled = web_client.enabled
@@ -106,11 +84,11 @@ class ListSourcesTool(EmmaTool):
             lines.append("🌐 **Búsqueda web**: No disponible")
             data["web_search"] = {"available": False}
 
-        # 4. Knowledge Graph
+        # 3. Knowledge Graph
         try:
             from app.clients.knowledge_tree_client import get_knowledge_tree_client
             kt_client = get_knowledge_tree_client()
-            summary = await kt_client.get_structural_summary(tenant_id=tenant_id)
+            summary = await kt_client.get_structural_summary()
             if summary and not summary.get("error"):
                 node_count = summary.get("total_nodes", summary.get("node_count", 0))
                 lines.append(f"🔗 **Grafo de conocimiento**: {node_count} entidades")
@@ -122,7 +100,7 @@ class ListSourcesTool(EmmaTool):
             lines.append("🔗 **Grafo de conocimiento**: No disponible")
             data["knowledge_graph"] = {"available": False}
 
-        # 5. Connectors (check via context features)
+        # 4. Connectors (check via context features)
         features = context.get("features", {})
         if features.get("connectors_enabled"):
             lines.append("🔌 **Conectores externos**: Habilitados (usa query_connector)")

@@ -17,9 +17,8 @@ logger = logging.getLogger(__name__)
 
 class NotificationService:
     """Service for handling various notification methods"""
-    
-    def __init__(self, tenant_id: str, user_id: str):
-        self.tenant_id = UUID(tenant_id)
+
+    def __init__(self, user_id: str):
         self.user_id = UUID(user_id)
     
     async def create_in_app_notification(
@@ -35,7 +34,6 @@ class NotificationService:
         """Create an in-app notification"""
         try:
             notification = Notification(
-                tenant_id=self.tenant_id,
                 user_id=recipient_id,
                 title=title,
                 message=message,

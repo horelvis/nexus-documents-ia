@@ -67,14 +67,14 @@ class OAuthService:
         flow.redirect_uri = settings.google_oauth_redirect_uri
         return flow
 
-    def generate_auth_url(self, connector_id: str, tenant_id: str, login_hint: str = None) -> str:
+    def generate_auth_url(self, connector_id: str, login_hint: str = None) -> str:
         """
         Generate Google OAuth authorization URL.
 
-        The state parameter encodes connector_id and tenant_id
-        so the callback knows where to store the tokens.
+        The state parameter encodes the connector_id so the callback knows
+        where to store the tokens.
         """
-        state = f"{connector_id}:{tenant_id}"
+        state = str(connector_id)
         flow = self._create_flow(state=state)
         kwargs = {
             "access_type": "offline",
@@ -111,19 +111,17 @@ class OAuthService:
 
         Args:
             code: Authorization code from Google
-            state: "connector_id:tenant_id" encoded state
+            state: connector_id encoded as state
 
         Returns:
             Dict with connector_id, google_email, success status
         """
-        # Parse state
-        parts = state.split(":", 1)
-        if len(parts) != 2:
+        # Parse state — legacy callers may still send "connector_id:tenant_id";
+        # accept either form and use only the connector_id.
+        connector_id_str = state.split(":", 1)[0].strip()
+        if not connector_id_str:
             raise ValueError(f"Invalid state parameter: {state}")
-
-        connector_id_str, tenant_id_str = parts
         connector_id = UUID(connector_id_str)
-        tenant_id = UUID(tenant_id_str)
 
         # Exchange code for tokens
         credentials = self.exchange_code(code, state)
@@ -139,7 +137,6 @@ class OAuthService:
         # Save to database
         await self._save_tokens_to_db(
             connector_id=connector_id,
-            tenant_id=tenant_id,
             access_token_encrypted=access_token_encrypted,
             refresh_token_encrypted=refresh_token_encrypted,
             token_expiry=credentials.expiry,
@@ -148,21 +145,19 @@ class OAuthService:
         )
 
         # Invalidate cache
-        await invalidate_connector_cache(connector_id, tenant_id)
+        await invalidate_connector_cache(connector_id)
 
         logger.info(f"OAuth tokens saved for connector {connector_id}, email: {google_email}")
 
         return {
             "success": True,
             "connector_id": str(connector_id),
-            "tenant_id": str(tenant_id),
             "google_email": google_email,
         }
 
     async def refresh_access_token(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
     ) -> Optional[str]:
         """
         Refresh an expired access token using the refresh token.
@@ -171,7 +166,7 @@ class OAuthService:
         """
         from ..core.config import load_connector_from_db
 
-        config = await load_connector_from_db(connector_id, tenant_id)
+        config = await load_connector_from_db(connector_id)
         if not config or not config.refresh_token:
             logger.error(f"No refresh token for connector {connector_id}")
             return None
@@ -192,7 +187,6 @@ class OAuthService:
             # Save refreshed tokens
             await self._save_tokens_to_db(
                 connector_id=connector_id,
-                tenant_id=tenant_id,
                 access_token_encrypted=encrypt_token(creds.token),
                 refresh_token_encrypted=encrypt_token(creds.refresh_token or config.refresh_token),
                 token_expiry=creds.expiry,
@@ -200,7 +194,7 @@ class OAuthService:
                 scopes=config.scopes,
             )
 
-            await invalidate_connector_cache(connector_id, tenant_id)
+            await invalidate_connector_cache(connector_id)
 
             logger.info(f"Refreshed access token for connector {connector_id}")
             return creds.token
@@ -212,12 +206,11 @@ class OAuthService:
     async def revoke_token(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
     ) -> bool:
         """Revoke OAuth tokens and clear from DB."""
         from ..core.config import load_connector_from_db
 
-        config = await load_connector_from_db(connector_id, tenant_id)
+        config = await load_connector_from_db(connector_id)
         if not config or not config.access_token:
             return False
 
@@ -233,7 +226,7 @@ class OAuthService:
 
         # Clear tokens in DB
         await self._clear_tokens_in_db(connector_id)
-        await invalidate_connector_cache(connector_id, tenant_id)
+        await invalidate_connector_cache(connector_id)
 
         logger.info(f"Revoked OAuth tokens for connector {connector_id}")
         return True
@@ -241,12 +234,11 @@ class OAuthService:
     async def get_oauth_status(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
     ) -> Dict[str, Any]:
         """Check OAuth status for a connector."""
         from ..core.config import load_connector_from_db
 
-        config = await load_connector_from_db(connector_id, tenant_id)
+        config = await load_connector_from_db(connector_id)
         if not config:
             return {"connected": False, "error": "Connector not found"}
 
@@ -302,9 +294,7 @@ class OAuthService:
             return config.access_token
 
         # Need to refresh
-        new_token = await self.refresh_access_token(
-            config.connector_id, config.tenant_id
-        )
+        new_token = await self.refresh_access_token(config.connector_id)
         if not new_token:
             raise ValueError(
                 f"Failed to refresh token for connector {config.connector_id}. "
@@ -320,7 +310,6 @@ class OAuthService:
     async def _save_tokens_to_db(
         self,
         connector_id: UUID,
-        tenant_id: UUID,
         access_token_encrypted: Optional[str],
         refresh_token_encrypted: Optional[str],
         token_expiry: Optional[datetime],

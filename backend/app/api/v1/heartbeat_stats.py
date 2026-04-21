@@ -1,11 +1,10 @@
-"""Heartbeat Stats API — Provides tenant statistics for Emma Heartbeat System.
+"""Heartbeat Stats API — Provides statistics for Emma Heartbeat System.
 
 These endpoints are consumed by emma-agent-service's Heartbeat System
-to gather tenant context for proactive insight generation.
+to gather context for proactive insight generation.
 """
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import func, select, and_, or_
@@ -29,12 +28,11 @@ router = APIRouter(
 )
 
 
-@router.get("/tenant/{tenant_id}")
-async def get_tenant_stats(
-    tenant_id: UUID,
+@router.get("")
+async def get_stats(
     db: AsyncSession = Depends(get_async_db),
 ) -> Dict[str, Any]:
-    """Get document statistics for a tenant.
+    """Get document statistics.
 
     Returns:
         - total_documents: Total indexed documents
@@ -51,10 +49,7 @@ async def get_tenant_stats(
     # Total documents
     total_result = await db.execute(
         select(func.count(IndexedDocument.id)).where(
-            and_(
-                IndexedDocument.tenant_id == tenant_id,
-                IndexedDocument.indexing_status == "indexed",
-            )
+            IndexedDocument.indexing_status == "indexed"
         )
     )
     total = total_result.scalar() or 0
@@ -63,7 +58,6 @@ async def get_tenant_stats(
     indexed_7d_result = await db.execute(
         select(func.count(IndexedDocument.id)).where(
             and_(
-                IndexedDocument.tenant_id == tenant_id,
                 IndexedDocument.indexing_status == "indexed",
                 IndexedDocument.indexed_at >= cutoff_7d,
             )
@@ -77,12 +71,7 @@ async def get_tenant_stats(
             IndexedDocument.weaviate_collection,
             func.count(IndexedDocument.id).label("count"),
         )
-        .where(
-            and_(
-                IndexedDocument.tenant_id == tenant_id,
-                IndexedDocument.indexing_status == "indexed",
-            )
-        )
+        .where(IndexedDocument.indexing_status == "indexed")
         .group_by(IndexedDocument.weaviate_collection)
     )
     by_collection = {
@@ -95,7 +84,6 @@ async def get_tenant_stats(
         select(IndexedDocument)
         .where(
             and_(
-                IndexedDocument.tenant_id == tenant_id,
                 IndexedDocument.indexing_status == "indexed",
                 IndexedDocument.indexed_at >= cutoff_24h,
             )
@@ -117,7 +105,6 @@ async def get_tenant_stats(
     ]
 
     return {
-        "tenant_id": str(tenant_id),
         "total_documents": total,
         "indexed_7d": indexed_7d,
         "by_collection": by_collection,
@@ -127,7 +114,6 @@ async def get_tenant_stats(
 
 @router.get("/contracts/expiring")
 async def get_expiring_contracts(
-    tenant_id: UUID = Query(...),
     days: int = Query(default=30, ge=1, le=365),
     db: AsyncSession = Depends(get_async_db),
 ) -> Dict[str, Any]:
@@ -148,7 +134,6 @@ async def get_expiring_contracts(
         select(IndexedDocument)
         .where(
             and_(
-                IndexedDocument.tenant_id == tenant_id,
                 IndexedDocument.indexing_status == "indexed",
                 or_(
                     IndexedDocument.source_metadata["contract_end_date"].isnot(None),
@@ -201,7 +186,6 @@ async def get_expiring_contracts(
     contracts.sort(key=lambda c: c["expiry_date"])
 
     return {
-        "tenant_id": str(tenant_id),
         "days": days,
         "contracts": contracts,
     }
@@ -209,7 +193,6 @@ async def get_expiring_contracts(
 
 @router.get("/analyses/pending")
 async def get_pending_analyses(
-    tenant_id: UUID = Query(...),
     db: AsyncSession = Depends(get_async_db),
 ) -> Dict[str, Any]:
     """Get count of pending document analyses.
@@ -226,10 +209,7 @@ async def get_pending_analyses(
     # Pending analyses (indexing_status = 'pending' or 'queued')
     pending_result = await db.execute(
         select(func.count(IndexedDocument.id)).where(
-            and_(
-                IndexedDocument.tenant_id == tenant_id,
-                IndexedDocument.indexing_status.in_(["pending", "queued"]),
-            )
+            IndexedDocument.indexing_status.in_(["pending", "queued"])
         )
     )
     pending_count = pending_result.scalar() or 0
@@ -238,7 +218,6 @@ async def get_pending_analyses(
     stale_result = await db.execute(
         select(func.count(IndexedDocument.id)).where(
             and_(
-                IndexedDocument.tenant_id == tenant_id,
                 IndexedDocument.indexing_status.in_(["pending", "queued"]),
                 IndexedDocument.created_at <= stale_cutoff,
             )
@@ -247,7 +226,6 @@ async def get_pending_analyses(
     stale_count = stale_result.scalar() or 0
 
     return {
-        "tenant_id": str(tenant_id),
         "pending_count": pending_count,
         "stale_count": stale_count,
     }
@@ -255,7 +233,6 @@ async def get_pending_analyses(
 
 @router.get("/anomalies/recent")
 async def get_recent_anomalies(
-    tenant_id: UUID = Query(...),
     hours: int = Query(default=24, ge=1, le=168),
     db: AsyncSession = Depends(get_async_db),
 ) -> Dict[str, Any]:
@@ -276,7 +253,6 @@ async def get_recent_anomalies(
         select(IndexedDocument)
         .where(
             and_(
-                IndexedDocument.tenant_id == tenant_id,
                 IndexedDocument.indexing_status == "failed",
                 IndexedDocument.indexed_at >= cutoff,
             )
@@ -301,7 +277,6 @@ async def get_recent_anomalies(
         )
         .where(
             and_(
-                IndexedDocument.tenant_id == tenant_id,
                 IndexedDocument.content_hash.isnot(None),
                 IndexedDocument.indexing_status == "indexed",
             )
@@ -319,7 +294,6 @@ async def get_recent_anomalies(
         })
 
     return {
-        "tenant_id": str(tenant_id),
         "hours": hours,
         "anomalies": anomalies,
     }

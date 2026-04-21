@@ -48,6 +48,11 @@ def get_version_locations():
     """
     base_dir = os.path.dirname(__file__)
     default_location = os.path.join(base_dir, "versions")
+    # NOTE: `versions/_archived/` holds the pre-nouxcube migration history for
+    # reference only. Alembic only scans the top-level of each location path,
+    # so _archived is invisible to autogenerate/upgrade. DO NOT add it to the
+    # returned list below without first checking the multi-tenancy removal plan
+    # (docs/superpowers/plans/2026-04-06-remove-tenancy-01-foundation.md).
 
     # Check for module-specific migration folders
     core_dir = os.path.join(base_dir, "versions", "core")

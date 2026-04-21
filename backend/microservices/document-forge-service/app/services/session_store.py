@@ -34,13 +34,12 @@ class SessionStore:
             return f"{PREFIX}:{session_id}:{suffix}"
         return f"{PREFIX}:{session_id}"
 
-    async def create_session(self, tenant_id: str, user_id: str) -> ForgeSession:
+    async def create_session(self, user_id: str) -> ForgeSession:
         """Create a new forge session."""
         session_id = f"forge_{uuid.uuid4().hex[:12]}"
         now = datetime.now(timezone.utc).isoformat()
         session = ForgeSession(
             session_id=session_id,
-            tenant_id=tenant_id,
             user_id=user_id,
             status=SessionStatus.CREATED,
             created_at=now,

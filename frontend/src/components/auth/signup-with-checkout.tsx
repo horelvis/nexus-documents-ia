@@ -25,7 +25,6 @@ export function SignUpWithCheckout() {
   const email = searchParams.get('email')
   const plan = searchParams.get('plan')
   const invitation = searchParams.get('invitation')
-  const tenantId = searchParams.get('tenant')
 
   const [checkoutData, setCheckoutData] = useState<CheckoutSession | null>(null)
   const [isLoading, setIsLoading] = useState(!!sessionId)
@@ -202,8 +201,8 @@ export function SignUpWithCheckout() {
               }
             }}
             fallbackRedirectUrl={
-              invitation && tenantId
-                ? `/${tenantId}/dashboard`
+              invitation
+                ? `/dashboard`
                 : plan && plan !== 'free'
                   ? `/checkout?plan=${plan}`
                   : plan === 'free'
@@ -217,7 +216,6 @@ export function SignUpWithCheckout() {
             }
             unsafeMetadata={{
               invitation_code: invitation || undefined,
-              tenant_id: tenantId || undefined,
               selected_plan: plan || undefined
             }}
           />

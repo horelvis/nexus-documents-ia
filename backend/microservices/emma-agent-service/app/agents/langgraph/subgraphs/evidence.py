@@ -461,13 +461,13 @@ async def cross_reference_source_dois(
 
 async def search_evidence(
     query_text: str,
-    tenant_id: str,
     collections: List[str],
     uploaded_texts: List[Dict],
     mode_config: Dict[str, Any],
     jurisprudence_evidence: Optional[List[Dict]] = None,
     source_document_ids: Optional[List[str]] = None,
     source_doi_validations: Optional[List[Dict]] = None,
+    user_roles: Optional[List[str]] = None,
 ) -> Dict[str, List[Dict]]:
     """
     Unified evidence search with two-tier separation.
@@ -501,14 +501,9 @@ async def search_evidence(
             logger.warning(f"RLM evidence filtering failed: {e}")
 
     # --- Weaviate search -> split by source_document_ids ---
-    sanitized_tenant = tenant_id.replace("-", "_")
-    safe_tenant = ''.join(c for c in tenant_id if c.isalnum())[:32]
+    # Single-tenant: use unified Nouxcube_documents collection (override via `collections`).
     candidate_collections = (
-        [collections[0]] if collections
-        else [
-            f"Nouxcube_{sanitized_tenant}_documents",
-            f"Nouxcube_{safe_tenant}_knowledge",
-        ]
+        [collections[0]] if collections else ["Nouxcube_documents"]
     )
 
     weaviate_found = False
@@ -523,7 +518,7 @@ async def search_evidence(
                     },
                     json={
                         "query": query_text,
-                        "tenant_id": tenant_id,
+                        "user_roles": user_roles or [],
                         "limit": 10,  # Fetch more to compensate for filtering
                         "search_type": "hybrid",
                         "is_admin": True,
@@ -664,7 +659,6 @@ async def search_evidence(
 
 async def get_source_context(
     query: str,
-    tenant_id: str,
     document_ids: Optional[List[str]] = None,
     collections: Optional[List[str]] = None,
     uploaded_texts: Optional[List[Dict]] = None,

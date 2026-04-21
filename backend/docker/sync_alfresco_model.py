@@ -20,7 +20,7 @@ from uuid import UUID
 import httpx
 
 # Database connection (adjust if needed)
-DATABASE_URL = "postgresql://nexus_user:nexus_password@localhost:5432/nexus_db"
+DATABASE_URL = "postgresql://nexus_user:nexus_password@localhost:5432/nouxcube"
 
 # Alfresco connector ID (from your database)
 CONNECTOR_ID = "49526fa0-c06b-41fc-9b8a-5df87e5d6bc7"

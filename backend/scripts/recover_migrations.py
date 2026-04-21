@@ -215,7 +215,7 @@ def create_recovery_sql():
 -- 1. Terminate any blocked transactions
 SELECT pg_terminate_backend(pid) 
 FROM pg_stat_activity 
-WHERE datname = 'nexus_db' 
+WHERE datname = 'nouxcube' 
 AND state = 'idle in transaction' 
 AND pid != pg_backend_pid();
 
@@ -321,7 +321,7 @@ def main():
     print("   alembic upgrade head")
     print()
     print("3. If migrations still fail, use the recovery.sql file:")
-    print("   docker compose -f docker/docker-compose.yml exec -T postgres psql -U nexus_user -d nexus_db < recovery.sql")
+    print("   docker compose -f docker/docker-compose.yml exec -T postgres psql -U nexus_user -d nouxcube < recovery.sql")
     print()
     print("4. To verify the fix:")
     print("   alembic current")

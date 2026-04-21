@@ -31,7 +31,6 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Agent, useAgentsService } from "@/lib/services/agents.service"
 import { useNotifications } from "@/contexts/app-state-context"
-import { useParams } from "next/navigation"
 
 interface AgentsSidebarProps {
   selectedAgent?: Agent | null
@@ -51,8 +50,7 @@ export function AgentsSidebar({
   
   const agentsService = useAgentsService()
   const { addNotification } = useNotifications()
-  const params = useParams()
-  const tenantId = params.tenantId as string
+
 
   useEffect(() => {
     loadAgents()

@@ -20,7 +20,6 @@ import { Progress } from '@/components/ui/progress'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
-import { useParams } from 'next/navigation'
 
 /**
  * Status icon component
@@ -68,9 +67,6 @@ function StatusBadge({ status }: { status: AnalysisJob['status'] }) {
  * Single job item in the queue
  */
 function QueueJobItem({ job, onCancel }: { job: AnalysisJob; onCancel: (id: string) => void }) {
-  const params = useParams()
-  const tenantId = params?.tenantId as string
-
   const isActive = job.status === 'pending' || job.status === 'processing'
   const isProcessing = job.status === 'processing'
   // Allow navigation for completed AND processing jobs (to see live progress)
@@ -107,8 +103,8 @@ function QueueJobItem({ job, onCancel }: { job: AnalysisJob; onCancel: (id: stri
       </div>
 
       <div className="flex items-center gap-1">
-        {canNavigate && tenantId && (
-          <Link href={`/${tenantId}/documents/${job.document_id}/analysis?jobId=${job.id}`}>
+        {canNavigate && (
+          <Link href={`/documents/${job.document_id}/analysis?jobId=${job.id}`}>
             <Button
               variant="ghost"
               size="icon"

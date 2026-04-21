@@ -12,11 +12,11 @@ Deployment modes:
 """
 
 from app.api.v1 import (
-    document_insights, documents, document_shares, document_categorization, tenants, auth, admin,
-    agents, webhooks, search, teams, users, entities,
+    document_insights, documents, document_categorization, auth, admin,
+    agents, webhooks, search, users, entities,
     weaviate, lgpd, analysis_queue, channels,
     internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
-    document_acl, folders, classification, sharing_insights, emma,
+    folders, classification, emma,
 )
 from fastapi import APIRouter
 from app.core.features import Feature, FeatureFlags
@@ -41,10 +41,8 @@ if FeatureFlags.is_enabled(Feature.SSO_MULTI_PROTOCOL):
     logger.debug("SSO multi-protocol routes enabled")
 
 api_router.include_router(documents.router, prefix="/documents", tags=["documents"])
-api_router.include_router(document_shares.router, prefix="/shares", tags=["document-shares"])
 api_router.include_router(document_categorization.router, prefix="/categorization", tags=["categorization"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])
-api_router.include_router(tenants.router, prefix="/tenants", tags=["tenants"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])
 api_router.include_router(google_drive.router)
 
@@ -94,9 +92,6 @@ internal_router.include_router(
 
 api_router.include_router(internal_router)
 
-# Teams management routes
-api_router.include_router(teams.router, prefix="/teams", tags=["teams"])
-
 # User management routes
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 
@@ -130,9 +125,6 @@ api_router.include_router(notebooks.router, prefix="/notebooks", tags=["notebook
 # Information Channels - Gmail, Google Drive, External DB for RAG
 api_router.include_router(channels.router, prefix="/channels", tags=["channels"])
 
-# Document ACL - Document-level Access Control Lists
-api_router.include_router(document_acl.router, prefix="/documents", tags=["document-acl"])
-
 # Folders - Document folder organization (physical folders in GCS)
 api_router.include_router(folders.router, prefix="/folders", tags=["folders"])
 
@@ -145,9 +137,6 @@ if FeatureFlags.is_enabled(Feature.SITE_PORTAL):
     api_router.include_router(site_guests.router, prefix="/site-guests", tags=["site-guests"])
     api_router.include_router(site_portal.router, prefix="/site-portal", tags=["site-portal"])
     logger.debug("Site portal routes enabled")
-
-# Sharing Insights - Analytics for document sharing and site guests (Emma AI)
-api_router.include_router(sharing_insights.router, tags=["sharing-insights"])
 
 # Feature Flags - Expose feature state to frontend
 from app.api.v1 import features

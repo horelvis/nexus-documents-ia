@@ -154,7 +154,6 @@ class DocxRenderer:
             }
             source_type_labels = {
                 "web": "Web",
-                "public_knowledge": "Web",
                 "uploaded": "Cargado",
                 "internal": "Interno",
                 "jurisprudence": "Jurisp.",
@@ -241,7 +240,7 @@ class DocxRenderer:
                 run.font.size = Pt(9)
 
             type_labels = {
-                "web": "Web", "public_knowledge": "Web",
+                "web": "Web",
                 "uploaded": "Cargado", "internal": "Interno",
                 "doi": "DOI Validado", "crossref": "CrossRef",
                 "doi_invalid": "DOI Inválido", "doi_mismatch": "DOI ≠",

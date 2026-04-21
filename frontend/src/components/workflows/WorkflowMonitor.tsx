@@ -16,11 +16,10 @@ import { RefreshCw, Activity, Loader2, AlertCircle, CheckCircle, Clock } from "l
 import { useWorkflowService } from "@/lib/workflow-service"
 
 interface WorkflowMonitorProps {
-  tenantId: string
   onWorkflowUpdate?: (workflow: any) => void
 }
 
-export function WorkflowMonitor({ tenantId, onWorkflowUpdate }: WorkflowMonitorProps) {
+export function WorkflowMonitor({ onWorkflowUpdate }: WorkflowMonitorProps) {
   const workflowService = useWorkflowService()
   const [isLoading, setIsLoading] = useState(true)
   const [instances, setInstances] = useState<any[]>([])

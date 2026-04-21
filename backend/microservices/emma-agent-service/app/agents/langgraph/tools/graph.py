@@ -59,10 +59,6 @@ class StructuralQueryTool(EmmaTool):
     async def execute(self, arguments: Dict[str, Any], context: Dict[str, Any]) -> ToolResult:
         from app.clients.knowledge_tree_client import get_knowledge_tree_client
 
-        tenant_id = context.get("tenant_id", "")
-        if not tenant_id:
-            return ToolResult.from_error("No tenant_id in context")
-
         query = arguments["query"]
         max_results = arguments.get("max_results", 20)
 
@@ -70,7 +66,6 @@ class StructuralQueryTool(EmmaTool):
 
         try:
             result = await client.structural_query(
-                tenant_id=tenant_id,
                 query=query,
                 max_results=max_results,
             )

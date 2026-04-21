@@ -1,7 +1,7 @@
 """Notification Service — Multi-channel notification dispatcher.
 
 Supports:
-- in_app: Stored in DB + pushed via WebSocket
+- in_app: Stored in Redis inbox + pushed via WebSocket
 - email: Sent via SMTP (delegates to background worker)
 - webhook: HTTP POST to configured URL
 - slack: Sent to dedicated notification channels via Slack API
@@ -50,7 +50,6 @@ class NotificationService:
 
     async def create_notification(
         self,
-        tenant_id: str,
         user_id: str,
         title: str,
         body: str,
@@ -62,7 +61,6 @@ class NotificationService:
         """Create and store a notification, then push via WebSocket."""
         notification = {
             "id": str(uuid.uuid4()),
-            "tenant_id": tenant_id,
             "user_id": user_id,
             "notification_type": notification_type,
             "title": title,
@@ -77,7 +75,7 @@ class NotificationService:
         r = await self._get_redis()
 
         # Store in Redis list (per-user inbox)
-        inbox_key = f"{NOTIFICATIONS_KEY_PREFIX}:{tenant_id}:{user_id}"
+        inbox_key = f"{NOTIFICATIONS_KEY_PREFIX}:{user_id}"
         await r.lpush(inbox_key, json.dumps(notification))
         await r.ltrim(inbox_key, 0, 499)  # Keep last 500 notifications
 
@@ -89,14 +87,13 @@ class NotificationService:
 
     async def get_notifications(
         self,
-        tenant_id: str,
         user_id: str,
         unread_only: bool = False,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Fetch notifications for a user."""
         r = await self._get_redis()
-        inbox_key = f"{NOTIFICATIONS_KEY_PREFIX}:{tenant_id}:{user_id}"
+        inbox_key = f"{NOTIFICATIONS_KEY_PREFIX}:{user_id}"
         raw_items = await r.lrange(inbox_key, 0, limit - 1)
 
         notifications = [json.loads(item) for item in raw_items]
@@ -104,10 +101,10 @@ class NotificationService:
             notifications = [n for n in notifications if not n.get("is_read")]
         return notifications
 
-    async def mark_read(self, tenant_id: str, user_id: str, notification_id: str) -> bool:
+    async def mark_read(self, user_id: str, notification_id: str) -> bool:
         """Mark a notification as read."""
         r = await self._get_redis()
-        inbox_key = f"{NOTIFICATIONS_KEY_PREFIX}:{tenant_id}:{user_id}"
+        inbox_key = f"{NOTIFICATIONS_KEY_PREFIX}:{user_id}"
         items = await r.lrange(inbox_key, 0, -1)
 
         for i, raw in enumerate(items):
@@ -118,10 +115,10 @@ class NotificationService:
                 return True
         return False
 
-    async def mark_all_read(self, tenant_id: str, user_id: str) -> int:
+    async def mark_all_read(self, user_id: str) -> int:
         """Mark all notifications as read for a user."""
         r = await self._get_redis()
-        inbox_key = f"{NOTIFICATIONS_KEY_PREFIX}:{tenant_id}:{user_id}"
+        inbox_key = f"{NOTIFICATIONS_KEY_PREFIX}:{user_id}"
         items = await r.lrange(inbox_key, 0, -1)
         count = 0
 
@@ -133,16 +130,15 @@ class NotificationService:
                 count += 1
         return count
 
-    async def get_unread_count(self, tenant_id: str, user_id: str) -> int:
+    async def get_unread_count(self, user_id: str) -> int:
         """Get count of unread notifications."""
-        notifications = await self.get_notifications(tenant_id, user_id, unread_only=True, limit=500)
+        notifications = await self.get_notifications(user_id, unread_only=True, limit=500)
         return len(notifications)
 
     # ── Trigger Integration ──────────────────────────────────────────
 
     async def send_trigger_notification(
         self,
-        tenant_id: str,
         trigger_name: str,
         event: EmmaEvent,
         channels: List[str],
@@ -151,7 +147,6 @@ class NotificationService:
         for channel in channels:
             if channel == "in_app":
                 await self.create_notification(
-                    tenant_id=tenant_id,
                     user_id="system",  # Will be routed to all admins
                     title=f"🔔 Trigger activado: {trigger_name}",
                     body=f"Evento {event.event_type} coincidió con el trigger '{trigger_name}'.",
@@ -160,7 +155,6 @@ class NotificationService:
                 )
             elif channel == "slack":
                 await self._send_slack_notification(
-                    tenant_id=tenant_id,
                     title=f"🔔 Trigger activado: {trigger_name}",
                     body=f"Evento `{event.event_type}` coincidió con el trigger '{trigger_name}'.",
                     priority="normal",
@@ -169,7 +163,6 @@ class NotificationService:
 
     async def send_trigger_result(
         self,
-        tenant_id: str,
         trigger_name: str,
         execution: Dict[str, Any],
         channels: List[str],
@@ -181,7 +174,6 @@ class NotificationService:
         for channel in channels:
             if channel == "in_app":
                 await self.create_notification(
-                    tenant_id=tenant_id,
                     user_id="system",
                     title=f"{emoji} Resultado: {trigger_name}",
                     body=f"Trigger '{trigger_name}' completado con estado: {status}",
@@ -198,7 +190,6 @@ class NotificationService:
                             json={
                                 "subject": f"Emma: {trigger_name} — {status}",
                                 "body": f"Trigger execution {status}",
-                                "tenant_id": tenant_id,
                             },
                             headers={"X-API-Key": settings.MICROSERVICES_API_KEY},
                         )
@@ -208,7 +199,6 @@ class NotificationService:
             elif channel == "slack":
                 # Send to dedicated Slack notification channels
                 await self._send_slack_notification(
-                    tenant_id=tenant_id,
                     title=f"{emoji} Resultado: {trigger_name}",
                     body=f"Trigger '{trigger_name}' completado con estado: {status}",
                     priority="high" if status == "failed" else "normal",
@@ -217,8 +207,8 @@ class NotificationService:
 
     # ── Slack Integration ──────────────────────────────────────────────
 
-    async def _get_notification_channels(self, tenant_id: str, channel_type: str = "slack") -> List[Dict[str, Any]]:
-        """Get channels marked as notification channels for a tenant.
+    async def _get_notification_channels(self, channel_type: str = "slack") -> List[Dict[str, Any]]:
+        """Get channels marked as notification channels.
 
         Queries Redis directly to find channels with config.is_notification_channel=true.
         """
@@ -235,13 +225,13 @@ class NotificationService:
 
             fernet = Fernet(key.encode()) if key else None
 
-            # Query all channels for this tenant
+            # Query all channels (single-tenant: global index)
             CHANNELS_PREFIX = "emma:channels"
-            channel_ids = await r.smembers(f"{CHANNELS_PREFIX}:{tenant_id}:index")
+            channel_ids = await r.smembers(f"{CHANNELS_PREFIX}:index")
 
             notification_channels = []
             for cid in channel_ids:
-                data = await r.get(f"{CHANNELS_PREFIX}:{tenant_id}:{cid}")
+                data = await r.get(f"{CHANNELS_PREFIX}:{cid}")
                 if data:
                     ch = json.loads(data)
                     # Check if it's a notification channel of the right type
@@ -269,23 +259,22 @@ class NotificationService:
 
     async def _send_slack_notification(
         self,
-        tenant_id: str,
         title: str,
         body: str,
         priority: str = "normal",
         metadata: Optional[Dict[str, Any]] = None,
     ):
-        """Send a notification to all Slack notification channels for a tenant.
+        """Send a notification to all Slack notification channels.
 
         Finds channels marked with config.is_notification_channel=true and sends
         the notification to the configured default_channel (e.g., #emma-alerts).
         """
         from app.channels.slack_channel import SlackChannel
 
-        channels = await self._get_notification_channels(tenant_id, "slack")
+        channels = await self._get_notification_channels("slack")
 
         if not channels:
-            logger.debug(f"No Slack notification channels configured for tenant {tenant_id}")
+            logger.debug("No Slack notification channels configured")
             return
 
         for channel_data in channels:
@@ -333,7 +322,6 @@ class NotificationService:
 
     async def send_to_slack_channels(
         self,
-        tenant_id: str,
         title: str,
         body: str,
         priority: str = "normal",
@@ -344,7 +332,6 @@ class NotificationService:
         Use this for direct Slack notifications outside of trigger results.
         """
         await self._send_slack_notification(
-            tenant_id=tenant_id,
             title=title,
             body=body,
             priority=priority,

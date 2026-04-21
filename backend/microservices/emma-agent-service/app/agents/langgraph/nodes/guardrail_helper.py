@@ -35,7 +35,7 @@ async def apply_guardrails(
 
     Args:
         content: LLM-generated response text.
-        state: LangGraph state dict (needs 'sector', 'tenant_id').
+        state: LangGraph state dict (needs 'sector').
 
     Returns:
         (final_content, metadata_dict) where metadata_dict has:
@@ -57,12 +57,10 @@ async def apply_guardrails(
 
         service = get_guardrail_service()
         sector = state.get("sector")
-        tenant_id = state.get("tenant_id")
 
         result = await service.validate(
             content=content,
             agent_name="synthesize",
-            tenant_id=tenant_id,
             sector=sector,
         )
 

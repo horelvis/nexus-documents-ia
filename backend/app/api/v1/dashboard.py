@@ -8,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_, case
 from uuid import UUID
 
-from app.api.async_dependencies import get_current_user_async, get_current_tenant_id_async
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
 from app.db.async_database import get_async_db
-from app.db.models import User, Document, DocumentView, DocumentShare, IndexedDocument
+from app.db.models import User, Document, DocumentView, IndexedDocument
 from app.schemas.dashboard import (
     DashboardStats, 
     DocumentTrend, 
@@ -27,8 +28,7 @@ router = APIRouter()
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get aggregated dashboard statistics for the current tenant.
@@ -40,8 +40,6 @@ async def get_dashboard_stats(
     import logging
     logger = logging.getLogger(__name__)
 
-    tenant_uuid = UUID(tenant_id)
-
     # Get Document table statistics (direct uploads)
     doc_stats = await db.execute(
         select(
@@ -50,7 +48,7 @@ async def get_dashboard_stats(
             func.sum(case((Document.indexed == 0, 1), else_=0)).label('processing'),
             func.sum(case((Document.indexing_error != None, 1), else_=0)).label('error'),
             func.coalesce(func.sum(Document.file_size), 0).label('total_size')
-        ).where(Document.tenant_id == tenant_uuid)
+        )
     )
     doc_result = doc_stats.one()
 
@@ -62,7 +60,7 @@ async def get_dashboard_stats(
             func.sum(case((IndexedDocument.indexing_status.in_(['pending', 'processing']), 1), else_=0)).label('processing'),
             func.sum(case((IndexedDocument.indexing_status == 'failed', 1), else_=0)).label('error'),
             func.coalesce(func.sum(IndexedDocument.size_bytes), 0).label('total_size')
-        ).where(IndexedDocument.tenant_id == tenant_uuid)
+        )
     )
     indexed_result = indexed_doc_stats.one()
 
@@ -74,21 +72,16 @@ async def get_dashboard_stats(
     total_storage = (doc_result.total_size or 0) + (indexed_result.total_size or 0)
 
     logger.info(
-        f"Dashboard stats for tenant {tenant_id}: "
+        f"Dashboard stats: "
         f"documents={doc_result.total or 0} + indexed={indexed_result.total or 0} = {total_documents}, "
         f"storage={total_storage}"
     )
-    
+
     # Get active users (users who accessed documents in last 30 days)
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
     active_users_query = await db.execute(
         select(func.count(func.distinct(DocumentView.user_id)))
-        .where(
-            and_(
-                DocumentView.viewed_at >= thirty_days_ago,
-                DocumentView.tenant_id == tenant_uuid
-            )
-        )
+        .where(DocumentView.viewed_at >= thirty_days_ago)
     )
     active_users = active_users_query.scalar() or 0
 
@@ -98,24 +91,14 @@ async def get_dashboard_stats(
     # Recent from Document table
     recent_docs_query = await db.execute(
         select(func.count(Document.id))
-        .where(
-            and_(
-                Document.tenant_id == tenant_uuid,
-                Document.created_at >= seven_days_ago
-            )
-        )
+        .where(Document.created_at >= seven_days_ago)
     )
     recent_docs = recent_docs_query.scalar() or 0
 
     # Recent from IndexedDocument table
     recent_indexed_query = await db.execute(
         select(func.count(IndexedDocument.id))
-        .where(
-            and_(
-                IndexedDocument.tenant_id == tenant_uuid,
-                IndexedDocument.created_at >= seven_days_ago
-            )
-        )
+        .where(IndexedDocument.created_at >= seven_days_ago)
     )
     recent_indexed = recent_indexed_query.scalar() or 0
     recent_uploads = recent_docs + recent_indexed
@@ -129,7 +112,6 @@ async def get_dashboard_stats(
         select(func.count(Document.id))
         .where(
             and_(
-                Document.tenant_id == tenant_uuid,
                 Document.created_at >= fourteen_days_ago,
                 Document.created_at < seven_days_ago
             )
@@ -142,7 +124,6 @@ async def get_dashboard_stats(
         select(func.count(IndexedDocument.id))
         .where(
             and_(
-                IndexedDocument.tenant_id == tenant_uuid,
                 IndexedDocument.created_at >= fourteen_days_ago,
                 IndexedDocument.created_at < seven_days_ago
             )
@@ -162,23 +143,13 @@ async def get_dashboard_stats(
     # Storage trend (compare total size growth) - from both tables
     storage_week_ago_docs = await db.execute(
         select(func.coalesce(func.sum(Document.file_size), 0))
-        .where(
-            and_(
-                Document.tenant_id == tenant_uuid,
-                Document.created_at < seven_days_ago
-            )
-        )
+        .where(Document.created_at < seven_days_ago)
     )
     prev_docs_storage = storage_week_ago_docs.scalar() or 0
 
     storage_week_ago_indexed = await db.execute(
         select(func.coalesce(func.sum(IndexedDocument.size_bytes), 0))
-        .where(
-            and_(
-                IndexedDocument.tenant_id == tenant_uuid,
-                IndexedDocument.created_at < seven_days_ago
-            )
-        )
+        .where(IndexedDocument.created_at < seven_days_ago)
     )
     prev_indexed_storage = storage_week_ago_indexed.scalar() or 0
 
@@ -196,8 +167,7 @@ async def get_dashboard_stats(
         .where(
             and_(
                 DocumentView.viewed_at >= sixty_days_ago,
-                DocumentView.viewed_at < thirty_days_ago,
-                DocumentView.tenant_id == tenant_uuid
+                DocumentView.viewed_at < thirty_days_ago
             )
         )
     )
@@ -238,20 +208,17 @@ async def get_dashboard_stats(
 async def get_recent_activity(
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
-    Get recent activity logs for the tenant
+    Get recent activity logs
     """
-    tenant_uuid = UUID(tenant_id)
     activities: List[ActivityLog] = []
-    
+
     # Get recent document uploads
     recent_docs = await db.execute(
         select(Document, User)
         .join(User, Document.created_by == User.id)
-        .where(Document.tenant_id == tenant_uuid)
         .order_by(Document.created_at.desc())
         .limit(limit // 3)
     )
@@ -277,7 +244,6 @@ async def get_recent_activity(
         select(DocumentView, Document, User)
         .join(Document, DocumentView.document_id == Document.id)
         .join(User, DocumentView.user_id == User.id)
-        .where(DocumentView.tenant_id == tenant_uuid)
         .order_by(DocumentView.viewed_at.desc())
         .limit(limit // 3)
     )
@@ -297,33 +263,11 @@ async def get_recent_activity(
             }
         ))
     
-    # Get recent document shares
-    recent_shares = await db.execute(
-        select(DocumentShare, Document, User)
-        .join(Document, DocumentShare.document_id == Document.id)
-        .join(User, DocumentShare.created_by == User.id)
-        .where(DocumentShare.tenant_id == tenant_uuid)
-        .order_by(DocumentShare.created_at.desc())
-        .limit(limit // 3)
-    )
-    
-    for share, doc, user in recent_shares:
-        activities.append(ActivityLog(
-            id=str(share.id),
-            type="document_share",
-            title="Document shared",
-            description=doc.filename,
-            user_name=user.full_name or user.email,
-            user_email=user.email,
-            timestamp=share.created_at,
-            metadata={
-                "document_id": str(doc.id),
-                "filename": doc.filename,
-                "share_type": share.share_type,
-                "recipient": share.recipient_email
-            }
-        ))
-    
+    # Note: recent "document shares" activity dropped — the DocumentShare
+    # model was removed when multi-tenant sharing was replaced with the
+    # role-based ACL (`Document.roles`). Per-user sharing as an explicit
+    # feature no longer exists; ACL is implicit via KeyCloak roles.
+
     # Sort all activities by timestamp
     activities.sort(key=lambda x: x.timestamp, reverse=True)
     
@@ -337,14 +281,11 @@ async def get_recent_activity(
 async def get_analytics_trends(
     period: str = Query("7d", regex="^(7d|30d|90d)$"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get analytics trends for the specified period
     """
-    tenant_uuid = UUID(tenant_id)
-    
     # Determine date range
     days = {"7d": 7, "30d": 30, "90d": 90}[period]
     start_date = datetime.utcnow() - timedelta(days=days)
@@ -355,12 +296,7 @@ async def get_analytics_trends(
             func.date(Document.created_at).label('date'),
             func.count(Document.id).label('count')
         )
-        .where(
-            and_(
-                Document.tenant_id == tenant_uuid,
-                Document.created_at >= start_date
-            )
-        )
+        .where(Document.created_at >= start_date)
         .group_by(func.date(Document.created_at))
         .order_by(func.date(Document.created_at))
     )
@@ -371,12 +307,7 @@ async def get_analytics_trends(
             func.date(IndexedDocument.created_at).label('date'),
             func.count(IndexedDocument.id).label('count')
         )
-        .where(
-            and_(
-                IndexedDocument.tenant_id == tenant_uuid,
-                IndexedDocument.created_at >= start_date
-            )
-        )
+        .where(IndexedDocument.created_at >= start_date)
         .group_by(func.date(IndexedDocument.created_at))
         .order_by(func.date(IndexedDocument.created_at))
     )
@@ -395,28 +326,18 @@ async def get_analytics_trends(
             func.date(DocumentView.viewed_at).label('date'),
             func.count(DocumentView.id).label('count')
         )
-        .where(
-            and_(
-                DocumentView.tenant_id == tenant_uuid,
-                DocumentView.viewed_at >= start_date
-            )
-        )
+        .where(DocumentView.viewed_at >= start_date)
         .group_by(func.date(DocumentView.viewed_at))
         .order_by(func.date(DocumentView.viewed_at))
     )
-    
+
     # Get storage growth - from Document table
     storage_docs = await db.execute(
         select(
             func.date(Document.created_at).label('date'),
             func.coalesce(func.sum(Document.file_size), 0).label('size')
         )
-        .where(
-            and_(
-                Document.tenant_id == tenant_uuid,
-                Document.created_at >= start_date
-            )
-        )
+        .where(Document.created_at >= start_date)
         .group_by(func.date(Document.created_at))
         .order_by(func.date(Document.created_at))
     )
@@ -427,12 +348,7 @@ async def get_analytics_trends(
             func.date(IndexedDocument.created_at).label('date'),
             func.coalesce(func.sum(IndexedDocument.size_bytes), 0).label('size')
         )
-        .where(
-            and_(
-                IndexedDocument.tenant_id == tenant_uuid,
-                IndexedDocument.created_at >= start_date
-            )
-        )
+        .where(IndexedDocument.created_at >= start_date)
         .group_by(func.date(IndexedDocument.created_at))
         .order_by(func.date(IndexedDocument.created_at))
     )
@@ -457,12 +373,7 @@ async def get_analytics_trends(
             func.count(DocumentView.id).label('view_count')
         )
         .join(DocumentView, Document.id == DocumentView.document_id)
-        .where(
-            and_(
-                Document.tenant_id == tenant_uuid,
-                DocumentView.viewed_at >= start_date
-            )
-        )
+        .where(DocumentView.viewed_at >= start_date)
         .group_by(Document.id, Document.filename)
         .order_by(func.count(DocumentView.id).desc())
         .limit(5)
@@ -492,24 +403,17 @@ async def get_analytics_trends(
 @router.get("/insights/ai", response_model=AIInsightsResponse)
 async def get_ai_insights(
     db: AsyncSession = Depends(get_async_db),
-    current_user: User = Depends(get_current_user_async),
-    tenant_id: str = Depends(get_current_tenant_id_async)
+    current_user: UserProfile = Depends(get_current_user_async),
 ):
     """
     Get AI-powered insights and recommendations
     """
-    tenant_uuid = UUID(tenant_id)
     insights: List[AIInsight] = []
-    
+
     # Check for uncategorized documents
     uncategorized = await db.execute(
         select(func.count(Document.id))
-        .where(
-            and_(
-                Document.tenant_id == tenant_uuid,
-                or_(Document.category == None, Document.category == '')
-            )
-        )
+        .where(or_(Document.category == None, Document.category == ''))
     )
     uncategorized_count = uncategorized.scalar() or 0
     
@@ -519,7 +423,7 @@ async def get_ai_insights(
             priority="medium",
             title=f"{uncategorized_count} documents need categorization",
             description="Organize your recent uploads for better search results",
-            action_url=f"/{tenant_id}/documents?filter=uncategorized",
+            action_url="/documents?filter=uncategorized",
             action_text="Categorize Now"
         ))
     
@@ -529,7 +433,6 @@ async def get_ai_insights(
         select(func.count(Document.id))
         .where(
             and_(
-                Document.tenant_id == tenant_uuid,
                 Document.mime_type == 'application/pdf',
                 or_(
                     Document.description == None,
@@ -547,7 +450,7 @@ async def get_ai_insights(
             priority="high",
             title="Contract analysis available",
             description=f"{contract_count} contracts can be analyzed for key terms and dates",
-            action_url=f"/{tenant_id}/agents?type=contract_analyzer",
+            action_url="/agents?type=contract_analyzer",
             action_text="Analyze Contracts"
         ))
     
@@ -557,7 +460,6 @@ async def get_ai_insights(
         select(func.count(Document.id))
         .where(
             and_(
-                Document.tenant_id == tenant_uuid,
                 Document.file_size > 1024 * 1024,  # Files larger than 1MB
                 or_(Document.description == None, Document.description == '')
             )
@@ -571,35 +473,14 @@ async def get_ai_insights(
             priority="low",
             title="Enable smart summaries",
             description="Get AI-generated summaries for long documents",
-            action_url=f"/{tenant_id}/settings/ai",
+            action_url="/settings/ai",
             action_text="Enable Feature"
         ))
     
-    # Check for expiring shared documents
-    expiring_shares = await db.execute(
-        select(func.count(DocumentShare.id))
-        .where(
-            and_(
-                DocumentShare.tenant_id == tenant_uuid,
-                DocumentShare.is_active == True,
-                DocumentShare.expires_at != None,
-                DocumentShare.expires_at <= datetime.utcnow() + timedelta(days=7),
-                DocumentShare.expires_at > datetime.utcnow()
-            )
-        )
-    )
-    expiring_count = expiring_shares.scalar() or 0
-    
-    if expiring_count > 0:
-        insights.append(AIInsight(
-            type="warning",
-            priority="high",
-            title=f"{expiring_count} shared links expiring soon",
-            description="Review and extend access for important shared documents",
-            action_url=f"/{tenant_id}/shared?filter=expiring",
-            action_text="Review Shares"
-        ))
-    
+    # Note: the expiring-shared-documents AI insight was dropped because
+    # DocumentShare is gone. Equivalent ACL insights (e.g. "N documents
+    # visible only to role X") could be reintroduced in a later feature.
+
     return AIInsightsResponse(
         insights=insights,
         generated_at=datetime.utcnow()

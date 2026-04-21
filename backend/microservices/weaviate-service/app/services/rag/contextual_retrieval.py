@@ -32,7 +32,6 @@ Usage:
         document_id="doc-123",
         text=document_text,
         metadata={"document_type": "contrato_laboral"},
-        tenant_id="tenant-abc"
     )
 
     # Apply context to chunks
@@ -817,8 +816,7 @@ class ContextualRetrievalService:
         document_id: str,
         text: str,
         metadata: Optional[Dict[str, Any]] = None,
-        tenant_id: Optional[str] = None,
-        use_llm: bool = False
+        use_llm: bool = False,
     ) -> ContextGenerationResult:
         """
         Analyze a document and generate contextual information.
@@ -827,7 +825,6 @@ class ContextualRetrievalService:
             document_id: Document identifier
             text: Full document text
             metadata: Document metadata
-            tenant_id: Tenant identifier
             use_llm: Whether to use LLM for enhanced analysis
 
         Returns:
@@ -1055,8 +1052,7 @@ async def contextualize_document(
     text: str,
     chunks: List[Any],
     metadata: Optional[Dict[str, Any]] = None,
-    tenant_id: Optional[str] = None,
-    use_llm: bool = False
+    use_llm: bool = False,
 ) -> Tuple[ContextGenerationResult, List[ContextualizedChunk]]:
     """
     Convenience function to analyze and contextualize a document in one step.
@@ -1066,7 +1062,6 @@ async def contextualize_document(
         text: Full document text
         chunks: Pre-chunked document
         metadata: Document metadata
-        tenant_id: Tenant identifier
         use_llm: Whether to use LLM for enhanced analysis
 
     Returns:
@@ -1076,8 +1071,7 @@ async def contextualize_document(
         document_id=document_id,
         text=text,
         metadata=metadata,
-        tenant_id=tenant_id,
-        use_llm=use_llm
+        use_llm=use_llm,
     )
 
     contextualized_chunks = contextual_retrieval.apply_context_to_chunks(

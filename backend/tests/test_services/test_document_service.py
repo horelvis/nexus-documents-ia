@@ -23,16 +23,14 @@ def mock_db_session():
     return session
 
 @pytest.fixture
-def document_service_instance(mock_db_session, test_tenant): # Added test_tenant for tenant_id
+def document_service_instance(mock_db_session):
     """Provides a DocumentService instance with mocked dependencies."""
-    # Mock dependencies of DocumentService if they are called by the methods under test
-    # For _validate_file and _create_document_record, storage_service, embedding_service
-    # are not directly called.
-    service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(uuid4()))
-    # If these services were used, you would mock them:
-    # service.storage_service = MagicMock()
-    # service.embedding_service = MagicMock()
-    # Additional services can be mocked here if needed
+    # Mock a UserProfile-like object for the service
+    mock_user = MagicMock()
+    mock_user.sub = str(uuid4())
+    mock_user.roles = ["ADMIN"]
+    mock_user.email = "test@example.com"
+    service = DocumentService(user=mock_user)
     return service
 
 # --- Tests for _validate_file ---
@@ -137,7 +135,7 @@ def test_create_document_record_success(document_service_instance, mock_db_sessi
 
     # Mocking behavior for Tag lookups
     # This mock simulates that 'tag1' exists and 'new_tag' does not.
-    existing_tag_obj = Tag(id=uuid4(), name="tag1", tenant_id=UUID(document_service_instance.tenant_id))
+    existing_tag_obj = Tag(id=uuid4(), name="tag1")
     
     def query_side_effect(model_class):
         query_mock = MagicMock()
@@ -180,8 +178,7 @@ def test_create_document_record_success(document_service_instance, mock_db_sessi
     assert db_document.filename == filename, f"Expected filename '{filename}', got '{db_document.filename}'"
     assert db_document.file_type == file_ext, f"Expected file_type '{file_ext}', got '{db_document.file_type}'"
     assert db_document.file_size == file_size, f"Expected file_size {file_size}, got {db_document.file_size}"
-    assert db_document.tenant_id == UUID(document_service_instance.tenant_id), "Tenant ID mismatch"
-    assert db_document.created_by == UUID(document_service_instance.user_id), "User ID mismatch"
+    assert db_document.created_by == UUID(document_service_instance.user.sub), "User ID mismatch"
     assert db_document.indexed == IndexingStatus.PROCESSING, f"Expected indexing status PROCESSING, got {db_document.indexed}"
     assert filename in db_document.file_path, f"Filename '{filename}' not in file_path '{db_document.file_path}'"
     assert str(db_document.id) in db_document.file_path, f"Document ID '{db_document.id}' not in file_path '{db_document.file_path}'"
@@ -244,57 +241,68 @@ def test_create_document_record_no_tags(document_service_instance, mock_db_sessi
 
 # --- Tests for public methods using real DB session via `db` fixture ---
 
-def test_get_documents(db: Session, test_documents, test_tenant): # Type hint db for clarity
+def _make_mock_user(user_id: str = None, roles: list = None):
+    """Helper to create a mock UserProfile for DocumentService."""
+    mock_user = MagicMock()
+    mock_user.sub = user_id or str(uuid4())
+    mock_user.roles = roles or ["ADMIN"]
+    mock_user.email = "test@example.com"
+    return mock_user
+
+
+def test_get_documents(db: Session, test_documents):
     """Test retrieving a list of documents."""
     # Arrange
-    # test_documents fixture already populates data using the same db session
-    document_service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(test_documents[0].created_by))
-    
+    mock_user = _make_mock_user(user_id=str(test_documents[0].created_by))
+    document_service = DocumentService(user=mock_user)
+
     # Act
-    result = document_service.get_documents(db=db, page=1, per_page=10) # Pass db session
-    
+    result = document_service.get_documents(db=db, page=1, per_page=10)
+
     # Assert
     assert "documents" in result, "Result should contain 'documents' key"
     assert "pagination" in result, "Result should contain 'pagination' key"
     assert len(result["documents"]) == 3, f"Expected 3 documents, got {len(result['documents'])}"
     assert result["pagination"]["total"] == 3, f"Expected pagination total 3, got {result['pagination']['total']}"
-    
+
     # Test pagination
-    result_pagination = document_service.get_documents(db=db, page=1, per_page=2) # Pass db session
+    result_pagination = document_service.get_documents(db=db, page=1, per_page=2)
     assert len(result_pagination["documents"]) == 2, f"Expected 2 documents for per_page=2, got {len(result_pagination['documents'])}"
     assert result_pagination["pagination"]["total"] == 3, f"Expected pagination total 3, got {result_pagination['pagination']['total']}"
     assert result_pagination["pagination"]["pages"] == 2, f"Expected 2 pages, got {result_pagination['pagination']['pages']}"
 
-def test_get_documents_with_filters(db: Session, test_documents, test_tags, test_tenant):
+def test_get_documents_with_filters(db: Session, test_documents, test_tags):
     """Test retrieving documents with various filters."""
     # Arrange
-    document_service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(test_documents[0].created_by))
-    
+    mock_user = _make_mock_user(user_id=str(test_documents[0].created_by))
+    document_service = DocumentService(user=mock_user)
+
     # Act: Filter by tag
     tag_to_filter = test_tags[0].name
-    result_tag_filter = document_service.get_documents(db=db, tags=[tag_to_filter]) # Pass db session
-    
+    result_tag_filter = document_service.get_documents(db=db, tags=[tag_to_filter])
+
     # Assert: Tag filter
     assert len(result_tag_filter["documents"]) > 0, f"Expected documents when filtering by tag '{tag_to_filter}', got none."
     for doc_dict in result_tag_filter["documents"]:
         assert tag_to_filter in doc_dict["tags"], f"Document {doc_dict['id']} should have tag '{tag_to_filter}'"
-    
+
     # Act: Filter by date (expecting no documents as date is current)
     from_date = datetime.utcnow().isoformat()
-    result_date_filter = document_service.get_documents(db=db, date_from=from_date) # Pass db session
-    
+    result_date_filter = document_service.get_documents(db=db, date_from=from_date)
+
     # Assert: Date filter
     assert len(result_date_filter["documents"]) == 0, f"Expected 0 documents when filtering from_date='{from_date}', got {len(result_date_filter['documents'])}"
 
-def test_get_document(db: Session, test_documents, test_tenant):
+def test_get_document(db: Session, test_documents):
     """Test retrieving a specific document by its ID."""
     # Arrange
-    document_service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(test_documents[0].created_by))
-    doc_to_get = test_documents[0] # Assuming this doc has 2 chunks from fixture setup
-    
+    mock_user = _make_mock_user(user_id=str(test_documents[0].created_by))
+    document_service = DocumentService(user=mock_user)
+    doc_to_get = test_documents[0]
+
     # Act
-    result = document_service.get_document(db=db, doc_id=str(doc_to_get.id)) # Pass db session
-    
+    result = document_service.get_document(db=db, doc_id=str(doc_to_get.id))
+
     # Assert
     assert result["id"] == str(doc_to_get.id), f"Expected document ID {doc_to_get.id}, got {result['id']}"
     assert result["title"] == doc_to_get.title, f"Expected title '{doc_to_get.title}', got '{result['title']}'"
@@ -304,58 +312,61 @@ def test_get_document(db: Session, test_documents, test_tenant):
     assert "Content for document 1, chunk 1" in result["preview_chunks"][0]["content"], "Preview chunk content mismatch"
 
 
-def test_add_and_remove_tag(db: Session, test_documents, test_tenant):
+def test_add_and_remove_tag(db: Session, test_documents):
     """Test adding and then removing a tag from a document."""
     # Arrange
-    document_service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(test_documents[0].created_by))
+    mock_user = _make_mock_user(user_id=str(test_documents[0].created_by))
+    document_service = DocumentService(user=mock_user)
     doc_id_str = str(test_documents[0].id)
     tag_name_to_manage = "new-unique-test-tag"
 
     # Act: Add tag
-    result_add = document_service.add_tag(db=db, doc_id=doc_id_str, tag_name=tag_name_to_manage) # Pass db session
+    result_add = document_service.add_tag(db=db, doc_id=doc_id_str, tag_name=tag_name_to_manage)
     # Assert: Add tag
     assert "message" in result_add, "Add tag response should contain 'message' key"
     assert f"Tag '{tag_name_to_manage}' added to document {doc_id_str}" in result_add["message"], f"Expected add success message for tag '{tag_name_to_manage}' on doc {doc_id_str}, got '{result_add['message']}'"
-    
+
     # Act: Verify tag was added
-    doc_after_add = document_service.get_document(db=db, doc_id=doc_id_str) # Pass db session
+    doc_after_add = document_service.get_document(db=db, doc_id=doc_id_str)
     # Assert: Tag presence
     assert tag_name_to_manage in doc_after_add["tags"], f"Tag '{tag_name_to_manage}' should be in document tags after adding"
-    
+
     # Act: Remove tag
-    result_remove = document_service.remove_tag(db=db, doc_id=doc_id_str, tag_name=tag_name_to_manage) # Pass db session
+    result_remove = document_service.remove_tag(db=db, doc_id=doc_id_str, tag_name=tag_name_to_manage)
     # Assert: Remove tag
     assert "message" in result_remove, "Remove tag response should contain 'message' key"
     assert f"Tag '{tag_name_to_manage}' removed from document {doc_id_str}" in result_remove["message"], f"Expected remove success message for tag '{tag_name_to_manage}' on doc {doc_id_str}, got '{result_remove['message']}'"
-    
+
     # Act: Verify tag was removed
-    doc_after_remove = document_service.get_document(db=db, doc_id=doc_id_str) # Pass db session
+    doc_after_remove = document_service.get_document(db=db, doc_id=doc_id_str)
     # Assert: Tag absence
     assert tag_name_to_manage not in doc_after_remove["tags"], f"Tag '{tag_name_to_manage}' should not be in document tags after removal"
 
-def test_generate_summary(db: Session, test_documents, test_tenant):
+def test_generate_summary(db: Session, test_documents):
     """Test generating a summary for a document."""
     # Arrange
-    document_service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(test_documents[0].created_by))
+    mock_user = _make_mock_user(user_id=str(test_documents[0].created_by))
+    document_service = DocumentService(user=mock_user)
     doc_id_str = str(test_documents[0].id)
-    
+
     # Act
-    result = document_service.generate_summary(db=db, doc_id=doc_id_str) # Pass db session
-    
+    result = document_service.generate_summary(db=db, doc_id=doc_id_str)
+
     # Assert
     assert "summary" in result, "Generate summary response should contain 'summary' key"
     assert result["summary"], "Summary should not be empty"
 
-def test_get_signed_download_url(db: Session, test_documents, test_tenant, mock_storage_service):
+def test_get_signed_download_url(db: Session, test_documents, mock_storage_service):
     """Test obtaining a signed URL for document download."""
     # Arrange
-    document_service = DocumentService(tenant_id=str(test_tenant.id), user_id=str(test_documents[0].created_by))
-    document_service.storage_service = mock_storage_service # Inject mock
+    mock_user = _make_mock_user(user_id=str(test_documents[0].created_by))
+    document_service = DocumentService(user=mock_user)
+    document_service.storage_service = mock_storage_service  # Inject mock
     doc_to_download = test_documents[0]
-    
+
     # Act
-    result = document_service.get_signed_download_url(db=db, doc_id=str(doc_to_download.id)) # Pass db session
-    
+    result = document_service.get_signed_download_url(db=db, doc_id=str(doc_to_download.id))
+
     # Assert
     assert "url" in result, "Download URL response should contain 'url' key"
     assert "expires_at" in result, "Download URL response should contain 'expires_at' key"
@@ -365,20 +376,19 @@ def test_get_signed_download_url(db: Session, test_documents, test_tenant, mock_
     assert doc_to_download.filename in result["url"], f"Expected original filename '{doc_to_download.filename}' in URL path, got '{result['url']}'"
 
 
-def test_get_signed_upload_url(db: Session, test_tenant, mock_storage_service): # Assuming user_id not strictly needed if not interacting with user-specific data
+def test_get_signed_upload_url(db: Session, mock_storage_service):
     """Test obtaining a signed URL for document upload."""
     # Arrange
-    user_id_for_service = str(uuid4()) # Generate a dummy user_id if required by constructor
-    document_service = DocumentService(tenant_id=str(test_tenant.id), user_id=user_id_for_service)
-    document_service.storage_service = mock_storage_service # Inject mock
-    
+    mock_user = _make_mock_user()
+    document_service = DocumentService(user=mock_user)
+    document_service.storage_service = mock_storage_service  # Inject mock
+
     # Act
     result = document_service.get_signed_upload_url(
         filename="test-upload.txt",
         content_type="text/plain"
-        # size is not used by the service method, so removed from here
     )
-    
+
     # Assert
     assert "upload_url" in result, "Upload URL response should contain 'upload_url' key"
     assert "expires_at" in result, "Upload URL response should contain 'expires_at' key"
@@ -388,20 +398,21 @@ def test_get_signed_upload_url(db: Session, test_tenant, mock_storage_service): 
     assert "documents/" in result["file_path"], f"Expected 'documents/' in file_path, got '{result['file_path']}'"
     assert "test-upload.txt" in result["file_path"], f"Expected 'test-upload.txt' in file_path, got '{result['file_path']}'"
 
-def test_extract_text_methods(db: Session, test_tenant): # Assuming user_id not strictly needed
+def test_extract_text_methods(db: Session):
     """Test internal text extraction methods for different file types."""
     # Arrange
-    document_service = DocumentService(tenant_id=str(test_tenant.id)) # user_id might not be needed for _extract_text
-    
+    mock_user = _make_mock_user()
+    document_service = DocumentService(user=mock_user)
+
     # Test TXT extraction
     txt_content = b"Este es un archivo de texto simple para pruebas."
     txt_file = io.BytesIO(txt_content)
-    
+
     # Act
     txt_text = document_service._extract_text(txt_file, "txt")
-    
+
     # Assert
     assert txt_text.strip() == txt_content.decode().strip(), "Extracted TXT content does not match original"
-    
+
     # Note: Tests for PDF, DOCX, CSV, and Excel would require actual files
-    # o mocks más complejos de sus respectivas bibliotecas
+    # o mocks mas complejos de sus respectivas bibliotecas

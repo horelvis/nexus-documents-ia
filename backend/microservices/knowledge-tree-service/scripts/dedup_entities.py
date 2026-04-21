@@ -11,7 +11,6 @@ DRY RUN by default — use --apply to execute merges.
 Usage:
     docker compose exec knowledge-tree-service python scripts/dedup_entities.py
     docker compose exec knowledge-tree-service python scripts/dedup_entities.py --apply
-    docker compose exec knowledge-tree-service python scripts/dedup_entities.py --tenant-id UUID
 """
 
 import argparse
@@ -24,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.core.auth_headers import EVERYONE_ROLE
 from app.services.falkordb_client import FalkorDBClient
 from app.services.uri_builder import URIBuilder
 
@@ -36,11 +36,10 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 
-async def find_duplicates(client: FalkorDBClient, tenant_id: str | None) -> list:
+async def find_duplicates(client: FalkorDBClient) -> list:
     """Find entity nodes that resolve to the same canonical name."""
-    user_filter = f"AND n.user = '{tenant_id}'" if tenant_id else ""
     query = (
-        f"MATCH (n:Node) WHERE n.uri STARTS WITH 'nouxcube://entity/' {user_filter} "
+        "MATCH (n:Node) WHERE n.uri STARTS WITH 'nouxcube://entity/' "
         "RETURN n.uri AS uri, n.created_at AS created_at"
     )
     rows = await client.execute_cypher(query)
@@ -114,12 +113,12 @@ async def merge_group(
     return stats
 
 
-async def run(tenant_id: str | None, apply: bool, output_json: str | None) -> dict:
+async def run(apply: bool, output_json: str | None) -> dict:
     client = FalkorDBClient()
     await client.initialize()
 
     try:
-        groups = await find_duplicates(client, tenant_id)
+        groups = await find_duplicates(client)
         print(f"\n  Found {len(groups)} duplicate groups\n")
 
         total_stats = {"groups": len(groups), "merged": 0}
@@ -131,7 +130,7 @@ async def run(tenant_id: str | None, apply: bool, output_json: str | None) -> di
             if apply:
                 await merge_group(
                     client, group,
-                    user=tenant_id or "_system",
+                    user=EVERYONE_ROLE,
                     collection="default",
                 )
                 total_stats["merged"] += 1
@@ -155,7 +154,6 @@ async def run(tenant_id: str | None, apply: bool, output_json: str | None) -> di
 def main():
     parser = argparse.ArgumentParser(description="Entity deduplication for TrustGraph")
     parser.add_argument("--apply", action="store_true", help="Execute merges (default is dry-run)")
-    parser.add_argument("--tenant-id", type=str, default=None, help="Filter by tenant ID")
     parser.add_argument("--output", type=str, default=None, help="Write duplicate groups to JSON file")
     args = parser.parse_args()
 
@@ -164,7 +162,7 @@ def main():
     print(f"Entity Deduplication — {mode}")
     print(f"{'=' * 60}")
 
-    stats = asyncio.run(run(args.tenant_id, args.apply, args.output))
+    stats = asyncio.run(run(args.apply, args.output))
 
     print(f"\n{'=' * 60}")
     print(f"Groups: {stats['groups']}, Merged: {stats['merged']}")

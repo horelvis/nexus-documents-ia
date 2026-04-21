@@ -11,7 +11,6 @@ from . import preview_tasks
 from . import channel_tasks
 from . import connector_tasks
 from . import verification_tasks
-from . import router_tasks  # NexusRouter training tasks
 
 __all__ = [
     "email_tasks",
@@ -20,5 +19,4 @@ __all__ = [
     "channel_tasks",
     "connector_tasks",
     "verification_tasks",
-    "router_tasks",
 ]

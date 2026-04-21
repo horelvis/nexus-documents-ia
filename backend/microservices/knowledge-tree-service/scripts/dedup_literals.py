@@ -11,9 +11,6 @@ Usage:
 
     docker compose exec knowledge-tree-service \
         python scripts/dedup_literals.py --dry-run
-
-    docker compose exec knowledge-tree-service \
-        python scripts/dedup_literals.py --tenant-id TENANT_ID
 """
 
 import argparse
@@ -37,16 +34,12 @@ UNIQUE_PREDICATES = [
 ]
 
 
-async def find_duplicates(client: FalkorDBClient, predicate: str, user: str | None):
+async def find_duplicates(client: FalkorDBClient, predicate: str):
     """Find subjects with multiple Literals for the given predicate."""
-    user_filter = "AND r.user = $user" if user else ""
     params = {"p_uri": predicate}
-    if user:
-        params["user"] = user
 
     query = (
         "MATCH (s:Node)-[r:Rel {uri: $p_uri}]->(lit:Literal) "
-        f"WHERE true {user_filter} "
         "WITH s, collect(lit) AS lits, collect(r) AS rels "
         "WHERE size(lits) > 1 "
         "RETURN s.uri AS subject, "
@@ -58,16 +51,11 @@ async def find_duplicates(client: FalkorDBClient, predicate: str, user: str | No
 
 
 async def delete_duplicate_literals(
-    client: FalkorDBClient, predicate: str, user: str | None, dry_run: bool
+    client: FalkorDBClient, predicate: str, dry_run: bool
 ):
     """For each subject with duplicates, keep shortest value, delete rest."""
-    user_filter = "AND r.user = $user" if user else ""
-    params = {"p_uri": predicate}
-    if user:
-        params["user"] = user
-
     # Find all subjects with >1 literal for this predicate
-    duplicates = await find_duplicates(client, predicate, user)
+    duplicates = await find_duplicates(client, predicate)
     if not duplicates:
         logger.info("  No duplicates found for %s", predicate)
         return 0
@@ -96,14 +84,10 @@ async def delete_duplicate_literals(
         # Delete the duplicate Rel edges and orphaned Literal nodes
         for val in remove:
             del_params = {"s_uri": subject, "p_uri": predicate, "val": val}
-            if user:
-                del_params["user"] = user
-            user_filter_del = "AND r.user = $user" if user else ""
 
             # Delete the Rel edge
             await client.execute_cypher(
                 "MATCH (s:Node {uri: $s_uri})-[r:Rel {uri: $p_uri}]->(lit:Literal {value: $val}) "
-                f"WHERE true {user_filter_del} "
                 "DELETE r",
                 del_params,
             )
@@ -123,7 +107,6 @@ async def delete_duplicate_literals(
 async def main():
     parser = argparse.ArgumentParser(description="Deduplicate TrustGraph definition/label Literals")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be deleted without deleting")
-    parser.add_argument("--tenant-id", help="Filter by tenant/user ID (default: all tenants)")
     args = parser.parse_args()
 
     client = FalkorDBClient()
@@ -134,7 +117,7 @@ async def main():
         for pred in UNIQUE_PREDICATES:
             pred_name = pred.split("/")[-1]
             logger.info("Processing predicate: %s", pred_name)
-            removed = await delete_duplicate_literals(client, pred, args.tenant_id, args.dry_run)
+            removed = await delete_duplicate_literals(client, pred, args.dry_run)
             total += removed
             logger.info("  %s: removed %d duplicates", pred_name, removed)
 

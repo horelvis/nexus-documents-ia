@@ -7,11 +7,10 @@ import { useRouter } from "next/navigation"
 import { useAuth, useUser } from "@clerk/nextjs"
 
 interface TenantNotFoundProps {
-  tenantId?: string
   onRetry?: () => void
 }
 
-export function TenantNotFound({ tenantId, onRetry }: TenantNotFoundProps) {
+export function TenantNotFound({ onRetry }: TenantNotFoundProps) {
   const router = useRouter()
   const { signOut } = useAuth()
   const { user } = useUser()
@@ -38,8 +37,7 @@ Hi Support Team,
 I'm experiencing an issue accessing my tenant organization. Here are the details:
 
 - User Email: ${user?.emailAddresses[0]?.emailAddress}
-- Tenant ID: ${tenantId || 'Unknown'}
-- Error: Invalid or default tenant ID detected
+- Error: Organization setup issue detected
 - Time: ${new Date().toISOString()}
 
 Please help me resolve this issue.
@@ -78,14 +76,6 @@ Thank you!
             </div>
           </div>
 
-          {tenantId && tenantId !== 'default' && (
-            <div className="p-3 bg-gray-100 rounded-lg">
-              <p className="text-xs text-gray-600">
-                <strong>Tenant ID:</strong> {tenantId}
-              </p>
-            </div>
-          )}
-
           <div className="space-y-2">
             <Button onClick={handleRetry} className="w-full" variant="default">
               <IconRefresh className="w-4 h-4 mr-2" />
@@ -105,7 +95,7 @@ Thank you!
           
           <div className="text-center">
             <p className="text-xs text-muted-foreground">
-              If this problem persists, please contact our support team with the tenant ID above.
+              If this problem persists, please contact our support team.
             </p>
           </div>
         </CardContent>

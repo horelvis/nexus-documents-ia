@@ -6,7 +6,6 @@ export interface Agent {
   name: string
   description?: string
   agent_type: 'virtual_assistant' | 'search_specialist' | 'document_analyst' | 'compliance_expert' | 'communication_specialist' | 'workflow_coordinator' | 'generic' | 'document_analyzer' | 'digital_signature' | 'rag_assistant' | 'contract_analyzer' | 'financial_analyzer' | 'legal_compliance'
-  tenant_id?: string
   created_by?: string
   created_at?: string
   updated_at?: string

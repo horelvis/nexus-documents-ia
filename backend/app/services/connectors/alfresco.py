@@ -754,7 +754,8 @@ class AlfrescoAdapter(ConnectorAdapter):
                 pass
 
         # Use owner from connector (service account = docs belong to admin)
-        owner_id = self._owner_id or self.tenant_id  # Fallback to tenant_id
+        # No fallback: in single-tenant mode the caller must provide owner_id.
+        owner_id = self._owner_id
 
         # Extract ALL custom properties (exp:*, pmreg:*, custom:*, etc.)
         # Exclude system properties (sys:*) and standard cm:* that are already mapped

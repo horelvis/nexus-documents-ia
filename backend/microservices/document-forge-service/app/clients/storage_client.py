@@ -1,7 +1,7 @@
 """HTTP client for Main API storage proxy (GCS upload/download)."""
 
 import logging
-from typing import Any
+from typing import Any, List, Optional
 
 import httpx
 
@@ -18,21 +18,30 @@ class StorageClient:
         self.base_url = settings.main_api_url
         self.api_key = settings.MICROSERVICES_API_KEY
 
-    def _headers(self, tenant_id: str = "") -> dict:
+    def _headers(
+        self,
+        user_roles: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
+    ) -> dict:
         h = {"X-API-Key": self.api_key}
-        if tenant_id:
-            h["X-Tenant-ID"] = tenant_id
+        if user_roles is not None:
+            h["X-User-Roles"] = ",".join(user_roles)
+        if user_id:
+            h["X-User-Id"] = user_id
         return h
 
     async def download_document(
-        self, file_path: str, tenant_id: str
+        self,
+        file_path: str,
+        user_roles: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
     ) -> bytes | None:
         """Download original document bytes from GCS via storage proxy."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.get(
                     f"{self.base_url}/api/v1/storage/proxy/{file_path}",
-                    headers=self._headers(tenant_id),
+                    headers=self._headers(user_roles, user_id),
                 )
                 if resp.status_code == 200:
                     return resp.content
@@ -49,7 +58,8 @@ class StorageClient:
         file_bytes: bytes,
         file_name: str,
         folder_path: str,
-        tenant_id: str,
+        user_roles: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
         content_type: str = "application/octet-stream",
     ) -> dict[str, Any] | None:
         """Upload document bytes to GCS via storage proxy."""
@@ -59,7 +69,7 @@ class StorageClient:
                     f"{self.base_url}/api/v1/storage/proxy/upload",
                     files={"file": (file_name, file_bytes, content_type)},
                     data={"folder_path": folder_path},
-                    headers=self._headers(tenant_id),
+                    headers=self._headers(user_roles, user_id),
                 )
                 if resp.status_code in (200, 201):
                     return resp.json()

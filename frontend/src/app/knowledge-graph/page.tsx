@@ -31,7 +31,7 @@ import { GraphCanvas2D } from "./components/GraphCanvas2D"
 import { NodeDetailsDrawer } from "./components/NodeDetailsDrawer"
 
 export default function KnowledgeGraphPage() {
-  const { isLoaded, isAuthenticated, tenantId } = useAuth()
+  const { isLoaded, isAuthenticated } = useAuth()
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -56,17 +56,16 @@ export default function KnowledgeGraphPage() {
 
   // ── Load data ──
   useEffect(() => {
-    if (isLoaded && isAuthenticated && tenantId) {
+    if (isLoaded && isAuthenticated) {
       if (initialEntity) {
         loadGraph([decodeURIComponent(initialEntity)])
       } else {
         loadGraph()
       }
     }
-  }, [isLoaded, isAuthenticated, tenantId, initialEntity]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isLoaded, isAuthenticated, initialEntity]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadGraph(seedUris?: string[]) {
-    if (!tenantId) return
     setIsLoading(true)
     setError(null)
     setSelectedNode(null)
@@ -76,7 +75,7 @@ export default function KnowledgeGraphPage() {
       // If no seeds provided, fetch top entities by degree centrality
       let seeds = seedUris ?? []
       if (seeds.length === 0) {
-        const topEntities = await knowledgeTreeApi.getTopEntities(tenantId, 5)
+        const topEntities = await knowledgeTreeApi.getTopEntities(5)
         seeds = topEntities.map((e) => e.uri)
       }
       if (seeds.length === 0) {
@@ -86,7 +85,7 @@ export default function KnowledgeGraphPage() {
         return
       }
       const response = await knowledgeTreeApi.getTripleNeighbors(
-        tenantId, seeds, 2, 150,
+        seeds, 2, 150,
         ['prov/.*', '.*/contradiction-subject'],
       )
       const { nodes: n, edges: e, properties: props, contradictions: contras } = buildTrustGraphData(response.edges)
@@ -232,9 +231,8 @@ export default function KnowledgeGraphPage() {
             )}
 
             {/* Entity search — top left overlay */}
-            {!isLoading && tenantId && (
+            {!isLoading && (
               <EntitySearchBar
-                tenantId={tenantId}
                 onSelect={(entity) => {
                   loadGraph([entity.entity_uri])
                 }}

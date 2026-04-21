@@ -31,11 +31,7 @@ function formatRelativeTime(date: Date, locale: string): string {
 }
 import { useTranslation } from "@/lib/i18n/hooks"
 
-interface SharedDocumentsPanelProps {
-  tenantId: string
-}
-
-export function SharedDocumentsPanel({ tenantId }: SharedDocumentsPanelProps) {
+export function SharedDocumentsPanel() {
   const { t, language } = useTranslation()
   const [shareStats, setShareStats] = useState<ShareStatistics | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -157,7 +153,7 @@ export function SharedDocumentsPanel({ tenantId }: SharedDocumentsPanelProps) {
 
         <div className="pt-4 border-t">
           <Button variant="outline" className="w-full" asChild>
-            <Link href={`/${tenantId}/shared`}>
+            <Link href={`/shared`}>
               <IconShare2 className="mr-2 h-4 w-4" />
               {t('dashboard.sharedDocuments.manageAll')}
             </Link>

@@ -21,13 +21,13 @@ Usage:
     from app.services.heartbeat import heartbeat_service
 
     # Manual run
-    result = await heartbeat_service.run(tenant_id)
+    result = await heartbeat_service.run()
 
     # Get status
-    status = await heartbeat_service.get_status(tenant_id)
+    status = await heartbeat_service.get_status()
 
     # Update config
-    await heartbeat_service.update_config(tenant_id, {"enabled": False})
+    await heartbeat_service.update_config({"enabled": False})
 """
 
 from .heartbeat_service import heartbeat_service, HeartbeatService

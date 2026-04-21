@@ -19,7 +19,6 @@ export interface NotebookSettings {
 
 export interface Notebook {
   id: string
-  tenant_id: string
   user_id: string
   title: string
   description?: string

@@ -252,7 +252,6 @@ class TenantContext(BaseModel):
     being sent to the LLM for insight evaluation.
     """
 
-    tenant_id: str
     gathered_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     # Recent document activity
@@ -303,7 +302,6 @@ class ProactiveInsight(BaseModel):
     """
 
     id: Optional[str] = None
-    tenant_id: str
 
     insight_type: str
     title: str = Field(..., max_length=255)
@@ -355,7 +353,6 @@ class ProactiveInsight(BaseModel):
 class ProactiveInsightCreate(BaseModel):
     """Schema for creating a new insight."""
 
-    tenant_id: str
     insight_type: str
     title: str = Field(..., max_length=255)
     summary: str = Field(..., max_length=500)
@@ -385,7 +382,6 @@ class ProactiveInsightUpdate(BaseModel):
 class HeartbeatStatusResponse(BaseModel):
     """Status of the Heartbeat System for a tenant."""
 
-    tenant_id: str
     enabled: bool
     last_run_at: Optional[datetime] = None
     next_run_at: Optional[datetime] = None
@@ -397,7 +393,6 @@ class HeartbeatStatusResponse(BaseModel):
 class HeartbeatRunResponse(BaseModel):
     """Response from a manual heartbeat run."""
 
-    tenant_id: str
     success: bool
     insights_generated: int = 0
     insights_delivered: int = 0

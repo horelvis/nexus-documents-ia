@@ -39,7 +39,6 @@ async def initialize_node(state: dict) -> dict:
 
     source_context, source_document_ids = await get_source_context(
         query=state["query"],
-        tenant_id=state["tenant_id"],
         document_ids=state.get("context_document_ids"),
         collections=state.get("collections"),
         uploaded_texts=state.get("uploaded_texts"),
@@ -139,12 +138,12 @@ async def evaluate_outcome_node(state: dict) -> dict:
     try:
         evidence_by_tier = await search_evidence(
             query_text=item.get("text", ""),
-            tenant_id=state["tenant_id"],
             collections=state.get("collections", []),
             uploaded_texts=state.get("uploaded_texts", []),
             mode_config=state.get("mode_config", {}),
             jurisprudence_evidence=state.get("jurisprudence_evidence", []),
             source_document_ids=state.get("source_document_ids", []),
+            user_roles=state.get("user_roles", []),
         )
 
         all_evidence = evidence_by_tier.get("source", []) + evidence_by_tier.get("external", [])

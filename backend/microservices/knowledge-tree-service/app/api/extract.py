@@ -8,6 +8,7 @@ import logging
 
 from fastapi import APIRouter, Depends
 
+from app.core.auth_headers import EVERYONE_ROLE
 from app.core.security import verify_api_key
 from app.services.falkordb_client import falkordb_client
 from app.services.triple_store import TripleStore
@@ -33,10 +34,12 @@ async def extract_triples(request: TripleExtractionRequest) -> TripleExtractionR
     """Extract and store triples from document chunks via LLM extractors."""
     coordinator = ExtractionCoordinator(falkordb_client)
 
+    # Writes use the EVERYONE sentinel; the multi-role ACL filter is applied
+    # at read time in a later wave of the tenancy removal refactor.
     result = await coordinator.extract_document(
         chunks=request.chunks,
         document_id=request.document_id,
-        user=request.tenant_id,
+        user=EVERYONE_ROLE,
         collection=request.collection,
         title=request.title,
         file_path=request.file_path,
@@ -61,7 +64,7 @@ async def structural_index(request: StructuralIndexRequest) -> StructuralIndexRe
 
     document_uri = await ts.store_document_node(
         document_id=request.document_id,
-        user=request.tenant_id,
+        user=EVERYONE_ROLE,
         collection=request.collection,
         title=request.title,
         file_path=request.file_path,

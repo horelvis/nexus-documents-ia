@@ -69,7 +69,6 @@ class StructuredLogger:
             'environment': 'development' if settings.DEBUG else 'production',
             'request_id': getattr(self._context, 'request_id', str(uuid.uuid4())),
             'user_id': getattr(self._context, 'user_id', None),
-            'tenant_id': getattr(self._context, 'tenant_id', None),
             'session_id': getattr(self._context, 'session_id', None),
             'ip_address': getattr(self._context, 'ip_address', None),
             'user_agent': getattr(self._context, 'user_agent', None),
@@ -224,12 +223,10 @@ class RequestContextMiddleware:
         # Set logging context
         request_id = headers.get(b'x-request-id', str(uuid.uuid4()).encode()).decode()
         user_id = headers.get(b'x-user-id', b'').decode() or None
-        tenant_id = headers.get(b'x-tenant-id', b'').decode() or None
 
         self.logger.set_context(
             request_id=request_id,
             user_id=user_id,
-            tenant_id=tenant_id,
             ip_address=self._get_client_ip(scope),
             user_agent=headers.get(b'user-agent', b'').decode(),
             http_method=scope.get("method"),

@@ -30,7 +30,6 @@ def _get_redis() -> redis.Redis:
 
 def publish_event(
     event_type: str,
-    tenant_id: str,
     payload: Dict[str, Any],
     source_service: str = "background-worker",
     correlation_id: Optional[str] = None,
@@ -41,14 +40,13 @@ def publish_event(
         data = {
             "event_id": str(uuid.uuid4()),
             "event_type": event_type,
-            "tenant_id": tenant_id,
             "payload": json.dumps(payload),
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source_service": source_service,
             "correlation_id": correlation_id or "",
         }
         msg_id = r.xadd(STREAM_KEY, data, maxlen=MAX_STREAM_LEN, approximate=True)
-        logger.info(f"Published event {event_type} for tenant {tenant_id}")
+        logger.info(f"Published event {event_type}")
         return msg_id.decode() if isinstance(msg_id, bytes) else msg_id
     except Exception as e:
         logger.warning(f"Failed to publish event {event_type}: {e}")

@@ -19,15 +19,6 @@ class Settings(BaseSettings):
     )
     debug: bool = DEBUG_DEFAULT
 
-    # ==========================================================================
-    # Deployment Mode: Single-tenant vs Multi-tenant
-    # ==========================================================================
-    # For on-premise: SINGLE_TENANT_MODE=true (all users share one tenant)
-    # For SaaS: SINGLE_TENANT_MODE=false (one tenant per organization)
-    single_tenant_mode: bool = os.getenv("SINGLE_TENANT_MODE", "true").lower() == "true"
-    default_tenant_id: str = os.getenv("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
-    default_tenant_name: str = os.getenv("DEFAULT_TENANT_NAME", "NouxCubeIA Organization")
-
     # Weaviate configuration
     weaviate_url: str = os.getenv("WEAVIATE_URL", "http://weaviate:8080")
     weaviate_api_key: str = os.getenv("WEAVIATE_API_KEY", "")  # For cloud instances
@@ -165,7 +156,7 @@ class Settings(BaseSettings):
 
     # RAG Pipeline - Public Knowledge Integration
     rag_public_knowledge_enabled: bool = os.getenv("RAG_PUBLIC_KNOWLEDGE_ENABLED", "true").lower() == "true"
-    rag_public_knowledge_weight: float = float(os.getenv("RAG_PUBLIC_KNOWLEDGE_WEIGHT", "0.7"))  # Weight for public vs tenant docs
+    rag_public_knowledge_weight: float = float(os.getenv("RAG_PUBLIC_KNOWLEDGE_WEIGHT", "0.7"))  # Weight for public vs user docs
     rag_public_knowledge_limit: int = int(os.getenv("RAG_PUBLIC_KNOWLEDGE_LIMIT", "10"))  # Max public docs to include
     rag_public_knowledge_categories: str = os.getenv("RAG_PUBLIC_KNOWLEDGE_CATEGORIES", "legislation,regulation,jurisprudence")  # Comma-separated
 
@@ -252,7 +243,7 @@ class Settings(BaseSettings):
     # PostgreSQL connection (used by session persistence, cached_path updates — NOT for graph)
     postgres_host: str = os.getenv("POSTGRES_SERVER", os.getenv("POSTGRES_HOST", "db"))
     postgres_port: int = int(os.getenv("POSTGRES_PORT", "5432"))
-    postgres_db: str = os.getenv("POSTGRES_DB", "nexus_db")
+    postgres_db: str = os.getenv("POSTGRES_DB", "nouxcube")
     postgres_user: str = os.getenv("POSTGRES_USER", "nexus_user")
     postgres_password: str = os.getenv("POSTGRES_PASSWORD", "nexus_password")
 
@@ -314,9 +305,9 @@ class Settings(BaseSettings):
     api_url: str = os.getenv("API_URL", "http://api:8000")
 
     # Database (for metadata coordination)
-    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nexus_db")
+    database_url: str = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@db:5432/nouxcube")
 
-    # Collection naming (tenant isolation)
+    # Collection naming
     collection_prefix: str = "Nouxcube_"
     default_collection: str = "documents"
 
@@ -326,15 +317,9 @@ class Settings(BaseSettings):
     agent_timeout_seconds: int = int(os.getenv("AGENT_TIMEOUT_SECONDS", "300"))
     agent_fallback_to_rag: bool = os.getenv("AGENT_FALLBACK_TO_RAG", "true").lower() == "true"
 
-    # Concurrency Control (SaaS multi-tenant)
-    # Max concurrent LLM calls across all tenants (RTX 4090 can handle 8+ concurrent)
+    # Concurrency Control
     llm_max_concurrent: int = int(os.getenv("LLM_MAX_CONCURRENT", "8"))
-    # Max concurrent analyses per tenant
-    analysis_max_per_tenant: int = int(os.getenv("ANALYSIS_MAX_PER_TENANT", "3"))
-    # Queue timeout for waiting LLM slot (seconds) - reduced for faster feedback
     llm_queue_timeout: int = int(os.getenv("LLM_QUEUE_TIMEOUT", "90"))
-    # Enable tenant isolation in queuing
-    tenant_isolation_enabled: bool = os.getenv("TENANT_ISOLATION_ENABLED", "true").lower() == "true"
 
     # Visualization settings
     enable_dynamic_display: bool = os.getenv("ENABLE_DYNAMIC_DISPLAY", "true").lower() == "true"

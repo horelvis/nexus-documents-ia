@@ -5,6 +5,7 @@ Handles guest management, permissions, and invitation emails.
 """
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
@@ -16,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.db.models import (
     SiteGuest, SiteGuestOTP, SiteGuestSession, SiteGuestPermission,
     SiteGuestAccessLog, SiteGuestShare, SiteGuestShareDocument,
-    Tenant, User, Document
+    User, Document
 )
 from app.schemas.site_guest import (
     SiteGuestCreate, SiteGuestUpdate, SiteGuestResponse,
@@ -30,6 +31,23 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
+# Single-tenant on-premise: hardcoded site settings
+DEFAULT_SITE_NAME = "NouxCube"
+DEFAULT_SITE_SLUG = "nouxcube"
+DEFAULT_SITE_WELCOME_MESSAGE = "Bienvenido al portal de NouxCube."
+
+
+@dataclass
+class SiteSettings:
+    """Hardcoded site settings for single-tenant deployment."""
+    id: UUID = UUID("00000000-0000-0000-0000-000000000001")
+    name: str = DEFAULT_SITE_NAME
+    slug: str = DEFAULT_SITE_SLUG
+    site_enabled: bool = True
+    site_welcome_message: str = DEFAULT_SITE_WELCOME_MESSAGE
+    is_active: bool = True
+
+
 class SiteGuestService:
     """Service for managing Site Guests (admin operations)."""
 
@@ -40,19 +58,17 @@ class SiteGuestService:
     @staticmethod
     async def create_guest(
         db: AsyncSession,
-        tenant_id: UUID,
         guest_data: SiteGuestCreate,
         invited_by_user_id: UUID
     ) -> SiteGuest:
         """Create a new Site Guest and optionally send invitation email."""
         # Check if guest already exists
-        existing = await SiteGuestService.get_guest_by_email(db, tenant_id, guest_data.email)
+        existing = await SiteGuestService.get_guest_by_email(db, guest_data.email)
         if existing:
             raise ValueError(f"Guest with email {guest_data.email} already exists")
 
         # Create guest
         guest = SiteGuest(
-            tenant_id=tenant_id,
             email=guest_data.email,
             name=guest_data.name,
             can_view=guest_data.can_view,
@@ -70,7 +86,7 @@ class SiteGuestService:
         if guest_data.send_invitation:
             await SiteGuestService.send_invitation_email(db, guest)
 
-        logger.info(f"Created Site Guest: {guest.email} for tenant {tenant_id}")
+        logger.info(f"Created Site Guest: {guest.email}")
         return guest
 
     @staticmethod
@@ -84,30 +100,23 @@ class SiteGuestService:
     @staticmethod
     async def get_guest_by_email(
         db: AsyncSession,
-        tenant_id: UUID,
         email: str
     ) -> Optional[SiteGuest]:
-        """Get a Site Guest by email within a tenant."""
+        """Get a Site Guest by email."""
         result = await db.execute(
-            select(SiteGuest).where(
-                and_(
-                    SiteGuest.tenant_id == tenant_id,
-                    SiteGuest.email == email.lower()
-                )
-            )
+            select(SiteGuest).where(SiteGuest.email == email.lower())
         )
         return result.scalar_one_or_none()
 
     @staticmethod
     async def list_guests(
         db: AsyncSession,
-        tenant_id: UUID,
         include_inactive: bool = False,
         page: int = 1,
         per_page: int = 20
     ) -> Tuple[List[SiteGuest], int]:
-        """List all Site Guests for a tenant with pagination."""
-        query = select(SiteGuest).where(SiteGuest.tenant_id == tenant_id)
+        """List all Site Guests with pagination."""
+        query = select(SiteGuest)
 
         if not include_inactive:
             query = query.where(SiteGuest.is_active == True)
@@ -156,15 +165,6 @@ class SiteGuestService:
         guest.is_active = False
 
         # Revoke all active sessions
-        await db.execute(
-            select(SiteGuestSession)
-            .where(
-                and_(
-                    SiteGuestSession.guest_id == guest_id,
-                    SiteGuestSession.is_active == True
-                )
-            )
-        )
         sessions = (await db.execute(
             select(SiteGuestSession).where(
                 and_(
@@ -191,7 +191,6 @@ class SiteGuestService:
     @staticmethod
     async def get_or_create_guest(
         db: AsyncSession,
-        tenant_id: UUID,
         email: str,
         name: Optional[str] = None,
         invited_by_user_id: Optional[UUID] = None
@@ -200,10 +199,10 @@ class SiteGuestService:
         Get existing guest by email or create new one.
         Returns (guest, is_new) tuple.
 
-        IMPORTANTE: No crear duplicados - un email = un guest por tenant.
+        IMPORTANTE: No crear duplicados - un email = un guest.
         """
         # Search for existing guest (case-insensitive)
-        existing_guest = await SiteGuestService.get_guest_by_email(db, tenant_id, email)
+        existing_guest = await SiteGuestService.get_guest_by_email(db, email)
 
         if existing_guest:
             # Reactivate if deactivated
@@ -216,7 +215,6 @@ class SiteGuestService:
 
         # Create new guest
         new_guest = SiteGuest(
-            tenant_id=tenant_id,
             email=email.lower(),
             name=name,
             invited_by_user_id=invited_by_user_id,
@@ -235,7 +233,6 @@ class SiteGuestService:
     @staticmethod
     async def create_share(
         db: AsyncSession,
-        tenant_id: UUID,
         guest_id: UUID,
         name: str,
         document_ids: List[UUID],
@@ -253,36 +250,25 @@ class SiteGuestService:
         if permission_type not in allowed_permission_types:
             raise ValueError(f"Invalid permission type: {permission_type}")
 
-        # Verify guest exists and belongs to tenant
+        # Verify guest exists
         result = await db.execute(
-            select(SiteGuest).where(
-                and_(
-                    SiteGuest.id == guest_id,
-                    SiteGuest.tenant_id == tenant_id
-                )
-            )
+            select(SiteGuest).where(SiteGuest.id == guest_id)
         )
         guest = result.scalar_one_or_none()
         if not guest:
             raise ValueError("Guest not found")
 
-        # Verify documents exist and belong to tenant (dedupe IDs)
+        # Verify documents exist (dedupe IDs)
         unique_document_ids = list(dict.fromkeys(document_ids))
         result = await db.execute(
-            select(Document.id).where(
-                and_(
-                    Document.tenant_id == tenant_id,
-                    Document.id.in_(unique_document_ids)
-                )
-            )
+            select(Document.id).where(Document.id.in_(unique_document_ids))
         )
         valid_doc_ids = list(result.scalars().all())
 
         missing_doc_ids = set(unique_document_ids) - set(valid_doc_ids)
         if missing_doc_ids:
             logger.warning(
-                "Some documents were not found or don't belong to tenant %s: %s",
-                tenant_id,
+                "Some documents were not found: %s",
                 list(missing_doc_ids)
             )
 
@@ -291,7 +277,6 @@ class SiteGuestService:
 
         # Create share
         share = SiteGuestShare(
-            tenant_id=tenant_id,
             guest_id=guest_id,
             name=name,
             description=description,
@@ -370,17 +355,10 @@ class SiteGuestService:
 
         Different email for new guests vs existing guests with new share.
         """
-        # Get tenant info
-        result = await db.execute(
-            select(Tenant).where(Tenant.id == guest.tenant_id)
-        )
-        tenant = result.scalar_one_or_none()
-        if not tenant:
-            logger.error(f"Tenant not found for guest {guest.id}")
-            return False
+        site = SiteSettings()
 
         # Build portal URL
-        portal_url = f"{settings.FRONTEND_URL}/portal/{tenant.slug or tenant.id}"
+        portal_url = f"{settings.FRONTEND_URL}/portal/{site.slug}"
 
         # Get document count
         result = await db.execute(
@@ -394,7 +372,7 @@ class SiteGuestService:
                 success = await EmailService.send_guest_invitation(
                     to_email=guest.email,
                     recipient_name=guest.name or guest.email,
-                    tenant_name=tenant.name,
+                    tenant_name=site.name,
                     portal_url=portal_url,
                     welcome_message=f"Se han compartido {document_count} documento(s) contigo en la colección '{share.name}'.",
                     expires_at=share.expires_at,
@@ -407,7 +385,7 @@ class SiteGuestService:
                 success = await EmailService.send_guest_invitation(
                     to_email=guest.email,
                     recipient_name=guest.name or guest.email,
-                    tenant_name=tenant.name,
+                    tenant_name=site.name,
                     portal_url=portal_url,
                     welcome_message=f"Se han compartido {document_count} documento(s) adicionales contigo en la colección '{share.name}'.",
                     expires_at=share.expires_at,
@@ -612,26 +590,19 @@ class SiteGuestService:
     @staticmethod
     async def send_invitation_email(db: AsyncSession, guest: SiteGuest, language: str = "es") -> bool:
         """Send invitation email to a guest using dedicated invitation template."""
-        # Get tenant info
-        tenant = await db.execute(
-            select(Tenant).where(Tenant.id == guest.tenant_id)
-        )
-        tenant = tenant.scalar_one_or_none()
-        if not tenant:
-            logger.error(f"Tenant not found for guest {guest.id}")
-            return False
+        site = SiteSettings()
 
         # Build portal URL
-        portal_url = f"{settings.FRONTEND_URL}/portal/{tenant.slug or tenant.id}"
+        portal_url = f"{settings.FRONTEND_URL}/portal/{site.slug}"
 
         try:
             # Use dedicated guest invitation template
             success = await EmailService.send_guest_invitation(
                 to_email=guest.email,
                 recipient_name=guest.name or guest.email,
-                tenant_name=tenant.name,
+                tenant_name=site.name,
                 portal_url=portal_url,
-                welcome_message=tenant.site_welcome_message,
+                welcome_message=site.site_welcome_message,
                 expires_at=guest.expires_at,
                 can_view=guest.can_view,
                 can_download=guest.can_download,
@@ -647,94 +618,39 @@ class SiteGuestService:
             return False
 
     # =====================================
-    # TENANT SITE SETTINGS
+    # SITE SETTINGS (single-tenant: hardcoded)
     # =====================================
 
     @staticmethod
-    async def get_tenant_site_settings(db: AsyncSession, tenant_id: UUID) -> Optional[Tenant]:
-        """Get tenant site settings."""
-        result = await db.execute(
-            select(Tenant).where(Tenant.id == tenant_id)
-        )
-        return result.scalar_one_or_none()
+    async def get_tenant_site_settings(db: AsyncSession) -> SiteSettings:
+        """Get site settings (hardcoded for single-tenant on-premise)."""
+        return SiteSettings()
 
     @staticmethod
     async def update_tenant_site_settings(
         db: AsyncSession,
-        tenant_id: UUID,
         updates: TenantSiteSettingsUpdate
-    ) -> Tenant:
-        """Update tenant site settings."""
-        result = await db.execute(
-            select(Tenant).where(Tenant.id == tenant_id)
-        )
-        tenant = result.scalar_one_or_none()
-        if not tenant:
-            raise ValueError("Tenant not found")
-
-        update_data = updates.model_dump(exclude_unset=True)
-
-        # Validate slug uniqueness if being updated
-        if "slug" in update_data and update_data["slug"]:
-            existing = await db.execute(
-                select(Tenant).where(
-                    and_(
-                        Tenant.slug == update_data["slug"],
-                        Tenant.id != tenant_id
-                    )
-                )
-            )
-            if existing.scalar_one_or_none():
-                raise ValueError("Slug already in use by another tenant")
-
-        for field, value in update_data.items():
-            setattr(tenant, field, value)
-
-        await db.commit()
-        await db.refresh(tenant)
-
-        logger.info(f"Updated site settings for tenant {tenant_id}")
-        return tenant
+    ) -> SiteSettings:
+        """Update site settings (no-op for single-tenant on-premise)."""
+        logger.info("update_tenant_site_settings is a no-op in single-tenant on-premise mode")
+        return SiteSettings()
 
     @staticmethod
-    async def get_tenant_by_slug(db: AsyncSession, slug: str) -> Optional[Tenant]:
+    async def get_tenant_by_slug(db: AsyncSession, slug: str) -> Optional[SiteSettings]:
         """
-        Get tenant by slug for public portal.
+        Get site settings by slug for public portal.
 
-        Also supports resolving by tenant UUID string (used when no slug is configured).
+        In single-tenant mode, always returns the hardcoded settings
+        when the slug matches or is the org UUID.
         """
-        key = (slug or "").strip()
+        key = (slug or "").strip().lower()
         if not key:
             return None
 
-        # Try UUID first (fallback when tenant.slug is not set)
-        try:
-            tenant_id = UUID(key)
-        except Exception:
-            tenant_id = None
-
-        if tenant_id is not None:
-            result = await db.execute(
-                select(Tenant).where(
-                    and_(
-                        Tenant.id == tenant_id,
-                        Tenant.is_active == True
-                    )
-                )
-            )
-            tenant = result.scalar_one_or_none()
-            if tenant:
-                return tenant
-
-        result = await db.execute(
-            select(Tenant).where(
-                and_(
-                    Tenant.slug == key.lower(),
-                    Tenant.is_active == True
-                )
-            )
-        )
-        return result.scalar_one_or_none()
+        site = SiteSettings()
+        if key == site.slug.lower() or key == str(site.id):
+            return site
+        return None
 
     @staticmethod
     def generate_slug(name: str) -> str:
@@ -753,82 +669,59 @@ class SiteGuestService:
     # =====================================
 
     @staticmethod
-    async def get_statistics(db: AsyncSession, tenant_id: UUID) -> SiteGuestStatistics:
+    async def get_statistics(db: AsyncSession) -> SiteGuestStatistics:
         """Get statistics for site guests."""
         now = datetime.now(timezone.utc)
         yesterday = now - timedelta(days=1)
 
         # Total guests
         total_result = await db.execute(
-            select(func.count()).where(SiteGuest.tenant_id == tenant_id)
+            select(func.count()).select_from(SiteGuest)
         )
         total_guests = total_result.scalar()
 
         # Active guests
         active_result = await db.execute(
-            select(func.count()).where(
-                and_(
-                    SiteGuest.tenant_id == tenant_id,
-                    SiteGuest.is_active == True
-                )
+            select(func.count()).select_from(SiteGuest).where(
+                SiteGuest.is_active == True
             )
         )
         active_guests = active_result.scalar()
 
         # Expired guests
         expired_result = await db.execute(
-            select(func.count()).where(
-                and_(
-                    SiteGuest.tenant_id == tenant_id,
-                    SiteGuest.expires_at < now
-                )
+            select(func.count()).select_from(SiteGuest).where(
+                SiteGuest.expires_at < now
             )
         )
         expired_guests = expired_result.scalar()
 
         # Total access count
         access_result = await db.execute(
-            select(func.sum(SiteGuest.access_count)).where(
-                SiteGuest.tenant_id == tenant_id
-            )
+            select(func.sum(SiteGuest.access_count))
         )
         total_access_count = access_result.scalar() or 0
 
         # Recent accesses (last 24 hours)
         recent_result = await db.execute(
-            select(func.count()).select_from(SiteGuestAccessLog).join(
-                SiteGuest, SiteGuestAccessLog.guest_id == SiteGuest.id
-            ).where(
-                and_(
-                    SiteGuest.tenant_id == tenant_id,
-                    SiteGuestAccessLog.created_at >= yesterday
-                )
+            select(func.count()).select_from(SiteGuestAccessLog).where(
+                SiteGuestAccessLog.created_at >= yesterday
             )
         )
         recent_accesses = recent_result.scalar()
 
         # Documents shared (unique)
         docs_result = await db.execute(
-            select(func.count(func.distinct(SiteGuestPermission.document_id))).join(
-                SiteGuest, SiteGuestPermission.guest_id == SiteGuest.id
-            ).where(
-                and_(
-                    SiteGuest.tenant_id == tenant_id,
-                    SiteGuestPermission.document_id.isnot(None)
-                )
+            select(func.count(func.distinct(SiteGuestPermission.document_id))).where(
+                SiteGuestPermission.document_id.isnot(None)
             )
         )
         documents_shared = docs_result.scalar()
 
         # Folders shared (unique)
         folders_result = await db.execute(
-            select(func.count(func.distinct(SiteGuestPermission.folder_path))).join(
-                SiteGuest, SiteGuestPermission.guest_id == SiteGuest.id
-            ).where(
-                and_(
-                    SiteGuest.tenant_id == tenant_id,
-                    SiteGuestPermission.folder_path.isnot(None)
-                )
+            select(func.count(func.distinct(SiteGuestPermission.folder_path))).where(
+                SiteGuestPermission.folder_path.isnot(None)
             )
         )
         folders_shared = folders_result.scalar()

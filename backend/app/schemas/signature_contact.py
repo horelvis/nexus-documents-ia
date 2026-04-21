@@ -36,7 +36,6 @@ class SignatureContactUpdate(BaseModel):
 class SignatureContact(SignatureContactBase):
     """Schema for signature contact responses"""
     id: UUID
-    tenant_id: UUID
     created_by: UUID
     is_favorite: bool
     usage_count: int

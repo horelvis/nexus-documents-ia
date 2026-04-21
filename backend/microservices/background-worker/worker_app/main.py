@@ -31,7 +31,6 @@ def verify_api_key(x_api_key: str = Header(...)):
 
 class PreviewRequest(BaseModel):
     document_id: str
-    tenant_id: str
     user_id: str
     preview_type: str = "all"
     force_regenerate: bool = False
@@ -40,7 +39,6 @@ class PreviewRequest(BaseModel):
 
 class PreviewBatchRequest(BaseModel):
     document_ids: List[str]
-    tenant_id: str
     user_id: str
     preview_type: str = "all"
     batch_size: int = 5
@@ -70,12 +68,10 @@ class UserInvitationRequest(BaseModel):
 
 class TeamInvitationRequest(BaseModel):
     invitation_id: str
-    tenant_id: str
 
 
 class ShareNotificationRequest(BaseModel):
     share_id: str
-    tenant_id: str
 
 
 class PasswordResetRequest(BaseModel):
@@ -86,7 +82,6 @@ class PasswordResetRequest(BaseModel):
 
 class IndexRetryRequest(BaseModel):
     document_id: str
-    tenant_id: str
     user_id: Optional[str] = None
     priority: str = "default"
 
@@ -95,7 +90,6 @@ class VerifyClaimRequest(BaseModel):
     """Request to verify a single claim."""
     claim_id: str
     claim_text: str
-    tenant_id: str
     context_document_ids: Optional[List[str]] = None
     collections: Optional[List[str]] = None
     confidence_threshold: float = 0.7
@@ -105,7 +99,6 @@ class VerifyClaimRequest(BaseModel):
 class BatchVerifyClaimsRequest(BaseModel):
     """Request to verify multiple claims."""
     claims: List[Dict[str, str]]  # [{"id": "...", "text": "..."}]
-    tenant_id: str
     context_document_ids: Optional[List[str]] = None
     collections: Optional[List[str]] = None
     confidence_threshold: float = 0.7
@@ -120,7 +113,6 @@ async def health_check():
 async def enqueue_preview(request: PreviewRequest, _: None = Depends(verify_api_key)):
     job = generate_document_preview_task.delay(
         request.document_id,
-        request.tenant_id,
         request.user_id,
         request.preview_type,
         request.force_regenerate,
@@ -132,7 +124,6 @@ async def enqueue_preview(request: PreviewRequest, _: None = Depends(verify_api_
 async def enqueue_preview_batch(request: PreviewBatchRequest, _: None = Depends(verify_api_key)):
     job = generate_preview_batch_task.delay(
         request.document_ids,
-        request.tenant_id,
         request.user_id,
         request.preview_type,
         request.batch_size,
@@ -170,13 +161,13 @@ async def enqueue_user_invitation(request: UserInvitationRequest, _: None = Depe
 
 @app.post("/tasks/email/team-invitation")
 async def enqueue_team_invitation(request: TeamInvitationRequest, _: None = Depends(verify_api_key)):
-    job = send_team_invitation_task.delay(request.invitation_id, request.tenant_id)
+    job = send_team_invitation_task.delay(request.invitation_id)
     return {"job_id": job.id}
 
 
 @app.post("/tasks/email/share-notification")
 async def enqueue_share_notification(request: ShareNotificationRequest, _: None = Depends(verify_api_key)):
-    job = send_document_share_notification_task.delay(request.share_id, request.tenant_id)
+    job = send_document_share_notification_task.delay(request.share_id)
     return {"job_id": job.id}
 
 
@@ -190,7 +181,6 @@ async def enqueue_password_reset(request: PasswordResetRequest, _: None = Depend
 async def enqueue_index_retry(request: IndexRetryRequest, _: None = Depends(verify_api_key)):
     job = retry_document_indexing_task.delay(
         request.document_id,
-        request.tenant_id,
         request.user_id,
     )
     return {"job_id": job.id}
@@ -267,7 +257,6 @@ async def enqueue_verify_claim(request: VerifyClaimRequest, _: None = Depends(ve
     job = verify_claim_task.delay(
         claim_id=request.claim_id,
         claim_text=request.claim_text,
-        tenant_id=request.tenant_id,
         context_document_ids=request.context_document_ids,
         collections=request.collections,
         confidence_threshold=request.confidence_threshold,
@@ -286,7 +275,6 @@ async def enqueue_batch_verify(request: BatchVerifyClaimsRequest, _: None = Depe
     """
     job = batch_verify_claims_task.delay(
         claims=request.claims,
-        tenant_id=request.tenant_id,
         context_document_ids=request.context_document_ids,
         collections=request.collections,
         confidence_threshold=request.confidence_threshold,

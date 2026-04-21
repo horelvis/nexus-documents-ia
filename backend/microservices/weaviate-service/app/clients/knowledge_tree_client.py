@@ -176,7 +176,7 @@ class KnowledgeTreeLegalClient:
     # ── Document-Law Linking ──────────────────────────────────────────
 
     async def link_document_to_law(
-        self, document_id: str, law_boe_id: str, tenant_id: str,
+        self, document_id: str, law_boe_id: str,
         relationship_type: str = "GOVERNED_BY",
     ) -> bool:
         """Link a document to a law."""
@@ -185,7 +185,6 @@ class KnowledgeTreeLegalClient:
                 "POST", f"/legal/documents/{document_id}/link-law",
                 json={
                     "law_boe_id": law_boe_id,
-                    "tenant_id": tenant_id,
                     "relationship_type": relationship_type,
                 },
             )
@@ -194,13 +193,12 @@ class KnowledgeTreeLegalClient:
             return False
 
     async def get_applicable_laws(
-        self, document_id: str, tenant_id: str
+        self, document_id: str
     ) -> List[Dict[str, Any]]:
         """Get laws linked to a document."""
         try:
             return await self._request(
                 "GET", f"/legal/documents/{document_id}/applicable-laws",
-                params={"tenant_id": tenant_id},
             )
         except Exception:
             return []
@@ -209,7 +207,6 @@ class KnowledgeTreeLegalClient:
 
     async def store_entities(
         self,
-        tenant_id: str,
         document_id: str,
         entities: List[Dict[str, Any]],
         relationships: Optional[List[Dict[str, Any]]] = None,
@@ -222,7 +219,6 @@ class KnowledgeTreeLegalClient:
         """
         try:
             return await self._request("POST", "/tree/entities/store", json={
-                "tenant_id": tenant_id,
                 "document_id": document_id,
                 "entities": entities,
                 "relationships": relationships or [],
@@ -233,7 +229,6 @@ class KnowledgeTreeLegalClient:
 
     async def extract_triples(
         self,
-        tenant_id: str,
         document_id: str,
         chunks: List[str],
         collection: str = "default",
@@ -245,7 +240,6 @@ class KnowledgeTreeLegalClient:
         """Trigger TrustGraph triple extraction for a document's chunks."""
         try:
             return await self._request("POST", "/extract/triples", json={
-                "tenant_id": tenant_id,
                 "document_id": document_id,
                 "chunks": chunks,
                 "collection": collection,
@@ -260,7 +254,6 @@ class KnowledgeTreeLegalClient:
 
     async def index_structural_triples(
         self,
-        tenant_id: str,
         document_id: str,
         collection: str = "default",
         title: str = "",
@@ -271,7 +264,6 @@ class KnowledgeTreeLegalClient:
         """Index document structural data without LLM extraction."""
         try:
             return await self._request("POST", "/extract/structural", json={
-                "tenant_id": tenant_id,
                 "document_id": document_id,
                 "collection": collection,
                 "title": title,
@@ -283,37 +275,35 @@ class KnowledgeTreeLegalClient:
             logger.warning(f"Failed to index structural triples for {document_id}: {e}")
             return {"success": False}
 
-    async def get_triple_context(self, tenant_id: str, limit: int = 20) -> Dict[str, Any]:
+    async def get_triple_context(self, limit: int = 20) -> Dict[str, Any]:
         """Get LLM context from the triple store."""
         try:
             return await self._request("POST", "/triples/context", json={
-                "tenant_id": tenant_id,
                 "limit": limit,
             })
         except Exception as e:
-            logger.warning(f"Failed to get triple context for tenant {tenant_id}: {e}")
+            logger.warning(f"Failed to get triple context: {e}")
             return {"context": "", "triples": []}
 
     async def get_document_entities(
-        self, document_id: str, tenant_id: str
+        self, document_id: str
     ) -> List[Dict[str, Any]]:
         """Get entities extracted from a document."""
         try:
             result = await self._request(
                 "GET", f"/tree/entities/by-document/{document_id}",
-                params={"tenant_id": tenant_id},
             )
             return result.get("entities", [])
         except Exception:
             return []
 
     async def search_entity(
-        self, tenant_id: str, value: str, entity_type: Optional[str] = None,
+        self, value: str, entity_type: Optional[str] = None,
         max_depth: int = 2, limit: int = 20,
     ) -> Dict[str, Any]:
         """Search entity and its neighborhood for graph-based query expansion."""
         try:
-            params = {"tenant_id": tenant_id, "value": value, "max_depth": max_depth, "limit": limit}
+            params: Dict[str, Any] = {"value": value, "max_depth": max_depth, "limit": limit}
             if entity_type:
                 params["type"] = entity_type
             return await self._request("GET", "/tree/entities/search", params=params)
@@ -322,36 +312,36 @@ class KnowledgeTreeLegalClient:
 
     # ── Structural Queries (proxy to /tree endpoints) ────────────────
 
-    async def get_structural_summary(self, tenant_id: str) -> str:
-        """Get tenant structural summary from knowledge-tree-service."""
+    async def get_structural_summary(self) -> str:
+        """Get structural summary from knowledge-tree-service."""
         try:
             result = await self._request(
                 "POST", "/tree/summary",
-                json={"tenant_id": tenant_id},
+                json={},
             )
             return result.get("summary", "")
         except Exception as e:
             logger.warning(f"Failed to get structural summary: {e}")
             return ""
 
-    async def get_container_types(self, tenant_id: str, limit: int = 20) -> List[str]:
-        """Get distinct container/folder types for a tenant."""
+    async def get_container_types(self, limit: int = 20) -> List[str]:
+        """Get distinct container/folder types."""
         try:
             result = await self._request(
                 "POST", "/tree/structural/query",
-                json={"tenant_id": tenant_id, "query": ""},
+                json={"query": ""},
             )
             type_counts = result.get("data", {}).get("container_type_counts", {})
             return list(type_counts.keys())[:limit]
         except Exception:
             return []
 
-    async def get_document_types(self, tenant_id: str, limit: int = 20) -> List[str]:
-        """Get distinct document types for a tenant."""
+    async def get_document_types(self, limit: int = 20) -> List[str]:
+        """Get distinct document types."""
         try:
             result = await self._request(
                 "POST", "/tree/structural/query",
-                json={"tenant_id": tenant_id, "query": ""},
+                json={"query": ""},
             )
             type_counts = result.get("data", {}).get("document_type_counts", {})
             return list(type_counts.keys())[:limit]
@@ -362,7 +352,6 @@ class KnowledgeTreeLegalClient:
 
     async def index_structural(
         self,
-        tenant_id: str,
         document_id: str,
         file_path: str = "",
         connector_metadata: Optional[Dict[str, Any]] = None,
@@ -374,7 +363,6 @@ class KnowledgeTreeLegalClient:
         """Index a document/folder into the AGE sector graph (structural nodes)."""
         try:
             return await self._request("POST", "/tree/index", json={
-                "tenant_id": tenant_id,
                 "document_id": document_id,
                 "file_path": file_path,
                 "connector_metadata": connector_metadata or {},
@@ -395,7 +383,6 @@ class KnowledgeTreeLegalClient:
 
     async def extract_and_link_legal(
         self,
-        tenant_id: str,
         document_id: str,
         text_sample: str,
         semantic_type: str = "",
@@ -406,7 +393,6 @@ class KnowledgeTreeLegalClient:
             "POST",
             "/tree/legal-links/extract-and-store",
             json={
-                "tenant_id": tenant_id,
                 "document_id": document_id,
                 "text_sample": text_sample[:2000],
                 "semantic_type": semantic_type,

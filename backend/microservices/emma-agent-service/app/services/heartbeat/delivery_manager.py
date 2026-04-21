@@ -51,14 +51,12 @@ class DeliveryManager:
         self,
         insights: List[ProactiveInsightCreate],
         config: HeartbeatConfig,
-        tenant_id: str,
     ) -> Tuple[List[ProactiveInsight], List[ProactiveInsightCreate]]:
         """Deliver insights respecting rate limits and quiet hours.
 
         Args:
             insights: Insights to deliver (already sorted by priority)
-            config: Heartbeat configuration for the tenant
-            tenant_id: Tenant ID
+            config: Heartbeat configuration
 
         Returns:
             Tuple of (delivered_insights, deferred_insights)
@@ -69,11 +67,11 @@ class DeliveryManager:
 
         # Check quiet hours
         if self._is_quiet_hours(now, config):
-            logger.info(f"Quiet hours active for tenant {tenant_id}, deferring all insights")
+            logger.info("Quiet hours active, deferring all insights")
             return [], insights
 
         # Get current delivery stats
-        stats = await self._get_delivery_stats(tenant_id)
+        stats = await self._get_delivery_stats()
 
         for insight in insights:
             # Check rate limits
@@ -88,11 +86,11 @@ class DeliveryManager:
                     # High priority bypasses some limits
                     if stats["today_count"] < config.max_insights_per_day * 1.5:
                         delivered_insight = await self._deliver_single(
-                            insight, config, tenant_id
+                            insight, config
                         )
                         if delivered_insight:
                             delivered.append(delivered_insight)
-                            await self._update_delivery_stats(tenant_id, now)
+                            await self._update_delivery_stats(now)
                             stats["today_count"] += 1
                             stats["hour_count"] += 1
                     else:
@@ -102,10 +100,10 @@ class DeliveryManager:
                 continue
 
             # Deliver the insight
-            delivered_insight = await self._deliver_single(insight, config, tenant_id)
+            delivered_insight = await self._deliver_single(insight, config)
             if delivered_insight:
                 delivered.append(delivered_insight)
-                await self._update_delivery_stats(tenant_id, now)
+                await self._update_delivery_stats(now)
                 stats["today_count"] += 1
                 stats["hour_count"] += 1
                 stats["last_insight_at"] = now
@@ -171,7 +169,6 @@ class DeliveryManager:
         self,
         insight: ProactiveInsightCreate,
         config: HeartbeatConfig,
-        tenant_id: str,
     ) -> Optional[ProactiveInsight]:
         """Deliver a single insight via configured channels."""
         now = datetime.now(timezone.utc)
@@ -180,7 +177,6 @@ class DeliveryManager:
         insight_id = str(uuid.uuid4())
         delivered_insight = ProactiveInsight(
             id=insight_id,
-            tenant_id=tenant_id,
             insight_type=insight.insight_type,
             title=insight.title,
             summary=insight.summary,
@@ -203,13 +199,13 @@ class DeliveryManager:
         for channel in config.channel_priority:
             try:
                 if channel == "in_app":
-                    await self._deliver_in_app(delivered_insight, tenant_id)
+                    await self._deliver_in_app(delivered_insight)
                     delivered = True
                 elif channel == "slack":
-                    await self._deliver_slack(delivered_insight, tenant_id)
+                    await self._deliver_slack(delivered_insight)
                     delivered = True
                 elif channel == "email":
-                    await self._deliver_email(delivered_insight, tenant_id, config)
+                    await self._deliver_email(delivered_insight, config)
                     delivered = True
                 # Continue to deliver to other channels (multi-channel delivery)
             except Exception as e:
@@ -221,14 +217,13 @@ class DeliveryManager:
             return None
 
         # Store insight in Redis for retrieval
-        await self._store_insight(delivered_insight, tenant_id)
+        await self._store_insight(delivered_insight)
 
         return delivered_insight
 
     async def _deliver_in_app(
         self,
         insight: ProactiveInsight,
-        tenant_id: str,
     ):
         """Deliver insight as in-app notification via WebSocket."""
         # Map urgency to notification priority
@@ -244,8 +239,7 @@ class DeliveryManager:
         priority = priority_map.get(InsightUrgency(urgency_value), "normal")
 
         await notification_service.create_notification(
-            tenant_id=tenant_id,
-            user_id="system",  # Broadcast to all tenant users
+            user_id="system",  # Broadcast to all users
             title=f"Emma Insight: {insight.title}",
             body=insight.summary,
             notification_type="proactive_insight",
@@ -262,7 +256,6 @@ class DeliveryManager:
     async def _deliver_email(
         self,
         insight: ProactiveInsight,
-        tenant_id: str,
         config: HeartbeatConfig,
     ):
         """Send email to configured recipients via background worker.
@@ -274,7 +267,7 @@ class DeliveryManager:
 
         recipients = config.email_recipients
         if not recipients:
-            logger.debug(f"No email recipients configured for tenant {tenant_id}")
+            logger.debug("No email recipients configured")
             return
 
         # Build email content
@@ -325,7 +318,6 @@ class DeliveryManager:
                                     a.action if hasattr(a, "action") else str(a)
                                     for a in (insight.suggested_actions or [])
                                 ],
-                                "tenant_id": tenant_id,
                             },
                         },
                         headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
@@ -337,7 +329,6 @@ class DeliveryManager:
     async def _deliver_slack(
         self,
         insight: ProactiveInsight,
-        tenant_id: str,
     ):
         """Deliver insight to Slack notification channels."""
         # Map urgency to priority string
@@ -352,7 +343,6 @@ class DeliveryManager:
 
         # Use notification service's Slack delivery
         await notification_service.send_to_slack_channels(
-            tenant_id=tenant_id,
             title=f"🔮 {insight.title}",
             body=insight.summary or "",
             priority=priority,
@@ -367,25 +357,24 @@ class DeliveryManager:
     async def _store_insight(
         self,
         insight: ProactiveInsight,
-        tenant_id: str,
     ):
         """Store delivered insight in Redis for retrieval."""
         r = await self._get_redis()
 
         # Full JSON serialization (all fields preserved)
-        key = f"emma:insights:{tenant_id}:{insight.id}"
+        key = f"emma:insights:{insight.id}"
         await r.set(key, insight.model_dump_json(), ex=settings.heartbeat_insight_ttl_seconds)
 
-        # Add to tenant's insight list with matching TTL (prevents zombie entries)
-        list_key = f"emma:insights:{tenant_id}:list"
+        # Add to global insight list with matching TTL (prevents zombie entries)
+        list_key = "emma:insights:list"
         await r.lpush(list_key, insight.id)
         await r.ltrim(list_key, 0, settings.heartbeat_max_insights_stored - 1)
         await r.expire(list_key, settings.heartbeat_insight_ttl_seconds)
 
-    async def _get_delivery_stats(self, tenant_id: str) -> Dict[str, Any]:
+    async def _get_delivery_stats(self) -> Dict[str, Any]:
         """Get current delivery statistics for rate limiting."""
         r = await self._get_redis()
-        key = f"emma:heartbeat:delivery:{tenant_id}"
+        key = "emma:heartbeat:delivery"
 
         data = await r.hgetall(key)
         now = datetime.now(timezone.utc)
@@ -413,10 +402,10 @@ class DeliveryManager:
 
         return stats
 
-    async def _update_delivery_stats(self, tenant_id: str, now: datetime):
+    async def _update_delivery_stats(self, now: datetime):
         """Update delivery statistics after sending an insight."""
         r = await self._get_redis()
-        key = f"emma:heartbeat:delivery:{tenant_id}"
+        key = "emma:heartbeat:delivery"
 
         today = now.strftime("%Y-%m-%d")
         current_hour = now.strftime("%Y-%m-%d-%H")
@@ -438,19 +427,18 @@ class DeliveryManager:
 
     async def get_pending_insights(
         self,
-        tenant_id: str,
         limit: int = 20,
     ) -> List[Dict[str, Any]]:
-        """Get list of recent insights for a tenant."""
+        """Get list of recent insights."""
         r = await self._get_redis()
 
-        list_key = f"emma:insights:{tenant_id}:list"
+        list_key = "emma:insights:list"
         insight_ids = await r.lrange(list_key, 0, limit - 1)
 
         insights = []
         expired_ids = []
         for insight_id in insight_ids:
-            key = f"emma:insights:{tenant_id}:{insight_id}"
+            key = f"emma:insights:{insight_id}"
             data = await r.get(key)
             if data:
                 insights.append(json.loads(data))

@@ -57,7 +57,7 @@ class PredictiveAnalysisTool(EmmaTool):
         query = arguments["query"]
         source_document_ids = arguments.get("source_document_ids", [])
 
-        tenant_id = context.get("tenant_id", "")
+        user_roles = context.get("user_roles", [])
         user_id = context.get("user_id")
         emit_sse = context.get("emit_sse")
 
@@ -69,7 +69,7 @@ class PredictiveAnalysisTool(EmmaTool):
         from app.agents.langgraph.subgraphs.predictive.graph import get_predictive_graph
 
         initial_state = create_predictive_state(
-            tenant_id=tenant_id,
+            user_roles=user_roles,
             user_id=user_id,
             query=query,
             max_factors=context.get("max_factors", 10),

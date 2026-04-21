@@ -60,7 +60,6 @@ class TriggerUpdate(BaseModel):
 
 class TriggerResponse(BaseModel):
     id: str
-    tenant_id: str
     name: str
     trigger_type: TriggerType
     event_pattern: Optional[str] = None
@@ -80,7 +79,6 @@ class TriggerResponse(BaseModel):
 class TriggerExecutionResponse(BaseModel):
     id: str
     trigger_id: str
-    tenant_id: str
     status: TriggerStatus
     result: Optional[Dict[str, Any]] = None
     started_at: Optional[datetime] = None

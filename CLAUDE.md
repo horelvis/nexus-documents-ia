@@ -28,13 +28,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Lint**: `cd frontend && npm run lint`
 - **Install**: `cd frontend && npm install`
 
-### Onboarding (New Tenant)
+### Onboarding
 - **Full docs**: [`docs/on-premise/ONBOARDING.md`](docs/on-premise/ONBOARDING.md)
 - **Onboarding mode**: `cd backend/docker && ./onboarding.sh start` (GPU → Docling, vLLM off)
 - **Index all**: `./onboarding.sh sync-all` then `./onboarding.sh status` to monitor
-- **Download BOE**: `./onboarding.sh boe` (13 presets, ~47 Spanish laws)
 - **Go live**: `./onboarding.sh finish` (GPU → vLLM, Emma operational)
-- **Compose override**: `docker-compose.onboarding.yml` (Docling GPU + disable RAG hierarchical)
+- **Compose override**: `docker-compose.onboarding.yml` (Docling GPU)
 
 ### Full Stack
 - Backend services: `cd backend/docker && docker compose up -d` (PostgreSQL, Redis, Weaviate, Elasticsearch, microservices with live reload)
@@ -43,13 +42,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-**NouxCubeIA** is a **multi-tenant intelligent document management system** with microservices architecture.
+**NouxCubeIA** is a **single-tenant intelligent document management system** with microservices architecture and role-based access control (KeyCloak OIDC/SAML + `roles: ARRAY(String)` on documents, `EVERYONE` wildcard).
 
 - **Backend**: FastAPI (Python 3.9+), async/await throughout
 - **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
 - **Database**: PostgreSQL 15 + Weaviate (vectors) + FalkorDB (graph) + Elasticsearch (full-text)
 - **Storage**: Google Cloud Storage
-- **AI/ML**: vLLM v0.18.0 (single-model: Qwen3.5-27B-AWQ, dual-phase PLANNER/CHAT) + LangGraph multi-agent orchestration
+- **AI/ML**: vLLM v0.18.0 (single-model: Qwen3.5-9B, dual-phase PLANNER/CHAT) + LangGraph multi-agent orchestration
 
 ### PostgreSQL
 
@@ -61,36 +60,30 @@ The `db` service uses vanilla `postgres:15`. Knowledge graph operations use **Fa
 |---------|------|---------|
 | Main API | 8000 | Core business logic, auth, document management |
 | Emma Agent Service | 8009 | LangGraph multi-agent RAG, Verified Generation |
-| Weaviate Service | 8007 | Vector search, RAG pipeline (embeddings via intelligence-docs) |
+| Weaviate Service | 8007 | Vector search, document indexing (embeddings via intelligence-docs) |
 | Intelligence Docs Service | 8012 | Text extraction (Docling/GLM-OCR), embedding (BGE-M3), entity extraction |
 | Knowledge Tree Service | 8011 | TrustGraph triple store (:Node/:Literal/:Rel), 4 LLM extractors, PROV-O provenance |
 | Elasticsearch Service | 8008 | Full-text search, hybrid search |
 | Background Worker | 8100 | Celery async task processing |
 | Emma Reactive Worker | — | Event listener + trigger engine (Redis Streams consumer) |
-| vLLM | internal | GPU inference — Qwen3.5-27B-AWQ (single-model, dual-phase PLANNER/CHAT) |
+| vLLM | internal | GPU inference — Qwen3.5-9B (single-model, dual-phase PLANNER/CHAT) |
 
 ### Deployment Mode (On-Premise Only)
 
-> **Note**: SaaS mode is **deprecated**. Only on-premise deployment is supported.
+Single-tenant, on-premise only. Multi-tenancy and SaaS mode have been fully removed.
 
-| Feature | On-Premise |
-|---------|------------|
-| Auth | OIDC/SAML |
-| ACL | JSONB in IndexedDocument |
+| Feature | Details |
+|---------|---------|
+| Auth | OIDC/SAML (KeyCloak) |
+| ACL | `roles: ARRAY(String)` on IndexedDocument, `EVERYONE` wildcard for public docs |
 | Documents | `indexed_documents` table |
 | Config | `DEPLOYMENT_MODE=on_premise` |
 
-### Multi-Pipeline RAG Sectors
+### Unified Config (Sectors Removed)
 
-One sector active per deployment via `ACTIVE_SECTOR` env var. Changing sector requires data re-ingestion.
+Sectors were removed (2026-03-31). `ACTIVE_SECTOR` is ignored. All 14 entity patterns are merged into a single unified configuration. `get_active_sector_config()` always returns the same config.
 
-| Sector | Agents | hybrid_alpha | top_k | Chunk Strategy |
-|--------|--------|-------------|-------|----------------|
-| `legal` | legal, labor, fiscal, contract, compliance, privacy | 0.7 | 12 | legal_sections (1500/200) |
-| `medical` | general | 0.6 | 15 | paragraph (1200/150) |
-| `documental` | general, education, realestate | 0.5 | 10 | semantic (1000/100) |
-
-**Key files**: `emma-agent-service/app/agents/langgraph/sectors/` (config.py, registry.py, entity_extractor.py, graph_expander.py)
+**Key files**: `emma-agent-service/app/agents/langgraph/sectors/config.py` (unified config)
 
 ### Emma Agent Service (LangGraph)
 
@@ -121,7 +114,7 @@ START → classify → [fast_path → END]
 - **RLM Processor**: Recursive pipeline for large docs (>16K tokens), Redis cached
 - **Verified Generation**: Claim-by-claim verification with SSE streaming
 - **LLM Router**: Dual-model architecture with automatic fallback (see below)
-- **SmartSearch**: Unified multi-store search replacing `search_documents` + `search_legislation` (see below)
+- **SmartSearch**: Unified multi-store search (Weaviate + FalkorDB) (see below)
 - **Social Agent**: Conversational agent for social channels (see below)
 - **Emma Reactive**: Event-driven proactive system (see below)
 - **Prompt Management**: Dynamic prompts, rules, guardrails (see below)
@@ -135,8 +128,8 @@ MemoRAG-inspired dual-model routing where a fast planner model handles tool call
                     ┌──────────────────────────────────────────┐
                     │            LLMRouter                     │
                     │                                          │
-User Query ──────►  │  role=PLANNER → vLLM (27B, temp=0.3)    │
-                    │  role=CHAT    → vLLM (27B, temp=0.6)     │
+User Query ──────►  │  role=PLANNER → vLLM (9B, temp=0.3)     │
+                    │  role=CHAT    → vLLM (9B, temp=0.6)      │
                     │                                          │
                     │  Fallback chain per role+provider         │
                     └──────────────────────────────────────────┘
@@ -145,8 +138,8 @@ User Query ──────►  │  role=PLANNER → vLLM (27B, temp=0.3)    
 **Role Assignment**:
 | Role | Model | Used By | Purpose |
 |------|-------|---------|---------|
-| `PLANNER` | Qwen3.5-27B-AWQ (temp=0.3) | classify, memory_recall, react_loop, decompose, swarm_worker, intent_router, verified eval, heartbeat, fact_extractor | Tool calling, JSON extraction, routing |
-| `CHAT` | Qwen3.5-27B-AWQ (temp=0.6) | synthesize, synthesize_swarm, rlm_processor, writer_agent, specialists, prediction_synthesizer | User-facing text generation |
+| `PLANNER` | Qwen3.5-9B (temp=0.3) | classify, memory_recall, react_loop, decompose, swarm_worker, intent_router, verified eval, heartbeat, fact_extractor | Tool calling, JSON extraction, routing |
+| `CHAT` | Qwen3.5-9B (temp=0.6) | synthesize, synthesize_swarm, rlm_processor, writer_agent, specialists, prediction_synthesizer | User-facing text generation |
 
 **Usage**:
 ```python
@@ -211,7 +204,7 @@ The knowledge graph uses a **TrustGraph-model RDF-style triple store** (`:Node`/
 
 ### SmartSearch — Unified Multi-Store Search
 
-The `smart_search` tool replaces the separate `search_documents` and `search_legislation` tools. It orchestrates 3 data stores automatically so the LLM doesn't have to choose which tool to call.
+The `smart_search` tool provides unified document search across 2 data stores so the LLM doesn't have to choose which tool to call.
 
 **Pipeline** (~200ms total):
 ```
@@ -220,11 +213,10 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
     → Merge + Dedup → Multi-Signal Re-Rank (~1ms) → Format for LLM
 ```
 
-**3 Data Stores**:
+**2 Data Stores**:
 | Store | What | How |
 |-------|------|-----|
-| Weaviate | Tenant documents (hybrid search) | `WeaviateClient.hybrid_search()` with enrichment filters |
-| PublicKnowledge | BOE legislation (hybrid search) | `WeaviateClient.search_public_knowledge()` |
+| Weaviate | Documents (hybrid search) | `WeaviateClient.hybrid_search()` with enrichment filters |
 | FalkorDB | Entity relationships (TrustGraph triples) | `KnowledgeTreeClient.query_triples()` via graph_expander |
 
 **Enrichment Properties** (first-class Weaviate properties, not JSONB):
@@ -233,28 +225,28 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 - `quality_score` — Quality 0.0-1.0 from DocumentIntelligence
 - `associated_person` — Person from folder hierarchy or entity extraction
 
-**5-Signal Re-Ranking** (sector-tunable weights):
-| Signal | Default | Legal | Medical | Documental |
-|--------|---------|-------|---------|------------|
-| similarity | 0.40 | 0.35 | 0.40 | 0.35 |
-| quality | 0.20 | 0.15 | 0.25 | 0.15 |
-| graph | 0.20 | 0.30 | 0.15 | 0.20 |
-| recency | 0.10 | 0.05 | 0.10 | 0.15 |
-| entity | 0.10 | 0.15 | 0.10 | 0.15 |
+**5-Signal Re-Ranking**:
+| Signal | Weight |
+|--------|--------|
+| similarity | 0.40 |
+| quality | 0.20 |
+| graph | 0.20 |
+| recency | 0.10 |
+| entity | 0.10 |
 
 **Config**: `SMART_SEARCH_RERANK_ENABLED=true`, `SMART_SEARCH_GRAPH_ENABLED=true`
 
 **Key files**:
 - `emma-agent-service/app/agents/langgraph/tools/smart_search.py` — SmartSearchTool implementation
 - `emma-agent-service/app/agents/langgraph/tools/registry.py` — Tool registration
-- `emma-agent-service/app/agents/langgraph/sectors/config.py` — `rerank_weights` per sector
+- `emma-agent-service/app/agents/langgraph/sectors/config.py` — Unified rerank weights
 - `weaviate-service/app/services/weaviate_service.py` — Enrichment properties + filters
 - `knowledge-tree-service/app/api/triples.py` — `/triples/query` endpoint (graph expansion)
 
 **ReAct Agent Tools** (16 total):
 | Tool | Purpose |
 |------|---------|
-| `smart_search` | Unified document + legislation search (auto-detects scope) |
+| `smart_search` | Unified document search (hybrid Weaviate + graph expansion) |
 | `graph_rag` | Knowledge graph retrieval with 8-stage pipeline (entity → BFS → guided expansion → scoring → provenance) |
 | `get_document_content` | Read full document by ID |
 | `structural_query` | Count, list, filter via FalkorDB TrustGraph |
@@ -325,7 +317,7 @@ Persistent user facts (name, department, preferences) that survive session expir
 **Architecture (Phase 2 — LangGraph Store)**:
 - **PRIMARY**: AsyncPostgresStore (cross-thread memory, shared psycopg3 pool with checkpointer)
 - **FALLBACK**: asyncpg + Redis (legacy, used when Store unavailable)
-- Store namespace: `("user_facts", tenant_id, user_id)` → key: `"category/fact_key"`
+- Store namespace: `("user_facts", user_id)` → key: `"category/fact_key"`
 - Write: fire-and-forget after each response → regex/LLM extraction → Store `aput()` (or legacy UPSERT)
 - Read: Store `asearch()` (or legacy Redis cache → PostgreSQL) → format → inject into system prompt
 
@@ -349,7 +341,7 @@ Persistent user facts (name, department, preferences) that survive session expir
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/emma/memory/facts` | GET | List active facts (`?user_id=X&tenant_id=Y`) |
+| `/emma/memory/facts` | GET | List active facts (`?user_id=X`) |
 | `/emma/memory/facts` | DELETE | Hard-delete ALL facts (GDPR right-to-erasure) |
 | `/emma/memory/facts/{id:path}` | DELETE | Delete single fact (Store key contains `/`) |
 
@@ -431,9 +423,9 @@ Events (Redis Streams) → Event Listener → Trigger Engine → Emma Background
 - **Heartbeat Service** (`services/heartbeat/`): Proactive context evaluation + insight generation
 
 **Heartbeat System** (Phase 6):
-- **Context Gatherer**: Collects tenant data (documents, contracts, activity)
+- **Context Gatherer**: Collects data (documents, contracts, activity)
 - **Insight Evaluator**: LLM Router + Langfuse prompt (`emma_heartbeat_evaluator`) with YAML fallback
-- **Priority Scorer**: Configurable per-tenant weights via `type_priorities` (merged with `DEFAULT_TYPE_PRIORITIES`)
+- **Priority Scorer**: Configurable weights via `type_priorities` (merged with `DEFAULT_TYPE_PRIORITIES`)
 - **Delivery Manager**: Rate limiting (5/day, 2/hour) + quiet hours (22:00-08:00)
 - **Insight Types**: Dynamic (string-based). Built-in: `contract_expiration`, `compliance_alert`, `risk_alert`, `anomaly_detected`, `task_reminder`, `deadline_approaching`, `document_update`, `activity_summary`. New types added via Langfuse prompt, no code changes needed.
 
@@ -446,7 +438,6 @@ Events (Redis Streams) → Event Listener → Trigger Engine → Emma Background
 # Create a Slack channel for notifications (via API or UI)
 curl -X POST "http://localhost:8009/channels" \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -d '{
     "channel_type": "slack",
     "channel_name": "Emma Alerts",
@@ -487,94 +478,6 @@ Then add `"slack"` to the `notification_channels` array in your triggers to rece
 - `EVENT_CONSUMER_GROUP` — Redis consumer group name
 - `CREDENTIALS_ENCRYPTION_KEY` — Fernet key for channel credential encryption
 
-### Multi-Tier RAG Caching
-
-> **Full docs**: [`docs/architecture/RAG_CACHING.md`](docs/architecture/RAG_CACHING.md)
-
-Tier 1 (Retrieval, 5min TTL) → Tier 2 (Context Assembly, 30min) → Tier 3 (Semantic, 1hr). Key files in `weaviate-service/app/services/rag/cache/`.
-
-### Public Knowledge & BOE Legislation
-
-> **Full docs**: [`docs/architecture/PUBLIC_KNOWLEDGE.md`](docs/architecture/PUBLIC_KNOWLEDGE.md)
-
-The **PublicKnowledge** system provides shared Spanish legislation across all tenants. It consists of:
-
-1. **Weaviate Collection** (`PublicKnowledge`): Chunked legislation with embeddings for RAG retrieval
-2. **Legal Knowledge Graph** (Apache AGE `knowledge_graph_public`): Law nodes + relationship edges (MODIFIES, REFERENCES, DEROGATES)
-3. **BOE Download API**: Endpoints to download and index legislation from BOE
-
-**Architecture**:
-```
-BOE API → Download & Parse → IndexingPipeline (chunks) → PublicKnowledge (Weaviate)
-                                    ↓
-                          LegalGraphService → Apache AGE graph
-```
-
-**API Endpoints** (`weaviate-service:8007/boe/`):
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/boe/presets` | GET | List available preset categories (13 domains) |
-| `/boe/download/preset` | POST | Download all laws in a preset |
-| `/boe/download` | POST | Download single law by BOE ID |
-| `/boe/all-legislation-ids` | GET | Get all unique BOE IDs (47 laws) |
-| `/boe/sync/{boe_id}` | POST | Sync law and detect article-level changes |
-
-**Presets disponibles** (13 categorías, ~47 leyes):
-- `laboral` (7): ET, LTD, LPRL, LISOS, LOI, LETA, LGSS
-- `fiscal` (5): LGT, LIRPF, LIS, LIVA, Reglamento Facturación
-- `mercantil` (3): LSC, CCom, LSP
-- `civil` (2): CC, LEC
-- `administrativo` (3): LPACAP, LRJSP, LCSP
-- `compliance` (5): LPBC, CP, LC, LSE, Auditoría
-- `propiedad_intelectual` (3): LPI, LM, LP
-- `comercio_consumidores` (5): LGDCU, LCD, LOCM, LGUM, LSSI
-- `emprendimiento` (3): LE, LCC, LS
-- `inmobiliario` (5): LAU, LPH, LH, Crédito Inmobiliario
-- `contabilidad` (2): PGC, PGC Pymes
-- `educacion` (3): LOMLOE, LOE, LOU
-- `proteccion_datos` (1): LOPDGDD
-
-**Client Onboarding** — Use the onboarding script (recommended) or manual curl:
-```bash
-# Recommended: use the onboarding script
-cd backend/docker && ./onboarding.sh boe           # All 13 presets
-cd backend/docker && ./onboarding.sh boe laboral    # Single preset
-
-# Manual alternative:
-API_KEY=$(grep MICROSERVICES_API_KEY backend/docker/.env | cut -d= -f2)
-curl -X POST "http://localhost:8007/boe/download/preset" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  -d '{"preset": "laboral", "index_to_weaviate": true}'
-```
-
-> See [`docs/on-premise/ONBOARDING.md`](docs/on-premise/ONBOARDING.md) for the complete onboarding guide.
-
-**Legal Graph Management**:
-```bash
-# View graph stats
-curl "http://localhost:8007/legal/stats" -H "X-API-Key: $API_KEY"
-
-# Get graph structure (nodes + edges for D3 visualization)
-curl "http://localhost:8007/legal/graph/structure" -H "X-API-Key: $API_KEY"
-
-# Connect orphan laws (if any exist without connections)
-docker compose exec weaviate-service bash -c \
-  'cd /app && PYTHONPATH=/app python scripts/connect_orphan_laws.py'
-```
-
-**Key files**:
-- `weaviate-service/app/api/boe_legislation.py` — BOE download endpoints
-- `weaviate-service/app/api/legal_graph.py` — Legal graph CRUD
-- `weaviate-service/app/services/sil/legal_graph_service.py` — Apache AGE graph operations
-- `weaviate-service/app/services/public_knowledge_service.py` — Weaviate PublicKnowledge CRUD
-- `weaviate-service/scripts/seed_legal_graph.py` — Initial graph population
-- `weaviate-service/scripts/connect_orphan_laws.py` — Connect orphan laws to hub laws
-- `weaviate-service/scripts/populate_legal_edges.py` — Create REFERENCES/MODIFIES edges from BOE analysis
-
-**Note**: 5 laws (LSP, LC, LP, LS, LAU Reform) aren't available in BOE's `/legislacion-consolidada` API and require manual seeding or alternative download methods.
-
 ## File Structure Conventions
 
 ### Backend (`/backend/app/`)
@@ -593,7 +496,7 @@ docker compose exec weaviate-service bash -c \
 ## Development Guidelines
 
 ### Database Operations
-- Always use tenant isolation: `filter(Model.tenant_id == current_tenant.id)`
+- Use role-based access: `filter(Document.roles.overlap(user.roles))` (no tenant_id — single-tenant)
 - Use async sessions: `async with get_async_db() as db:`
 - Create migrations safely: `cd backend && python scripts/create_migration.py -m "description" --autogenerate`
 - Fix multiple heads: `python scripts/create_migration.py --fix-heads`
@@ -607,7 +510,7 @@ docker compose exec weaviate-service bash -c \
 
 ### Security
 - All endpoints require auth except public ones
-- Tenant-based authorization for data access
+- Role-based authorization for data access (KeyCloak roles, `EVERYONE` wildcard)
 - Never log secrets (API keys, tokens, passwords)
 - Environment variables for all secrets
 

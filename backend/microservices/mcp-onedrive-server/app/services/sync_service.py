@@ -1,7 +1,6 @@
 """
 OneDrive Sync & Indexing Service.
 
-Same pattern as mcp-google-drive-server sync_service.py:
 1. run_sync_job(): Lists files in OneDrive → creates/updates indexed_documents
 2. run_index_pending_job(): Downloads from OneDrive → sends to Weaviate pipeline
 
@@ -69,7 +68,7 @@ async def run_sync_job(
         # Get connector
         row = await conn.fetchrow(
             """
-            SELECT id, tenant_id, name, config, is_active, sync_enabled,
+            SELECT id, name, config, is_active, sync_enabled,
                    last_health_check, created_by_id, connector_type
             FROM connectors WHERE id = $1
             """,
@@ -85,10 +84,8 @@ async def run_sync_job(
         if row["connector_type"] != "onedrive":
             return {"success": False, "error": f"Not an onedrive connector: {row['connector_type']}"}
 
-        tenant_id = row["tenant_id"]
-
         # Load full config with decrypted tokens
-        config = await load_connector_from_db(UUID(connector_id), tenant_id)
+        config = await load_connector_from_db(UUID(connector_id))
         if not config:
             return {"success": False, "error": "Failed to load connector config"}
 
@@ -102,8 +99,7 @@ async def run_sync_job(
         owner_id = row["created_by_id"]
         if not owner_id:
             admin_row = await conn.fetchrow(
-                "SELECT id FROM users WHERE tenant_id = $1 AND is_active = true LIMIT 1",
-                tenant_id,
+                "SELECT id FROM users WHERE is_active = true ORDER BY created_at LIMIT 1",
             )
             if admin_row:
                 owner_id = admin_row["id"]
@@ -138,7 +134,6 @@ async def run_sync_job(
                     await _process_onedrive_item(
                         conn=conn,
                         item=item,
-                        tenant_id=tenant_id,
                         connector_id=UUID(connector_id),
                         owner_id=owner_id,
                         stats=stats,
@@ -199,7 +194,6 @@ async def run_sync_job(
 async def _process_onedrive_item(
     conn: asyncpg.Connection,
     item,
-    tenant_id: UUID,
     connector_id: UUID,
     owner_id: UUID,
     stats: Dict[str, Any],
@@ -285,22 +279,22 @@ async def _process_onedrive_item(
         await conn.execute(
             """
             INSERT INTO indexed_documents (
-                id, tenant_id, connector_id, external_id, external_url,
-                external_path, owner_id, is_tenant_public, title,
+                id, connector_id, external_id, external_url,
+                external_path, owner_id, title,
                 description, mime_type, file_extension, size_bytes,
                 source_created_at, source_modified_at, indexing_status,
-                shared_with_users, shared_with_groups
+                roles
             ) VALUES (
-                $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14, $15, $16,
-                $17::jsonb, $18::jsonb
+                $1::uuid, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10, $11, $12, $13, $14,
+                $15
             )
             """,
-            doc_id, tenant_id, connector_id, item.id, external_url,
-            external_path, owner_id, True, title,
+            doc_id, connector_id, item.id, external_url,
+            external_path, owner_id, title,
             None, mime_type, file_extension, size_bytes,
             item.created_at, item.modified_at, "pending",
-            json.dumps([]), json.dumps([]),
+            ["EVERYONE"],
         )
         stats["items_new"] += 1
 
@@ -322,7 +316,7 @@ async def run_index_pending_job(
     conn = await pool.acquire()
     try:
         row = await conn.fetchrow(
-            "SELECT id, tenant_id, config, is_active, connector_type FROM connectors WHERE id = $1",
+            "SELECT id, config, is_active, connector_type FROM connectors WHERE id = $1",
             UUID(connector_id),
         )
         if not row:
@@ -330,10 +324,8 @@ async def run_index_pending_job(
         if not row["is_active"]:
             return {"success": False, "error": "Connector not active"}
 
-        tenant_id = row["tenant_id"]
-
         # Load config with decrypted tokens
-        config = await load_connector_from_db(UUID(connector_id), tenant_id)
+        config = await load_connector_from_db(UUID(connector_id))
         if not config or not config.is_authenticated:
             return {"success": False, "error": "Connector not authenticated"}
 
@@ -344,10 +336,10 @@ async def run_index_pending_job(
         limit = max_documents or 1000
         pending_docs = await conn.fetch(
             """
-            SELECT id, tenant_id, connector_id, external_id, external_url,
-                   external_path, owner_id, is_tenant_public, title, description,
+            SELECT id, connector_id, external_id, external_url,
+                   external_path, owner_id, title, description,
                    mime_type, file_extension, size_bytes, source_created_at,
-                   source_modified_at, shared_with_users, shared_with_groups
+                   source_modified_at, roles
             FROM indexed_documents
             WHERE connector_id = $1 AND indexing_status = 'pending'
             ORDER BY created_at
@@ -506,7 +498,6 @@ async def _index_single_document(
             file_bytes=content,
             filename=doc["title"],
             mime_type=effective_mime,
-            tenant_id=str(doc["tenant_id"]),
             owner_id=str(doc["owner_id"]),
             metadata={
                 "external_id": doc["external_id"],
@@ -518,9 +509,7 @@ async def _index_single_document(
                 "source_modified_at": doc["source_modified_at"].isoformat() if doc["source_modified_at"] else None,
             },
             acl={
-                "is_tenant_public": doc["is_tenant_public"],
-                "shared_with_users": doc["shared_with_users"] or [],
-                "shared_with_groups": doc["shared_with_groups"] or [],
+                "roles": list(doc["roles"]) if doc["roles"] else ["EVERYONE"],
             },
         )
 
@@ -591,7 +580,6 @@ async def _send_to_weaviate_pipeline(
     file_bytes: bytes,
     filename: str,
     mime_type: Optional[str],
-    tenant_id: str,
     owner_id: str,
     metadata: Dict[str, Any],
     acl: Dict[str, Any],
@@ -608,7 +596,6 @@ async def _send_to_weaviate_pipeline(
         "file_bytes_base64": file_base64,
         "filename": filename,
         "mime_type": mime_type,
-        "tenant_id": tenant_id,
         "owner_id": owner_id,
         "metadata": metadata,
         "acl": acl,

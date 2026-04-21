@@ -66,8 +66,9 @@ async def run_sync_job(
         # Get connector
         row = await conn.fetchrow(
             """
-            SELECT id, tenant_id, name, config, is_active, sync_enabled,
-                   last_health_check, created_by_id, connector_type
+            SELECT id, name, config, is_active, sync_enabled,
+                   last_health_check, created_by_id, connector_type,
+                   default_document_roles
             FROM connectors WHERE id = $1
             """,
             UUID(connector_id),
@@ -82,10 +83,8 @@ async def run_sync_job(
         if row["connector_type"] != "google_drive":
             return {"success": False, "error": f"Not a google_drive connector: {row['connector_type']}"}
 
-        tenant_id = row["tenant_id"]
-
         # Load full config with decrypted tokens
-        config = await load_connector_from_db(UUID(connector_id), tenant_id)
+        config = await load_connector_from_db(UUID(connector_id))
         if not config:
             return {"success": False, "error": "Failed to load connector config"}
 
@@ -95,17 +94,19 @@ async def run_sync_job(
         # Ensure fresh token
         access_token = await oauth_service.ensure_fresh_token(config)
 
-        # Get owner
+        # Get owner (connector creator or first active user as fallback)
         owner_id = row["created_by_id"]
         if not owner_id:
             admin_row = await conn.fetchrow(
-                "SELECT id FROM users WHERE tenant_id = $1 AND is_active = true LIMIT 1",
-                tenant_id,
+                "SELECT id FROM users WHERE is_active = true ORDER BY created_at LIMIT 1",
             )
             if admin_row:
                 owner_id = admin_row["id"]
             else:
                 return {"success": False, "error": "No owner found for documents"}
+
+        # Default roles for ingested documents — from connector config, or EVERYONE
+        default_roles = list(row["default_document_roles"] or ["EVERYONE"])
 
         # Create Drive service
         drive = DriveService(access_token, config)
@@ -135,9 +136,9 @@ async def run_sync_job(
                     await _process_drive_file(
                         conn=conn,
                         file=file,
-                        tenant_id=tenant_id,
                         connector_id=UUID(connector_id),
                         owner_id=owner_id,
+                        default_roles=default_roles,
                         stats=stats,
                         full_sync=full_sync,
                     )
@@ -196,9 +197,9 @@ async def run_sync_job(
 async def _process_drive_file(
     conn: asyncpg.Connection,
     file,
-    tenant_id: UUID,
     connector_id: UUID,
     owner_id: UUID,
+    default_roles: List[str],
     stats: Dict[str, Any],
     full_sync: bool = False,
 ) -> None:
@@ -287,22 +288,21 @@ async def _process_drive_file(
         await conn.execute(
             """
             INSERT INTO indexed_documents (
-                id, tenant_id, connector_id, external_id, external_url,
-                external_path, owner_id, is_tenant_public, title,
+                id, connector_id, external_id, external_url,
+                external_path, owner_id, title,
                 description, mime_type, file_extension, size_bytes,
                 source_created_at, source_modified_at, indexing_status,
-                shared_with_users, shared_with_groups
+                roles
             ) VALUES (
-                $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9,
-                $10, $11, $12, $13, $14, $15, $16,
-                $17::jsonb, $18::jsonb
+                $1::uuid, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10, $11, $12, $13, $14, $15
             )
             """,
-            doc_id, tenant_id, connector_id, file.id, external_url,
-            external_path, owner_id, True, title,
+            doc_id, connector_id, file.id, external_url,
+            external_path, owner_id, title,
             None, mime_type, file_extension, size_bytes,
             file.created_at, file.modified_at, "pending",
-            json.dumps([]), json.dumps([]),
+            default_roles,
         )
         stats["items_new"] += 1
 
@@ -324,7 +324,7 @@ async def run_index_pending_job(
     conn = await pool.acquire()
     try:
         row = await conn.fetchrow(
-            "SELECT id, tenant_id, config, is_active, connector_type FROM connectors WHERE id = $1",
+            "SELECT id, config, is_active, connector_type FROM connectors WHERE id = $1",
             UUID(connector_id),
         )
         if not row:
@@ -332,10 +332,8 @@ async def run_index_pending_job(
         if not row["is_active"]:
             return {"success": False, "error": "Connector not active"}
 
-        tenant_id = row["tenant_id"]
-
         # Load config with decrypted tokens
-        config = await load_connector_from_db(UUID(connector_id), tenant_id)
+        config = await load_connector_from_db(UUID(connector_id))
         if not config or not config.is_authenticated:
             return {"success": False, "error": "Connector not authenticated"}
 
@@ -346,10 +344,10 @@ async def run_index_pending_job(
         limit = max_documents or 1000
         pending_docs = await conn.fetch(
             """
-            SELECT id, tenant_id, connector_id, external_id, external_url,
-                   external_path, owner_id, is_tenant_public, title, description,
+            SELECT id, connector_id, external_id, external_url,
+                   external_path, owner_id, title, description,
                    mime_type, file_extension, size_bytes, source_created_at,
-                   source_modified_at, shared_with_users, shared_with_groups
+                   source_modified_at, roles
             FROM indexed_documents
             WHERE connector_id = $1 AND indexing_status = 'pending'
             ORDER BY created_at
@@ -519,12 +517,12 @@ async def _index_single_document(
 
         # Step 2: Send to Weaviate Service
         logger.debug(f"Sending to Weaviate pipeline ({len(content)} bytes)")
+        doc_roles = list(doc["roles"] or ["EVERYONE"])
         weaviate_result = await _send_to_weaviate_pipeline(
             document_id=str(doc_id),
             file_bytes=content,
             filename=doc["title"],
             mime_type=effective_mime,
-            tenant_id=str(doc["tenant_id"]),
             owner_id=str(doc["owner_id"]),
             metadata={
                 "external_id": doc["external_id"],
@@ -535,11 +533,7 @@ async def _index_single_document(
                 "source_created_at": doc["source_created_at"].isoformat() if doc["source_created_at"] else None,
                 "source_modified_at": doc["source_modified_at"].isoformat() if doc["source_modified_at"] else None,
             },
-            acl={
-                "is_tenant_public": doc["is_tenant_public"],
-                "shared_with_users": doc["shared_with_users"] or [],
-                "shared_with_groups": doc["shared_with_groups"] or [],
-            },
+            acl={"roles": doc_roles},
         )
 
         duration = time.time() - processing_start
@@ -609,7 +603,6 @@ async def _send_to_weaviate_pipeline(
     file_bytes: bytes,
     filename: str,
     mime_type: Optional[str],
-    tenant_id: str,
     owner_id: str,
     metadata: Dict[str, Any],
     acl: Dict[str, Any],
@@ -626,7 +619,6 @@ async def _send_to_weaviate_pipeline(
         "file_bytes_base64": file_base64,
         "filename": filename,
         "mime_type": mime_type,
-        "tenant_id": tenant_id,
         "owner_id": owner_id,
         "metadata": metadata,
         "acl": acl,

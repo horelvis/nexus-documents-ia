@@ -33,7 +33,6 @@ class TemplateEditSessionService:
         template_file_mime: Optional[str],
         user_id: str,
         user_email: str,
-        tenant_id: str,
         google_doc_id: str,
         google_doc_url: str,
         google_doc_edit_url: str,
@@ -49,7 +48,6 @@ class TemplateEditSessionService:
             template_file_mime=template_file_mime,
             user_id=user_id,
             user_email=user_email,
-            tenant_id=tenant_id,
             google_doc_id=google_doc_id,
             google_doc_url=google_doc_url,
             google_doc_edit_url=google_doc_edit_url,
@@ -98,15 +96,12 @@ class TemplateEditSessionService:
         db: Session,
         *,
         user_id: Optional[str] = None,
-        tenant_id: Optional[str] = None,
         include_completed: bool = False,
         include_expired: bool = False,
     ) -> List[TemplateEditSession]:
         stmt = select(TemplateEditSession)
         if user_id:
             stmt = stmt.where(TemplateEditSession.user_id == user_id)
-        if tenant_id:
-            stmt = stmt.where(TemplateEditSession.tenant_id == tenant_id)
         if not include_completed:
             stmt = stmt.where(TemplateEditSession.status == "active")
         if not include_expired:

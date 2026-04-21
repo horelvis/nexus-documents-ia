@@ -307,8 +307,8 @@ class StorageServiceHealthCheck(HealthChecker):
         try:
             from app.services.async_storage_client import AsyncStorageClient
 
-            # Create client with minimal context (health check doesn't need tenant)
-            client = AsyncStorageClient(tenant_id="health-check")
+            # Create client with minimal context for the health probe
+            client = AsyncStorageClient()
             result = await client.health_check()
 
             if result.get("status") == "healthy":

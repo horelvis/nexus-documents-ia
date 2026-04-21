@@ -45,7 +45,6 @@ class LoginResponse(BaseModel):
     user: Dict[str, Any] = Field(..., description="User data")
     subscription: SubscriptionInfo = Field(..., description="Subscription details from Stripe")
     permissions: UserPermissions = Field(..., description="User permissions based on plan")
-    tenant_id: str = Field(..., description="User's tenant ID")
 
 
 class LogoutResponse(BaseModel):

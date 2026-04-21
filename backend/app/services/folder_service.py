@@ -19,7 +19,7 @@ from uuid import UUID
 from sqlalchemy import func, distinct, select, update, union_all, literal
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Document, IndexedDocument, Tenant, FolderMarker
+from app.db.models import Document, IndexedDocument, FolderMarker
 
 logger = logging.getLogger(__name__)
 
@@ -60,9 +60,8 @@ class FolderService:
     No separate folders table - we use DISTINCT folder_path queries.
     """
 
-    def __init__(self, db: AsyncSession, tenant_id: str, storage_service=None):
+    def __init__(self, db: AsyncSession, storage_service=None):
         self.db = db
-        self.tenant_id = tenant_id
         self.storage_service = storage_service
 
     async def get_folder_tree(self) -> FolderNode:
@@ -84,7 +83,6 @@ class FolderService:
                 Document.folder_path,
                 func.count(Document.id).label("count")
             )
-            .where(Document.tenant_id == self.tenant_id)
             .where(Document.folder_path.isnot(None))
             .group_by(Document.folder_path)
         )
@@ -99,7 +97,6 @@ class FolderService:
                 IndexedDocument.external_path,
                 func.count(IndexedDocument.id).label("count")
             )
-            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
             .where(IndexedDocument.external_path.isnot(None))
             .group_by(IndexedDocument.external_path)
         )
@@ -109,10 +106,7 @@ class FolderService:
                 path_to_count[path] += count
 
         # Get empty folder markers
-        markers_stmt = (
-            select(FolderMarker.folder_path)
-            .where(FolderMarker.tenant_id == UUID(self.tenant_id))
-        )
+        markers_stmt = select(FolderMarker.folder_path)
         markers_result = await self.db.execute(markers_stmt)
         marker_paths = {row[0] for row in markers_result.all() if row[0]}
 
@@ -173,7 +167,6 @@ class FolderService:
                 Document.folder_path,
                 func.count(Document.id).label("count")
             )
-            .where(Document.tenant_id == self.tenant_id)
             .where(Document.folder_path.isnot(None))
             .group_by(Document.folder_path)
         )
@@ -188,7 +181,6 @@ class FolderService:
                 IndexedDocument.external_path,
                 func.count(IndexedDocument.id).label("count")
             )
-            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
             .where(IndexedDocument.external_path.isnot(None))
             .group_by(IndexedDocument.external_path)
         )
@@ -198,10 +190,7 @@ class FolderService:
                 all_folders[path] += count
 
         # Get empty folder markers
-        markers_stmt = (
-            select(FolderMarker.folder_path)
-            .where(FolderMarker.tenant_id == UUID(self.tenant_id))
-        )
+        markers_stmt = select(FolderMarker.folder_path)
         markers_result = await self.db.execute(markers_stmt)
         marker_paths = {row[0] for row in markers_result.all() if row[0]}
 
@@ -241,7 +230,7 @@ class FolderService:
         Returns:
             List of Document objects
         """
-        stmt = select(Document).where(Document.tenant_id == self.tenant_id)
+        stmt = select(Document)
 
         if include_subfolders:
             # Use LIKE for prefix matching
@@ -275,11 +264,7 @@ class FolderService:
             True if successful
         """
         # Get document
-        stmt = (
-            select(Document)
-            .where(Document.id == UUID(document_id))
-            .where(Document.tenant_id == self.tenant_id)
-        )
+        stmt = select(Document).where(Document.id == UUID(document_id))
         result = await self.db.execute(stmt)
         document = result.scalar_one_or_none()
 
@@ -303,16 +288,7 @@ class FolderService:
         # Move in GCS if storage service available
         if self.storage_service and old_file_path != new_file_path:
             try:
-                # Get tenant for bucket name
-                tenant_stmt = select(Tenant).where(Tenant.id == self.tenant_id)
-                tenant_result = await self.db.execute(tenant_stmt)
-                tenant = tenant_result.scalar_one_or_none()
-                if tenant:
-                    await self._move_file_in_gcs(
-                        tenant.bucket_name,
-                        old_file_path,
-                        new_file_path,
-                    )
+                await self._move_file_in_gcs(old_file_path, new_file_path)
             except Exception as e:
                 logger.error(f"Failed to move file in GCS: {e}")
                 # Continue anyway - DB update is more important
@@ -334,14 +310,13 @@ class FolderService:
 
     async def _move_file_in_gcs(
         self,
-        bucket_name: str,
         old_path: str,
         new_path: str,
     ):
         """Move file in GCS using storage service."""
         try:
             result = await self.storage_service.move_file(old_path, new_path)
-            logger.info(f"Moved file in GCS: {old_path} -> {new_path} (bucket: {bucket_name})")
+            logger.info(f"Moved file in GCS: {old_path} -> {new_path}")
             return result
         except Exception as e:
             logger.error(f"Failed to move file in GCS: {old_path} -> {new_path}: {e}")
@@ -355,18 +330,12 @@ class FolderService:
         Combines stats from both Document and IndexedDocument tables.
         """
         # Total documents from Document table
-        doc_total_stmt = (
-            select(func.count(Document.id))
-            .where(Document.tenant_id == self.tenant_id)
-        )
+        doc_total_stmt = select(func.count(Document.id))
         doc_total_result = await self.db.execute(doc_total_stmt)
         doc_total = doc_total_result.scalar() or 0
 
         # Total documents from IndexedDocument table
-        idx_total_stmt = (
-            select(func.count(IndexedDocument.id))
-            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
-        )
+        idx_total_stmt = select(func.count(IndexedDocument.id))
         idx_total_result = await self.db.execute(idx_total_stmt)
         idx_total = idx_total_result.scalar() or 0
 
@@ -375,7 +344,6 @@ class FolderService:
         # Unclassified from Document table (in /Sin Clasificar)
         doc_unclassified_stmt = (
             select(func.count(Document.id))
-            .where(Document.tenant_id == self.tenant_id)
             .where(Document.folder_path == "/Sin Clasificar")
         )
         doc_unclassified_result = await self.db.execute(doc_unclassified_stmt)
@@ -385,7 +353,6 @@ class FolderService:
         # But we can check for null/empty external_path
         idx_unclassified_stmt = (
             select(func.count(IndexedDocument.id))
-            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
             .where(
                 (IndexedDocument.external_path.is_(None)) |
                 (IndexedDocument.external_path == "") |
@@ -400,7 +367,6 @@ class FolderService:
         # Auto-classified from Document table
         auto_stmt = (
             select(func.count(Document.id))
-            .where(Document.tenant_id == self.tenant_id)
             .where(Document.auto_classified == True)
         )
         auto_result = await self.db.execute(auto_stmt)
@@ -410,7 +376,6 @@ class FolderService:
         # Distinct folders from Document table (excluding /Sin Clasificar)
         doc_folders_stmt = (
             select(func.count(distinct(Document.folder_path)))
-            .where(Document.tenant_id == self.tenant_id)
             .where(Document.folder_path != "/Sin Clasificar")
             .where(Document.folder_path.isnot(None))
         )
@@ -420,7 +385,6 @@ class FolderService:
         # Distinct folders from IndexedDocument table
         idx_folders_stmt = (
             select(func.count(distinct(IndexedDocument.external_path)))
-            .where(IndexedDocument.tenant_id == UUID(self.tenant_id))
             .where(IndexedDocument.external_path.isnot(None))
             .where(IndexedDocument.external_path != "")
             .where(IndexedDocument.external_path != "/")
@@ -451,13 +415,13 @@ class FolderService:
 # Convenience Functions (Async)
 # =============================================================================
 
-async def get_folder_tree(db: AsyncSession, tenant_id: str) -> FolderNode:
-    """Get folder tree for a tenant."""
-    service = FolderService(db, tenant_id)
+async def get_folder_tree(db: AsyncSession) -> FolderNode:
+    """Get folder tree."""
+    service = FolderService(db)
     return await service.get_folder_tree()
 
 
-async def get_classification_stats(db: AsyncSession, tenant_id: str) -> FolderStats:
-    """Get classification statistics for a tenant."""
-    service = FolderService(db, tenant_id)
+async def get_classification_stats(db: AsyncSession) -> FolderStats:
+    """Get classification statistics."""
+    service = FolderService(db)
     return await service.get_classification_stats()

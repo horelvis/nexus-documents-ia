@@ -9,11 +9,10 @@ Provides:
 All endpoints require X-API-Key authentication.
 """
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from app.core.config import settings
 from app.schemas.heartbeat import (
     HeartbeatConfig,
     HeartbeatConfigUpdate,
@@ -30,25 +29,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/heartbeat", tags=["heartbeat"])
 
 
-def get_tenant_id(tenant_id: Optional[str] = Query(None)) -> str:
-    """Get tenant ID from query param or use default."""
-    if tenant_id:
-        return tenant_id
-    if settings.single_tenant_mode:
-        return settings.default_tenant_id
-    raise HTTPException(status_code=400, detail="tenant_id is required")
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Heartbeat Execution
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/run", response_model=HeartbeatRunResponse)
 async def run_heartbeat(
-    tenant_id: str = Depends(get_tenant_id),
     force: bool = Query(False, description="Bypass interval checks"),
 ) -> HeartbeatRunResponse:
-    """Manually trigger a heartbeat evaluation for a tenant.
+    """Manually trigger a heartbeat evaluation.
 
     This runs the full heartbeat pipeline:
     1. Gather context from PostgreSQL/Weaviate/Redis
@@ -58,14 +47,12 @@ async def run_heartbeat(
 
     Use `force=true` to bypass the interval check and run immediately.
     """
-    return await heartbeat_service.run(tenant_id, force=force)
+    return await heartbeat_service.run(force=force)
 
 
 @router.get("/status", response_model=HeartbeatStatusResponse)
-async def get_heartbeat_status(
-    tenant_id: str = Depends(get_tenant_id),
-) -> HeartbeatStatusResponse:
-    """Get current heartbeat status for a tenant.
+async def get_heartbeat_status() -> HeartbeatStatusResponse:
+    """Get current heartbeat status.
 
     Returns:
     - enabled: Whether heartbeat is enabled
@@ -75,7 +62,7 @@ async def get_heartbeat_status(
     - insights_delivered_today: Count for rate limiting
     - config: Current configuration
     """
-    return await heartbeat_service.get_status(tenant_id)
+    return await heartbeat_service.get_status()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,19 +70,16 @@ async def get_heartbeat_status(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/config", response_model=HeartbeatConfig)
-async def get_heartbeat_config(
-    tenant_id: str = Depends(get_tenant_id),
-) -> HeartbeatConfig:
-    """Get heartbeat configuration for a tenant."""
-    return await heartbeat_service.get_config(tenant_id)
+async def get_heartbeat_config() -> HeartbeatConfig:
+    """Get heartbeat configuration."""
+    return await heartbeat_service.get_config()
 
 
 @router.patch("/config", response_model=HeartbeatConfig)
 async def update_heartbeat_config(
     update: HeartbeatConfigUpdate,
-    tenant_id: str = Depends(get_tenant_id),
 ) -> HeartbeatConfig:
-    """Update heartbeat configuration for a tenant.
+    """Update heartbeat configuration.
 
     Partial update — only provided fields are modified.
 
@@ -108,7 +92,7 @@ async def update_heartbeat_config(
     }
     ```
     """
-    return await heartbeat_service.update_config(tenant_id, update)
+    return await heartbeat_service.update_config(update)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -117,19 +101,17 @@ async def update_heartbeat_config(
 
 @router.get("/insights", response_model=InsightListResponse)
 async def list_insights(
-    tenant_id: str = Depends(get_tenant_id),
     status: Optional[str] = Query(None, description="Filter by status: pending, delivered, dismissed"),
     insight_type: Optional[str] = Query(None, description="Filter by type: contract_expiration, etc."),
     limit: int = Query(20, ge=1, le=100),
     page: int = Query(1, ge=1),
 ) -> InsightListResponse:
-    """List proactive insights for a tenant.
+    """List proactive insights.
 
     Supports filtering by status and insight type.
     Results are ordered by creation date (newest first).
     """
     insights = await heartbeat_service.get_insights(
-        tenant_id=tenant_id,
         status=status,
         insight_type=insight_type,
         limit=limit,
@@ -142,11 +124,7 @@ async def list_insights(
             # Ensure title is never empty
             if not i.get("title"):
                 i["title"] = "Sin título"
-            # Pass all available fields (JSON storage preserves everything)
-            insight_objects.append(ProactiveInsight(
-                **{k: v for k, v in i.items() if k != "tenant_id"},
-                tenant_id=tenant_id,
-            ))
+            insight_objects.append(ProactiveInsight(**i))
         except Exception:
             continue
 
@@ -162,10 +140,9 @@ async def list_insights(
 @router.get("/insights/{insight_id}")
 async def get_insight(
     insight_id: str,
-    tenant_id: str = Depends(get_tenant_id),
 ) -> Dict[str, Any]:
     """Get a specific insight by ID."""
-    insights = await heartbeat_service.get_insights(tenant_id, limit=100)
+    insights = await heartbeat_service.get_insights(limit=100)
     for insight in insights:
         if insight.get("id") == insight_id:
             return insight
@@ -176,7 +153,6 @@ async def get_insight(
 async def update_insight(
     insight_id: str,
     update: ProactiveInsightUpdate,
-    tenant_id: str = Depends(get_tenant_id),
 ) -> Dict[str, str]:
     """Update an insight's status.
 
@@ -187,7 +163,6 @@ async def update_insight(
     """
     if update.status:
         success = await heartbeat_service.update_insight_status(
-            tenant_id=tenant_id,
             insight_id=insight_id,
             status=update.status.value if hasattr(update.status, 'value') else str(update.status),
         )
@@ -200,11 +175,9 @@ async def update_insight(
 @router.post("/insights/{insight_id}/dismiss")
 async def dismiss_insight(
     insight_id: str,
-    tenant_id: str = Depends(get_tenant_id),
 ) -> Dict[str, str]:
     """Dismiss an insight (mark as dismissed)."""
     success = await heartbeat_service.update_insight_status(
-        tenant_id=tenant_id,
         insight_id=insight_id,
         status="dismissed",
     )
@@ -216,11 +189,9 @@ async def dismiss_insight(
 @router.post("/insights/{insight_id}/acted")
 async def mark_insight_acted(
     insight_id: str,
-    tenant_id: str = Depends(get_tenant_id),
 ) -> Dict[str, str]:
     """Mark an insight as acted upon."""
     success = await heartbeat_service.update_insight_status(
-        tenant_id=tenant_id,
         insight_id=insight_id,
         status="acted_on",
     )
@@ -234,9 +205,7 @@ async def mark_insight_acted(
 # ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/digest")
-async def get_daily_digest(
-    tenant_id: str = Depends(get_tenant_id),
-) -> Dict[str, Any]:
+async def get_daily_digest() -> Dict[str, Any]:
     """Generate a daily digest of insights and activity.
 
     Returns a summary of:
@@ -246,4 +215,4 @@ async def get_daily_digest(
     - Anomalies detected
     - Action items
     """
-    return await heartbeat_service.generate_digest(tenant_id)
+    return await heartbeat_service.generate_digest()

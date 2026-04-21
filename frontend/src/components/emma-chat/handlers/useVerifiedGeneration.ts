@@ -40,7 +40,6 @@ function hasValidToken(): boolean {
 
 interface VerifiedHandlerOptions {
   userId?: string
-  tenantId: string | null
   sessionId: string
   uploadTempDocument: (file: File) => Promise<{ upload_id: string; filename: string }>
   updateMessages: (updater: (prev: EmmaMessage[]) => EmmaMessage[]) => void
@@ -53,7 +52,6 @@ interface VerifiedHandlerOptions {
 export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
   const {
     userId,
-    tenantId,
     sessionId,
     uploadTempDocument,
     updateMessages,
@@ -77,7 +75,7 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
 
   // Recover verified generation session if user navigated away during generation
   useEffect(() => {
-    if (typeof window === 'undefined' || !tenantId) return
+    if (typeof window === 'undefined') return
     const raw = sessionStorage.getItem('verified_active_session')
     if (!raw) return
 
@@ -107,7 +105,6 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
               timestamp: new Date(),
               verified: {
                 session_id: data.session_id,
-                tenant_id: tenantId,
                 topic: data.topic || marker.topic,
                 claims: data.claims || [],
                 current_phase: 'complete' as const,
@@ -128,7 +125,7 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
       }
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantId])
+  }, [])
 
   // Consume completed verified generation jobs from layout-level context
   useEffect(() => {
@@ -158,7 +155,7 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
 
   const handleVerifiedGeneration = useCallback(
     async (topic: string, attachments?: Attachment[]) => {
-      if (!userId || !tenantId) return
+      if (!userId) return
 
       if (!hasValidToken()) {
         setError('Tu sesión ha expirado. Por favor inicia sesión nuevamente.')
@@ -187,7 +184,6 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
         const verifiedMessageId = (Date.now() + 1).toString()
         const initialVerified: VerifiedGenerationMetadata = {
           session_id: sessionId,
-          tenant_id: tenantId || undefined,
           topic,
           claims: [],
           current_phase: 'generating',
@@ -252,7 +248,6 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
         try {
           for await (const event of queryVerifiedStream({
             query: topic,
-            tenant_id: tenantId,
             session_id: sessionId,
             context_document_ids: contextDocIds.length > 0 ? contextDocIds : undefined,
             uploaded_file_ids: uploadedFileIds.length > 0 ? uploadedFileIds : undefined,
@@ -407,7 +402,6 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
     },
     [
       userId,
-      tenantId,
       sessionId,
       onAuthError,
       updateMessages,
@@ -424,8 +418,6 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
 
   const handleReviewSubmit = useCallback(
     async (jobId: string, decisions: ReviewDecision[]) => {
-      if (!tenantId) return
-
       const job = verifiedJobsRef.current[jobId]
       if (!job) return
 
@@ -437,7 +429,6 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
       try {
         for await (const event of submitReviewAndResume(
           job.session_id,
-          tenantId,
           decisions,
         )) {
           if (event.event_type === 'document_complete') {
@@ -504,7 +495,7 @@ export function useVerifiedGenerationHandler(options: VerifiedHandlerOptions) {
         }))
       }
     },
-    [tenantId, verifiedJobsRef, contextUpdateJob],
+    [verifiedJobsRef, contextUpdateJob],
   )
 
   // Register HITL review handler in context so the floating widget can call it

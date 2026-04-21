@@ -112,7 +112,6 @@ class LearningOrchestrator:
         # Create job
         job = DataLearningJob(
             connector_id=connector_id,
-            tenant_id=connector.tenant_id,
             job_type=request.job_type.value,
             status=DataLearningJobStatus.PENDING,
             config=request.config,

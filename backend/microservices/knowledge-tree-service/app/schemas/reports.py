@@ -61,7 +61,8 @@ class AssembledGraph(BaseModel):
 
 class AssembleRequest(BaseModel):
     """Request to assemble graph data for a report."""
-    tenant_id: str
+    user_roles: List[str] = Field(default_factory=list)
+    user_id: Optional[str] = None
     entity_uri: str
     report_type: str = "entity_profile"
     collection: Optional[str] = None

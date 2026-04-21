@@ -20,7 +20,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Agent, useAgentsService } from "@/lib/services/agents.service"
 import { useNotifications } from "@/contexts/app-state-context"
-import { useParams, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import { useNavigation } from "@/hooks/use-navigation"
 
 export function NavAgents() {
@@ -31,9 +31,7 @@ export function NavAgents() {
   const agentsService = useAgentsService()
   const { addNotification } = useNotifications()
   const { navigate } = useNavigation()
-  const params = useParams()
   const searchParams = useSearchParams()
-  const tenantId = params.tenantId as string
   const selectedAgentId = searchParams.get('agentId')
 
   useEffect(() => {
@@ -103,7 +101,7 @@ export function NavAgents() {
 
   const handleAgentClick = (agent: Agent) => {
     // Navigate to agents page with agent selection
-    navigate(`/${tenantId}/agents?agentId=${agent.id}`)
+    navigate(`/agents?agentId=${agent.id}`)
   }
 
   const getStatusBadge = (isActive: boolean) => {
@@ -156,7 +154,7 @@ export function NavAgents() {
                 ) : agents.length === 0 ? (
                   <SidebarMenuSubItem>
                     <SidebarMenuSubButton 
-                      onClick={() => router.push(`/${tenantId}/agents`)}
+                      onClick={() => router.push(`/agents`)}
                       className="text-muted-foreground hover:text-foreground cursor-pointer"
                     >
                       <div className="flex items-center gap-2">
@@ -205,7 +203,7 @@ export function NavAgents() {
                 {/* Quick actions */}
                 <SidebarMenuSubItem>
                   <SidebarMenuSubButton 
-                    onClick={() => router.push(`/${tenantId}/agents`)}
+                    onClick={() => router.push(`/agents`)}
                     className="text-blue-600 hover:text-blue-700 cursor-pointer mt-2 border-t pt-2"
                   >
                     <div className="flex items-center gap-2">

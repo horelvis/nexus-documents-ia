@@ -9,7 +9,6 @@ Usage:
     # Publish
     await event_bus.publish(EmmaEvent(
         event_type="document.indexed",
-        tenant_id="tenant-123",
         payload={"doc_id": "abc", "collection": "contracts"},
     ))
 
@@ -70,7 +69,7 @@ class EventBus:
             maxlen=MAX_STREAM_LEN,
             approximate=True,
         )
-        logger.info(f"Published {event.event_type} [{event.tenant_id}] → {msg_id}")
+        logger.info(f"Published {event.event_type} → {msg_id}")
         return msg_id.decode() if isinstance(msg_id, bytes) else msg_id
 
     # ── Subscribing (consumer group) ─────────────────────────────────

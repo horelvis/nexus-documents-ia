@@ -18,8 +18,8 @@ Quick Start:
     executor = ToolExecutor(registry)
     adapter = get_tool_adapter("sglang")
 
-    # Get tools for tenant
-    tools = registry.get_tools_for_tenant(tenant_id)
+    # Get tools (single-tenant: no per-tenant overrides)
+    tools = registry.get_tools()
     provider_tools = adapter.format_tools_for_request(
         [t.get_definition() for t in tools]
     )
@@ -28,7 +28,7 @@ Quick Start:
     tool_calls = adapter.parse_tool_calls(llm_response)
 
     # Execute tools
-    context = ToolExecutionContext(tenant_id=tenant_id, user_id=user_id)
+    context = ToolExecutionContext(user_id=user_id, user_roles=user_roles)
     results = await executor.execute_many(tool_calls, context)
 
     # Format results for next LLM message
@@ -39,7 +39,7 @@ Package Structure:
     ├── __init__.py          # This file - exports public API
     ├── base.py              # Core abstractions (ToolDefinition, BaseTool, etc.)
     ├── executor.py          # ToolExecutor with async/retry logic
-    ├── registry.py          # Global and per-tenant tool management
+    ├── registry.py          # Global tool management (single-tenant deployment)
     └── adapters/            # LLM-specific format adapters
         ├── __init__.py
         ├── base.py          # ToolCallAdapter ABC

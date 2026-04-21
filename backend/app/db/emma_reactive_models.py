@@ -32,7 +32,6 @@ class EmmaTrigger(Base):
     __tablename__ = "emma_triggers"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     trigger_type = Column(String(50), nullable=False)  # event | schedule | condition
     event_pattern = Column(String(255), nullable=True)
@@ -46,7 +45,7 @@ class EmmaTrigger(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        Index("idx_emma_triggers_tenant_active", "tenant_id", "is_active"),
+        Index("idx_emma_triggers_active", "is_active"),
         Index("idx_emma_triggers_type", "trigger_type"),
     )
 
@@ -57,7 +56,6 @@ class EmmaTriggerExecution(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     trigger_id = Column(UUID(as_uuid=True), ForeignKey("emma_triggers.id", ondelete="CASCADE"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     status = Column(String(50), default="pending")  # pending | running | completed | failed
     result = Column(JSONB, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
@@ -65,7 +63,7 @@ class EmmaTriggerExecution(Base):
     tokens_used = Column(Integer, nullable=True)
 
     __table_args__ = (
-        Index("idx_trigger_exec_status", "tenant_id", "status"),
+        Index("idx_trigger_exec_status", "status"),
     )
 
 
@@ -78,12 +76,13 @@ class EmmaNotification(Base):
     __tablename__ = "emma_notifications"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     notification_type = Column(String(50), nullable=True)
     title = Column(String(255), nullable=True)
     body = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=True)
+    # Renamed from 'metadata' (reserved in SQLAlchemy Declarative) as part of the
+    # multi-tenancy removal refactor; the underlying column name is preserved.
+    notification_metadata = Column("metadata", JSONB, nullable=True)
     action_url = Column(Text, nullable=True)
     is_read = Column(Boolean, default=False)
     priority = Column(String(20), default="normal")
@@ -91,7 +90,7 @@ class EmmaNotification(Base):
 
     __table_args__ = (
         Index("idx_notifications_user_unread", "user_id", "is_read"),
-        Index("idx_notifications_tenant_created", "tenant_id", "created_at"),
+        Index("idx_notifications_created", "created_at"),
     )
 
 
@@ -100,14 +99,13 @@ class EmmaNotificationPreference(Base):
     __tablename__ = "emma_notification_preferences"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False)
     user_id = Column(UUID(as_uuid=True), nullable=False)
     email_enabled = Column(Boolean, default=True)
     in_app_enabled = Column(Boolean, default=True)
     webhook_url = Column(Text, nullable=True)
 
     __table_args__ = (
-        UniqueConstraint("tenant_id", "user_id", name="uq_notification_prefs_tenant_user"),
+        UniqueConstraint("user_id", name="uq_notification_prefs_user"),
     )
 
 
@@ -120,7 +118,6 @@ class EmmaChannel(Base):
     __tablename__ = "emma_channels"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     channel_type = Column(String(50), nullable=False)  # whatsapp | telegram | slack | email
     channel_name = Column(String(255), nullable=True)
     config = Column(JSONB, nullable=False)
@@ -132,7 +129,7 @@ class EmmaChannel(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        Index("idx_channels_tenant_type", "tenant_id", "channel_type"),
+        Index("idx_emma_channels_type", "channel_type"),
     )
 
 
@@ -142,7 +139,6 @@ class EmmaChannelMessage(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     channel_id = Column(UUID(as_uuid=True), ForeignKey("emma_channels.id", ondelete="CASCADE"), nullable=False, index=True)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     direction = Column(String(20), nullable=False)  # inbound | outbound
     content = Column(Text, nullable=False)
     emma_thread_id = Column(UUID(as_uuid=True), nullable=True)
@@ -169,7 +165,6 @@ class EmmaHeartbeatConfig(Base):
     __tablename__ = "emma_heartbeat_configs"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, unique=True, index=True)
 
     # Configuration stored as JSONB for flexibility
     # Schema defined in app/schemas/heartbeat.py::HeartbeatConfig
@@ -216,7 +211,6 @@ class EmmaProactiveInsight(Base):
     __tablename__ = "emma_proactive_insights"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
 
     # Insight content
     insight_type = Column(String(50), nullable=False)  # contract_expiration | compliance_alert | ...
@@ -247,8 +241,8 @@ class EmmaProactiveInsight(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True)
 
     __table_args__ = (
-        Index("idx_insights_tenant_status", "tenant_id", "status"),
-        Index("idx_insights_tenant_type", "tenant_id", "insight_type"),
-        Index("idx_insights_tenant_priority", "tenant_id", "priority_score"),
+        Index("idx_insights_status", "status"),
+        Index("idx_insights_type", "insight_type"),
+        Index("idx_insights_priority", "priority_score"),
         Index("idx_insights_created", "created_at"),
     )

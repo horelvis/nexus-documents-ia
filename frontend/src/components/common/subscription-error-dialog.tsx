@@ -40,35 +40,27 @@ interface SubscriptionErrorDialogProps {
     }
     action_required?: string
   }
-  tenantId?: string
 }
 
-export function SubscriptionErrorDialog({ 
-  isOpen, 
-  onClose, 
+export function SubscriptionErrorDialog({
+  isOpen,
+  onClose,
   errorDetail,
-  tenantId 
 }: SubscriptionErrorDialogProps) {
   const router = useRouter()
-  
+
   const handleUpgrade = () => {
-    if (tenantId) {
-      // Close dialog first
-      onClose()
-      // Small delay to ensure dialog closes before navigation
-      setTimeout(() => {
-        router.push(`/${tenantId}/plans`)
-      }, 100)
-    }
+    onClose()
+    setTimeout(() => {
+      router.push(`/plans`)
+    }, 100)
   }
 
   const handleRenewSubscription = () => {
-    if (tenantId) {
-      onClose()
-      setTimeout(() => {
-        router.push('/pricing')
-      }, 100)
-    }
+    onClose()
+    setTimeout(() => {
+      router.push('/pricing')
+    }, 100)
   }
 
   // Determinar si la suscripción ha caducado

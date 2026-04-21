@@ -64,7 +64,6 @@ class AgentConfigurationUpdate(BaseModel):
 
 class AgentConfigurationResponse(AgentConfigurationBase):
     id: UUID
-    tenant_id: UUID
     agent_definition_id: UUID
     enabled_by: Optional[UUID] = None
     enabled_at: Optional[datetime] = None

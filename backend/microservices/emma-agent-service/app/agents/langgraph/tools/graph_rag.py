@@ -226,8 +226,9 @@ def _parse_scoring_json(content: str) -> List[Dict[str, Any]]:
 
 async def _resolve_chunk_texts(
     source_evidence: List[Dict[str, Any]],
-    tenant_id: str,
     weaviate_client: Any,
+    user_roles: List[str],
+    user_id: Optional[str] = None,
     max_snippet_chars: int = 300,
 ) -> None:
     """Fetch chunk content for each source and add chunk_text field.
@@ -248,8 +249,9 @@ async def _resolve_chunk_texts(
     async def _fetch_and_assign(doc_id: str, sources: List[Dict[str, Any]]):
         try:
             chunks = await weaviate_client.get_document_chunks(
-                tenant_id=tenant_id,
                 document_id=doc_id,
+                user_roles=user_roles,
+                user_id=user_id,
             )
             # Build offset→content map
             chunk_map = {}
@@ -283,7 +285,6 @@ async def _resolve_chunk_texts(
 async def _resolve_authority_weights(
     edges: List[Dict[str, Any]],
     kts_client,
-    tenant_id: str,
 ) -> Dict[int, float]:
     """Resolve authority weights for edges by source document semantic_type.
 
@@ -308,7 +309,6 @@ async def _resolve_authority_weights(
         try:
             # Get semantic-type of document
             type_result = await kts_client.query_triples(
-                tenant_id=tenant_id,
                 subject_uri=doc_uri,
                 predicate_uri="nouxcube://predicate/core/semantic-type",
                 limit=1,
@@ -320,7 +320,6 @@ async def _resolve_authority_weights(
 
             # Look up authority weight for this semantic_type
             aw_result = await kts_client.query_triples(
-                tenant_id="_system",
                 subject_uri=f"nouxcube://entity/_system/{sem_type}",
                 predicate_uri="nouxcube://predicate/trust/authority-weight",
                 limit=1,
@@ -346,7 +345,7 @@ async def _resolve_authority_weights(
     return result
 
 
-async def _batch_embed_edges(descriptions: List[str], tenant_id: str) -> List[List[float]]:
+async def _batch_embed_edges(descriptions: List[str]) -> List[List[float]]:
     """Batch embed edge descriptions via intelligence-docs-service.
 
     Returns list of embedding vectors (same order as input).
@@ -365,7 +364,6 @@ async def _batch_embed_edges(descriptions: List[str], tenant_id: str) -> List[Li
                 json={"texts": descriptions, "task": "retrieval.passage"},
                 headers={
                     "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-Tenant-ID": tenant_id,
                 },
             )
             response.raise_for_status()
@@ -423,7 +421,8 @@ class GraphRAGTool(EmmaTool):
             return ToolResult(output="", data={}, success=True)
 
         query: str = arguments["query"]
-        tenant_id: str = context.get("tenant_id", "")
+        user_roles: List[str] = context.get("user_roles", [])
+        user_id: Optional[str] = context.get("user_id")
 
         # ── Stage 1: Entity retrieval ────────────────────────────────────────
 
@@ -432,7 +431,7 @@ class GraphRAGTool(EmmaTool):
         if cached_concepts is not None:
             concepts = cached_concepts
         else:
-            concepts = await extract_concepts(query, tenant_id)
+            concepts = await extract_concepts(query)
 
         if not concepts.embeddings:
             # No embeddings available — cannot do vector entity search
@@ -452,7 +451,6 @@ class GraphRAGTool(EmmaTool):
             try:
                 hits = await weaviate_client.search_entities_by_embedding(
                     embedding=embedding,
-                    tenant_id=tenant_id,
                     limit=settings.graph_rag_entity_limit,
                 )
                 for hit in hits:
@@ -485,7 +483,6 @@ class GraphRAGTool(EmmaTool):
 
         try:
             neighbors_result = await kts_client.batch_neighbors(
-                tenant_id=tenant_id,
                 seed_uris=seed_uris,
                 max_hops=settings.graph_rag_max_hops,
                 max_edges=settings.graph_rag_max_edges,
@@ -570,7 +567,6 @@ class GraphRAGTool(EmmaTool):
                                 len(expand_uris), expansion.get("reason", "")[:100]
                             )
                             extra_result = await kts_client.batch_neighbors(
-                                tenant_id=tenant_id,
                                 seed_uris=expand_uris,
                                 max_hops=settings.guided_expansion_max_hops,
                                 max_edges=remaining_budget,
@@ -635,7 +631,6 @@ class GraphRAGTool(EmmaTool):
             # 3. Query KTS for core/label triple
             try:
                 triple_result = await kts_client.query_triples(
-                    tenant_id=tenant_id,
                     subject_uri=uri,
                     predicate_uri=label_predicate,
                     limit=1,
@@ -669,7 +664,7 @@ class GraphRAGTool(EmmaTool):
             ))
 
         # Batch embed descriptions
-        desc_embeddings = await _batch_embed_edges(edge_descriptions, tenant_id)
+        desc_embeddings = await _batch_embed_edges(edge_descriptions)
 
         if desc_embeddings and concepts.embeddings:
             # Concept embeddings as list of vectors
@@ -697,7 +692,7 @@ class GraphRAGTool(EmmaTool):
             if settings.authority_weights_enabled:
                 try:
                     authority_map = await _resolve_authority_weights(
-                        filtered_edges, kts_client, tenant_id
+                        filtered_edges, kts_client
                     )
                 except Exception as exc:
                     logger.warning("Authority weight resolution failed: %s", exc)
@@ -767,7 +762,6 @@ class GraphRAGTool(EmmaTool):
                     logger.info(f"graph_rag: trace edge sample: s={te['subject_uri'][:60]} p={te['predicate_uri'][:60]} o={te['object_uri'][:60]}")
             if trace_edges:
                 raw_sources = await kts_client.trace_sources(
-                    tenant_id=tenant_id,
                     edges=trace_edges,
                 )
                 logger.info(f"graph_rag: Stage 7 — got {len(raw_sources) if isinstance(raw_sources, list) else len(raw_sources.get('sources', []))} source(s)")
@@ -792,7 +786,7 @@ class GraphRAGTool(EmmaTool):
         # ── Stage 7b: Resolve chunk text for source evidence ────────────
         if source_evidence:
             try:
-                await _resolve_chunk_texts(source_evidence, tenant_id, weaviate_client)
+                await _resolve_chunk_texts(source_evidence, weaviate_client, user_roles, user_id)
             except Exception as e:
                 logger.warning(f"graph_rag: chunk text resolution failed: {e}")
 

@@ -21,13 +21,12 @@ class EmmaUserMemoryFact(Base):
     Stores declared facts ("Me llamo Carlos") and inferred facts
     ("trabaja frecuentemente con contratos") for personalization.
 
-    Facts are scoped to (tenant_id, user_id) and deduplicated by
+    Facts are scoped to user_id and deduplicated by
     (category, fact_key) via a partial unique index on active facts.
     """
     __tablename__ = "emma_user_memory_facts"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     user_id = Column(String(255), nullable=False, index=True)
 
     # Fact classification
@@ -51,12 +50,12 @@ class EmmaUserMemoryFact(Base):
         # Unique active fact per user+category+key (allows soft-deleted duplicates)
         Index(
             "uq_user_memory_active_fact",
-            "tenant_id", "user_id", "category", "fact_key",
+            "user_id", "category", "fact_key",
             unique=True,
             postgresql_where=Column("is_active") == True,  # noqa: E712
         ),
         # Fast lookup for user facts
-        Index("idx_user_memory_tenant_user", "tenant_id", "user_id"),
+        Index("idx_user_memory_user", "user_id"),
         # Fast lookup for active facts
-        Index("idx_user_memory_active", "tenant_id", "user_id", "is_active"),
+        Index("idx_user_memory_active", "user_id", "is_active"),
     )

@@ -10,7 +10,6 @@ DRY RUN by default — use --apply to execute changes.
 Usage:
     docker compose exec knowledge-tree-service python scripts/cleanup_blacklisted_entities.py
     docker compose exec knowledge-tree-service python scripts/cleanup_blacklisted_entities.py --apply
-    docker compose exec knowledge-tree-service python scripts/cleanup_blacklisted_entities.py --tenant-id UUID
 """
 
 import argparse
@@ -33,7 +32,7 @@ BOLD = "\033[1m"
 RESET = "\033[0m"
 
 
-async def cleanup(tenant_id: str | None, apply: bool) -> dict:
+async def cleanup(apply: bool) -> dict:
     client = FalkorDBClient()
     await client.initialize()
     blacklist = EntityBlacklist()
@@ -41,9 +40,8 @@ async def cleanup(tenant_id: str | None, apply: bool) -> dict:
     stats = {"scanned": 0, "blacklisted": 0, "rels_removed": 0, "nodes_removed": 0}
 
     try:
-        user_filter = f"AND n.user = '{tenant_id}'" if tenant_id else ""
         query = (
-            f"MATCH (n:Node) WHERE n.uri STARTS WITH 'nouxcube://entity/' {user_filter} "
+            "MATCH (n:Node) WHERE n.uri STARTS WITH 'nouxcube://entity/' "
             "RETURN n.uri AS uri"
         )
         rows = await client.execute_cypher(query)
@@ -85,7 +83,6 @@ async def cleanup(tenant_id: str | None, apply: bool) -> dict:
 def main():
     parser = argparse.ArgumentParser(description="Cleanup blacklisted entities from TrustGraph")
     parser.add_argument("--apply", action="store_true", help="Actually delete (default is dry-run)")
-    parser.add_argument("--tenant-id", type=str, default=None, help="Filter by tenant ID")
     args = parser.parse_args()
 
     mode = "APPLY" if args.apply else "DRY RUN"
@@ -93,7 +90,7 @@ def main():
     print(f"Blacklisted Entity Cleanup — {mode}")
     print(f"{'=' * 60}")
 
-    stats = asyncio.run(cleanup(args.tenant_id, args.apply))
+    stats = asyncio.run(cleanup(args.apply))
 
     print(f"\n{'=' * 60}")
     print(f"Scanned: {stats['scanned']}, Blacklisted: {stats['blacklisted']}")

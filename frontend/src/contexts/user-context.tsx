@@ -174,18 +174,10 @@ export function UserProvider({ children }: UserProviderProps) {
     }
   }, [userLoading, userError, backendUser])
 
-  // Helper function to get tenant-aware onboarding path
-  const getOnboardingPath = useCallback((userData?: BackendUser) => {
-    if (userData?.tenant_id) {
-      return `/${userData.tenant_id}/onboarding`
-    }
-    // Fallback to extract tenantId from pathname if available
-    const tenantMatch = pathname.match(/^\/([^\/]+)\//)
-    if (tenantMatch) {
-      return `/${tenantMatch[1]}/onboarding`
-    }
-    return '/onboarding' // Fallback
-  }, [pathname])
+  // Helper function to get onboarding path
+  const getOnboardingPath = useCallback((_userData?: BackendUser) => {
+    return '/onboarding'
+  }, [])
 
   // Helper function to check if current path is onboarding
   const isOnboardingPath = useCallback(() => {

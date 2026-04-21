@@ -27,7 +27,7 @@ def test_build_edge_description():
 async def test_graph_rag_disabled_returns_empty():
     """When settings.graph_rag_enabled=False, tool returns empty ToolResult."""
     tool = GraphRAGTool()
-    context = {"tenant_id": "tenant-1", "user_id": "user-1"}
+    context = {"user_id": "user-1"}
 
     with patch("app.agents.langgraph.tools.graph_rag.settings") as mock_settings:
         mock_settings.graph_rag_enabled = False
@@ -49,7 +49,7 @@ async def test_graph_rag_no_entities_returns_empty():
     from app.agents.langgraph.tools.concept_extractor import ConceptResult
 
     tool = GraphRAGTool()
-    context = {"tenant_id": "tenant-1", "user_id": "user-1"}
+    context = {"user_id": "user-1"}
 
     mock_concepts = ConceptResult(
         high_level=["derecho fiscal"],
@@ -92,7 +92,7 @@ async def test_graph_rag_full_pipeline():
     from app.agents.langgraph.tools.concept_extractor import ConceptResult
 
     tool = GraphRAGTool()
-    context = {"tenant_id": "tenant-1", "user_id": "user-1"}
+    context = {"user_id": "user-1"}
 
     # Stage 1 inputs
     mock_concepts = ConceptResult(

@@ -25,17 +25,17 @@ class WeaviateClient(BaseHTTPClient):
         logger.info("WeaviateClient initialized | base_url=%s", base_url)
 
     @staticmethod
-    def _extract_context_headers(payload: Optional[Dict[str, Any]]) -> Dict[str, Optional[str]]:
-        tenant_id = None
+    def _extract_context_headers(payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         user_id = None
+        user_roles = None
         request_id = None
         if isinstance(payload, dict):
-            tenant_id = payload.get("tenant_id")
             user_id = payload.get("user_id")
+            user_roles = payload.get("user_roles")
             request_id = payload.get("request_id") or payload.get("requestId")
         return {
-            "tenant_id": str(tenant_id) if tenant_id else None,
             "user_id": str(user_id) if user_id else None,
+            "user_roles": list(user_roles) if user_roles else None,
             "request_id": str(request_id) if request_id else None,
         }
         
@@ -101,8 +101,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 f"/weaviate/collections/{collection_name}/search",
                 json=search_request,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
                 timeout=30.0,
             )
@@ -161,8 +161,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/elysia/query",
                 json=query_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
                 timeout=120.0,
             )
@@ -182,8 +182,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/elysia/tools/execute",
                 json=tool_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
                 timeout=60.0,
             )
@@ -217,8 +217,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/elysia/visualize",
                 json=viz_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
             )
         except Exception as e:
@@ -237,8 +237,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/elysia/feedback",
                 json=feedback_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
             )
         except Exception as e:
@@ -308,12 +308,11 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ Failed to get collection info | collection=%s error=%s", collection_name, e)
             return {"error": str(e)}
 
-    async def search_similar(self, collection_name: str, query: str, limit: int = 5, tenant_id: str = None) -> List[Dict[str, Any]]:
+    async def search_similar(self, collection_name: str, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Search for similar documents using Weaviate semantic search"""
         search_request = {
             "query": query,
             "limit": limit,
-            "tenant_id": tenant_id,
             "search_type": "hybrid"
         }
         result = await self.search_documents(collection_name, search_request)
@@ -342,8 +341,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/emma/query",
                 json=query_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
             )
         except Exception as e:
@@ -358,8 +357,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/emma/v2/query",
                 json=query_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
             )
         except Exception as e:
@@ -390,8 +389,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/emma/feedback",
                 json=feedback_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
             )
         except Exception as e:
@@ -434,7 +433,6 @@ class WeaviateClient(BaseHTTPClient):
     async def emma_analyze_with_annotations(
         self,
         document_id: str,
-        tenant_id: str,
         analysis_type: str = "legal",
         file_content: Optional[bytes] = None,
         filename: Optional[str] = None,
@@ -444,7 +442,6 @@ class WeaviateClient(BaseHTTPClient):
         try:
             data = {
                 "document_id": document_id,
-                "tenant_id": tenant_id,
                 "analysis_type": analysis_type,
             }
             files = {}
@@ -593,7 +590,6 @@ class WeaviateClient(BaseHTTPClient):
 
     async def invalidate_cache_by_document(
         self,
-        tenant_id: str,
         document_id: str
     ) -> Dict[str, Any]:
         """
@@ -603,7 +599,6 @@ class WeaviateClient(BaseHTTPClient):
         cached responses from being returned to users who lost access.
 
         Args:
-            tenant_id: Tenant identifier
             document_id: Document whose ACL changed
 
         Returns:
@@ -611,18 +606,17 @@ class WeaviateClient(BaseHTTPClient):
         """
         try:
             payload = {
-                "tenant_id": tenant_id,
                 "document_id": document_id
             }
             logger.info(
-                "🔄 Invalidating cache for document | tenant=%s document=%s",
-                tenant_id, document_id
+                "🔄 Invalidating cache for document | document=%s",
+                document_id
             )
             return await self.post_json("/weaviate/cache/invalidate-by-document", json=payload)
         except Exception as e:
             logger.exception(
-                "❌ Failed to invalidate cache | tenant=%s document=%s error=%s",
-                tenant_id, document_id, e
+                "❌ Failed to invalidate cache | document=%s error=%s",
+                document_id, e
             )
             # Don't raise - cache invalidation failure shouldn't block ACL updates
             return {"status": "error", "error": str(e), "entries_invalidated": 0}
@@ -640,8 +634,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/knowledge/search",
                 json=search_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
             )
         except Exception as e:
@@ -650,15 +644,13 @@ class WeaviateClient(BaseHTTPClient):
 
     async def knowledge_list_entities(
         self,
-        tenant_id: str,
         entity_type: Optional[str] = None,
         domain: Optional[str] = None,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
-        """List knowledge entities for a tenant"""
+        """List knowledge entities"""
         try:
             params = {
-                "tenant_id": tenant_id,
                 "limit": limit
             }
             if entity_type:
@@ -666,26 +658,24 @@ class WeaviateClient(BaseHTTPClient):
             if domain:
                 params["domain"] = domain
 
-            logger.debug("Listing knowledge entities | tenant=%s type=%s", tenant_id, entity_type)
+            logger.debug("Listing knowledge entities | type=%s", entity_type)
             return await self.get_json("/knowledge/entities", params=params)
         except Exception as e:
             logger.exception("❌ Failed to list knowledge entities | error=%s", e)
             raise
 
-    async def knowledge_get_entity(self, entity_id: str, tenant_id: str) -> Dict[str, Any]:
+    async def knowledge_get_entity(self, entity_id: str) -> Dict[str, Any]:
         """Get a specific knowledge entity"""
         try:
-            params = {"tenant_id": tenant_id}
-            return await self.get_json(f"/knowledge/entities/{entity_id}", params=params)
+            return await self.get_json(f"/knowledge/entities/{entity_id}")
         except Exception as e:
             logger.exception("❌ Failed to get knowledge entity | entity_id=%s error=%s", entity_id, e)
             raise
 
-    async def knowledge_delete_entity(self, entity_id: str, tenant_id: str) -> Dict[str, Any]:
+    async def knowledge_delete_entity(self, entity_id: str) -> Dict[str, Any]:
         """Delete a knowledge entity"""
         try:
-            params = {"tenant_id": tenant_id}
-            response = await self.delete(f"/knowledge/entities/{entity_id}", params=params)
+            response = await self.delete(f"/knowledge/entities/{entity_id}")
             if response.status_code < 400:
                 return {"status": "deleted", "entity_id": entity_id}
             return {"status": "error", "entity_id": entity_id}
@@ -693,20 +683,18 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ Failed to delete knowledge entity | entity_id=%s error=%s", entity_id, e)
             raise
 
-    async def knowledge_delete_by_document(self, document_id: str, tenant_id: str) -> Dict[str, Any]:
+    async def knowledge_delete_by_document(self, document_id: str) -> Dict[str, Any]:
         """Delete all knowledge entities from a document"""
         try:
-            params = {"tenant_id": tenant_id}
-            return await self.delete_json(f"/knowledge/documents/{document_id}/knowledge", params=params)
+            return await self.delete_json(f"/knowledge/documents/{document_id}/knowledge")
         except Exception as e:
             logger.exception("❌ Failed to delete document knowledge | document_id=%s error=%s", document_id, e)
             raise
 
-    async def knowledge_stats(self, tenant_id: str) -> Dict[str, Any]:
+    async def knowledge_stats(self) -> Dict[str, Any]:
         """Get knowledge graph statistics"""
         try:
-            params = {"tenant_id": tenant_id}
-            return await self.get_json("/knowledge/stats", params=params)
+            return await self.get_json("/knowledge/stats")
         except Exception as e:
             logger.exception("❌ Failed to get knowledge stats | error=%s", e)
             raise
@@ -715,10 +703,10 @@ class WeaviateClient(BaseHTTPClient):
     # USER LEARNING OPERATIONS
     # =========================================================================
 
-    async def learning_get_profile(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    async def learning_get_profile(self, user_id: str) -> Dict[str, Any]:
         """Get user learning profile"""
         try:
-            params = {"tenant_id": tenant_id, "user_id": user_id}
+            params = {"user_id": user_id}
             logger.debug("Getting learning profile | user=%s", user_id[:8] if user_id else "None")
             return await self.get_json("/learning/profile", params=params)
         except Exception as e:
@@ -727,13 +715,12 @@ class WeaviateClient(BaseHTTPClient):
 
     async def learning_update_profile(
         self,
-        tenant_id: str,
         user_id: str,
         profile_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Update user learning profile preferences"""
         try:
-            params = {"tenant_id": tenant_id, "user_id": user_id}
+            params = {"user_id": user_id}
             logger.debug("Updating learning profile | user=%s", user_id[:8] if user_id else "None")
             return await self.put_json("/learning/profile", json=profile_data, params=params)
         except Exception as e:
@@ -742,13 +729,12 @@ class WeaviateClient(BaseHTTPClient):
 
     async def learning_record_feedback(
         self,
-        tenant_id: str,
         user_id: str,
         feedback_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Record user feedback for learning"""
         try:
-            params = {"tenant_id": tenant_id, "user_id": user_id}
+            params = {"user_id": user_id}
             logger.debug("Recording feedback | user=%s rating=%s", user_id[:8] if user_id else "None", feedback_data.get("rating"))
             return await self.post_json("/learning/feedback", json=feedback_data, params=params)
         except Exception as e:
@@ -757,50 +743,49 @@ class WeaviateClient(BaseHTTPClient):
 
     async def learning_record_document_view(
         self,
-        tenant_id: str,
         user_id: str,
         view_data: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Record document view for learning"""
         try:
-            params = {"tenant_id": tenant_id, "user_id": user_id}
+            params = {"user_id": user_id}
             logger.debug("Recording document view | user=%s document=%s", user_id[:8] if user_id else "None", view_data.get("document_id"))
             return await self.post_json("/learning/document-view", json=view_data, params=params)
         except Exception as e:
             logger.exception("❌ Failed to record document view | error=%s", e)
             raise
 
-    async def learning_get_stats(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    async def learning_get_stats(self, user_id: str) -> Dict[str, Any]:
         """Get learning statistics for a user"""
         try:
-            params = {"tenant_id": tenant_id, "user_id": user_id}
+            params = {"user_id": user_id}
             return await self.get_json("/learning/stats", params=params)
         except Exception as e:
             logger.exception("❌ Failed to get learning stats | error=%s", e)
             raise
 
-    async def learning_get_context(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    async def learning_get_context(self, user_id: str) -> Dict[str, Any]:
         """Get full user context for Emma"""
         try:
-            params = {"tenant_id": tenant_id, "user_id": user_id}
+            params = {"user_id": user_id}
             return await self.get_json("/learning/context", params=params)
         except Exception as e:
             logger.exception("❌ Failed to get user context | error=%s", e)
             raise
 
-    async def learning_get_ranking_weights(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    async def learning_get_ranking_weights(self, user_id: str) -> Dict[str, Any]:
         """Get personalized ranking weights"""
         try:
-            params = {"tenant_id": tenant_id, "user_id": user_id}
+            params = {"user_id": user_id}
             return await self.get_json("/learning/ranking-weights", params=params)
         except Exception as e:
             logger.exception("❌ Failed to get ranking weights | error=%s", e)
             raise
 
-    async def learning_flush(self, tenant_id: str, user_id: str) -> Dict[str, Any]:
+    async def learning_flush(self, user_id: str) -> Dict[str, Any]:
         """Flush pending learning data"""
         try:
-            params = {"tenant_id": tenant_id, "user_id": user_id}
+            params = {"user_id": user_id}
             return await self.post_json("/learning/flush", json={}, params=params)
         except Exception as e:
             logger.exception("❌ Failed to flush learning data | error=%s", e)
@@ -818,8 +803,8 @@ class WeaviateClient(BaseHTTPClient):
             return await self.post_json(
                 "/sil/query",
                 json=query_data,
-                tenant_id=ctx["tenant_id"],
                 user_id=ctx["user_id"],
+                user_roles=ctx["user_roles"],
                 request_id=ctx["request_id"],
                 timeout=60.0,
             )
@@ -836,22 +821,20 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ SIL index structural failed | error=%s", e)
             raise
 
-    async def sil_get_structure(self, document_id: str, tenant_id: str) -> Dict[str, Any]:
+    async def sil_get_structure(self, document_id: str) -> Dict[str, Any]:
         """Get structural metadata for a document"""
         try:
-            params = {"tenant_id": tenant_id}
             logger.debug("Getting structural metadata | document_id=%s", document_id)
-            return await self.get_json(f"/sil/structure/{document_id}", params=params)
+            return await self.get_json(f"/sil/structure/{document_id}")
         except Exception as e:
             logger.exception("❌ Failed to get structural metadata | document_id=%s error=%s", document_id, e)
             raise
 
-    async def sil_graph_stats(self, tenant_id: str) -> Dict[str, Any]:
+    async def sil_graph_stats(self) -> Dict[str, Any]:
         """Get SIL graph statistics"""
         try:
-            params = {"tenant_id": tenant_id}
-            logger.debug("Getting SIL graph stats | tenant_id=%s", tenant_id)
-            return await self.get_json("/sil/graph/stats", params=params)
+            logger.debug("Getting SIL graph stats")
+            return await self.get_json("/sil/graph/stats")
         except Exception as e:
             logger.exception("❌ Failed to get SIL graph stats | error=%s", e)
             raise
@@ -859,7 +842,6 @@ class WeaviateClient(BaseHTTPClient):
     async def sil_search_structural(
         self,
         query: str,
-        tenant_id: str,
         limit: int = 10,
         semantic_type: Optional[str] = None,
         domain: Optional[str] = None
@@ -868,7 +850,6 @@ class WeaviateClient(BaseHTTPClient):
         try:
             params = {
                 "query": query,
-                "tenant_id": tenant_id,
                 "limit": limit,
             }
             if semantic_type:
@@ -885,13 +866,11 @@ class WeaviateClient(BaseHTTPClient):
     async def sil_get_folder_contents(
         self,
         folder_path: str,
-        tenant_id: str,
         include_subfolders: bool = False
     ) -> Dict[str, Any]:
         """Get contents of a structural folder"""
         try:
             params = {
-                "tenant_id": tenant_id,
                 "include_subfolders": str(include_subfolders).lower(),
             }
             logger.debug("Getting folder contents | path=%s", folder_path)
@@ -903,14 +882,12 @@ class WeaviateClient(BaseHTTPClient):
     async def sil_get_related_documents(
         self,
         document_id: str,
-        tenant_id: str,
         relationship_type: Optional[str] = None,
         max_depth: int = 2
     ) -> Dict[str, Any]:
         """Get documents related to a given document"""
         try:
             params = {
-                "tenant_id": tenant_id,
                 "max_depth": max_depth,
             }
             if relationship_type:
@@ -922,12 +899,11 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ Failed to get related documents | document_id=%s error=%s", document_id, e)
             raise
 
-    async def sil_mark_document_removed(self, document_id: str, tenant_id: str) -> Dict[str, Any]:
+    async def sil_mark_document_removed(self, document_id: str) -> Dict[str, Any]:
         """Mark a document as removed in the structural graph"""
         try:
-            params = {"tenant_id": tenant_id}
             logger.debug("Marking document as removed | document_id=%s", document_id)
-            response = await self.delete(f"/sil/structure/{document_id}", params=params)
+            response = await self.delete(f"/sil/structure/{document_id}")
             if response.status_code < 400:
                 return await response.json()
             return {"success": False, "error": f"HTTP {response.status_code}"}
@@ -935,14 +911,11 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ Failed to mark document removed | document_id=%s error=%s", document_id, e)
             raise
 
-    async def sil_clear_graph(self, tenant_id: Optional[str] = None) -> Dict[str, Any]:
+    async def sil_clear_graph(self) -> Dict[str, Any]:
         """Clear the structural graph"""
         try:
-            params = {}
-            if tenant_id:
-                params["tenant_id"] = tenant_id
-            logger.info("🔄 Clearing SIL graph | tenant_id=%s", tenant_id or "ALL")
-            response = await self.delete("/sil/graph/clear", params=params)
+            logger.info("🔄 Clearing SIL graph")
+            response = await self.delete("/sil/graph/clear")
             if response.status_code < 400:
                 return await response.json()
             return {"success": False, "error": f"HTTP {response.status_code}"}
@@ -952,15 +925,12 @@ class WeaviateClient(BaseHTTPClient):
 
     async def sil_get_document_ids(
         self,
-        tenant_id: Optional[str] = None,
         limit: int = 10000
     ) -> Dict[str, Any]:
         """Get list of document IDs already indexed in the graph"""
         try:
             params = {"limit": limit}
-            if tenant_id:
-                params["tenant_id"] = tenant_id
-            logger.debug("Getting indexed document IDs | tenant_id=%s", tenant_id)
+            logger.debug("Getting indexed document IDs")
             return await self.get_json("/sil/graph/document-ids", params=params)
         except Exception as e:
             logger.exception("❌ Failed to get document IDs | error=%s", e)
@@ -970,8 +940,7 @@ class WeaviateClient(BaseHTTPClient):
         """Re-index documents to the structural graph"""
         try:
             logger.info(
-                "🔄 Starting SIL reindex | tenant_id=%s full_reindex=%s",
-                reindex_data.get("tenant_id"),
+                "🔄 Starting SIL reindex | full_reindex=%s",
                 reindex_data.get("full_reindex", False)
             )
             return await self.post_json("/sil/reindex", json=reindex_data, timeout=300.0)
@@ -1095,7 +1064,7 @@ class WeaviateClient(BaseHTTPClient):
         """Route a query through the SLM Router"""
         try:
             ctx = self._extract_context_headers(request)
-            logger.debug("🧠 SLM route | tenant=%s", ctx.get("tenant_id"))
+            logger.debug("🧠 SLM route | user=%s", ctx.get("user_id"))
             return await self.post_json("/slm/route", json=request, timeout=60.0, **ctx)
         except Exception as e:
             logger.exception("❌ SLM route failed | error=%s", e)
@@ -1105,18 +1074,18 @@ class WeaviateClient(BaseHTTPClient):
         """Generate a TOON plan without executing it"""
         try:
             ctx = self._extract_context_headers(request)
-            logger.debug("🧠 SLM plan | tenant=%s", ctx.get("tenant_id"))
+            logger.debug("🧠 SLM plan | user=%s", ctx.get("user_id"))
             return await self.post_json("/slm/plan", json=request, timeout=30.0, **ctx)
         except Exception as e:
             logger.exception("❌ SLM plan failed | error=%s", e)
             raise
 
-    async def slm_get_schema(self, tenant_id: str) -> Dict[str, Any]:
-        """Get the extracted schema for a tenant"""
+    async def slm_get_schema(self) -> Dict[str, Any]:
+        """Get the extracted schema"""
         try:
-            return await self.get_json(f"/slm/schema/{tenant_id}")
+            return await self.get_json("/slm/schema")
         except Exception as e:
-            logger.exception("❌ SLM get schema failed | tenant=%s error=%s", tenant_id, e)
+            logger.exception("❌ SLM get schema failed | error=%s", e)
             raise
 
     async def slm_learning_status(self) -> Dict[str, Any]:

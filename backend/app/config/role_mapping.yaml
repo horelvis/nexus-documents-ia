@@ -1,0 +1,25 @@
+# Role mapping configuration
+#
+# Maps KeyCloak group names (left side) to canonical application role
+# identifiers (right side, English uppercase). The application uses only
+# the right-side identifiers internally — the YAML is the only place
+# where Spanish or organization-specific names are mentioned.
+#
+# Reserved value 'EVERYONE' is a wildcard meaning "any authenticated user".
+# It is NEVER assigned to a user as a regular role. Documents with
+# roles=['EVERYONE'] are visible to all authenticated users regardless
+# of the roles they carry in their JWT.
+#
+# To add a new role for this deployment:
+#   1. Create the group in KeyCloak admin UI.
+#   2. Add a line below mapping the group path to a canonical identifier.
+#   3. Restart the backend service.
+# No code change required.
+
+group_to_role:
+  "/Administradores": ADMIN
+  "/Comercial": SALES
+  "/Departamento Legal": LEGAL
+  "/Recursos Humanos": HR
+  "/Finanzas": FINANCE
+  "/Médicos": MEDICAL

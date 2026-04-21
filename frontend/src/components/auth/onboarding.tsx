@@ -40,7 +40,7 @@ type UnifiedFormData = {
 }
 
 interface NewUserOnboardingProps {
-  onComplete?: (tenantId?: string) => void
+  onComplete?: () => void
 }
 
 export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
@@ -54,12 +54,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   } = useUserContext()
   const [currentStep, setCurrentStep] = useState(0)
   const [isProcessing, setIsProcessing] = useState(false)
-  const tenantPlansPath = useMemo(() => {
-    if (backendUser?.tenant_id) {
-      return `/${backendUser.tenant_id}/plans`
-    }
-    return '/plans'
-  }, [backendUser?.tenant_id])
+  const tenantPlansPath = '/plans'
 
   const unifiedForm = useForm<UnifiedFormData>({
     resolver: zodResolver(createUnifiedDataSchema(t)),
@@ -121,7 +116,7 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   useEffect(() => {
     if (backendUser && backendUser.onboarding_completed) {
       // User already completed onboarding, redirect to dashboard
-      onComplete?.(backendUser.tenant_id)
+      onComplete?.()
     }
   }, [backendUser, onComplete])
 
@@ -183,16 +178,10 @@ export function NewUserOnboarding({ onComplete }: NewUserOnboardingProps) {
   }
 
   const handleGoToDashboard = () => {
-    const tenantId = backendUser?.tenant_id
-    
     if (onComplete) {
-      onComplete(tenantId)
+      onComplete()
     } else {
-      if (tenantId) {
-        router.push(`/${tenantId}/dashboard`)
-      } else {
-        router.push('/dashboard')
-      }
+      router.push('/dashboard')
     }
   }
 

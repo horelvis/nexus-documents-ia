@@ -22,9 +22,8 @@ logger = logging.getLogger(__name__)
 class OptimizedDocumentService:
     """Optimized document service with performance enhancements"""
 
-    def __init__(self, db: Session, tenant_id: str, user_id: Optional[str] = None):
+    def __init__(self, db: Session, user_id: Optional[str] = None):
         self.db = db
-        self.tenant_id = tenant_id
         self.user_id = user_id
         self.query_optimizer = QueryOptimizer(db)
         self.async_optimizer = AsyncOptimizer()
@@ -41,7 +40,6 @@ class OptimizedDocumentService:
 
         try:
             documents = self.query_optimizer.get_documents_with_relations(
-                tenant_id=self.tenant_id,
                 user_id=self.user_id,
                 limit=limit,
                 offset=offset,
@@ -82,7 +80,6 @@ class OptimizedDocumentService:
 
         try:
             documents = self.query_optimizer.search_documents_optimized(
-                tenant_id=self.tenant_id,
                 search_term=query,
                 limit=limit
             )
@@ -111,7 +108,7 @@ class OptimizedDocumentService:
         start_time = time.time()
 
         try:
-            stats = self.query_optimizer.get_tenant_stats_optimized(self.tenant_id)
+            stats = self.query_optimizer.get_system_stats_optimized()
 
             # Add additional computed stats
             stats['avg_views_per_document'] = (
@@ -147,7 +144,6 @@ class OptimizedDocumentService:
 
         try:
             activity = self.query_optimizer.get_recent_activity_optimized(
-                tenant_id=self.tenant_id,
                 days=days,
                 limit=100
             )
@@ -183,7 +179,6 @@ class OptimizedDocumentService:
 
         try:
             documents = self.query_optimizer.get_documents_by_tag_optimized(
-                tenant_id=self.tenant_id,
                 tag_name=tag_name,
                 limit=limit
             )
@@ -217,8 +212,8 @@ class OptimizedDocumentService:
         """
         Invalidate caches that might be affected by document changes.
         """
-        # Invalidate tenant stats cache
-        cache.delete(f"tenant:{self.tenant_id}:stats")
+        # Invalidate org-wide stats cache
+        cache.delete("system:stats")
 
         # Invalidate user document lists if applicable
         if self.user_id:
@@ -268,7 +263,6 @@ class OptimizedDocumentService:
         try:
             # Get documents with metrics, ordered by relevance score
             documents = self.query_optimizer.get_documents_with_relations(
-                tenant_id=self.tenant_id,
                 limit=limit,
                 offset=0,
                 include_views=False,
@@ -315,7 +309,6 @@ class OptimizedDocumentService:
         return {
             'cache_stats': cache.get_stats(),
             'query_optimizer_stats': {
-                'tenant_id': self.tenant_id,
                 'user_id': self.user_id
             }
         }

@@ -1,6 +1,5 @@
 "use client"
 
-import { useParams } from "next/navigation"
 import { UploadDialog } from "@/components/dashboard/upload-dialog"
 import { useUpload } from "@/contexts/upload-context"
 import { useNotifications } from "@/contexts/app-state-context"
@@ -10,9 +9,6 @@ export function GlobalUploadDialog() {
   const { uploadDialogOpen, setUploadDialogOpen, onUploadComplete, closeUploadDialog, targetFolderPath } = useUpload()
   const { addNotification } = useNotifications()
   const { emitDocumentEvent } = useDocumentEvents()
-  const params = useParams()
-  const tenantIdParam = params?.tenantId as string | string[] | undefined
-  const tenantId = Array.isArray(tenantIdParam) ? tenantIdParam[0] : tenantIdParam
 
   const handleUploadComplete = (uploadedFiles: Array<{file: File, id: string, status: string}>) => {
     console.log('[DEBUG] GlobalUploadDialog: handleUploadComplete called', { filesCount: uploadedFiles?.length })
@@ -39,7 +35,6 @@ export function GlobalUploadDialog() {
 
     console.log('[DEBUG] GlobalUploadDialog: Emitting documents:updated event')
     emitDocumentEvent("documents:updated", {
-      tenantId,
       source: "upload",
       files: uploadedFiles
     })
