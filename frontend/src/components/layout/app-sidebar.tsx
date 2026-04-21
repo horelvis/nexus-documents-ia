@@ -25,6 +25,7 @@ import {
   IconFileText,
   IconBell,
   IconNetwork,
+  IconRobot,
 } from '@tabler/icons-react'
 import {
   Sidebar,
@@ -80,6 +81,19 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       icon: IconHistory,
       onClick: handleOpenHistory,
       isActive: false,
+    },
+  ]
+
+  const agentsNavItems = [
+    {
+      title: 'Mis agentes',
+      href: '/agents',
+      icon: IconRobot,
+    },
+    {
+      title: 'Crear agente',
+      href: '/agents/new',
+      icon: IconPlus,
     },
   ]
 
@@ -180,6 +194,29 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
                   >
                     <item.icon className="h-4 w-4" />
                     <span>{item.title}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Agents */}
+        <SidebarGroup>
+          <SidebarGroupLabel>Agentes</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {agentsNavItems.map((item) => (
+                <SidebarMenuItem key={item.href}>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip={item.title}
+                    isActive={pathname === item.href || pathname.startsWith(item.href + '/')}
+                  >
+                    <Link href={item.href}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
