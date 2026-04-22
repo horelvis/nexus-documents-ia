@@ -22,7 +22,7 @@ Usage:
     enriched = await context_enricher.enrich_chunks(
         full_text=document_text,
         chunks=chunks,
-        doc_metadata={"title": "Contrato de trabajo", "domain": "labor"},
+        doc_metadata={"title": "Contrato de trabajo"},
     )
     # Each chunk now has context prepended to content
     # and chunk_context in metadata
@@ -126,7 +126,7 @@ class ContextEnricher:
         Args:
             full_text: The complete document text (sent once as system context).
             chunks: List of DocumentChunk objects with .content and .metadata.
-            doc_metadata: Document metadata (title, domain, etc.).
+            doc_metadata: Document metadata (title, etc.).
 
         Returns:
             The same chunks list, modified in-place.

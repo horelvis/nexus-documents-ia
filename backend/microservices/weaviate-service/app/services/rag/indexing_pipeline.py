@@ -149,8 +149,6 @@ class IndexingResult:
     chunks: List[DocumentChunk] = field(default_factory=list)
 
     # Contextual Retrieval results (Anthropic pattern)
-    contextual_domain: Optional[str] = None  # Detected legal domain
-    contextual_laws: List[str] = field(default_factory=list)  # Applicable laws
     contextual_prefix: Optional[str] = None  # Context prepended to chunks
 
     # Knowledge extraction results
@@ -191,10 +189,8 @@ class IndexingResult:
             "analysis": self.analysis.to_dict() if self.analysis else None,
             "chunk_count": len(self.chunks),
             "contextual_retrieval": {
-                "domain": self.contextual_domain,
-                "applicable_laws": self.contextual_laws,
                 "context_prefix_length": len(self.contextual_prefix) if self.contextual_prefix else 0,
-            } if self.contextual_domain else None,
+            } if self.contextual_prefix else None,
             "knowledge": {
                 "entities_count": self.knowledge_result.entities_count if self.knowledge_result else 0,
                 "relationships_count": self.knowledge_result.relationships_count if self.knowledge_result else 0,
@@ -746,8 +742,6 @@ class IndexingPipeline:
                 logger.warning(f"[{document_id}] Parent-child chunking failed, using flat chunks: {e}")
 
         # === Stage 4: Contextual Retrieval (Anthropic pattern) ===
-        contextual_domain = None
-        contextual_laws = []
         contextual_prefix = None
         contextual_time = 0.0
 
@@ -756,7 +750,7 @@ class IndexingPipeline:
             contextual_start = time.time()
 
             try:
-                # Analyze document to detect domain and applicable laws
+                # Analyze document to detect type and extract entities
                 context_result = await contextual_retrieval.analyze_document(
                     document_id=document_id,
                     text=text_for_chunking,
@@ -764,8 +758,6 @@ class IndexingPipeline:
                     use_llm=settings.contextual_retrieval_use_llm,
                 )
 
-                contextual_domain = context_result.domain.value
-                contextual_laws = [l.to_citation() for l in context_result.applicable_laws]
                 contextual_prefix = context_result.context_prefix
 
                 # Apply context to chunks - modify chunk content with context prefix
@@ -775,8 +767,6 @@ class IndexingPipeline:
                     chunk.content = f"{contextual_prefix} {original_text}"
 
                     # Enrich chunk metadata with contextual info
-                    chunk.metadata["contextual_domain"] = contextual_domain
-                    chunk.metadata["contextual_laws"] = contextual_laws
                     chunk.metadata["contextual_prefix_applied"] = True
                     chunk.metadata["original_text_length"] = len(original_text)
 
@@ -784,7 +774,7 @@ class IndexingPipeline:
 
                 logger.info(
                     f"[{document_id}] Applied contextual retrieval: "
-                    f"domain={contextual_domain}, laws={len(contextual_laws)}, "
+                    f"document_type={context_result.document_type}, "
                     f"prefix={len(contextual_prefix)} chars, time={contextual_time:.1f}ms"
                 )
 
@@ -807,7 +797,6 @@ class IndexingPipeline:
                     chunks=chunks,
                     doc_metadata={
                         "title": metadata.get("title", metadata.get("filename", "Documento")),
-                        "domain": contextual_domain or "",
                     },
                 )
                 enricher_time = (time.time() - enricher_start) * 1000
@@ -928,8 +917,6 @@ class IndexingPipeline:
             document_id=document_id,
             analysis=analysis,
             chunks=chunks,
-            contextual_domain=contextual_domain,
-            contextual_laws=contextual_laws,
             contextual_prefix=contextual_prefix,
             knowledge_result=knowledge_result,
             document_summary=document_summary,
@@ -1331,7 +1318,7 @@ class IndexingPipeline:
                     "tags": metadata.get("tags", []),
                     # Enrichment for FalkorDB auto-index
                     "file_path": metadata.get("external_path", ""),
-                    "domain": result.contextual_domain or "",
+                    "domain": "",
                     "semantic_type": metadata.get("document_type", ""),
                     "connector_id": metadata.get("connector_id", ""),
                     "connector_type": metadata.get("connector_type", ""),
