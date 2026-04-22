@@ -51,8 +51,6 @@ NouxCubeIA On-Premise is designed for organizations that require complete contro
 │     • Solo Qwen3-1.7B (modelo muy pequeño)                                  │
 │     • Contexto máximo 8K tokens                                             │
 │     • Embeddings en CPU (muy lento, 2-5 segundos por chunk)                 │
-│     • Sin TTS local                                                         │
-│     • SLM Router disponible pero lento                                      │
 │     • Agent Self-Verifies: ~2-3 minutos por claim                           │
 │     • 1-2 usuarios concurrentes máximo                                      │
 │     • NO RECOMENDADO para producción                                        │
@@ -82,14 +80,12 @@ NouxCubeIA On-Premise is designed for organizations that require complete contro
 │  ✅ PERMITE:                                                                 │
 │     • Qwen3-4B con contexto 16K tokens                                      │
 │     • BGE-M3 embeddings en GPU (~50-100ms por chunk)                        │
-│     • TTS local (VibeVoice)                                                 │
-│     • SLM Router completo con respuestas en <2 segundos                     │
 │     • Agent Self-Verifies: 30-50 segundos por claim                         │
 │     • RAG completo en <3 segundos                                           │
 │     • 3-5 usuarios concurrentes                                             │
 │                                                                              │
 │  ⚠️  NOTA: Esta configuración va "JUSTA" si activas todas las features      │
-│     Si ves errores OOM, desactiva TTS local o usa embeddings en CPU         │
+│     Si ves errores OOM, usa embeddings en CPU                               │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -106,7 +102,7 @@ NouxCubeIA On-Premise is designed for organizations that require complete contro
 │  Red:     10GbE                                                             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  Distribución RAM (64GB):                                                    │
-│     PostgreSQL + AGE:    8GB                                                │
+│     PostgreSQL:          8GB                                                │
 │     Redis:               2GB                                                │
 │     Weaviate:            8GB                                                │
 │     Elasticsearch:       8GB                                                │
@@ -307,26 +303,29 @@ For documents without visual elements, maximize context window.
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                 NouxCubeIA On-Premise Architecture v2.0                    │
-│                    (con SLM Router + Agent Self-Verifies)                    │
+│                    (LangGraph ReAct + Agent Self-Verifies)                   │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │                     Application Services                             │    │
 │  │                                                                      │    │
-│  │  ┌──────────┐  ┌─────────────────────────┐  ┌──────────────────┐   │    │
-│  │  │   api    │  │    weaviate-service     │  │ background-worker│   │    │
-│  │  │ FastAPI  │  │  ┌───────────────────┐  │  │     Celery       │   │    │
-│  │  │  :8000   │  │  │ Emma AI (RAG)     │  │  │     :8100        │   │    │
-│  │  │          │  │  │ SLM Router        │  │  │  ┌────────────┐  │   │    │
-│  │  │          │  │  │ Verified Gen      │  │  │  │verification│  │   │    │
-│  │  │          │  │  └───────────────────┘  │  │  │   queue    │  │   │    │
-│  │  │          │  │         :8007           │  │  └────────────┘  │   │    │
-│  │  └──────────┘  └─────────────────────────┘  └──────────────────┘   │    │
+│  │  ┌──────────┐  ┌───────────────────┐  ┌──────────────────────────┐  │    │
+│  │  │   api    │  │ emma-agent-service│  │    background-worker     │  │    │
+│  │  │ FastAPI  │  │  LangGraph ReAct  │  │        Celery            │  │    │
+│  │  │  :8000   │  │  Verified Gen     │  │        :8100             │  │    │
+│  │  │          │  │  :8009 (int)      │  │                          │  │    │
+│  │  │          │  │  :8019 (ext)      │  │                          │  │    │
+│  │  └──────────┘  └───────────────────┘  └──────────────────────────┘  │    │
 │  │                                                                      │    │
-│  │  ┌──────────┐  ┌─────────────────┐  ┌──────────────────┐            │    │
-│  │  │langextract│ │ storage-service │  │   tts-service    │            │    │
-│  │  │  :8009   │  │     :8010       │  │  (Google/Local)  │            │    │
-│  │  └──────────┘  └─────────────────┘  └──────────────────┘            │    │
+│  │  ┌──────────────────┐  ┌─────────────────┐  ┌─────────────────┐    │    │
+│  │  │ weaviate-service │  │ storage-service  │  │document-forge-  │    │    │
+│  │  │   vector RAG     │  │    :8010        │  │  service :8013  │    │    │
+│  │  │    :8007         │  └─────────────────┘  └─────────────────┘    │    │
+│  │  └──────────────────┘                                               │    │
+│  │  ┌──────────────────┐  ┌─────────────────┐                          │    │
+│  │  │intelligence-docs │  │knowledge-tree-  │                          │    │
+│  │  │  service :8012   │  │  service :8011  │                          │    │
+│  │  └──────────────────┘  └─────────────────┘                          │    │
 │  │                                                                      │    │
 │  └──────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
@@ -345,16 +344,15 @@ For documents without visual elements, maximize context window.
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
 │  │                       Data Layer                                      │   │
 │  │                                                                       │   │
-│  │  ┌────────────────┐  ┌──────────┐  ┌──────────┐  ┌───────────┐      │   │
-│  │  │  PostgreSQL    │  │  Redis   │  │ Weaviate │  │ KeyCloak  │      │   │
-│  │  │    + AGE       │  │  Cache   │  │ VectorDB │  │   OIDC    │      │   │
-│  │  │  ┌──────────┐  │  │  :6379   │  │  :8080   │  │   :8080   │      │   │
-│  │  │  │Knowledge │  │  │          │  │          │  │           │      │   │
-│  │  │  │  Graph   │  │  │ Verified │  │          │  │           │      │   │
-│  │  │  │ (Cypher) │  │  │ Claims   │  │          │  │           │      │   │
-│  │  │  └──────────┘  │  │ Cache    │  │          │  │           │      │   │
-│  │  │    :5432       │  │          │  │          │  │           │      │   │
-│  │  └────────────────┘  └──────────┘  └──────────┘  └───────────┘      │   │
+│  │  ┌────────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────┐  │   │
+│  │  │ PostgreSQL │  │ FalkorDB │  │  Redis   │  │ Weaviate │  │KeyCl.│  │   │
+│  │  │            │  │ TrustGr. │  │  Cache   │  │ VectorDB │  │ OIDC │  │   │
+│  │  │            │  │  :6380   │  │  :6379   │  │  :8080   │  │:8081 │  │   │
+│  │  │            │  │ :Node    │  │          │  │          │  │      │  │   │
+│  │  │            │  │ :Literal │  │          │  │          │  │      │  │   │
+│  │  │            │  │ :Rel     │  │          │  │          │  │      │  │   │
+│  │  │  :5432     │  │          │  │          │  │          │  │      │  │   │
+│  │  └────────────┘  └──────────┘  └──────────┘  └──────────┘  └──────┘  │   │
 │  │                                                                       │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
@@ -363,26 +361,22 @@ For documents without visual elements, maximize context window.
 Flujo de Consulta:
 ─────────────────
 
-Usuario ──▶ API ──▶ weaviate-service
+Usuario ──▶ API ──▶ emma-agent-service (LangGraph ReAct)
                          │
          ┌───────────────┼───────────────┐
          │               │               │
          ▼               ▼               ▼
     ┌─────────┐    ┌──────────┐    ┌───────────┐
-    │   SLM   │    │   RAG    │    │ Verified  │
-    │ Router  │    │ Pipeline │    │    Gen    │
-    │ (TOON)  │    │ (Emma)   │    │  (Stop&Go)│
+    │ smart_  │    │ graph_   │    │ Verified  │
+    │ search  │    │  rag     │    │    Gen    │
+    │(Weaviate│    │(FalkorDB)│    │  (Stop&Go)│
     └────┬────┘    └────┬─────┘    └─────┬─────┘
          │              │                │
          │         ┌────┴────┐      ┌────┴────┐
          │         │  vLLM   │      │ Celery  │
-         │         │ Qwen3-4B│      │Verifier │
-         │         └─────────┘      └─────────┘
-         │
-    ┌────┴─────┐
-    │ Apache   │
-    │ AGE Graph│
-    └──────────┘
+         │         │Qwen3.5- │      │Verifier │
+         │         │   9B    │      └─────────┘
+         └─────────┴─────────┘
 ```
 
 ### Service Ports
@@ -390,7 +384,7 @@ Usuario ──▶ API ──▶ weaviate-service
 | Service | Internal Port | External Port | Description |
 |---------|---------------|---------------|-------------|
 | api | 8000 | 8000 | Main FastAPI gateway |
-| emma-agent-service | 8009 | 8009 | LangGraph multi-agent RAG |
+| emma-agent-service | 8009 | 8019 | LangGraph multi-agent RAG |
 | weaviate-service | 8000 | 8007 | Vector search, RAG pipeline |
 | intelligence-docs-service | 8000 | 8012 | Text extraction, embeddings (BGE-M3), entity extraction |
 | knowledge-tree-service | 8011 | 8011 | FalkorDB graph queries |
@@ -402,60 +396,56 @@ Usuario ──▶ API ──▶ weaviate-service
 | db (PostgreSQL) | 5432 | 5432 | Database |
 | redis | 6379 | 6379 | Cache |
 | weaviate | 8080 | 8080 | Vector database |
-| falkordb | 6379 | 6380 | Graph database (knowledge graph) |
+| falkordb | 6379 | 6380 | Knowledge graph (TrustGraph, Redis-based) |
+| document-forge-service | 8013 | 8013 | PDF/DOCX generation |
 | keycloak | 8080 | 8081 | SSO (optional) |
 
 ---
 
 ## Emma AI: Multi-Agent System
 
-Emma is the intelligent assistant built on **Anthropic Skill Custom** framework with multi-pattern orchestration. The system automatically selects the best execution pattern based on query analysis.
+Emma is the intelligent assistant built on **LangGraph** (ReAct agent) with 9 nodes and 16 tools. Queries are classified and routed through fast-path, direct synthesis, or a decompose-and-swarm path for complex multi-part questions.
 
-### Orchestration Patterns
+### Graph Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     EMMA COORDINATOR - ORCHESTRATION PATTERNS                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  User Query → Pattern Detection (LLM analysis or keywords)                  │
-│                              │                                               │
-│         ┌────────────────────┼────────────────────┬─────────────────┐       │
-│         ▼                    ▼                    ▼                 ▼       │
-│    ┌─────────┐         ┌──────────┐        ┌───────────┐     ┌──────────┐  │
-│    │ HANDOFF │         │SEQUENTIAL│        │CONCURRENT │     │ RLM_LONG │  │
-│    │(default)│         │ (A→B→C)  │        │ (A|B|C)   │     │ (>50K)   │  │
-│    └────┬────┘         └────┬─────┘        └─────┬─────┘     └────┬─────┘  │
-│         │                   │                    │                │        │
-│    LLM decides         Step-by-step         Multi-view       Recursive    │
-│    via tools           analysis             parallel         decomposition │
-│                                                                              │
-│  Examples:            Examples:            Examples:        Examples:       │
-│  • General Q&A        • Due diligence      • Compare docs   • Large PDFs   │
-│  • Simple search      • Legal analysis     • Risk assess.   • Long reports │
-│  • Summaries          • Compliance audit   • Multi-expert   • >50K tokens  │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+START → classify → [fast_path → END]
+                 → rewrite → memory_recall → react_loop ⟲ → synthesize → END
+                 → rewrite → memory_recall → decompose → swarm_worker × N →
+                   synthesize_swarm → END
 ```
 
-### Specialized Agents
+### ReAct Agent Tools (16)
 
-Emma delegates tasks to specialized agents based on the query domain:
+| Tool | Purpose |
+|------|---------|
+| `smart_search` | Unified document search (hybrid Weaviate + graph expansion) |
+| `graph_rag` | Knowledge graph retrieval (8-stage pipeline, FalkorDB) |
+| `get_document_content` | Read full document by ID |
+| `structural_query` | Count, list, filter via FalkorDB TrustGraph |
+| `analyze_domain` | Specialist domain analysis |
+| `web_search` | Internet search (Tavily primary, DuckDuckGo fallback) |
+| `search_jurisprudence` | CENDOJ jurisprudence search |
+| `list_sources` | Discover available data sources |
+| `query_connector` | Query external connectors (SharePoint, etc.) |
+| `generate_document` | Generate document from template |
+| `forge_document` | Create PDF/DOCX documents |
+| `send_email` | Send email notifications |
+| `verified_generation` | Claim-by-claim verification sub-graph |
+| `predictive_analysis` | Predictive analysis sub-graph |
+| `generate_knowledge_report` | Structured reports with KPIs from knowledge graph |
+| `terminate` | Signal completion with response |
 
-| Agent | Domain | Capabilities | Legal Knowledge |
-|-------|--------|--------------|-----------------|
-| **SearchAgent** | Document Retrieval | Semantic + hybrid search, entity matching | - |
-| **ContractAgent** | Contract Law | Clause analysis, risk detection, deadlines | Civil Code, Commercial Code |
-| **ComplianceAgent** | Regulatory | GDPR, LOPDGDD verification, audit trails | LOPDGDD, RGPD |
-| **SummarizerAgent** | Content Synthesis | Executive summaries, key points, TL;DR | - |
-| **AnalystAgent** | Data Analysis | Financial metrics, trends, comparisons | - |
-| **LaborAgent** | Employment Law | Contract terms, PRL, working conditions | Workers' Statute, LISOS |
-| **FiscalAgent** | Tax Law | IRPF, VAT, corporate tax analysis | Tax regulations |
-| **PrivacyAgent** | Data Protection | Personal data handling, consent verification | LOPDGDD, GDPR |
-| **LegalAgent** | General Legal | Cross-domain legal analysis | Multiple sources |
-| **EducationAgent** | Education Law | LOMLOE, LOE compliance | Education laws |
-| **RealEstateAgent** | Property Law | Lease analysis, cadastral data | Property regulations |
-| **TaxDeclarationAgent** | Tax Forms | Form validation, deduction identification | Tax forms |
+### LLM Router — Dual-Phase Architecture
+
+Emma uses a single vLLM endpoint (Qwen3.5-9B) with two temperature/token configurations:
+
+| Role | Temperature | Max Tokens | Used By |
+|------|-------------|------------|---------|
+| `PLANNER` | 0.3 | 2048 | classify, memory_recall, react_loop, decompose, swarm_worker |
+| `CHAT` | 0.5 | 8192 | synthesize, synthesize_swarm, rlm_processor, writer_agent |
+
+> **Full details**: [`docs/architecture/EMMA_AI.md`](docs/architecture/EMMA_AI.md)
 
 ### Agent Configuration
 
@@ -465,31 +455,25 @@ Emma delegates tasks to specialized agents based on the query domain:
 # =============================================================================
 # Agent System Configuration
 # =============================================================================
-# Enable/disable the agent system
-AGENT_ENABLED=true
-
-# Default orchestration pattern (handoff, sequential, concurrent, rlm_long)
-AGENT_DEFAULT_PATTERN=handoff
-
-# Agent timeout (seconds) - increase for complex analysis
+# Emma agent timeout (seconds)
 AGENT_TIMEOUT_SECONDS=120
 
-# Redis for agent conversation persistence
+# Redis for conversation persistence (LangGraph checkpointer)
 REDIS_HOST=redis
 REDIS_PORT=6379
 REDIS_DB=0
 
-# Conversation TTL (seconds)
-AGENT_CONVERSATION_TTL=3600
+# LangGraph checkpointer (AsyncPostgresSaver)
+LANGGRAPH_CHECKPOINTER_ENABLED=true
 
 # =============================================================================
-# RLM (Long Context) Configuration
+# LLM Router Configuration
 # =============================================================================
-# Token threshold to trigger RLM pattern
-RLM_TOKEN_THRESHOLD=50000
-
-# Maximum recursion depth for document decomposition
-RLM_MAX_DEPTH=3
+CHAT_MAX_TOKENS=8192
+CHAT_TEMPERATURE=0.5
+PLANNER_MAX_TOKENS=2048
+PLANNER_TEMPERATURE=0.3
+REACT_CONTEXT_COMPRESS_THRESHOLD=4000
 ```
 
 ---
@@ -604,167 +588,24 @@ CONNECTOR_HEALTH_CHECK_INTERVAL=300
 
 ## Knowledge Graph: Entity & Document Relationships
 
-NouxCubeIA includes a **Knowledge Graph** powered by **Apache AGE** (A Graph Extension for PostgreSQL). This enables entity-based document discovery, relationship traversal, and intelligent query expansion.
+Knowledge graph operations use **FalkorDB** (Redis-based, port 6380, graph name `knowledge_graph`). The schema follows the TrustGraph RDF-style triple model: every entity is a `:Node` or `:Literal`, connected by `:Rel` edges carrying URI predicates (e.g., `nouxcube://predicate/legal/empleado-de`). 72 predicates are seeded across `core/`, `legal/`, `trust/`, `medical/`, `documental/`, and `prov/` namespaces.
 
-### Architecture
+### Pipeline
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    KNOWLEDGE GRAPH ARCHITECTURE                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │                     PostgreSQL + Apache AGE                          │    │
-│  │                                                                      │    │
-│  │  Graph: knowledge_graph (shared, tenant-isolated via properties)    │    │
-│  │                                                                      │    │
-│  │  ┌────────────────────────────────────────────────────────────┐     │    │
-│  │  │  NODES (Vertices)                                          │     │    │
-│  │  │                                                            │     │    │
-│  │  │  ┌─────────┐    ┌──────────┐    ┌─────────┐              │     │    │
-│  │  │  │ Entity  │    │ Document │    │  Chunk  │              │     │    │
-│  │  │  │         │    │          │    │         │              │     │    │
-│  │  │  │ PERSON  │    │ contract │    │ chunk_1 │              │     │    │
-│  │  │  │ ORG     │    │ invoice  │    │ chunk_2 │              │     │    │
-│  │  │  │ DATE    │    │ report   │    │ ...     │              │     │    │
-│  │  │  │ AMOUNT  │    │          │    │         │              │     │    │
-│  │  │  └─────────┘    └──────────┘    └─────────┘              │     │    │
-│  │  │                                                            │     │    │
-│  │  └────────────────────────────────────────────────────────────┘     │    │
-│  │                                                                      │    │
-│  │  ┌────────────────────────────────────────────────────────────┐     │    │
-│  │  │  EDGES (Relationships)                                     │     │    │
-│  │  │                                                            │     │    │
-│  │  │  • APPEARS_IN:  Entity → Document (strength, context)     │     │    │
-│  │  │  • RELATED_TO:  Entity → Entity (type, strength)          │     │    │
-│  │  │  • REFERENCES:  Document → Document (type, strength)      │     │    │
-│  │  │  • CONTAINS:    Document → Chunk (sequence)               │     │    │
-│  │  │  • DEPENDS_ON:  Chunk → Chunk (semantic|structural)       │     │    │
-│  │  │                                                            │     │    │
-│  │  └────────────────────────────────────────────────────────────┘     │    │
-│  │                                                                      │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-│  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  INDEX TABLES (PostgreSQL - for fast lookups)                        │    │
-│  │                                                                      │    │
-│  │  • kg_entity_index:   normalized_value → vertex_id                  │    │
-│  │  • kg_document_index: document_id → vertex_id                       │    │
-│  │                                                                      │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+Document indexing triggers `POST /extract/triples` to knowledge-tree-service. An `ExtractionCoordinator` runs 4 LLM extractors in parallel (definitions, relationships, objects, topics), deduplicates, filters via blacklist, resolves entities via the Ontology terms semantic search (Weaviate `OntologyTerms` collection), then MERGE-writes nodes and CREATE-writes relationships in FalkorDB. PROV-O provenance and contradiction detection run as post-processing.
 
-### How It Works
+### Query Access
 
-When documents are indexed, the system:
+The ReAct agent invokes the `graph_rag` tool (8-stage pipeline):
 
-1. **Extracts Entities**: Uses LLM to identify PERSON, ORGANIZATION, DATE, AMOUNT, etc.
-2. **Normalizes Values**: Deduplicates entities (e.g., "Juan García" = "juan garcia")
-3. **Creates Graph Nodes**: Stores entities and documents as vertices in AGE
-4. **Establishes Relationships**: Links entities to documents (APPEARS_IN) and entities to each other (RELATED_TO)
-
-During queries:
-
-1. **Entity Detection**: Identifies entities mentioned in the user query
-2. **Graph Traversal**: Uses Cypher to find related entities and documents
-3. **Query Expansion**: Adds related terms to improve retrieval
-4. **Context Enrichment**: Provides document relationships to the LLM
-
-### Entity Types
-
-| Type | Description | Example |
-|------|-------------|---------|
-| `PERSON` | Individual names | "Juan García Pérez" |
-| `ORGANIZATION` | Companies, institutions | "Acme Corp", "Ministerio de Hacienda" |
-| `DATE` | Dates and periods | "15 de enero de 2024" |
-| `AMOUNT` | Monetary values | "15.000 €", "$50,000" |
-| `LOCATION` | Places, addresses | "Madrid", "C/ Gran Vía 25" |
-| `CONTRACT_ID` | Contract identifiers | "CNT-2024-001" |
-| `LAW_REFERENCE` | Legal citations | "Art. 1 LOPDGDD" |
-| `DOCUMENT_REF` | Document references | "Anexo A", "Cláusula 5.2" |
-
-### Cypher Query Examples
-
-```cypher
--- Find all entities in a specific document
-MATCH (e:Entity)-[:APPEARS_IN]->(d:Document {id: 'doc-456'})
-RETURN e.entity_value, e.entity_type
-
--- Find related entities (for query expansion)
-MATCH (e:Entity {value: 'Juan García', tenant_id: 'tenant-123'})
-      -[:RELATED_TO*1..2]-(related)
-RETURN related.value, related.type
-
--- Find documents containing a specific person
-MATCH (e:Entity {entity_type: 'PERSON', normalized_value: 'juan garcia'})
-      -[:APPEARS_IN]->(d:Document)
-WHERE d.tenant_id = 'tenant-123'
-RETURN d.id, d.title
-
--- Find document dependencies/references
-MATCH (d1:Document)-[r:REFERENCES]->(d2:Document)
-WHERE d1.tenant_id = 'tenant-123'
-RETURN d1.title AS source, d2.title AS target, r.type
-
--- Find co-occurring entities (entities that appear together)
-MATCH (e1:Entity)-[:APPEARS_IN]->(d:Document)<-[:APPEARS_IN]-(e2:Entity)
-WHERE e1.entity_id <> e2.entity_id
-  AND e1.tenant_id = 'tenant-123'
-RETURN e1.value, e2.value, count(d) AS co_occurrences
-ORDER BY co_occurrences DESC
-LIMIT 10
-```
-
-### Graph Service API
-
-The Knowledge Graph is accessible through the Weaviate Service API:
-
-```bash
-# Get graph statistics for a tenant
-curl http://localhost:8007/api/v1/graph/stats \
-  -H "X-Tenant-ID: $TENANT_ID" | jq
-
-# Response:
-{
-  "enabled": true,
-  "backend": "apache_age",
-  "graph_name": "knowledge_graph",
-  "tenant_id": "tenant-123",
-  "node_count": 1542,
-  "edge_count": 3891,
-  "entity_types": {
-    "PERSON": 234,
-    "ORGANIZATION": 156,
-    "DATE": 412,
-    "AMOUNT": 289,
-    "LOCATION": 98
-  }
-}
-
-# Find entity neighbors (related entities)
-curl "http://localhost:8007/api/v1/graph/neighbors?entity=Juan%20García&depth=2" \
-  -H "X-Tenant-ID: $TENANT_ID" | jq
-
-# Response:
-[
-  {
-    "entity_value": "Acme Corp",
-    "entity_type": "ORGANIZATION",
-    "relationship_type": "RELATED_TO",
-    "relationship_strength": 0.85,
-    "depth": 1
-  },
-  {
-    "entity_value": "María López",
-    "entity_type": "PERSON",
-    "relationship_type": "RELATED_TO",
-    "relationship_strength": 0.72,
-    "depth": 2
-  }
-]
-```
+1. Entity retrieval
+2. BFS subgraph expansion
+3. LLM-guided expansion
+4. Label resolution
+5. Semantic pre-filter with 5-signal scoring (semantic + confidence + authority + consensus + recency)
+6. LLM edge scoring
+7. Chain-of-thought path formatting
+8. Source provenance
 
 ### Configuration
 
@@ -772,63 +613,32 @@ curl "http://localhost:8007/api/v1/graph/neighbors?entity=Juan%20García&depth=2
 # backend/docker/.env
 
 # =============================================================================
-# Knowledge Graph Configuration (Apache AGE)
+# Knowledge Graph Configuration (FalkorDB / TrustGraph)
 # =============================================================================
-# Enable/disable knowledge graph
-RAG_KNOWLEDGE_GRAPH_ENABLED=true
+# Enable/disable knowledge graph in SmartSearch
+SMART_SEARCH_GRAPH_ENABLED=true
 
-# Graph traversal settings
-RAG_GRAPH_TRAVERSAL_DEPTH=2          # Max hops for neighbor queries
-RAG_GRAPH_MAX_NEIGHBORS=50           # Max neighbors to return
-RAG_GRAPH_MIN_RELATIONSHIP_STRENGTH=0.3  # Filter weak relationships
+# graph_rag tool settings
+RAG_GRAPH_TRAVERSAL_DEPTH=2          # Max BFS hops
+RAG_GRAPH_MAX_NEIGHBORS=50           # Max neighbors per hop
+RAG_GRAPH_MIN_RELATIONSHIP_STRENGTH=0.3  # Filter low-confidence edges
 
-# Entity extraction (during indexing)
+# Entity extraction (during indexing, knowledge-tree-service)
 ENTITY_EXTRACTION_ENABLED=true
 ENTITY_EXTRACTION_MODEL=vllm         # Use local vLLM for extraction
-ENTITY_TYPES=PERSON,ORGANIZATION,DATE,AMOUNT,LOCATION,CONTRACT_ID
-
-# Index optimization
-KG_ENTITY_DEDUP_ENABLED=true         # Deduplicate similar entities
-KG_RELATIONSHIP_INFERENCE=true       # Infer relationships from context
-```
-
-### Database Setup
-
-The Knowledge Graph is automatically initialized when PostgreSQL starts. The initialization script (`backend/docker/init-scripts/01-init-age.sql`) creates:
-
-1. **Apache AGE Extension**: Graph database functionality
-2. **Knowledge Graph**: Default graph for all tenants
-3. **Index Tables**: Fast lookup tables for entities and documents
-4. **Helper Functions**: Tenant graph management functions
-
-```bash
-# Verify AGE installation
-docker compose exec db psql -U nexusdocs -d nexusdocs -c "
-  SELECT extname, extversion FROM pg_extension WHERE extname = 'age';
-"
-
-# Check graph exists
-docker compose exec db psql -U nexusdocs -d nexusdocs -c "
-  LOAD 'age';
-  SET search_path = ag_catalog, public;
-  SELECT name FROM ag_catalog.ag_graph;
-"
-
-# View entity index
-docker compose exec db psql -U nexusdocs -d nexusdocs -c "
-  SELECT entity_type, count(*) FROM kg_entity_index GROUP BY entity_type;
-"
 ```
 
 ### Use Cases
 
 | Use Case | How Graph Helps |
 |----------|-----------------|
-| **"Find contracts with Juan García"** | Entity lookup → APPEARS_IN → Documents |
-| **"Show related people"** | Entity → RELATED_TO traversal |
-| **"Documents referencing this one"** | Document → REFERENCES → Documents |
-| **"Find all invoices > €10,000"** | AMOUNT entities + APPEARS_IN |
-| **Query expansion** | Automatically adds related terms from graph |
+| **"Find contracts with Juan García"** | Entity `:Node` → `:Rel` → Document `:Node` traversal |
+| **"Show related people"** | BFS traversal + LLM-guided expansion |
+| **"Legal analysis of a clause"** | Ontology predicate resolution + authority scoring |
+| **"Who appears in this document?"** | PROV-O provenance + source citations |
+| **Query expansion** | Graph context injected into SmartSearch result |
+
+> **Full details**: [`docs/architecture/TRUSTGRAPH.md`](docs/architecture/TRUSTGRAPH.md)
 
 ---
 
@@ -838,6 +648,8 @@ NouxCubeIA includes a comprehensive **Spanish Legal Knowledge Base** sourced fro
 
 > **📖 Full Documentation**: [`docs/architecture/BOE_LEGAL_KNOWLEDGE.md`](docs/architecture/BOE_LEGAL_KNOWLEDGE.md)
 
+> **Nota:** El corpus BOE se unifica directamente dentro de **TrustGraph (FalkorDB)**. No existe una colección Weaviate separada para BOE. El `boe_legislation_downloader.py` se migrará a un conector estándar.
+
 ### Key Features
 
 | Feature | Description |
@@ -846,7 +658,7 @@ NouxCubeIA includes a comprehensive **Spanish Legal Knowledge Base** sourced fro
 | **47+ Laws Indexed** | ET, LOPDGDD, LGT, Código Civil, LSC, and more |
 | **Change Detection** | Automatic sync with BOE for legislative updates |
 | **Article-Level Diff** | Detailed change tracking with severity classification |
-| **Graph Integration** | Laws linked in Apache AGE for relationship queries |
+| **Graph Integration** | Laws stored as `:Node`/`:Rel` triples in FalkorDB TrustGraph |
 
 ### Initialization
 
@@ -860,10 +672,6 @@ python scripts/boe_legislation_downloader.py --preset laboral
 python scripts/boe_legislation_downloader.py --preset fiscal
 python scripts/boe_legislation_downloader.py --preset proteccion_datos
 ```
-
-> **Nota:** El `boe_legislation_downloader.py` se migrará a un conector.
-> El corpus BOE se unifica directamente dentro de TrustGraph (FalkorDB), sin
-> colección Weaviate separada.
 
 ### Legal Domains Available
 
@@ -950,10 +758,9 @@ El patrón **Agent Self-Verifies** implementa generación de documentos donde **
 
 ```bash
 # Generar documento verificado (síncrono)
-POST http://localhost:8007/verified/generate
+POST http://localhost:8019/emma/verified/generate
 {
   "query": "Genera un resumen del proyecto Alpha basado en los documentos",
-  "tenant_id": "tenant-uuid",
   "max_claims": 10,
   "confidence_threshold": 0.7
 }
@@ -1133,10 +940,10 @@ When a user asks Emma a question, the query flows through a sophisticated 7-laye
 │  └────────────────────────────────┬────────────────────────────────────┘    │
 │                                   ▼                                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
-│  │  LAYER 6: Agent Orchestration (Emma Coordinator)                    │    │
-│  │  • Pattern selection (handoff/sequential/concurrent/rlm)            │    │
-│  │  • Agent delegation based on query domain                           │    │
-│  │  • Tool calling for specialized analysis                            │    │
+│  │  LAYER 6: Agent Orchestration (Emma — LangGraph ReAct)              │    │
+│  │  • classify → [fast_path | react_loop | decompose+swarm]            │    │
+│  │  • 16 tools for document search, graph RAG, generation              │    │
+│  │  • Tool calling with PLANNER role (temp=0.3)                        │    │
 │  └────────────────────────────────┬────────────────────────────────────┘    │
 │                                   ▼                                          │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
@@ -1246,13 +1053,11 @@ The system automatically invalidates caches when data changes:
 # Manual cache invalidation (admin API)
 # Invalidate caches for specific documents
 curl -X POST http://localhost:8007/api/v1/cache/invalidate \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{"document_ids": ["doc-123", "doc-456"]}'
 
 # Get cache health statistics
-curl http://localhost:8007/api/v1/cache/health \
-  -H "X-Tenant-ID: $TENANT_ID" | jq
+curl http://localhost:8007/api/v1/cache/health | jq
 ```
 
 #### Monitoring Cache Performance
@@ -1261,13 +1066,12 @@ curl http://localhost:8007/api/v1/cache/health \
 # Check Redis cache usage
 docker compose exec redis redis-cli INFO memory | grep used_memory_human
 
-# View cache keys for a tenant
-docker compose exec redis redis-cli KEYS "retrieval:tenant-123:*" | wc -l
-docker compose exec redis redis-cli KEYS "context:tenant-123:*" | wc -l
+# View cache keys
+docker compose exec redis redis-cli KEYS "retrieval:*" | wc -l
+docker compose exec redis redis-cli KEYS "context:*" | wc -l
 
 # Cache statistics endpoint
-curl http://localhost:8007/api/v1/cache/stats \
-  -H "X-Tenant-ID: $TENANT_ID" | jq
+curl http://localhost:8007/api/v1/cache/stats | jq
 
 # Response:
 # {
@@ -1300,33 +1104,28 @@ redis:
 
 ```bash
 # 1. Simple search query
-curl -X POST http://localhost:8007/api/v1/emma/ask \
+curl -X POST http://localhost:8019/emma/query \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -d '{
-    "question": "Find all contracts from 2024",
-    "workflow_type": "auto"
+    "query": "Find all contracts from 2024",
+    "thread_id": "test-thread-1"
   }' | jq
 
-# 2. Legal analysis query (triggers Public Knowledge)
-curl -X POST http://localhost:8007/api/v1/emma/ask \
+# 2. Legal analysis query
+curl -X POST http://localhost:8019/emma/query \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -d '{
-    "question": "Is this employment contract compliant with the Workers Statute?",
-    "document_ids": ["doc-123"],
-    "workflow_type": "sequential"
+    "query": "Is this employment contract compliant with the Workers Statute?",
+    "thread_id": "test-thread-2"
   }' | jq
 
-# 3. Multi-document comparison (concurrent pattern)
-curl -X POST http://localhost:8007/api/v1/emma/ask \
+# 3. Streaming SSE response
+curl -X POST http://localhost:8019/emma/query/stream \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -d '{
-    "question": "Compare the terms between contract A and contract B",
-    "document_ids": ["doc-123", "doc-456"],
-    "workflow_type": "concurrent"
-  }' | jq
+    "query": "Compare the terms between contract A and contract B",
+    "thread_id": "test-thread-3"
+  }'
 ```
 
 ---
@@ -1405,10 +1204,10 @@ ANTHROPIC_API_KEY=sk-ant-...  # Optional fallback
 # =============================================================================
 # Database
 # =============================================================================
-POSTGRES_USER=nexusdocs
-POSTGRES_PASSWORD=your-secure-password
-POSTGRES_DB=nexusdocs
-DATABASE_URL=postgresql://nexusdocs:your-secure-password@db:5432/nexusdocs
+POSTGRES_USER=nexus_user
+POSTGRES_PASSWORD=nexus_password
+POSTGRES_DB=nouxcube
+DATABASE_URL=postgresql://nexus_user:nexus_password@db:5432/nouxcube
 
 # =============================================================================
 # Storage
@@ -1529,12 +1328,11 @@ open http://localhost:8000/docs
 
 ```bash
 # Test Emma endpoint (requires authentication)
-curl -X POST http://localhost:8007/api/v1/emma/ask \
+curl -X POST http://localhost:8019/emma/query \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: test-tenant" \
   -d '{
-    "question": "What documents do I have?",
-    "workflow_type": "auto"
+    "query": "What documents do I have?",
+    "thread_id": "smoke-test-1"
   }' | jq
 ```
 
@@ -1687,10 +1485,10 @@ For production deployments:
 
 ```bash
 # Automated daily backup
-docker compose exec db pg_dump -U nexusdocs nexusdocs > backup_$(date +%Y%m%d).sql
+docker compose exec db pg_dump -U nexus_user nouxcube > backup_$(date +%Y%m%d).sql
 
 # Restore
-docker compose exec -T db psql -U nexusdocs nexusdocs < backup_20240115.sql
+docker compose exec -T db psql -U nexus_user nouxcube < backup_20240115.sql
 ```
 
 ### Document Storage Backup
