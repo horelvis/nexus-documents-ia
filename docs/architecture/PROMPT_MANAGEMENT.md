@@ -31,7 +31,6 @@ El sistema de Prompt Management permite:
 
 - **Sin redespliegue**: Cambios en prompts sin reiniciar servicios
 - **Trazabilidad**: Historial completo de versiones en Langfuse
-- **Multi-tenant**: Reglas y guardrails por tenant
 - **Observabilidad**: Métricas de uso y rendimiento
 
 ---
@@ -50,7 +49,7 @@ El sistema de Prompt Management permite:
 │  │PromptComposer│  │  RuleEngine  │  │  GuardrailService    │   │
 │  │              │  │              │  │                      │   │
 │  │ • Langfuse   │  │ • Evaluate   │  │ • Validate           │   │
-│  │ • YAML       │  │ • Apply      │  │ • Redact             │   │
+│  │   (only src) │  │ • Apply      │  │ • Redact             │   │
 │  │ • Cache      │  │ • Cache      │  │ • Block              │   │
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘   │
 │         │                 │                      │               │
@@ -99,6 +98,8 @@ Emma Service → HTTP Request → Main API → PostgreSQL
 
 ## Langfuse - Gestión del Ciclo de Vida
 
+> **Langfuse is the ONLY prompt source.** There is no YAML fallback at runtime. If a prompt is not found in Langfuse, `PromptNotFoundError` is raised immediately (fail-fast). The file `config/prompts/emma_prompts.yaml` exists as a historical reference only and is NOT loaded at runtime.
+
 ### Acceso Web UI
 
 - **URL**: http://localhost:3002
@@ -129,7 +130,6 @@ Emma Service → HTTP Request → Main API → PostgreSQL
 ```jinja2
 {{user_query}}         - Pregunta del usuario
 {{context}}            - Contexto RAG recuperado
-{{sector}}             - Sector activo (legal, medical, documental)
 {{agent_name}}         - Nombre del agente especialista
 {{language}}           - Idioma detectado
 {{today}}              - Fecha actual
@@ -144,6 +144,20 @@ curl -X POST "http://localhost:8009/prompts/sync" \
   -H "Content-Type: application/json" \
   -d '{"prompt_names": ["emma_system_prompt"]}'
 ```
+
+### Production Label Pinning
+
+All `get_prompt()` calls default to `label="production"` (configurable via `LANGFUSE_PROMPT_LABEL` env var). This means:
+
+- Admins editing a prompt in the Langfuse UI create a new version tagged `"latest"` (not `"production"`).
+- Edits do NOT reach runtime until explicitly promoted to the `"production"` label via the Langfuse UI or API.
+- Rationale: prevents accidentally pushing untested drafts live.
+
+**Promote a prompt to production:**
+1. Langfuse UI (http://localhost:3002) → Prompts → select prompt
+2. Pick the version you want to promote (usually "latest")
+3. Add the `"production"` label (or use the promote button)
+4. The change takes effect on the next `get_prompt()` call (after cache TTL, default 5 min)
 
 ---
 
@@ -188,8 +202,6 @@ Las reglas permiten modificar prompts dinámicamente según el contexto de la so
   "document_type": "contrato_laboral",    // Tipo exacto
   "document_type": ["contrato", "anexo"], // Lista de tipos
   "action": "analyze",                     // Acción solicitada
-  "sector": "legal",                       // Sector activo
-  "domain": "labor",                       // Dominio del agente
   "user_role": "admin",                    // Rol del usuario
   "has_attachments": true,                 // Condición booleana
   "query_contains": "despido"              // Substring en query
@@ -200,12 +212,10 @@ Las reglas permiten modificar prompts dinámicamente según el contexto de la so
 
 ```bash
 API_KEY="JWFu8l5QmBnWz1xk26Y7QMCWYeEKcTtPPzcLyb285Cc"
-TENANT_ID="00000000-0000-0000-0000-000000000001"
 
 # Crear regla
 curl -X POST "http://localhost:8009/prompts/rules" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "rule_name": "fiscal_docs_extra_care",
@@ -218,20 +228,17 @@ curl -X POST "http://localhost:8009/prompts/rules" \
 
 # Listar reglas
 curl -X GET "http://localhost:8009/prompts/rules" \
-  -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID"
+  -H "X-API-Key: $API_KEY"
 
 # Evaluar reglas (ver cuáles aplican)
 curl -X POST "http://localhost:8009/prompts/rules/evaluate" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{"document_type": "declaracion_fiscal", "action": "analyze"}'
 
 # Eliminar regla
 curl -X DELETE "http://localhost:8009/prompts/rules/{rule_id}" \
-  -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID"
+  -H "X-API-Key: $API_KEY"
 ```
 
 ---
@@ -328,7 +335,6 @@ Los guardrails validan las respuestas del LLM **antes** de enviarlas al usuario.
 # Crear guardrail
 curl -X POST "http://localhost:8009/prompts/guardrails" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "guardrail_name": "dni_detector",
@@ -342,7 +348,6 @@ curl -X POST "http://localhost:8009/prompts/guardrails" \
 # Probar guardrails contra contenido
 curl -X POST "http://localhost:8009/prompts/guardrails/test" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "content": "El DNI del cliente es 12345678A",
@@ -369,14 +374,17 @@ curl -X POST "http://localhost:8009/prompts/guardrails/test" \
 
 Sistema de ejemplos question-answer que se inyectan dinámicamente usando búsqueda semántica.
 
-### Dominios Soportados
+### Tipos de documento soportados
 
-| domain | Descripción |
-|--------|-------------|
-| `legal` | Derecho, contratos, normativa |
-| `medical` | Salud, diagnósticos, tratamientos |
-| `documental` | Gestión documental general |
-| `general` | Uso general |
+| document_type | Descripción |
+|---------------|-------------|
+| `factura` | Facturas y documentos de pago |
+| `contrato` | Contratos y acuerdos |
+| `nomina` | Nóminas y documentos laborales |
+| `sentencia` | Sentencias y resoluciones judiciales |
+| `contrato_laboral` | Contratos de trabajo |
+| `declaracion_fiscal` | Declaraciones fiscales e impuestos |
+| `general` | Documentos de uso general |
 
 ### Estructura de un Ejemplo
 
@@ -385,7 +393,7 @@ Sistema de ejemplos question-answer que se inyectan dinámicamente usando búsqu
   "question": "¿Cuántos días de preaviso necesito para un despido disciplinario?",
   "answer": "En un despido disciplinario no se requiere preaviso según el artículo 55 del Estatuto de los Trabajadores. El despido puede ser efectivo desde el momento de su comunicación al trabajador.",
   "category": "despido",
-  "domain": "legal",
+  "document_type": "contrato_laboral",
   "tags": ["laboral", "despido", "preaviso"]
 }
 ```
@@ -404,31 +412,28 @@ Sistema de ejemplos question-answer que se inyectan dinámicamente usando búsqu
 # Crear ejemplo
 curl -X POST "http://localhost:8009/prompts/few-shot" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "question": "¿Qué es la indemnización por despido improcedente?",
     "answer": "La indemnización por despido improcedente es de 33 días de salario por año trabajado, con un máximo de 24 mensualidades, según el artículo 56 del ET.",
     "category": "despido",
-    "domain": "legal",
+    "document_type": "contrato_laboral",
     "tags": ["laboral", "indemnización"]
   }'
 
 # Buscar ejemplos similares
 curl -X POST "http://localhost:8009/prompts/few-shot/search" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "¿Cuánto me corresponde si me despiden?",
     "limit": 3,
-    "domain": "legal"
+    "document_type": "contrato_laboral"
   }'
 
 # Dar feedback (mejora ranking)
 curl -X POST "http://localhost:8009/prompts/few-shot/feedback" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "example_id": "uuid-del-ejemplo",
@@ -449,7 +454,7 @@ curl -X POST "http://localhost:8009/prompts/few-shot/feedback" \
 | GET | `/prompts/available` | Lista prompts disponibles |
 | POST | `/prompts/sync` | Sincronizar desde Langfuse |
 | POST | `/prompts/cache/invalidate` | Limpiar caché |
-| POST | `/prompts/reload` | Recargar YAML |
+| POST | `/prompts/reload` | Recargar caché de prompts |
 | **Rules** | | |
 | GET | `/prompts/rules` | Listar reglas |
 | POST | `/prompts/rules` | Crear regla |
@@ -474,7 +479,6 @@ curl -X POST "http://localhost:8009/prompts/few-shot/feedback" \
 
 ```
 X-API-Key: {MICROSERVICES_API_KEY}
-X-Tenant-ID: {tenant_uuid}  # Para operaciones multi-tenant
 Content-Type: application/json
 ```
 
@@ -487,10 +491,12 @@ Content-Type: application/json
 ```bash
 # Langfuse
 LANGFUSE_ENABLED=true
-LANGFUSE_HOST=http://langfuse:3000
+LANGFUSE_HOST=http://langfuse:3000  # Container-to-container (default in compose)
+                                    # From host / external tools: http://localhost:3002
 LANGFUSE_PUBLIC_KEY=pk-emma-dev
 LANGFUSE_SECRET_KEY=sk-emma-dev
 USE_LANGFUSE_PROMPTS=true
+LANGFUSE_PROMPT_LABEL=production    # Label required for prompts to be active at runtime
 
 # Feature Flags
 RULE_ENGINE_ENABLED=true
@@ -519,7 +525,6 @@ Las reglas y guardrails se evalúan en orden de prioridad (menor número = mayor
 # Crear guardrail de idioma
 curl -X POST "http://localhost:8009/prompts/guardrails" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "guardrail_name": "spanish_only",
@@ -536,7 +541,6 @@ curl -X POST "http://localhost:8009/prompts/guardrails" \
 # Crear regla para contratos
 curl -X POST "http://localhost:8009/prompts/rules" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "rule_name": "contract_analysis_enhanced",
@@ -556,7 +560,6 @@ curl -X POST "http://localhost:8009/prompts/rules" \
 # Crear guardrail de datos médicos
 curl -X POST "http://localhost:8009/prompts/guardrails" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{
     "guardrail_name": "medical_data_blocker",
@@ -569,6 +572,24 @@ curl -X POST "http://localhost:8009/prompts/guardrails" \
     "applies_to": ["*"]
   }'
 ```
+
+---
+
+## Seeding Prompts into Langfuse
+
+All prompt definitions live in `backend/microservices/emma-agent-service/app/services/prompt_registry.py` (~91 `PromptEntry` instances). Migration scripts in `backend/microservices/emma-agent-service/scripts/` push prompt sets atomically into Langfuse.
+
+**Pattern — `migrate_*.py` scripts:**
+```bash
+# Push a specific prompt set (e.g. after adding new prompts):
+docker compose exec emma-agent-service python scripts/migrate_9b_prompt_optimization.py
+
+# Each migrate_*.py script is idempotent: it creates new Langfuse versions
+# but does NOT automatically promote them to "production".
+# After running, promote in the Langfuse UI or use the API.
+```
+
+The scripts follow the naming convention `migrate_<feature|date>_<description>.py`. After running, the new versions appear in Langfuse as `"latest"` — promote to `"production"` label to activate them at runtime (see Production Label Pinning above).
 
 ---
 
@@ -594,7 +615,6 @@ curl -X POST "http://localhost:8009/prompts/cache/invalidate" \
 # Evaluar manualmente
 curl -X POST "http://localhost:8009/prompts/rules/evaluate" \
   -H "X-API-Key: $API_KEY" \
-  -H "X-Tenant-ID: $TENANT_ID" \
   -H "Content-Type: application/json" \
   -d '{"document_type": "tu_tipo", "action": "tu_accion"}'
 ```
