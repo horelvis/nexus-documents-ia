@@ -194,7 +194,6 @@ class IndexingResult:
             "knowledge": {
                 "entities_count": self.knowledge_result.entities_count if self.knowledge_result else 0,
                 "relationships_count": self.knowledge_result.relationships_count if self.knowledge_result else 0,
-                "domain": self.knowledge_result.domain.value if self.knowledge_result else None,
             } if self.knowledge_result else None,
             "visual": {
                 "visual_embeddings_count": len(self.visual_embeddings),
@@ -869,8 +868,7 @@ class IndexingPipeline:
 
                 logger.info(
                     f"[{document_id}] Extracted {knowledge_result.entities_count} entities, "
-                    f"{knowledge_result.relationships_count} relationships, "
-                    f"domain: {knowledge_result.domain.value}"
+                    f"{knowledge_result.relationships_count} relationships"
                 )
 
             except Exception as e:

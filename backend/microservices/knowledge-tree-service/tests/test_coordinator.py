@@ -384,7 +384,6 @@ class TestExtractDocument:
                 title="Test Document",
                 file_path="/docs/test/doc.pdf",
                 semantic_type="contrato",
-                domain="legal",
             )
 
         assert result["success"] is True
@@ -413,7 +412,6 @@ class TestExtractDocument:
                 title="Node Verify Doc",
                 file_path="/docs/node-verify.pdf",
                 semantic_type="informe",
-                domain="documental",
             )
 
         doc_uri = result["document_uri"]
@@ -461,7 +459,6 @@ class TestExtractDocument:
                 title="Aggregate Test",
                 file_path="/docs/aggregate.pdf",
                 semantic_type="contrato",
-                domain="legal",
             )
 
         assert result["success"] is True

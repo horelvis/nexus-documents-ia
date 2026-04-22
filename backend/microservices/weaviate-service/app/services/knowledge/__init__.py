@@ -11,7 +11,6 @@ from .schemas import (
     KnowledgeExtractionResult,
     EntityType,
     RelationshipType,
-    DomainType
 )
 
 __all__ = [
@@ -22,5 +21,4 @@ __all__ = [
     "KnowledgeExtractionResult",
     "EntityType",
     "RelationshipType",
-    "DomainType",
 ]

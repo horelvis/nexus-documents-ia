@@ -36,16 +36,6 @@ class RelationshipType(str, Enum):
     REFERENCES = "references"
 
 
-class DomainType(str, Enum):
-    """Domain categories for entities."""
-    LEGAL = "legal"
-    FISCAL = "fiscal"
-    HR = "hr"
-    FINANCIAL = "financial"
-    TECHNICAL = "technical"
-    GENERAL = "general"
-
-
 class KnowledgeEntity(BaseModel):
     """A knowledge entity extracted from a document."""
 
@@ -60,9 +50,6 @@ class KnowledgeEntity(BaseModel):
     # Source information
     source_document_id: Optional[str] = None
     extraction_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
-
-    # Classification
-    domain: DomainType = DomainType.GENERAL
 
     # Additional attributes specific to the entity type
     attributes: Dict[str, Any] = Field(default_factory=dict)
@@ -108,9 +95,6 @@ class KnowledgeExtractionResult(BaseModel):
     entities_count: int = 0
     relationships_count: int = 0
 
-    # Domain classification (most common from entities, or GENERAL)
-    domain: DomainType = DomainType.GENERAL
-
     # Processing info
     processing_time_ms: int = 0
     extraction_method: str = "langextract"  # langextract, llm, hybrid
@@ -133,10 +117,6 @@ class EntityNormalizationConfig(BaseModel):
 
     # Type classification
     auto_classify_types: bool = True
-
-    # Domain detection
-    auto_detect_domain: bool = True
-    default_domain: DomainType = DomainType.GENERAL
 
     # Context extraction
     context_chars_before: int = 100

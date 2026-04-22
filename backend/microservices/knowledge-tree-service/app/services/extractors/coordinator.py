@@ -312,7 +312,6 @@ class ExtractionCoordinator:
         title: str,
         file_path: str,
         semantic_type: str,
-        domain: str,
     ) -> Dict[str, Any]:
         """Extract and store triples for all chunks of a document.
 
@@ -336,7 +335,6 @@ class ExtractionCoordinator:
                 title=title,
                 file_path=file_path,
                 semantic_type=semantic_type,
-                domain=domain,
             )
         except Exception as exc:
             errors.append(f"store_document_node: {exc}")

@@ -19,7 +19,6 @@ class TripleExtractionRequest(BaseModel):
     title: str = ""
     file_path: str = ""
     semantic_type: str = ""
-    domain: str = ""
 
 
 class TripleExtractionResponse(BaseModel):
@@ -104,7 +103,6 @@ class StructuralIndexRequest(BaseModel):
     file_path: str = ""
     title: str = ""
     semantic_type: str = ""
-    domain: str = ""
     connector_id: Optional[str] = None
     connector_type: Optional[str] = None
 

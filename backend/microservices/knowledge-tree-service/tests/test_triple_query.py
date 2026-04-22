@@ -264,7 +264,6 @@ class TestTenantContext:
             title="Contrato de Trabajo",
             file_path="/docs/contratos/ct001.pdf",
             semantic_type="contrato",
-            domain="legal",
         )
         # mentioned-in triple: Juan → document (node)
         await store.store_triple(

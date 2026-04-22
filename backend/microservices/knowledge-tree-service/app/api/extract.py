@@ -44,7 +44,6 @@ async def extract_triples(request: TripleExtractionRequest) -> TripleExtractionR
         title=request.title,
         file_path=request.file_path,
         semantic_type=request.semantic_type,
-        domain=request.domain,
     )
 
     return TripleExtractionResponse(
@@ -69,7 +68,6 @@ async def structural_index(request: StructuralIndexRequest) -> StructuralIndexRe
         title=request.title,
         file_path=request.file_path,
         semantic_type=request.semantic_type,
-        domain=request.domain,
     )
 
     return StructuralIndexResponse(success=True, document_uri=document_uri)

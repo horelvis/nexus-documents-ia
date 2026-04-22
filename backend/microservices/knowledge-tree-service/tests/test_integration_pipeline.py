@@ -177,7 +177,6 @@ class TestFullPipeline:
                 title="Contrato TechCorp - Juan García López",
                 file_path="/docs/legal/contract-001.pdf",
                 semantic_type="contrato",
-                domain="legal",
             )
 
         # 4. Assert top-level success

@@ -259,7 +259,6 @@ class TestStoreDocumentNode:
             title="Contrato de Trabajo",
             file_path="/docs/contratos/ct001.pdf",
             semantic_type="contrato",
-            domain="legal",
         )
 
         expected_uri = URIBuilder.document(col, "doc-001")

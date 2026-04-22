@@ -52,7 +52,6 @@ def extract_document_task(
     title: str = "",
     file_path: str = "",
     semantic_type: str = "",
-    domain: str = "",
 ) -> Dict[str, Any]:
     """Extract and store TrustGraph triples for a document.
 
@@ -68,7 +67,6 @@ def extract_document_task(
         title:         Human-readable document title.
         file_path:     Storage path (used to derive folder URI).
         semantic_type: Document semantic type (e.g. "factura").
-        domain:        Business domain (e.g. "legal").
 
     Returns:
         KTS TripleExtractionResponse dict on success.
@@ -84,7 +82,6 @@ def extract_document_task(
         "title": title,
         "file_path": file_path,
         "semantic_type": semantic_type,
-        "domain": domain,
     }
 
     logger.info(

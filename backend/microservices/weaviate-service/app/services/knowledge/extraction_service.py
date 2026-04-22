@@ -20,7 +20,6 @@ from .schemas import (
     KnowledgeExtractionConfig,
     EntityType,
     RelationshipType,
-    DomainType,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,26 +94,6 @@ class KnowledgeExtractionService:
             "reference": EntityType.REFERENCE,
             "ley": EntityType.REFERENCE,
             "normativa": EntityType.REFERENCE,
-        }
-
-        # Domain detection keywords
-        self._domain_keywords = {
-            DomainType.LEGAL: [
-                "contrato", "clausula", "articulo", "ley", "normativa",
-                "juridico", "legal", "tribunal", "juzgado", "sentencia"
-            ],
-            DomainType.FISCAL: [
-                "irpf", "iva", "impuesto", "fiscal", "tributario",
-                "hacienda", "modelo", "declaracion", "base imponible"
-            ],
-            DomainType.HR: [
-                "nomina", "salario", "empleado", "trabajador", "laboral",
-                "contrato de trabajo", "convenio", "vacaciones", "despido"
-            ],
-            DomainType.FINANCIAL: [
-                "factura", "pago", "ingreso", "gasto", "balance",
-                "cuenta", "financiero", "presupuesto", "inversion"
-            ],
         }
 
     async def initialize(self) -> None:
@@ -197,13 +176,7 @@ class KnowledgeExtractionService:
             )
             logger.info(f"📊 Normalized: {len(normalized_entities)} entities")
 
-            # Step 2: Detect domain
-            domain = await self._detect_domain(content, document_type)
-            for entity in normalized_entities:
-                if entity.domain == DomainType.GENERAL:
-                    entity.domain = domain
-
-            # Step 3: Detect relationships
+            # Step 2: Detect relationships
             relationships = await self._detect_relationships(
                 entities=normalized_entities,
                 content=content
@@ -230,7 +203,6 @@ class KnowledgeExtractionService:
             result.relationships = relationships
             result.entities_count = len(normalized_entities)
             result.relationships_count = len(relationships)
-            result.domain = domain  # Set document domain
             result.processing_time_ms = int((time.time() - start_time) * 1000)
             result.success = True
 
@@ -354,40 +326,6 @@ class KnowledgeExtractionService:
 
         except Exception:
             return entity_value
-
-    async def _detect_domain(
-        self,
-        content: str,
-        document_type: Optional[str] = None
-    ) -> DomainType:
-        """Detect the domain of a document based on content and type."""
-        content_lower = content.lower()
-
-        # Check document type first
-        if document_type:
-            doc_type_lower = document_type.lower()
-            if any(kw in doc_type_lower for kw in ["contrat", "legal", "juridic"]):
-                return DomainType.LEGAL
-            if any(kw in doc_type_lower for kw in ["nomin", "laboral", "emplead"]):
-                return DomainType.HR
-            if any(kw in doc_type_lower for kw in ["fiscal", "impuest", "modelo"]):
-                return DomainType.FISCAL
-            if any(kw in doc_type_lower for kw in ["factur", "financ", "pago"]):
-                return DomainType.FINANCIAL
-
-        # Count keyword matches for each domain
-        domain_scores = {}
-        for domain, keywords in self._domain_keywords.items():
-            score = sum(1 for kw in keywords if kw in content_lower)
-            domain_scores[domain] = score
-
-        # Return domain with highest score (if above threshold)
-        if domain_scores:
-            best_domain = max(domain_scores, key=domain_scores.get)
-            if domain_scores[best_domain] >= 2:
-                return best_domain
-
-        return DomainType.GENERAL
 
     async def _detect_relationships(
         self,
@@ -534,7 +472,6 @@ class KnowledgeExtractionService:
                     entity_value=entity.entity_value,
                     context_text=entity.context_text,
                     entity_label=entity.entity_label,
-                    domain=entity.domain,
                     source_document_id=document_id,
                     confidence=entity.extraction_confidence,
                     attributes=entity.attributes,

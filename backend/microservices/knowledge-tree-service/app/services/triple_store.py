@@ -361,7 +361,6 @@ class TripleStore:
         title: str,
         file_path: str,
         semantic_type: Optional[str] = None,
-        domain: Optional[str] = None,
     ) -> str:
         """Create a document :Node with standard metadata triples.
 
@@ -369,7 +368,6 @@ class TripleStore:
           core/type        → "document"
           core/label       → title
           core/semantic-type → semantic_type  (if provided)
-          core/domain      → domain           (if provided)
           core/contained-in → folder URI      (Node, derived from file_path)
 
         Args:
@@ -379,7 +377,6 @@ class TripleStore:
             title:         Human-readable document title.
             file_path:     File system path (used to derive folder URI).
             semantic_type: Optional semantic type (e.g. "factura", "contrato").
-            domain:        Optional business domain (e.g. "legal", "fiscal").
 
         Returns:
             doc_uri — the canonical URI of the document node.
@@ -407,12 +404,6 @@ class TripleStore:
         if semantic_type:
             await self._store_doc_literal_triple(
                 doc_uri, "core", "semantic-type", semantic_type, user, collection
-            )
-
-        # core/domain → domain (Literal, optional)
-        if domain:
-            await self._store_doc_literal_triple(
-                doc_uri, "core", "domain", domain, user, collection
             )
 
         # core/contained-in → folder (Node)
