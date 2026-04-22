@@ -511,7 +511,7 @@ PROMPT_REGISTRY: Dict[str, PromptEntry] = {
     ),
     "emma_explain_user": PromptEntry(
         yaml_path=("explain", "user"),
-        description="User template with verified facts and sector guidance",
+        description="User template with verified facts, tools, and sources",
         section="explain",
     ),
 

@@ -142,8 +142,6 @@ async def _call_llm(
     facts_formatted: str,
     tools_human_names: str,
     source_names: str,
-    sector: str,
-    sector_guidance: str,
 ) -> str:
     """Call the planner LLM to humanize the extracted facts.
 
@@ -153,10 +151,7 @@ async def _call_llm(
 
     system_prompt = await client.get_prompt(
         "emma_explain_system",
-        variables={
-            "sector": sector,
-            "sector_guidance": sector_guidance,
-        },
+        variables={},
     )
     user_prompt = await client.get_prompt(
         "emma_explain_user",
@@ -224,25 +219,15 @@ async def explain_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "is_complete": True,
             }
 
-        # Get guidance from unified config
-        sector_config = get_active_sector_config()
-        sector_guidance = (
-            sector_config.explain_guidance
-            if sector_config
-            else "Usa lenguaje accesible. Cita fuentes por nombre completo."
-        )
-
         # Format facts for LLM
         facts_formatted = "\n".join(f"- {f}" for f in facts)
 
-        # Call LLM
+        # Call LLM (guidance is baked into the Langfuse prompt, no per-sector vars)
         try:
             explanation = await _call_llm(
                 facts_formatted=facts_formatted,
                 tools_human_names=tools_human_names,
                 source_names=source_names,
-                sector="general",
-                sector_guidance=sector_guidance,
             )
         except Exception as e:
             logger.warning(f"Explain LLM call failed, using fallback: {e}")
