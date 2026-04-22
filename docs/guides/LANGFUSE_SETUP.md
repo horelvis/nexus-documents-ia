@@ -32,8 +32,9 @@ Langfuse es una plataforma open-source para observabilidad y gestión de LLMs. E
 │                    Emma Agent Service                        │
 │                                                              │
 │  LangfusePromptClient ──→ Langfuse API ──→ Prompt Content   │
-│         │                                                    │
-│         └──→ YAML Fallback (si Langfuse no disponible)      │
+│                            │                                 │
+│                            └── PromptNotFoundError raised    │
+│                                on miss (fail-fast, no YAML) │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -42,7 +43,7 @@ Langfuse es una plataforma open-source para observabilidad y gestión de LLMs. E
 │                                                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │   Prompts   │  │  Versions   │  │   Observability     │  │
-│  │   (32+)     │  │  & Labels   │  │   & Metrics         │  │
+│  │   (~90)     │  │  & Labels   │  │   & Metrics         │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                               │
@@ -95,36 +96,46 @@ LANGFUSE_DISABLE_SIGNUP=true
 docker compose restart emma-agent-service langfuse
 ```
 
-## Migración de Prompts
+## Seeding Prompts into Langfuse
 
-### Migrar prompts de YAML a Langfuse
+Prompts are pushed to Langfuse via individual migration scripts in `backend/microservices/emma-agent-service/scripts/`. Each script is self-contained and push-idempotent (safe to re-run with `--force` to create new versions).
 
-Los prompts de Emma están originalmente en `emma_prompts.yaml`. Para migrarlos a Langfuse:
+Available scripts (verified against filesystem):
 
 ```bash
-cd backend
+# Core prompt optimization (Qwen3.5-9B tuning):
+docker compose exec emma-agent-service python scripts/migrate_9b_prompt_optimization.py
 
-# Preview (sin cambios)
-LANGFUSE_HOST=http://localhost:3002 \
-LANGFUSE_PUBLIC_KEY=<tu-public-key> \
-LANGFUSE_SECRET_KEY=<tu-secret-key> \
-python3 scripts/migrate_prompts_to_langfuse.py --dry-run
+# Emma's humanized reasoning prompts:
+docker compose exec emma-agent-service python scripts/migrate_explain_prompts.py
 
-# Migración real
-LANGFUSE_HOST=http://localhost:3002 \
-LANGFUSE_PUBLIC_KEY=<tu-public-key> \
-LANGFUSE_SECRET_KEY=<tu-secret-key> \
-python3 scripts/migrate_prompts_to_langfuse.py
+# Knowledge report generation prompts:
+docker compose exec emma-agent-service python scripts/migrate_knowledge_report_prompt.py
+
+# Entity extraction (NER) prompts:
+docker compose exec emma-agent-service python scripts/migrate_ner_prompts.py
+
+# Retrieval intelligence prompts:
+docker compose exec emma-agent-service python scripts/migrate_retrieval_intelligence_prompts.py
+
+# TrustGraph phase 2 prompts:
+docker compose exec emma-agent-service python scripts/migrate_trustgraph_phase2_prompts.py
+
+# Guardrails (not prompts, but related):
+docker compose exec emma-agent-service python scripts/seed_guardrails.py
 ```
 
-### Prompts migrados (32 total)
+Each accepts `--dry-run` (no changes), `--force` (overwrite existing), and optionally `--diff` flags. See individual script headers for details.
 
-| Categoría | Prompts |
+After seeding, promote prompts to the `production` label in the Langfuse UI (see "Production Label Pinning" below).
+
+### Prompts (~90 total in registry)
+
+| Categoría | Ejemplos |
 |-----------|---------|
-| **Core** | `emma_context_root` |
+| **Core** | `emma_context_root`, `emma_planning`, `emma_synthesis` |
 | **Actions** | `emma_action_generate`, `emma_action_retrieve` |
-| **System** | `emma_planning`, `emma_synthesis` |
-| **Sectors** | `emma_sector_legal`, `emma_sector_medical`, `emma_sector_documental` (+ generation variants) |
+| **Sectors** | `emma_sector_legal`, `emma_sector_medical`, `emma_sector_documental` (+ generation variants) *(legacy — sectors removed 2026-03-31, unified config active)* |
 | **Agents** | `emma_agent_labor`, `emma_agent_fiscal`, `emma_agent_contract`, `emma_agent_compliance`, etc. |
 | **Social** | `emma_social_system_prompt`, `emma_social_group_relevance_prompt` |
 
@@ -174,8 +185,10 @@ LANGFUSE_PROMPT_CACHE_TTL=300  # segundos (default: 5 min)
 ### Variables de entorno relevantes
 
 ```bash
-# Habilitar Langfuse
+# Habilitar Langfuse (config.py field: langfuse_enabled)
 LANGFUSE_ENABLED=true
+
+# Prompt source toggle (passed via docker-compose.onpremise.yml)
 USE_LANGFUSE_PROMPTS=true
 
 # Conexión
@@ -183,19 +196,46 @@ LANGFUSE_HOST=http://langfuse:3000
 LANGFUSE_PUBLIC_KEY=pk-lf-xxx
 LANGFUSE_SECRET_KEY=sk-lf-xxx
 
+# Label usado por get_prompt() en runtime (default: production)
+LANGFUSE_PROMPT_LABEL=production
+
 # Caché
 LANGFUSE_PROMPT_CACHE_TTL=300
 ```
 
-### Fallback a YAML
+### Missing Prompts — Fail-Fast Behavior
 
-Si Langfuse no está disponible, Emma usa automáticamente el archivo YAML:
+If a prompt is not found in Langfuse at the specified label (default `production`), `LangfusePromptClient.get_prompt()` raises `PromptNotFoundError`. There is no automatic YAML fallback — missing prompts are a hard error.
 
-```
-microservices/emma-agent-service/config/prompts/emma_prompts.yaml
-```
+Rationale: silent fallback would mask misconfigurations. Fail-fast surfaces missing/mislabeled prompts during deployment rather than at request time.
 
-Este fallback es transparente y no requiere configuración.
+Mitigation: always run the Langfuse seed/migration workflow (see "Seeding Prompts into Langfuse" above) after deploying a new version that introduces new prompt names.
+
+## Production Label Pinning
+
+All `get_prompt()` calls default to `label="production"` via the `LANGFUSE_PROMPT_LABEL` env var (default: `"production"`).
+
+### How it works
+
+- Admin edits a prompt in the Langfuse UI → new version is tagged `"latest"`
+- Runtime `get_prompt(name)` fetches the version with label `"production"`
+- New versions DO NOT reach runtime until explicitly promoted to the `"production"` label
+
+### Why
+
+Prevents accidentally pushing untested drafts live. Edits are staged; promotion is deliberate.
+
+### How to promote a prompt
+
+1. Open Langfuse UI → Prompts → select prompt
+2. Switch to the **Versions** tab
+3. Pick the version to promote (usually "latest")
+4. Add the `"production"` label (or use the promote button)
+5. Save. The change takes effect on the next `get_prompt()` call (after the cache TTL expires, typically 5 min)
+
+### Override the label
+
+Set `LANGFUSE_PROMPT_LABEL=staging` (or any label name) to pull prompts from a different label. Useful for dev/staging environments that want to test non-promoted versions.
 
 ## Troubleshooting
 
