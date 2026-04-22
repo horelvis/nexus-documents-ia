@@ -421,7 +421,6 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       - RAG_KNOWLEDGE_GRAPH_ENABLED=${RAG_KNOWLEDGE_GRAPH_ENABLED:-true}
-      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # FalkorDB Configuration
       - FALKORDB_HOST=${FALKORDB_HOST:-falkordb}
@@ -716,7 +715,6 @@ services:
       - LLM_PROVIDER=${LLM_PROVIDER:-sglang}
       - SINGLE_TENANT_MODE=true
       - DEFAULT_TENANT_ID=${DEFAULT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
-      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - CREDENTIALS_ENCRYPTION_KEY=${CREDENTIALS_ENCRYPTION_KEY:-}
     volumes:

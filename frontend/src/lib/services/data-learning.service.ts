@@ -60,12 +60,10 @@ export interface ContentModelSummary {
   total_properties: number
   total_associations: number
   custom_types: string[]
-  semantic_domains: string[]
 }
 
 export interface TypeSemantic {
   semantic_type: string
-  domain: string
   description?: string
   chunking_strategy?: ChunkingType
   importance: number

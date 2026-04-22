@@ -425,7 +425,6 @@ services:
       - MICROSERVICES_API_KEY=${MICROSERVICES_API_KEY}
       - AGE_DATABASE_URL=${DATABASE_URL:-postgresql+asyncpg://nexus_user:nexus_password@db:5432/nouxcube}
       - RAG_KNOWLEDGE_GRAPH_ENABLED=${RAG_KNOWLEDGE_GRAPH_ENABLED:-true}
-      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
       - AGE_GRAPH_NAME=${AGE_GRAPH_NAME:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
@@ -472,8 +471,6 @@ services:
       # Knowledge Tree Service (structural context)
       - KNOWLEDGE_TREE_SERVICE_URL=${KNOWLEDGE_TREE_SERVICE_URL:-http://knowledge-tree-service:8011}
       - KNOWLEDGE_TREE_SERVICE_TIMEOUT=30
-      # Multi-Pipeline RAG Sector
-      - ACTIVE_SECTOR=${ACTIVE_SECTOR:-}
       # Redis for sessions
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - REDIS_HOST=redis
