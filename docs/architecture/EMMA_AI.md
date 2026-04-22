@@ -17,11 +17,11 @@ Emma is the intelligent AI assistant for NouxCubeIA, built on **LangGraph** (ReA
 │  │   Frontend  │     │  API Gateway│     │   Emma Agent Service        │    │
 │  │  Next.js 15 │────▶│   FastAPI   │────▶│  ┌─────────────────────┐   │    │
 │  │  EmmaChat   │     │   :8000     │     │  │  LangGraph ReAct    │   │    │
-│  └─────────────┘     └─────────────┘     │  │  Agent (8 nodes)    │   │    │
+│  └─────────────┘     └─────────────┘     │  │  Agent (9 nodes)    │   │    │
 │                             │            │  └──────────┬──────────┘   │    │
 │                             │            │             │              │    │
 │                             ▼            │  ┌──────────▼──────────┐   │    │
-│  ┌─────────────────────────────────────┐ │  │  9 ReAct Tools      │   │    │
+│  ┌─────────────────────────────────────┐ │  │  16 ReAct Tools     │   │    │
 │  │         Data Layer                   │ │  │  - smart_search     │   │    │
 │  │  ┌──────────┐ ┌──────────┐ ┌──────┐ │ │  │  - structural_query │   │    │
 │  │  │PostgreSQL│ │ Weaviate │ │Redis │ │ │  │  - analyze_domain   │   │    │
@@ -43,22 +43,22 @@ Emma is the intelligent AI assistant for NouxCubeIA, built on **LangGraph** (ReA
 
 ---
 
-## ReAct Agent Graph (8 Nodes)
+## ReAct Agent Graph (9 Nodes)
 
 Two execution paths through the same StateGraph:
 
 ```
 START → classify → [fast_path → END]
-                 → rewrite → memory_recall → react_loop ⟲ → synthesize → END       (simple)
-                 → rewrite → memory_recall → decompose → Send[swarm_worker × N] →   (complex)
-                   synthesize_swarm → END
+                 → rewrite → memory_recall → react_loop ⟲ → synthesize → explain → END       (simple)
+                 → rewrite → memory_recall → decompose → Send[swarm_worker × N] →             (complex)
+                   synthesize_swarm → explain → END
 ```
 
 ### Nodes
 
 | Node | Purpose | LLM Role | Retry |
 |------|---------|----------|-------|
-| `classify` | Intent detection, fast-path, sector config | PLANNER | Yes (2 attempts) |
+| `classify` | Intent detection, fast-path, unified config | PLANNER | Yes (2 attempts) |
 | `rewrite` | Contextualize follow-up queries using conversation history | PLANNER | Yes |
 | `memory_recall` | Scan document memories, generate clues | PLANNER | Yes |
 | `react_loop` | Tool-calling ReAct iterations (max 10 steps) | PLANNER | Internal |
@@ -66,6 +66,7 @@ START → classify → [fast_path → END]
 | `decompose` | Split complex query into sub-tasks (Swarm) | PLANNER | Yes |
 | `swarm_worker` | Mini-ReAct loop per sub-task (parallel via `Send()`) | PLANNER | Internal |
 | `synthesize_swarm` | Merge parallel worker results into coherent answer | CHAT | Yes |
+| `explain` | Generate humanized reasoning trace via `emma_explain_system` prompt; calls LLM with verified facts; outputs user-friendly explanation | CHAT | No |
 
 ### Routing Logic
 
@@ -87,9 +88,9 @@ START → classify → [fast_path → END]
 |------|---------|
 | `app/agents/langgraph/graph.py` | StateGraph definition + routing functions |
 | `app/agents/langgraph/state.py` | `ReActState` TypedDict + `create_initial_react_state()` |
-| `app/agents/langgraph/nodes/` | All 8 node implementations |
-| `app/agents/langgraph/tools/` | 9 tools via `ToolRegistry` singleton |
-| `app/agents/langgraph/sectors/` | Per-sector configuration (legal, medical, documental) |
+| `app/agents/langgraph/nodes/` | All 9 node implementations |
+| `app/agents/langgraph/tools/` | 16 tools via `ToolRegistry` singleton |
+| `app/agents/langgraph/sectors/` | Unified entity patterns configuration |
 
 ---
 
@@ -107,7 +108,7 @@ START → classify → [fast_path → END]
 │   │     (Checkpointer)      │    │       (Cross-Thread Memory)       │    │
 │   ├─────────────────────────┤    ├───────────────────────────────────┤    │
 │   │ Scope: per thread_id    │    │ Namespace: ("user_facts",         │    │
-│   │                         │    │   tenant_id, user_id)             │    │
+│   │                         │    │   user_id)                        │    │
 │   │ Stores:                 │    │                                    │    │
 │   │ - Message history       │    │ Key: "category/fact_key"           │    │
 │   │ - Graph state snapshots │    │ Value: {fact_value, confidence,    │    │
@@ -175,22 +176,29 @@ response = await router.chat(messages=messages, role=ModelRole.PLANNER)  # Fast 
 response = await router.chat(messages=messages, role=ModelRole.CHAT)     # Quality generation
 ```
 
-**Optional dual-model**: `VLLM_DUAL_MODEL=true` runs a separate 4B planner instance.
+**Optional dual-model**: `SGLANG_DUAL_MODEL=true` runs a separate 4B planner instance (`VLLM_DUAL_MODEL` accepted as legacy fallback).
 
 ---
 
-## ReAct Tools (9)
+## ReAct Tools (16)
 
 | Tool | Purpose |
 |------|---------|
-| `smart_search` | Unified document + legislation search (auto-detects scope, 3 data stores) |
+| `smart_search` | Unified document + legislation search (auto-detects scope, hybrid Weaviate + FalkorDB) |
+| `graph_rag` | Knowledge graph retrieval with 8-stage pipeline (entity → BFS → guided expansion → scoring → provenance) |
 | `get_document_content` | Read full document by ID |
-| `structural_query` | Count, list, filter via Apache AGE graph |
+| `structural_query` | Count, list, filter via FalkorDB TrustGraph |
 | `analyze_domain` | Specialist domain analysis (legal, fiscal, labor, etc.) |
 | `web_search` | Internet search (Tavily primary, DuckDuckGo fallback) |
 | `search_jurisprudence` | CENDOJ jurisprudence search |
 | `list_sources` | Discover available data sources |
 | `query_connector` | Query external connectors (SharePoint, etc.) |
+| `generate_document` | Generate document from template |
+| `forge_document` | Create PDF documents |
+| `send_email` | Send email notifications |
+| `verified_generation` | Claim-by-claim verification sub-graph |
+| `predictive_analysis` | Predictive analysis sub-graph |
+| `generate_knowledge_report` | Generate structured reports with KPIs and verified citations from knowledge graph |
 | `terminate` | Signal completion with response |
 
 Tools are registered via `ToolRegistry` singleton in `app/agents/langgraph/tools/registry.py`.
@@ -225,21 +233,22 @@ EMMA AGENT SERVICE (FastAPI - port 8009)
 │       ├──→ Hydrate upload context (if document attached)                    │
 │       ├──→ Create initial state (loads user_memory from Store)              │
 │       │                                                                      │
-│       └──→ LangGraph ReAct Graph (8 nodes)                                 │
+│       └──→ LangGraph ReAct Graph (9 nodes)                                 │
 │            │                                                                 │
-│            ├──→ classify (intent + fast-path + sector config)               │
+│            ├──→ classify (intent + fast-path + unified config)              │
 │            ├──→ rewrite (contextualize follow-ups via history)              │
 │            ├──→ memory_recall (document memories from knowledge-tree)       │
 │            ├──→ react_loop (tool calls: smart_search, structural_query...)  │
 │            │    └──→ SmartSearch → Weaviate + TrustGraph (FalkorDB)         │
-│            └──→ synthesize / synthesize_swarm                               │
+│            ├──→ synthesize / synthesize_swarm                               │
+│            └──→ explain (humanized reasoning trace → END)                   │
 │                                                                              │
 │  Checkpointer: PostgresSaver (conversation continuity)                      │
 │  Store: AsyncPostgresStore (user facts across sessions)                     │
 └─────────────────────────────────────────────────────────────────────────────┘
 
 SSE EVENTS
-  └→ event: slm_thinking  (reasoning steps, tool calls)
+  └→ event: agent_reasoning  (reasoning steps, tool calls)
   └→ event: token          (streaming answer tokens)
   └→ event: sources        (retrieved documents)
   └→ event: complete       (final answer + metadata)
@@ -299,8 +308,8 @@ SSE EVENTS
                No extra LLM call (direct pass-through)
 
 4. SSE STREAMING
-   └→ event: slm_thinking { step: "Searching documents..." }
-   └→ event: slm_thinking { step: "Found 8 relevant chunks" }
+   └→ event: agent_reasoning { step: "Searching documents..." }
+   └→ event: agent_reasoning { step: "Found 8 relevant chunks" }
    └→ event: token { text: "He identificado..." }
    └→ event: sources [{ title, document_id, score }]
    └→ event: complete { answer, sources, metadata }
@@ -445,17 +454,16 @@ REDIS_PORT=6379
 
 ---
 
-## Multi-Pipeline RAG Sectors
+## Unified Entity Patterns
 
-Emma supports per-deployment sector configuration via `ACTIVE_SECTOR` environment variable.
+Sectors were removed (2026-03-31). Emma uses a single merged configuration for entity extraction patterns, unified across all prior taxonomies (legal, medical, documental).
 
-| Sector | Specialist Agents | hybrid_alpha | top_k | Chunk Strategy |
-|--------|-------------------|-------------|-------|----------------|
-| `legal` | legal, labor, fiscal, contract, compliance, privacy | 0.7 | 12 | legal_sections (1500/200) |
-| `medical` | general | 0.6 | 15 | paragraph (1200/150) |
-| `documental` | general, education, realestate | 0.5 | 10 | semantic (1000/100) |
+- All 14 entity pattern types are merged into one config in `app/agents/langgraph/sectors/config.py`
+- `get_active_sector_config()` always returns the same unified config
+- `ACTIVE_SECTOR` env var is ignored (still accepted for backwards compatibility)
+- Dynamic per-query context comes from TrustGraph (FalkorDB), not sector config
 
-See `emma-agent-service/app/agents/langgraph/sectors/` for implementation.
+See `emma-agent-service/app/agents/langgraph/sectors/config.py` for implementation.
 
 ---
 
@@ -486,8 +494,8 @@ Emma Reactive extends Emma beyond request-response into a **proactive, event-dri
 | `app/agents/langgraph/graph.py` | StateGraph definition (compiled with checkpointer + Store) |
 | `app/agents/langgraph/state.py` | `ReActState` TypedDict + initial state factory |
 | `app/agents/langgraph/api.py` | `stream_react_query()` — SSE streaming bridge |
-| `app/agents/langgraph/nodes/` | 8 node implementations |
-| `app/agents/langgraph/tools/` | 9 tools via ToolRegistry |
+| `app/agents/langgraph/nodes/` | 9 node implementations |
+| `app/agents/langgraph/tools/` | 16 tools via ToolRegistry |
 | `app/agents/langgraph/sectors/` | Sector configuration |
 | `app/agents/llm_router.py` | LLMRouter with dual-phase client pool |
 | `app/core/checkpointer.py` | PostgresSaver + Store singletons (shared pool) |
@@ -534,8 +542,8 @@ Emma Reactive extends Emma beyond request-response into a **proactive, event-dri
 - [EMMA_REACTIVE.md](./EMMA_REACTIVE.md) - Emma Reactive event-driven system
 - [RAG_PIPELINE.md](./RAG_PIPELINE.md) - RAG Implementation Blueprint
 - [MODULAR_ARCHITECTURE.md](./MODULAR_ARCHITECTURE.md) - On-Premise Architecture
-- [PUBLIC_KNOWLEDGE.md](./PUBLIC_KNOWLEDGE.md) - BOE Legislation & Legal Knowledge Graph
+- [TRUSTGRAPH.md](./TRUSTGRAPH.md) - TrustGraph knowledge graph triple store
 
 ---
 
-*Architecture: LangGraph ReAct Agent + SGLang (Qwen3.5-9B) + PostgresSaver + AsyncPostgresStore + SmartSearch + Multi-Pipeline RAG Sectors + Emma Reactive*
+*Architecture: LangGraph ReAct Agent (9 nodes, 16 tools) + SGLang (Qwen3.5-9B) + PostgresSaver + AsyncPostgresStore + SmartSearch + Unified Entity Patterns + Emma Reactive*
