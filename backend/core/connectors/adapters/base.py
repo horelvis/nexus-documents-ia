@@ -64,18 +64,6 @@ class PathIntelligence:
         'legal': [r'legal', r'jur[ií]dico', r'sentencia', r'demanda'],
     }
 
-    # Domain patterns (from path structure)
-    DOMAIN_PATTERNS = {
-        'legal': [r'legal', r'jur[ií]dico', r'contratos', r'contracts'],
-        'finance': [r'financ', r'contab', r'accounting', r'factura', r'invoice'],
-        'hr': [r'rrhh', r'recursos.?humanos', r'hr', r'human.?resources', r'personal'],
-        'sales': [r'ventas', r'sales', r'comercial', r'clientes'],
-        'marketing': [r'marketing', r'publicidad', r'comunicaci[oó]n'],
-        'operations': [r'operaciones', r'operations', r'producci[oó]n'],
-        'it': [r'\bit\b', r'tecnolog[ií]a', r'sistemas', r'technology'],
-        'compliance': [r'compliance', r'cumplimiento', r'normativ', r'regulat'],
-    }
-
     # Client/project extraction patterns
     CLIENT_PATTERNS = [
         r'/clientes?/([^/]+)/',
@@ -208,26 +196,6 @@ class PathIntelligence:
 
         return None, 0.0
 
-    @classmethod
-    def infer_domain(cls, path: str) -> tuple[Optional[str], float]:
-        """
-        Infer business domain from path structure.
-
-        Returns:
-            Tuple of (domain, confidence)
-        """
-        path_lower = path.lower()
-
-        for domain, patterns in cls.DOMAIN_PATTERNS.items():
-            for pattern in patterns:
-                if re.search(pattern, path_lower, re.IGNORECASE):
-                    # Count matches for confidence
-                    matches = sum(1 for p in patterns if re.search(p, path_lower, re.IGNORECASE))
-                    confidence = min(0.5 + (matches * 0.15), 0.9)
-                    return domain, confidence
-
-        return None, 0.0
-
 
 class MetadataAdapter(ABC):
     """
@@ -314,16 +282,6 @@ class MetadataAdapter(ABC):
                 metadata.classification.semantic_type = inferred_type
                 metadata.classification.semantic_type_confidence = confidence
                 metadata.classification.semantic_type_source = "path_inference"
-
-        # Infer domain if not set
-        if not metadata.classification.domain:
-            inferred_domain, confidence = PathIntelligence.infer_domain(
-                metadata.path.full_path
-            )
-            if inferred_domain:
-                metadata.classification.domain = inferred_domain
-                metadata.classification.domain_confidence = confidence
-                metadata.classification.domain_source = "path_inference"
 
         # Infer client if not set
         if not metadata.business.client_name and metadata.path.client_from_path:

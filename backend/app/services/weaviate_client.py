@@ -567,7 +567,6 @@ class WeaviateClient(BaseHTTPClient):
     async def knowledge_list_entities(
         self,
         entity_type: Optional[str] = None,
-        domain: Optional[str] = None,
         limit: int = 50
     ) -> List[Dict[str, Any]]:
         """List knowledge entities"""
@@ -577,8 +576,6 @@ class WeaviateClient(BaseHTTPClient):
             }
             if entity_type:
                 params["entity_type"] = entity_type
-            if domain:
-                params["domain"] = domain
 
             logger.debug("Listing knowledge entities | type=%s", entity_type)
             return await self.get_json("/knowledge/entities", params=params)
@@ -766,7 +763,6 @@ class WeaviateClient(BaseHTTPClient):
         query: str,
         limit: int = 10,
         semantic_type: Optional[str] = None,
-        domain: Optional[str] = None
     ) -> Dict[str, Any]:
         """Search structural documents by semantic similarity"""
         try:
@@ -776,8 +772,6 @@ class WeaviateClient(BaseHTTPClient):
             }
             if semantic_type:
                 params["semantic_type"] = semantic_type
-            if domain:
-                params["domain"] = domain
 
             logger.debug("Searching structural documents | query=%s", query[:50])
             return await self.post_json("/sil/search-structural", params=params)

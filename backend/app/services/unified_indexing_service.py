@@ -613,7 +613,6 @@ class UnifiedIndexingService:
             "property_weights": {},
             "relationships": [],
             "semantic_type": None,
-            "domain": None,
         }
 
         try:
@@ -666,7 +665,6 @@ class UnifiedIndexingService:
                     node_type = indexed_doc.source_metadata.get("alfresco_node_type")
                     type_semantics = content_model.type_semantics.get(node_type, {})
                     learned_context["semantic_type"] = type_semantics.get("semantic_type")
-                    learned_context["domain"] = type_semantics.get("domain")
 
         except Exception as e:
             logger.warning(f"Failed to get learned context for {indexed_doc.id}: {e}")
@@ -756,7 +754,6 @@ class UnifiedIndexingService:
                 - property_weights: {field: weight}
                 - relationships: [{type, target_id, strength}, ...]
                 - semantic_type: Document semantic type
-                - domain: Document domain (legal, hr, finance, ...)
             indexing_strategy: Indexing strategy configuration
                 - chunking_type: semantic, legal_sections, markdown_headers, ...
                 - chunking_config: {target_chunk_size, overlap, ...}

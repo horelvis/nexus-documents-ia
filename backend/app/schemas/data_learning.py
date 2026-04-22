@@ -114,7 +114,6 @@ class PropertyDefinition(BaseModel):
 class TypeSemantic(BaseModel):
     """LLM-enriched semantic information for a content type."""
     semantic_type: str = Field(..., description="Normalized type (e.g., administrative_file)")
-    domain: str = Field(..., description="Domain (legal, hr, finance, general)")
     description: Optional[str] = None
     chunking_strategy: Optional[ChunkingType] = None
     importance: float = Field(default=1.0, ge=0, le=2.0)
@@ -161,7 +160,6 @@ class ContentModelSummary(BaseModel):
     total_properties: int = 0
     total_associations: int = 0
     custom_types: List[str] = Field(default_factory=list)
-    semantic_domains: List[str] = Field(default_factory=list)
 
 
 # =============================================================================
@@ -425,7 +423,6 @@ class LearnedContext(BaseModel):
     connector-agnostic semantic information for RAG retrieval.
     """
     semantic_type: Optional[str] = Field(None, description="Normalized document type")
-    domain: Optional[str] = Field(None, description="Domain (legal, hr, finance)")
     folder_semantics: Dict[str, Any] = Field(default_factory=dict)
     # Example: {"department": "RRHH", "year": "2024", "classification": "expedientes"}
 
@@ -517,7 +514,6 @@ class TOONLearnedContext(BaseModel):
     compared to JSON when passed to LLMs.
     """
     st: Optional[str] = Field(None, alias="semantic_type")
-    d: Optional[str] = Field(None, alias="domain")
     fs: Dict[str, str] = Field(default_factory=dict, alias="folder_semantics")
     pw: Dict[str, float] = Field(default_factory=dict, alias="property_weights")
 
@@ -529,8 +525,6 @@ class TOONLearnedContext(BaseModel):
         lines = ["learned_context"]
         if self.st:
             lines.append(f"  semantic_type: {self.st}")
-        if self.d:
-            lines.append(f"  domain: {self.d}")
         if self.fs:
             lines.append("  folder_semantics")
             for k, v in self.fs.items():

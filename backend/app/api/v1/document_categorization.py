@@ -144,7 +144,7 @@ async def categorize_documents(
                             "success": True,
                             "category": classify_data.get("document_type", "general"),
                             "confidence": classify_data.get("confidence", 0.0),
-                            "reasoning": classify_data.get("domain", ""),
+                            "reasoning": classify_data.get("document_type", ""),
                             "method": "intelligence-docs-service",
                         }
 

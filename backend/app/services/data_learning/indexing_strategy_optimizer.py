@@ -162,14 +162,13 @@ class IndexingStrategyOptimizer:
         if content_model and content_model.type_semantics:
             for type_name, semantics in content_model.type_semantics.items():
                 semantic_type = semantics.get("semantic_type", "")
-                domain = semantics.get("domain", "general")
                 suggested_chunking = semantics.get("chunking_strategy")
 
                 # Determine chunking type
                 if suggested_chunking:
                     chunking = ChunkingType(suggested_chunking)
                 else:
-                    chunking = self._infer_chunking_type(semantic_type, domain)
+                    chunking = self._infer_chunking_type(semantic_type)
 
                 strategy = await self._create_or_update_strategy(
                     connector_id=connector_id,
@@ -177,7 +176,7 @@ class IndexingStrategyOptimizer:
                     mime_type_pattern=None,
                     chunking_type=chunking,
                     priority=10,
-                    extract_entities=domain in ["legal", "hr", "finance"],
+                    extract_entities=True,
                 )
                 strategies.append(strategy)
 
@@ -287,14 +286,12 @@ class IndexingStrategyOptimizer:
     def _infer_chunking_type(
         self,
         semantic_type: str,
-        domain: str,
     ) -> ChunkingType:
         """
-        Infer chunking type from semantic type and domain.
+        Infer chunking type from semantic type.
 
         Args:
             semantic_type: Normalized semantic type
-            domain: Document domain
 
         Returns:
             Appropriate chunking type
@@ -304,12 +301,6 @@ class IndexingStrategyOptimizer:
         for key, chunking in TYPE_CHUNKING_MAPPING.items():
             if key in lower_type:
                 return chunking
-
-        # Check domain
-        if domain == "legal":
-            return ChunkingType.LEGAL_SECTIONS
-        elif domain == "technical":
-            return ChunkingType.MARKDOWN_HEADERS
 
         return ChunkingType.SEMANTIC
 

@@ -81,11 +81,6 @@ class ClassificationInfo(BaseModel):
     semantic_type_confidence: float = 0.0  # 0-1, how sure are we?
     semantic_type_source: str = "unknown"  # "metadata", "path_inference", "ml_classification"
 
-    # Business domain (legal, hr, finance, etc.)
-    domain: Optional[str] = None
-    domain_confidence: float = 0.0
-    domain_source: str = "unknown"
-
     # Categories and tags
     categories: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)
@@ -196,10 +191,6 @@ class NormalizedMetadata(BaseModel):
                 type_desc += " (inferred)"
             parts.append(type_desc)
 
-        # Domain description
-        if self.classification.domain:
-            parts.append(f"Domain: {self.classification.domain}")
-
         # Business context (if rich metadata)
         if self.richness_level >= MetadataRichness.BASIC:
             if self.business.client_name:
@@ -237,7 +228,6 @@ class NormalizedMetadata(BaseModel):
             "extension": self.path.extension,
             "folder": self.path.parent_folder,
             "semantic_type": self.classification.semantic_type,
-            "domain": self.classification.domain,
             "richness_level": self.richness_level.name,
         }
 

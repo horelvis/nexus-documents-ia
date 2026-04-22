@@ -1440,9 +1440,6 @@ class KnowledgeEntity(Base):
     # Metadatos adicionales específicos del tipo
     attributes = Column(JSONB, default=dict, nullable=False)  # Atributos específicos del tipo de entidad
 
-    # Dominio/categoría
-    domain = Column(String(100), nullable=True, index=True)  # legal, fiscal, hr, general
-
     # ACL heredado del documento fuente
     acl_user_ids = Column(JSONB, default=list, nullable=False)
     acl_role_ids = Column(JSONB, default=list, nullable=False)
@@ -1771,7 +1768,6 @@ class IndexedDocument(Base):
     learned_context = Column(JSONB, nullable=True)
     # {
     #   "semantic_type": "administrative_file",
-    #   "domain": "hr",
     #   "folder_semantics": {"department": "RRHH", "year": "2024"},
     #   "property_weights": {"identifier": 2.0, "title": 1.5},
     #   "relationships": [{"type": "references", "target_id": "...", "strength": 0.8}]
@@ -2114,7 +2110,7 @@ class ConnectorContentModel(Base):
 
     # LLM-enriched semantics (normalized)
     type_semantics = Column(JSONB, nullable=True)
-    # Example: {"gdapm:expediente": {"semantic_type": "administrative_file", "domain": "legal", "chunking_strategy": "legal_sections"}}
+    # Example: {"gdapm:expediente": {"semantic_type": "administrative_file", "chunking_strategy": "legal_sections"}}
 
     property_semantics = Column(JSONB, nullable=True)
     # Example: {"gdapm:numExpediente": {"search_weight": 2.0, "is_identifier": true}}
@@ -2498,7 +2494,6 @@ class EmmaSession(Base):
     session_metadata = Column(JSONB, default={})
     # {
     #   "last_knowledge_source": "documents" | "graph" | "general",
-    #   "domains_used": ["labor", "fiscal"],
     #   "total_execution_time_ms": 12345,
     #   "sil_queries_count": 3
     # }

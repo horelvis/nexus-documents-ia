@@ -232,10 +232,6 @@ class GoogleDriveMetadataAdapter(MetadataAdapter):
         properties = raw_metadata.get("properties", {})
         if "category" in properties:
             classification.categories.append(properties["category"])
-        if "domain" in properties:
-            classification.domain = properties["domain"]
-            classification.domain_confidence = 0.85
-            classification.domain_source = "metadata"
         if "type" in properties:
             if not classification.semantic_type:
                 classification.semantic_type = properties["type"]

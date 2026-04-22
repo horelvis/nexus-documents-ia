@@ -7,7 +7,7 @@ Discovers and parses content models from external connectors:
 - FileSystem: Inferred from file metadata (future)
 
 The discovered model is enriched with LLM-powered semantic analysis
-to understand domain, importance, and chunking strategies.
+to understand importance and chunking strategies.
 """
 import logging
 from abc import ABC, abstractmethod
@@ -593,20 +593,12 @@ class ContentModelDiscoveryService:
             if not t.startswith("cm:")
         ]
 
-        # Extract unique domains from type semantics
-        domains = set()
-        if content_model.type_semantics:
-            for semantic in content_model.type_semantics.values():
-                if isinstance(semantic, dict) and "domain" in semantic:
-                    domains.add(semantic["domain"])
-
         return ContentModelSummary(
             total_types=len(content_model.content_types),
             total_aspects=len(content_model.aspects),
             total_properties=len(content_model.property_definitions or {}),
             total_associations=len(content_model.association_types or {}),
             custom_types=custom_types,
-            semantic_domains=list(domains),
         )
 
     def _generate_basic_type_semantics(
@@ -620,15 +612,6 @@ class ContentModelDiscoveryService:
         """
         semantics = {}
         for type_name, type_info in content_types.items():
-            # Determine domain from type name prefix
-            domain = "general"
-            if any(kw in type_name.lower() for kw in ["legal", "contract", "clause"]):
-                domain = "legal"
-            elif any(kw in type_name.lower() for kw in ["hr", "employee", "personnel"]):
-                domain = "hr"
-            elif any(kw in type_name.lower() for kw in ["invoice", "payment", "fiscal"]):
-                domain = "finance"
-
             # Determine semantic type
             semantic_type = "document"
             if "expediente" in type_name.lower():
@@ -640,7 +623,6 @@ class ContentModelDiscoveryService:
 
             semantics[type_name] = {
                 "semantic_type": semantic_type,
-                "domain": domain,
                 "description": type_info.get("description"),
                 "chunking_strategy": "semantic",  # Default
                 "importance": 1.0,
@@ -701,7 +683,7 @@ class ContentModelDiscoveryService:
         """
         Enrich type semantics using LLM.
 
-        Asks LLM to classify domain, purpose, and suggest chunking strategy.
+        Asks LLM to classify purpose and suggest chunking strategy.
         """
         # For now, use basic heuristics
         # TODO: Implement LLM enrichment when llm_client is available

@@ -494,14 +494,12 @@ async def knowledge_search(
 @router.get("/knowledge/entities")
 async def knowledge_list_entities(
     entity_type: Optional[str] = None,
-    domain: Optional[str] = None,
     limit: int = 50,
 ):
     """List knowledge entities for current tenant"""
     try:
         return await weaviate_client.knowledge_list_entities(
             entity_type=entity_type,
-            domain=domain,
             limit=limit
         )
     except HTTPClientError as e:
@@ -754,7 +752,6 @@ async def sil_search_structural(
     query: str,
     limit: int = 10,
     semantic_type: Optional[str] = None,
-    domain: Optional[str] = None,
 ):
     """
     Search structural documents by semantic similarity.
@@ -767,7 +764,6 @@ async def sil_search_structural(
             query=query,
             limit=limit,
             semantic_type=semantic_type,
-            domain=domain
         )
     except HTTPClientError as e:
         raise HTTPException(status_code=e.status_code or 500, detail=str(e))
@@ -1235,7 +1231,6 @@ async def legal_graph_structure():
 @router.get("/legal/graph/search")
 async def legal_graph_search(
     q: str = None,
-    domain: str = None,
     boe_id: str = None,
     include_neighbors: bool = True,
     limit: int = 20,
@@ -1245,8 +1240,6 @@ async def legal_graph_search(
         params = {"include_neighbors": str(include_neighbors).lower(), "limit": limit}
         if q:
             params["q"] = q
-        if domain:
-            params["domain"] = domain
         if boe_id:
             params["boe_id"] = boe_id
 

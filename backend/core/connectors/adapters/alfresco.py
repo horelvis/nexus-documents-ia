@@ -53,24 +53,6 @@ ALFRESCO_TYPE_TO_SEMANTIC = {
     "cm:folder": "folder",
 }
 
-# Mapping of Alfresco aspects to semantic enrichment
-ALFRESCO_ASPECT_TO_DOMAIN = {
-    # Legal aspects
-    "exp:documentoExpediente": "legal",
-    "legal:legalDocument": "legal",
-    "compliance:regulated": "compliance",
-    # Financial aspects
-    "fin:financial": "finance",
-    "acc:accounting": "finance",
-    # HR aspects
-    "hr:personnelDocument": "hr",
-    # IT aspects
-    "it:technicalDocument": "it",
-    # Operations
-    "ops:operational": "operations",
-}
-
-
 class AlfrescoMetadataAdapter(MetadataAdapter):
     """
     Metadata adapter for Alfresco Content Services.
@@ -152,7 +134,7 @@ class AlfrescoMetadataAdapter(MetadataAdapter):
         # Extract ownership
         metadata.ownership = self._extract_ownership(alfresco_props, raw_metadata)
 
-        # Extract classification (type, domain, categories)
+        # Extract classification (type, categories)
         metadata.classification = self._extract_classification(
             content_type, aspects, alfresco_props, parent_props
         )
@@ -248,26 +230,6 @@ class AlfrescoMetadataAdapter(MetadataAdapter):
 
         # Aspects
         classification.aspects = aspects
-
-        # Infer domain from aspects
-        for aspect in aspects:
-            domain = ALFRESCO_ASPECT_TO_DOMAIN.get(aspect)
-            if domain:
-                classification.domain = domain
-                classification.domain_confidence = 0.9
-                classification.domain_source = "metadata"
-                break
-
-        # Check parent folder for classification hints
-        if not classification.domain and parent_props:
-            # Look for classification in parent properties
-            for prop_name, prop_value in parent_props.items():
-                if "classification" in prop_name.lower() or "domain" in prop_name.lower():
-                    if prop_value:
-                        classification.domain = str(prop_value).lower()
-                        classification.domain_confidence = 0.85
-                        classification.domain_source = "parent_folder"
-                        break
 
         # Extract categories from Alfresco
         categories = alfresco_props.get("cm:categories", [])
