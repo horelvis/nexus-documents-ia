@@ -20,7 +20,6 @@
 
 | Option | Best For | Guide |
 |--------|----------|-------|
-| **SaaS** | Fast start, no infrastructure | [README-SAAS.md](README-SAAS.md) |
 | **On-Premise** | Data sovereignty, air-gapped | [README-ONPREMISE.md](README-ONPREMISE.md) |
 
 ### Key Features
@@ -30,7 +29,7 @@
 | **Emma AI Assistant** | Intelligent assistant with LangGraph ReAct agent (16 tools) + Swarm parallel execution |
 | **TrustGraph Knowledge Expert** | RDF-style knowledge graph (FalkorDB) with 72-predicate ontology, semantic retrieval, authority scoring, and report generation with verified citations |
 | **Emma Reactive** | Event-driven proactive AI — triggers, notifications, multi-channel (Telegram, WhatsApp, Slack, Email) |
-| **SmartSearch** | Unified multi-store search (Weaviate + BOE legislation + knowledge graph) |
+| **SmartSearch** | Unified multi-store search (Weaviate + TrustGraph knowledge graph + semantic index) |
 | **Multimodal RAG Pipeline** | 7-layer retrieval with hybrid search, cross-encoder reranking, and verified generation |
 | **Cross-Modal Search** | Text queries find images, diagrams, and tables in documents |
 | **Legal Knowledge Base** | Spanish BOE legislation indexed for automatic legal context |
@@ -88,10 +87,10 @@ curl http://localhost:8000/health
 │                             ▼            │  │  + PostgresSaver    │   │    │
 │  ┌─────────────────────────────────────┐ │  └─────────────────────┘   │    │
 │  │         Data Layer                   │ │                           │    │
-│  │  ┌──────────┐ ┌──────────┐ ┌──────┐ │ │  ┌─────────────────────┐   │    │
-│  │  │PostgreSQL│ │ Weaviate │ │Redis │ │ │  │  vLLM Server        │   │    │
-│  │  │   +AGE   │ │ (Vector) │ │      │ │ │  │  Qwen3.5-9B (GPU)   │   │    │
-│  │  └──────────┘ └──────────┘ └──────┘ │ │  └─────────────────────┘   │    │
+│  │  ┌──────────┐ ┌──────────┐ ┌──────┐ ┌──────────┐ │  ┌─────────────────────┐   │    │
+│  │  │PostgreSQL│ │ Weaviate │ │Redis │ │FalkorDB  │ │  │  vLLM Server        │   │    │
+│  │  │          │ │ (Vector) │ │      │ │ (Graph)  │ │  │  Qwen3.5-9B (GPU)   │   │    │
+│  │  └──────────┘ └──────────┘ └──────┘ └──────────┘ │  └─────────────────────┘   │    │
 │  └─────────────────────────────────────┘ │                            │    │
 │                                          └────────────────────────────┘    │
 │                                                                              │
@@ -104,7 +103,7 @@ Emma AI is built on **LangGraph** with a ReAct agent (8 nodes) + optional Swarm 
 
 | Tool | Purpose |
 |------|---------|
-| `smart_search` | Unified search across tenant documents, BOE legislation, and knowledge graph |
+| `smart_search` | Unified search across documents, TrustGraph (legal knowledge + entity relationships), and semantic index |
 | `graph_rag` | Knowledge graph retrieval — 8-stage pipeline with authority scoring and multi-hop reasoning |
 | `structural_query` | Count, list, filter via FalkorDB TrustGraph |
 | `analyze_domain` | Specialist domain analysis (legal, fiscal, labor, medical) |
@@ -201,7 +200,8 @@ docker compose logs ngrok | grep "url="
 
 ### Backend
 - **Framework**: FastAPI (Python 3.9+) with async/await
-- **Database**: PostgreSQL 15 + Apache AGE (Graph)
+- **Database**: PostgreSQL 15
+- **Graph DB**: FalkorDB (TrustGraph knowledge graph on Redis)
 - **Vector DB**: Weaviate
 - **Cache**: Redis
 - **AI Framework**: LangGraph (ReAct agent + PostgresSaver + AsyncPostgresStore)
@@ -224,7 +224,6 @@ docker compose logs ngrok | grep "url="
 
 | Document | Description |
 |----------|-------------|
-| [README-SAAS.md](README-SAAS.md) | **Cloud-hosted SaaS deployment guide** |
 | [README-ONPREMISE.md](README-ONPREMISE.md) | **Complete on-premise deployment guide** |
 | [CLAUDE.md](CLAUDE.md) | Development guidelines for Claude Code |
 | [docs/architecture/](docs/architecture/) | System architecture documentation |
@@ -238,7 +237,6 @@ docker compose logs ngrok | grep "url="
 | [USER_MEMORY.md](docs/architecture/USER_MEMORY.md) | Cross-session user memory (AsyncPostgresStore) |
 | [EMMA_AI.md](docs/architecture/EMMA_AI.md) | Emma AI agent system |
 | [EMMA_REACTIVE.md](docs/architecture/EMMA_REACTIVE.md) | Emma Reactive event-driven system |
-| [BOE_LEGAL_KNOWLEDGE.md](docs/architecture/BOE_LEGAL_KNOWLEDGE.md) | Spanish Legal Knowledge Base (BOE) |
 | [ACL_SYSTEM.md](docs/architecture/ACL_SYSTEM.md) | Access Control architecture |
 | [RAG_PIPELINE.md](docs/architecture/RAG_PIPELINE.md) | RAG implementation blueprint |
 
@@ -247,10 +245,9 @@ docker compose logs ngrok | grep "url="
 ## Security
 
 - **Authentication**: OIDC/SAML with KeyCloak, Azure AD, Okta
-- **Multi-Tenant**: Complete data isolation per tenant
 - **Encryption**: At rest and in transit
 - **Audit**: Comprehensive logging of all operations
-- **RBAC**: Fine-grained role-based access control with JSONB ACL
+- **RBAC**: Fine-grained role-based access control via `roles: ARRAY(String)` on documents, with `EVERYONE` wildcard for public docs
 - **Air-Gapped**: Works without internet connectivity
 
 ---
