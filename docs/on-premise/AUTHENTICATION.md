@@ -74,9 +74,12 @@ services:
    - **Valid Redirect URIs**: `https://your-app.com/api/v1/auth/callback`
 
 3. Create groups for role mapping:
-   - `NouxCubeIA-Admins` → Admin role
-   - `NouxCubeIA-Users` → User role
-   - `NouxCubeIA-Viewers` → Viewer role
+   - `/Administradores` (Administrators → `ADMIN`)
+   - `/Comercial` (Sales → `SALES`)
+   - `/Departamento Legal` (Legal → `LEGAL`)
+   - `/Recursos Humanos` (HR → `HR`)
+   - `/Finanzas` (Finance → `FINANCE`)
+   - `/Médicos` (Medical → `MEDICAL`)
 
 ### 3. Configure NouxCubeIA
 
@@ -92,14 +95,12 @@ OIDC_CLIENT_ID=nexusdocs-client
 OIDC_CLIENT_SECRET=your-client-secret-from-keycloak
 OIDC_SCOPES=openid,profile,email,groups
 
-# Group to Role Mapping
-OIDC_ADMIN_GROUP=NouxCubeIA-Admins
-OIDC_USER_GROUP=NouxCubeIA-Users
-OIDC_VIEWER_GROUP=NouxCubeIA-Viewers
+# Group to Role Mapping (group paths match role_mapping.yaml)
+OIDC_ADMIN_GROUP=/Administradores
+OIDC_USER_GROUP=/Comercial
 
 # JIT Provisioning
 OIDC_JIT_PROVISIONING=true
-OIDC_DEFAULT_TENANT=default
 
 # Session Configuration
 SESSION_SECRET=your-secure-session-secret-min-32-chars
@@ -138,10 +139,13 @@ Add these permissions:
 
 ### 3. Create Security Groups
 
-Create groups in Azure AD:
-- `SG-NouxCubeIA-Admins`
-- `SG-NouxCubeIA-Users`
-- `SG-NouxCubeIA-Viewers`
+Create groups in Azure AD mirroring the canonical role names:
+- `SG-Administradores` → `ADMIN`
+- `SG-Comercial` → `SALES`
+- `SG-Departamento-Legal` → `LEGAL`
+- `SG-Recursos-Humanos` → `HR`
+- `SG-Finanzas` → `FINANCE`
+- `SG-Medicos` → `MEDICAL`
 
 ### 4. Configure NouxCubeIA
 
@@ -192,41 +196,46 @@ OIDC_CLIENT_ID=your-okta-client-id
 OIDC_CLIENT_SECRET=your-okta-client-secret
 OIDC_SCOPES=openid,profile,email,groups
 
-OIDC_ADMIN_GROUP=NouxCubeIA-Admins
-OIDC_USER_GROUP=NouxCubeIA-Users
+OIDC_ADMIN_GROUP=/Administradores
+OIDC_USER_GROUP=/Comercial
 ```
 
 ---
 
 ## Group to Role Mapping
 
-NouxCubeIA maps IdP groups to application roles:
+NouxCubeIA maps IdP group paths to canonical application roles:
 
-| IdP Group | Application Role | Permissions |
-|-----------|------------------|-------------|
-| `*-Admins` | Admin | Full access, user management, settings |
-| `*-Users` | User | Upload, view, edit documents |
-| `*-Viewers` | Viewer | Read-only access to documents |
+| IdP Group Path | Canonical Role | Permissions |
+|----------------|----------------|-------------|
+| `/Administradores` | `ADMIN` | Full access, user management, settings |
+| `/Comercial` | `SALES` | Upload, view, edit documents |
+| `/Departamento Legal` | `LEGAL` | Upload, view, edit documents |
+| `/Recursos Humanos` | `HR` | Upload, view, edit documents |
+| `/Finanzas` | `FINANCE` | Upload, view, edit documents |
+| `/Médicos` | `MEDICAL` | Upload, view, edit documents |
 
-### Custom Role Mapping
+### Role Mapping Configuration
 
-```python
-# backend/app/core/auth/group_mapper.py
+The group-to-role mapping is defined in `backend/app/config/role_mapping.yaml` (YAML, not Python). The `AuthProvider.map_groups_to_roles()` method reads this file and translates KeyCloak group paths to canonical role identifiers.
 
-GROUP_ROLE_MAPPING = {
-    # KeyCloak groups
-    "NouxCubeIA-Admins": "admin",
-    "NouxCubeIA-Users": "user",
-    "NouxCubeIA-Viewers": "viewer",
-
-    # Azure AD groups (by Object ID)
-    "12345678-1234-...": "admin",
-
-    # Custom groups
-    "Legal-Team": "user",
-    "External-Auditors": "viewer",
-}
+Example `role_mapping.yaml`:
+```yaml
+# KeyCloak group path → canonical role
+group_to_role:
+  "/Administradores": ADMIN
+  "/Comercial": SALES
+  "/Departamento Legal": LEGAL
+  "/Recursos Humanos": HR
+  "/Finanzas": FINANCE
+  "/Médicos": MEDICAL
 ```
+
+To add a new role mapping:
+1. Create the KeyCloak group (e.g., `/Nuevo-Departamento`)
+2. Add a line to `role_mapping.yaml` mapping it to a canonical role
+3. Restart the API service (the YAML is read on startup)
+4. Assign users to the group via KeyCloak admin UI
 
 ---
 
@@ -252,12 +261,6 @@ When enabled, users are automatically created on first login:
 ```bash
 # Enable JIT Provisioning
 OIDC_JIT_PROVISIONING=true
-
-# Default tenant for new users (if not derived from IdP)
-OIDC_DEFAULT_TENANT=default
-
-# Auto-create tenant from IdP organization attribute
-OIDC_TENANT_FROM_ATTRIBUTE=organization
 
 # Attribute mapping
 OIDC_ATTRIBUTE_EMAIL=email
@@ -362,6 +365,6 @@ curl -X POST https://your-idp.com/protocol/openid-connect/token \
 
 ## Related Documentation
 
-- [MODULAR_ARCHITECTURE.md](../architecture/MODULAR_ARCHITECTURE.md) - SaaS vs On-Premise differences
+- [MODULAR_ARCHITECTURE.md](../architecture/MODULAR_ARCHITECTURE.md) - Microservices architecture overview
 - [ACL_SYSTEM.md](../architecture/ACL_SYSTEM.md) - Access Control configuration
 - [README-ONPREMISE.md](../../README-ONPREMISE.md) - Main on-premise guide
