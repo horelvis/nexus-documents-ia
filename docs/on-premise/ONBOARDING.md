@@ -1,6 +1,6 @@
-# Tenant Onboarding Guide
+# NouxCubeIA Onboarding Guide
 
-Complete guide for onboarding a new tenant in NouxCubeIA on-premise. Covers initial setup, bulk indexing optimization, legislation download, and go-live checklist.
+Complete guide for initial deployment and content ingestion on a new NouxCubeIA installation. Covers initial setup, bulk indexing optimization, legislation download, and go-live checklist.
 
 ---
 
@@ -10,7 +10,7 @@ Complete guide for onboarding a new tenant in NouxCubeIA on-premise. Covers init
                            ONBOARDING MODE                    NORMAL MODE
                       ┌─────────────────────┐          ┌─────────────────────┐
                       │                     │          │                     │
-   GPU (24GB VRAM)    │  Docling GPU        │    →     │  vLLM (Qwen3-14B)  │
+   GPU (24GB VRAM)    │  Docling GPU        │    →     │  SGLang (Qwen3.5-9B)│
                       │  5-10x faster PDF   │          │  Emma AI agent      │
                       │                     │          │                     │
                       ├─────────────────────┤          ├─────────────────────┤
@@ -26,7 +26,7 @@ Complete guide for onboarding a new tenant in NouxCubeIA on-premise. Covers init
                       Indexing at max speed            Incremental syncs
 ```
 
-The key insight: **vLLM and Docling compete for the same GPU**. During onboarding, bulk indexing is the priority, so we dedicate the GPU to Docling. Once indexing is complete, we swap the GPU to vLLM and Emma becomes operational.
+The key insight: **SGLang and Docling compete for the same GPU**. During onboarding, bulk indexing is the priority, so we dedicate the GPU to Docling. Once indexing is complete, we swap the GPU to SGLang and Emma becomes operational.
 
 ---
 
@@ -76,17 +76,59 @@ cd backend/docker
 
 ### Phase 0: Initial Setup
 
-Before onboarding, the platform must be running:
+Before onboarding, start the platform and complete initial configuration:
+
+**Step 1: Start all services**
 
 ```bash
 cd backend/docker
-./start-dev.sh          # Start all services (including vLLM)
+docker compose up -d
 ```
 
-Configure the tenant in the admin UI (`https://your-domain/admin`):
-1. Create the tenant organization
-2. Configure authentication (OIDC/SAML) — see [`AUTHENTICATION.md`](AUTHENTICATION.md)
-3. Add data source connectors (Google Drive, OneDrive, Alfresco) — see [`CONNECTORS.md`](CONNECTORS.md)
+Wait for all services to report healthy:
+
+```bash
+docker compose ps
+```
+
+**Step 2: Apply database migrations**
+
+```bash
+docker exec docker-api-1 alembic upgrade head
+```
+
+**Step 3: Seed initial database**
+
+```bash
+docker exec docker-api-1 python -m scripts.init_db
+```
+
+**Step 4: Configure KeyCloak authentication**
+
+Configure groups and role mappings per your deployment:
+
+- See [`AUTHENTICATION.md`](AUTHENTICATION.md) for OIDC/SAML setup and `role_mapping.yaml` group configuration.
+
+**Step 5: Seed Langfuse prompts**
+
+Before Emma can answer queries, Langfuse must have the initial prompt set:
+
+```bash
+# Seed all prompt migrations in order:
+docker compose exec emma-agent-service python scripts/migrate_9b_prompt_optimization.py
+docker compose exec emma-agent-service python scripts/migrate_explain_prompts.py
+docker compose exec emma-agent-service python scripts/migrate_ner_prompts.py
+docker compose exec emma-agent-service python scripts/migrate_retrieval_intelligence_prompts.py
+docker compose exec emma-agent-service python scripts/migrate_trustgraph_phase2_prompts.py
+docker compose exec emma-agent-service python scripts/migrate_knowledge_report_prompt.py
+docker compose exec emma-agent-service python scripts/seed_guardrails.py
+```
+
+Promote prompts to the `production` label in the Langfuse UI (http://localhost:3002) — see [`LANGFUSE_SETUP.md`](../guides/LANGFUSE_SETUP.md) for production-label pinning details.
+
+**Step 6: Add data source connectors**
+
+- See [`CONNECTORS.md`](CONNECTORS.md) for Google Drive, OneDrive, Alfresco connector setup.
 
 ### Phase 1: Enter Onboarding Mode
 
@@ -96,7 +138,7 @@ Configure the tenant in the admin UI (`https://your-domain/admin`):
 
 This command:
 1. Ensures all base services are running
-2. **Stops vLLM** (frees ~22GB VRAM)
+2. **Stops SGLang** (`sglang` service — frees ~22GB VRAM)
 3. Stops Docling CPU (if running)
 4. **Starts Docling GPU** (uses freed VRAM)
 5. Restarts weaviate-service with `RAG_HIERARCHICAL_ENABLED=false`
@@ -104,7 +146,7 @@ This command:
 **What's disabled:**
 | Feature | Why | Impact |
 |---------|-----|--------|
-| vLLM | Free GPU for Docling | Emma chat unavailable |
+| SGLang (LLM inference) | Free GPU for Docling | Emma chat unavailable |
 | RAG hierarchical summaries | Require LLM | No document-level summaries (minor retrieval impact on very long docs) |
 
 **What's NOT disabled:**
@@ -147,7 +189,7 @@ Available presets:
 | `educacion` | 3 | LOMLOE, LOE, LOU |
 | `proteccion_datos` | 1 | LOPDGDD |
 
-> See [`PUBLIC_KNOWLEDGE.md`](../architecture/PUBLIC_KNOWLEDGE.md) for details on the BOE legislation system.
+> BOE legislation is indexed into the unified TrustGraph — see [`TRUSTGRAPH.md`](../architecture/TRUSTGRAPH.md) for details on the knowledge graph pipeline.
 
 ### Phase 3: Index Data Sources
 
@@ -238,8 +280,8 @@ Once all connectors show acceptable indexed percentages:
 
 This command:
 1. Stops Docling GPU
-2. Starts the full normal stack (vLLM + Docling CPU)
-3. Waits for vLLM to load the model (~2-3 min)
+2. Starts the full normal stack (SGLang + Docling CPU)
+3. Waits for SGLang to load the model (~2-3 min)
 4. Shows final indexing stats
 
 After this, Emma is fully operational.
@@ -254,8 +296,8 @@ After this, Emma is fully operational.
 ┌─────────────┐     ┌─────────────┐     ┌──────────────┐     ┌──────────┐
 │  Connector   │────▶│ textextract │────▶│   Weaviate   │────▶│ Knowledge│
 │  (download)  │     │  (Docling)  │     │   Service    │     │   Graph  │
-│              │     │             │     │  (chunk +    │     │ (Apache  │
-│  20 parallel │     │ 4 workers   │     │   embed)     │     │   AGE)   │
+│              │     │             │     │  (chunk +    │     │(FalkorDB)│
+│  20 parallel │     │ 4 workers   │     │   embed)     │     │          │
 └─────────────┘     └─────────────┘     └──────────────┘     └──────────┘
     ~50ms/doc          ~3-30s/doc          ~2-5s/doc           ~1s/doc
    (network)        (CPU or GPU)       (BGE-M3 embed)      (graph insert)
@@ -344,12 +386,11 @@ Documents indexed during onboarding include these first-class Weaviate propertie
 
 | Property | Source | Example |
 |----------|--------|---------|
-| `domain` | Contextual retrieval | `"legal"`, `"financial"`, `"hr"` |
 | `semantic_type` | MIME mapping / pipeline inference | `"contract"`, `"invoice"`, `"report"` |
 | `quality_score` | Document intelligence (0.0-1.0) | `0.85` |
 | `associated_person` | Folder hierarchy heuristic | `"Javier Martinez"` |
 
-These properties enable Emma's SmartSearch to filter results by domain, type, person, and quality without relying on full-text matching.
+These properties enable Emma's SmartSearch to filter results by type, person, and quality without relying on full-text matching.
 
 ---
 
@@ -367,13 +408,13 @@ sudo apt-get install -y nvidia-container-toolkit
 sudo systemctl restart docker
 ```
 
-### Services won't start without vLLM
+### Services won't start without SGLang
 
-If services fail with "depends on undefined service vllm":
+If services fail with "depends on undefined service sglang":
 ```bash
-# Start normally first (vLLM included), then stop vLLM
+# Start normally first (SGLang included), then stop it
 docker compose -f docker-compose.onpremise.yml up -d
-docker compose -f docker-compose.onpremise.yml stop vllm
+docker compose -f docker-compose.onpremise.yml stop sglang
 ```
 
 The `onboarding.sh start` command handles this automatically.
@@ -405,7 +446,7 @@ If many large PDFs cause timeouts:
 
 - [ ] All connectors show acceptable indexed percentage (`./onboarding.sh status`)
 - [ ] `./onboarding.sh finish` completed successfully
-- [ ] vLLM is healthy (`docker exec docker-vllm-1 curl -sf http://localhost:8000/health`)
+- [ ] SGLang is healthy (`docker exec docker-sglang-1 curl -sf http://localhost:8000/health`)
 - [ ] Emma responds to test queries in the chat UI
 - [ ] BOE legislation is searchable (test: "articulo 37 estatuto de trabajadores")
 - [ ] Incremental sync scheduler is configured (Celery Beat or cron)
