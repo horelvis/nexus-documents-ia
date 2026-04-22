@@ -4,13 +4,36 @@ This guide covers configuring enterprise content connectors for NouxCubeIA on-pr
 
 ## Supported Connectors
 
-| Connector | Status | Sync Type | MCP Support |
-|-----------|--------|-----------|-------------|
-| **Alfresco 7.x** | Full Support | Bi-directional | Yes |
-| **Database (SQL)** | Full Support | One-way | Yes |
-| **SharePoint Online** | Full Support | One-way | Yes |
-| **File System** | Full Support | One-way | No |
-| **S3-Compatible** | Full Support | One-way | No |
+| Connector | Status | Description | Adapter |
+|-----------|--------|-------------|---------|
+| Alfresco 7.x | Full support | Enterprise ECM with CMIS/REST API | `core/connectors/adapters/alfresco.py` |
+| Google Drive | Full support | Google Workspace Drive via OAuth2 | `core/connectors/adapters/google_drive.py` |
+| SharePoint / OneDrive | MCP-based | Via MCP server (`mcp-onedrive` container) | MCP protocol |
+| BOE Legislation | Script-based | Spanish Official Gazette downloader (roadmap: convert to connector) | `backend/scripts/boe_legislation_downloader.py` |
+
+---
+
+## Connector Operations (CLI)
+
+Connector sync is managed via `backend/docker/onboarding.sh`:
+
+```bash
+cd backend/docker
+
+# List all connectors and their status:
+./onboarding.sh status
+
+# Trigger sync for ONE connector by ID:
+./onboarding.sh sync <connector-id>
+
+# Trigger sync for ALL active connectors (onboarding mode):
+./onboarding.sh sync-all
+
+# Download BOE legislation (preset-based):
+./onboarding.sh boe <preset-name>
+```
+
+The HTTP API endpoints (`POST /api/v1/connectors/{id}/sync`, etc.) are also available for programmatic control — see the API section below.
 
 ---
 
@@ -117,8 +140,10 @@ mcp-alfresco:
 ### Metadata Mapping
 
 ```python
-# backend/app/connectors/alfresco/metadata_mapping.py
+# backend/core/connectors/adapters/alfresco.py
 
+# NOTE: ALFRESCO_TO_NEXUSDOCS is the current name in the adapter code.
+# "NEXUSDOCS" is stale product naming — tech debt to rename to ALFRESCO_TO_NOUXCUBE.
 ALFRESCO_TO_NEXUSDOCS = {
     "cm:title": "title",
     "cm:description": "description",
@@ -142,9 +167,49 @@ ALFRESCO_TO_NEXUSDOCS = {
 
 ---
 
+## Google Drive Connector
+
+### Overview
+
+The Google Drive connector indexes documents from Google Workspace Drive via OAuth2. The adapter is at `backend/core/connectors/adapters/google_drive.py`.
+
+### Prerequisites
+
+- Google Cloud project with the Drive API enabled
+- OAuth2 client credentials (client ID + secret) — configured on the `mcp-google-drive` container
+
+### Configuration
+
+```bash
+# Set on the mcp-google-drive container (docker-compose.onpremise.yml)
+
+GOOGLE_OAUTH_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_OAUTH_CLIENT_SECRET=your-client-secret
+GOOGLE_OAUTH_REDIRECT_URI=https://nexusdocs.company.com/oauth/google/callback
+GOOGLE_OAUTH_SCOPES=https://www.googleapis.com/auth/drive.readonly
+
+# Encryption key for storing OAuth tokens in the database:
+CREDENTIALS_ENCRYPTION_KEY=<fernet-key>
+
+# Set on the main backend:
+GOOGLE_DRIVE_ENCRYPTION_KEY=<same-fernet-key>
+```
+
+> TODO: Full per-connector env var reference is in
+> `backend/microservices/mcp-google-drive-server/app/core/config.py`. Check that file for the authoritative list.
+
+### Auth Flow
+
+Users authorize via OAuth2 (three-legged flow). The MCP server exchanges the authorization code for access/refresh tokens, encrypts them with the Fernet key, and stores them in PostgreSQL. Token refresh is handled automatically.
+
+---
+
 ## Database Connector
 
 ### Overview
+
+> **NOT IMPLEMENTED** — The Database (SQL) connector does not exist in the active codebase.
+> The section below is retained as a design reference only.
 
 The Database connector allows indexing documents stored in SQL databases, supporting:
 - PostgreSQL, MySQL, SQL Server, Oracle
@@ -326,6 +391,40 @@ services:
       - /path/to/documents:/mnt/documents:ro
       - /path/to/scanned:/mnt/scanned:ro
 ```
+
+---
+
+## Connector ACL — `default_document_roles`
+
+Every connector carries a `default_document_roles: ARRAY(String)` field (PostgreSQL). When the connector syncs a document, these roles are copied into the document's `roles` field, which drives the `filter_visible_to_user()` ACL query (see [ACL_SYSTEM.md](../architecture/ACL_SYSTEM.md)).
+
+- **Default**: `["EVERYONE"]` — document visible to any authenticated user.
+- **Typical values**: `["LEGAL"]`, `["HR", "FINANCE"]`, `["EVERYONE"]`, etc.
+- Role IDs must match canonical roles from `backend/app/config/role_mapping.yaml`.
+
+Example — create a connector that tags its docs as `LEGAL` by default:
+```json
+POST /api/v1/connectors
+{
+  "name": "Alfresco Legal",
+  "connector_type": "alfresco",
+  "config": { ... },
+  "default_document_roles": ["LEGAL"]
+}
+```
+
+---
+
+## SharePoint / OneDrive (MCP-based)
+
+Microsoft 365 services are integrated via [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) servers rather than direct adapters in `core/connectors/adapters/`. Running containers:
+- `docker-mcp-onedrive-1` — OneDrive MCP server
+- `docker-mcp-alfresco-1` — Alfresco MCP (alternative to direct adapter)
+- `docker-mcp-google-drive-1` — Google Drive MCP (alternative to direct adapter)
+
+The Emma agent invokes these via the `query_connector` tool. Configuration lives per-container in their respective docker-compose entries in `docker-compose.onpremise.yml` (environment variables for OAuth tokens, base URLs, etc.).
+
+> **Note**: For SharePoint/OneDrive, there is no direct adapter in `core/connectors/adapters/`. All Microsoft 365 connectivity goes through the MCP server. The `SHAREPOINT_*` env vars described in an older section of this document are placeholder patterns only — verify actual variables against the `mcp-onedrive` container config in `docker-compose.onpremise.yml`.
 
 ---
 
