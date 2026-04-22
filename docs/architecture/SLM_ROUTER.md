@@ -187,7 +187,7 @@ Provides tenant-specific context for accurate planning:
 from app.services.slm_router import get_schema_provider
 
 context = await schema_provider.get_prompt_context(tenant_id)
-# Returns: document types, clients, folder structure, domains
+# Returns: document types, clients, folder structure
 ```
 
 ### 4. History Manager

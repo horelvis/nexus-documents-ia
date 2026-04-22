@@ -59,7 +59,7 @@ El **Structural Intelligence Layer (SIL)** fue un componente que representó un 
 │  • Grafo de ESTRUCTURA, no de contenido                                     │
 │  • Nodos: Folders, Sites, Documents (solo metadata)                         │
 │  • Edges: contains, version_of, relates_to, sibling_of                      │
-│  • Propiedades: semantic_type, domain, importance                           │
+│  • Propiedades: semantic_type, importance                                   │
 │                                                                              │
 │  CAPA 3: STRUCTURAL EMBEDDINGS (Weaviate)                                   │
 │  ══════════════════════════════════════════                                 │
@@ -113,7 +113,7 @@ El **Structural Intelligence Layer (SIL)** fue un componente que representó un 
 │    structural_context:                                                       │
 │      query_result: {count: 5, titles: [...]}                                │
 │      folder_path: /Clientes/ACME/2024/Contratos                             │
-│      semantic_domain: legal                                                  │
+│      semantic_type: contract                                                │
 │                                                                              │
 │  Output:                                                                     │
 │    "ACME tiene 5 contratos del 2024:                                        │
@@ -260,7 +260,7 @@ Indexar metadata estructural de un documento.
     "author": "Legal Department"
   },
   "learned_context": {
-    "domain": "legal",
+    "semantic_type": "contract",
     "folder_semantics": {"department": "ventas"}
   }
 }
@@ -315,7 +315,6 @@ properties = [
 
     # Clasificación estructural
     "semantic_type",         # contract, invoice, report, etc.
-    "domain",                # legal, hr, finance, etc.
     "importance",            # 0.0-1.0
 
     # Jerarquía y ubicación
@@ -374,7 +373,6 @@ CREATE (d:structural_document {
   tenant_id: 'tenant-123',
   weaviate_id: 'wv-abc',
   semantic_type: 'contract',
-  domain: 'legal',
   folder_path: '/Clientes/ACME/2024/Contratos',
   prop_title: 'Contrato Master ACME',
   prop_client: 'ACME',
@@ -513,7 +511,7 @@ metadata = await structural_extractor.extract_structural_metadata(
     document_id="doc-123",
     file_path="/Clientes/ACME/2024/Contratos/Master.pdf",
     connector_metadata={"title": "Contrato Master"},
-    learned_context={"domain": "legal"},
+    learned_context={"semantic_type": "contract"},
 )
 
 # Index to Weaviate

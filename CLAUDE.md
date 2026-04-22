@@ -220,8 +220,7 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 | FalkorDB | Entity relationships (TrustGraph triples) | `KnowledgeTreeClient.query_triples()` via graph_expander |
 
 **Enrichment Properties** (first-class Weaviate properties, not JSONB):
-- `domain` — Business domain (legal, fiscal, medical)
-- `semantic_type` — Document type (factura, contrato, nomina)
+- `semantic_type` — Document type (factura, contrato, nomina, sentencia, etc.) — sole taxonomy
 - `quality_score` — Quality 0.0-1.0 from DocumentIntelligence
 - `associated_person` — Person from folder hierarchy or entity extraction
 
