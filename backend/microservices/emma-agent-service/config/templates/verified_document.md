@@ -24,7 +24,7 @@
 
 | Tipo | Título | URL |
 |------|--------|-----|
-{% for src in sources %}| {% if src.source == "web" or src.source == "public_knowledge" %}Web{% elif src.source == "uploaded" %}Cargado{% elif src.source == "jurisprudence" %}Jurisprudencia{% elif src.source == "doi" %}DOI Validado{% elif src.source == "crossref" %}CrossRef{% elif src.source == "doi_invalid" %}DOI Inválido{% elif src.source == "doi_mismatch" %}DOI No Corresponde{% elif src.source == "citation_unverified" %}Cita No Verificada{% else %}Interno{% endif %} | {{ src.title or src.id }} | {{ src.url or "—" }} |
+{% for src in sources %}| {% if src.source == "web" %}Web{% elif src.source == "uploaded" %}Cargado{% elif src.source == "jurisprudence" %}Jurisprudencia{% elif src.source == "doi" %}DOI Validado{% elif src.source == "crossref" %}CrossRef{% elif src.source == "doi_invalid" %}DOI Inválido{% elif src.source == "doi_mismatch" %}DOI No Corresponde{% elif src.source == "citation_unverified" %}Cita No Verificada{% else %}Interno{% endif %} | {{ src.title or src.id }} | {{ src.url or "—" }} |
 {% endfor %}
 {% endif %}
 

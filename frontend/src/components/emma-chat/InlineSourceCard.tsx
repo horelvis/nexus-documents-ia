@@ -28,7 +28,7 @@ function detectSourceType(doc: DocumentInfo): SourceType {
   const name = (doc.name || '').toLowerCase()
   const st = (doc.source_type || '').toLowerCase()
 
-  if (st === 'public_knowledge' || st === 'legislation') return 'boe'
+  if (st === 'legislation') return 'boe'
   if (ft.includes('pdf') || name.endsWith('.pdf')) return 'pdf'
   if (
     ft.includes('image') ||

@@ -163,12 +163,6 @@ interface BOEDownloadResult {
   error?: string
 }
 
-interface PublicKnowledgeStats {
-  total_documents: number
-  documents_by_category: Record<string, number>
-  documents_by_jurisdiction: Record<string, number>
-}
-
 interface KnowledgeExtractionResult {
   total_documents: number
   processed: number
@@ -250,7 +244,6 @@ export default function AdminDashboardPage() {
   const [weaviateHealth, setWeaviateHealth] = useState<WeaviateHealth | null>(null)
   const [knowledgeStats, setKnowledgeStats] = useState<KnowledgeStats | null>(null)
 const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
-  const [publicKnowledgeStats, setPublicKnowledgeStats] = useState<PublicKnowledgeStats | null>(null)
 
   // Loading states
   const [isLoading, setIsLoading] = useState(true)
@@ -349,7 +342,6 @@ const [boePresets, setBoePresets] = useState<BOEPreset[]>([])
         loadWeaviateHealth(),
         loadKnowledgeStats(),
         loadBoePresets(),
-        loadPublicKnowledgeStats(),
         loadTrainingStatus(),
         loadHeartbeatStatus(),
         loadCendojStatus(),
@@ -409,18 +401,6 @@ const loadBoePresets = async () => {
       }
     } catch (error) {
       console.error('Failed to load BOE presets:', error)
-    }
-  }
-
-  const loadPublicKnowledgeStats = async () => {
-    try {
-      // Call /weaviate/public-knowledge/stats endpoint
-      const response = await apiClient.get<PublicKnowledgeStats>('/weaviate/public-knowledge/stats')
-      if (!response.error && response.data) {
-        setPublicKnowledgeStats(response.data)
-      }
-    } catch (error) {
-      console.error('Failed to load public knowledge stats:', error)
     }
   }
 
@@ -657,8 +637,8 @@ const loadBoePresets = async () => {
         `Descarga completada: ${successCount} leyes indexadas, ${errorCount} errores`
       )
 
-      // Reload public knowledge stats
-      await loadPublicKnowledgeStats()
+      // Reload knowledge stats
+      await loadKnowledgeStats()
 
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error al descargar legislación'
@@ -691,8 +671,8 @@ const loadBoePresets = async () => {
         `Sincronización completada: ${results.length} leyes verificadas, ${changesCount} con cambios`
       )
 
-      // Reload public knowledge stats
-      await loadPublicKnowledgeStats()
+      // Reload knowledge stats
+      await loadKnowledgeStats()
 
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error al sincronizar legislación'
@@ -709,9 +689,9 @@ const loadBoePresets = async () => {
     setError(null)
 
     try {
-      // Call /weaviate/public-knowledge/extract endpoint
+      // Call /weaviate/knowledge/extract endpoint
       const response = await apiClient.post<KnowledgeExtractionResult>(
-        '/weaviate/public-knowledge/extract',
+        '/weaviate/knowledge/extract',
         {},
         { params: { limit: 200 } }
       )
@@ -1320,39 +1300,6 @@ const loadBoePresets = async () => {
                 )}
 
                 <div className="grid gap-4 md:grid-cols-2">
-                  {/* Public Knowledge Stats */}
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <IconChartBar className="h-5 w-5" />
-                        Estadísticas del Conocimiento Público
-                      </CardTitle>
-                      <CardDescription>
-                        Documentos indexados en la base de conocimiento
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-sm">Total documentos</span>
-                        <span className="text-2xl font-bold">
-                          {formatNumber(publicKnowledgeStats?.total_documents)}
-                        </span>
-                      </div>
-                      {publicKnowledgeStats?.documents_by_category &&
-                        Object.keys(publicKnowledgeStats.documents_by_category).length > 0 && (
-                        <div className="space-y-2">
-                          <span className="text-sm text-muted-foreground">Por categoría:</span>
-                          {Object.entries(publicKnowledgeStats.documents_by_category).map(([cat, count]) => (
-                            <div key={cat} className="flex items-center justify-between p-2 bg-muted/50 rounded">
-                              <span className="text-sm capitalize">{cat.replace(/_/g, ' ')}</span>
-                              <Badge variant="outline">{formatNumber(count)}</Badge>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-
                   {/* BOE Presets */}
                   <Card>
                     <CardHeader>
@@ -2401,21 +2348,6 @@ const loadBoePresets = async () => {
                         </div>
                         <Button variant="outline" asChild>
                           <Link href="/connectors">Configurar</Link>
-                        </Button>
-                      </div>
-
-                      <div className="flex items-center justify-between p-4 border rounded-lg">
-                        <div className="flex items-center gap-4">
-                          <IconDatabase className="h-8 w-8 text-green-500" />
-                          <div>
-                            <h4 className="font-medium">Base de Conocimiento Público</h4>
-                            <p className="text-sm text-muted-foreground">
-                              Gestiona legislación y normativa indexada
-                            </p>
-                          </div>
-                        </div>
-                        <Button variant="outline" asChild>
-                          <Link href="/admin/public-knowledge">Ver</Link>
                         </Button>
                       </div>
 

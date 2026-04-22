@@ -53,7 +53,7 @@ export interface DocumentInfo {
   // Legal graph integration (for BOE legislation sources)
   boe_id?: string           // BOE identifier (e.g., "BOE-A-2015-11430")
   graph_link?: string       // Deep link to knowledge tree (e.g., "/admin/knowledge-tree?focus=BOE-A-2015-11430")
-  source_type?: string      // "public_knowledge" | "tenant" | etc.
+  source_type?: string      // "uploaded" | "connector" | "trustgraph" | etc.
 }
 
 export interface ClarificationOption {

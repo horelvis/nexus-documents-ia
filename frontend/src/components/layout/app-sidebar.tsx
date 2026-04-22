@@ -19,7 +19,6 @@ import {
   IconHistory,
   IconPlus,
   IconSchool,
-  IconDatabase,
   IconDashboard,
   IconMessageCircle,
   IconFileText,
@@ -116,11 +115,6 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       title: 'Administración',
       href: '/admin/dashboard',
       icon: IconDashboard,
-    },
-    {
-      title: 'Base de Conocimiento',
-      href: '/admin/public-knowledge',
-      icon: IconDatabase,
     },
     {
       title: 'Knowledge Graph',

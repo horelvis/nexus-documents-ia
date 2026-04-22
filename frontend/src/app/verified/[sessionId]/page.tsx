@@ -91,7 +91,7 @@ function getSourceIcon(source: VerifiedSource) {
     return <IconScale className="h-3.5 w-3.5 text-purple-500" />
   }
   const type = source.source || 'internal'
-  if (type === 'web' || type === 'public_knowledge') {
+  if (type === 'web') {
     return <IconWorld className="h-3.5 w-3.5 text-blue-500" />
   }
   if (type === 'uploaded') {
@@ -116,7 +116,6 @@ function getSourceLabel(source: VerifiedSource): string {
   if (source.roj || source.ecli) return 'Jurisprudencia'
   const type = source.source || 'internal'
   if (type === 'web') return 'Web'
-  if (type === 'public_knowledge') return 'Legislación'
   if (type === 'uploaded') return 'Cargado'
   if (type === 'doi') return 'DOI Validado'
   if (type === 'crossref') return 'CrossRef'

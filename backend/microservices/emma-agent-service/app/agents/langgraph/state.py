@@ -228,13 +228,6 @@ class RAGState(TypedDict, total=False):
     sector_config: Optional[Dict[str, Any]]
 
     # =========================================================================
-    # Graph Expansion (populated by graph_expand, used by retrieve)
-    # =========================================================================
-    # BOE IDs from graph expansion (QA matches + Cypher results)
-    # Used by retrieve to filter PublicKnowledge searches
-    expanded_boe_ids: List[str]
-
-    # =========================================================================
     # RLM (Recursive Language Models) State
     # =========================================================================
     # Whether RLM was activated for this query
@@ -356,9 +349,6 @@ def create_initial_state(
         # Config (unified — knowledge graph provides dynamic context)
         sector=None,
         sector_config=sector_config_dict,
-
-        # Graph Expansion (populated by graph_expand node)
-        expanded_boe_ids=[],
 
         # RLM
         rlm_activated=False,

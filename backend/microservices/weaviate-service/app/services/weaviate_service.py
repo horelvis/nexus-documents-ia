@@ -1,9 +1,9 @@
 """Weaviate service implementation — embeddings via intelligence-docs-service.
 
 Single-org refactor: collections are fixed (Nouxcube_documents,
-Nouxcube_knowledge, Nouxcube_visual, TrustGraphEntities, OntologyTerms,
-PublicKnowledge). ACL is enforced by the ``roles`` TEXT_ARRAY property +
-the ``EVERYONE`` sentinel.
+Nouxcube_knowledge, Nouxcube_visual, TrustGraphEntities, OntologyTerms).
+ACL is enforced by the ``roles`` TEXT_ARRAY property + the ``EVERYONE``
+sentinel. Legal/BOE knowledge is unified into TrustGraph (FalkorDB).
 """
 import weaviate
 import logging

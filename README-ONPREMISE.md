@@ -859,10 +859,11 @@ python scripts/boe_legislation_downloader.py --preset all
 python scripts/boe_legislation_downloader.py --preset laboral
 python scripts/boe_legislation_downloader.py --preset fiscal
 python scripts/boe_legislation_downloader.py --preset proteccion_datos
-
-# Sync to Legal Knowledge Graph
-python scripts/sync_public_knowledge_to_legal_graph.py
 ```
+
+> **Nota:** El `boe_legislation_downloader.py` se migrará a un conector.
+> El corpus BOE se unifica directamente dentro de TrustGraph (FalkorDB), sin
+> colección Weaviate separada.
 
 ### Legal Domains Available
 

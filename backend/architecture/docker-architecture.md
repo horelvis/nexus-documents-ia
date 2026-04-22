@@ -90,6 +90,6 @@ Document Upload → API → weaviate-service (indexing pipeline)
 
 User Query → API → emma-agent-service (LangGraph ReAct agent)
     → SGLang (LLM inference)
-    → weaviate-service (SmartSearch: Weaviate + FalkorDB + PublicKnowledge)
+    → weaviate-service (SmartSearch: Weaviate + FalkorDB TrustGraph)
     → Response with citations
 ```

@@ -544,8 +544,8 @@ class IndexingPipeline:
             document_id: Unique document identifier
             text: Already-extracted document text
             metadata: Document metadata
-            collection_name: Optional Weaviate collection override (e.g., "PublicKnowledge"
-                for BOE legislation). If None, uses DOCUMENTS_COLLECTION.
+            collection_name: Optional Weaviate collection override.
+                If None, uses DOCUMENTS_COLLECTION.
             indexing_strategy: Optional strategy for chunking:
                 - chunking_type: semantic, legal_sections, markdown_headers, paragraph
                 - chunking_config: {target_chunk_size, overlap, ...}

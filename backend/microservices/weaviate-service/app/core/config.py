@@ -154,12 +154,6 @@ class Settings(BaseSettings):
     rag_validation_semantic: bool = os.getenv("RAG_VALIDATION_SEMANTIC", "false").lower() == "true"
     rag_validation_threshold: float = float(os.getenv("RAG_VALIDATION_THRESHOLD", "0.7"))
 
-    # RAG Pipeline - Public Knowledge Integration
-    rag_public_knowledge_enabled: bool = os.getenv("RAG_PUBLIC_KNOWLEDGE_ENABLED", "true").lower() == "true"
-    rag_public_knowledge_weight: float = float(os.getenv("RAG_PUBLIC_KNOWLEDGE_WEIGHT", "0.7"))  # Weight for public vs user docs
-    rag_public_knowledge_limit: int = int(os.getenv("RAG_PUBLIC_KNOWLEDGE_LIMIT", "10"))  # Max public docs to include
-    rag_public_knowledge_categories: str = os.getenv("RAG_PUBLIC_KNOWLEDGE_CATEGORIES", "legislation,regulation,jurisprudence")  # Comma-separated
-
     # RAG Pipeline - Soft Selection (heuristic diversity-aware selection)
     rag_soft_selection_enabled: bool = os.getenv("RAG_SOFT_SELECTION_ENABLED", "true").lower() == "true"
     rag_soft_selection_temperature: float = float(os.getenv("RAG_SOFT_SELECTION_TEMPERATURE", "0.5"))  # Lower=sharper, Higher=uniform

@@ -750,7 +750,7 @@ function ClaimDetail({
 /** Compact chip for a per-claim evidence source */
 function ClaimSourceChip({ source }: { source: VerifiedSource }) {
   const type = source.source || 'internal'
-  const isWeb = type === 'web' || type === 'public_knowledge'
+  const isWeb = type === 'web'
   const isJurisprudence = !!source.roj || !!source.ecli
   const isDoi = type === 'doi' || type === 'crossref'
   const isDoiInvalid = type === 'doi_invalid'
@@ -791,7 +791,7 @@ function ClaimSourceChip({ source }: { source: VerifiedSource }) {
 /** Source row as table row matching PDF "Fuentes Consultadas" */
 function SourceRow({ source }: { source: VerifiedSource }) {
   const sourceType = source.source || 'internal'
-  const icon = sourceType === 'web' || sourceType === 'public_knowledge'
+  const icon = sourceType === 'web'
     ? <IconWorld className="h-3 w-3 text-blue-500 inline" />
     : sourceType === 'uploaded'
       ? <IconPaperclip className="h-3 w-3 text-amber-500 inline" />
@@ -802,7 +802,7 @@ function SourceRow({ source }: { source: VerifiedSource }) {
           : sourceType === 'doi_mismatch'
             ? <IconAlertTriangle className="h-3 w-3 text-amber-500 inline" />
             : <IconFile className="h-3 w-3 text-gray-400 inline" />
-  const label = sourceType === 'web' || sourceType === 'public_knowledge' ? 'Web'
+  const label = sourceType === 'web' ? 'Web'
     : sourceType === 'uploaded' ? 'Cargado'
     : sourceType === 'doi' ? 'DOI Validado'
     : sourceType === 'crossref' ? 'CrossRef'

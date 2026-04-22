@@ -65,7 +65,7 @@ function buildEvidenceGraph(sources: any[]): { nodes: ExplainNode[]; links: Expl
     seen.add(id)
 
     const type: ExplainNode['type'] =
-      src.source_type === 'public_knowledge' ? 'law' : 'document'
+      src.source_type === 'legislation' ? 'law' : 'document'
 
     nodes.push({
       id,

@@ -49,7 +49,7 @@ function isDoc(doc: DocumentInfo): boolean {
 
 function getBadge(doc: DocumentInfo): { label: string; className: string } {
   const st = (doc.source_type || '').toLowerCase()
-  if (st === 'public_knowledge' || st === 'legislation') return { label: 'BOE', className: 'bg-purple-600' }
+  if (st === 'legislation') return { label: 'BOE', className: 'bg-purple-600' }
   if (isPdf(doc)) return { label: 'PDF', className: 'bg-red-600' }
   if (isImage(doc)) return { label: 'IMG', className: 'bg-green-600' }
   if (isMarkdown(doc)) return { label: 'MD', className: 'bg-amber-600' }

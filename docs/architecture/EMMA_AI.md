@@ -231,7 +231,7 @@ EMMA AGENT SERVICE (FastAPI - port 8009)
 │            ├──→ rewrite (contextualize follow-ups via history)              │
 │            ├──→ memory_recall (document memories from knowledge-tree)       │
 │            ├──→ react_loop (tool calls: smart_search, structural_query...)  │
-│            │    └──→ SmartSearch → Weaviate + PublicKnowledge + AGE graph   │
+│            │    └──→ SmartSearch → Weaviate + TrustGraph (FalkorDB)         │
 │            └──→ synthesize / synthesize_swarm                               │
 │                                                                              │
 │  Checkpointer: PostgresSaver (conversation continuity)                      │
@@ -287,7 +287,7 @@ SSE EVENTS
            ├→ react_loop (iteration 1)
            │   LLM decides: call smart_search(query="contract risks")
            │   → SmartSearch: entity extraction → scope detection →
-           │     parallel search (Weaviate + PublicKnowledge) →
+           │     parallel search (Weaviate + TrustGraph) →
            │     merge + dedup + re-rank
            │   Returns: 8 relevant chunks with sources
            │

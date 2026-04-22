@@ -87,8 +87,8 @@ export function DocumentDisplay({
 
   // Get border color based on file type or source type
   const getBorderColor = (doc: DocumentInfo) => {
-    // Legal/public knowledge sources get a special purple/gold border
-    if (doc.source_type === 'public_knowledge' || doc.boe_id || doc.graph_link) {
+    // Legal sources get a special purple/gold border
+    if (doc.boe_id || doc.graph_link) {
       return 'border-l-amber-500'
     }
     const config = getFileTypeConfig(doc.fileType, doc.fileType)
@@ -105,7 +105,7 @@ export function DocumentDisplay({
   // because the LLM may misattribute BOE metadata to tenant documents.
   const isLegalSource = (doc: DocumentInfo) => {
     const st = doc.source_type?.toLowerCase() || ''
-    return st === 'public_knowledge' || st === 'legislation'
+    return st === 'legislation'
   }
 
   return (
