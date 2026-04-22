@@ -389,7 +389,6 @@ class LearnedContextSchema(BaseModel):
     normalized_properties: Dict[str, Any] = {}
     relationships: List[Dict[str, Any]] = []
     semantic_type: Optional[str] = None
-    domain: Optional[str] = None
     folder_pattern_id: Optional[str] = None
     folder_confidence: Optional[float] = None
 
@@ -768,7 +767,6 @@ async def index_from_connector(
             learned_context_dict = request.learned_context.model_dump()
             logger.info(
                 f"🧠 Storing learned context: semantic_type={request.learned_context.semantic_type}, "
-                f"domain={request.learned_context.domain}, "
                 f"folder_semantics={list(request.learned_context.folder_semantics.keys())}"
             )
 
@@ -822,11 +820,6 @@ async def index_from_connector(
             folder_path=folder_path,
             folder_hierarchy=folder_hierarchy,
             connector_id=connector_id,
-            domain=(
-                (request.learned_context.domain if request.learned_context and request.learned_context.domain else None)
-                or result.contextual_domain
-                or ""
-            ),
             semantic_type=(
                 (request.learned_context.semantic_type if request.learned_context and request.learned_context.semantic_type else None)
                 or inferred_semantic_type
@@ -843,7 +836,6 @@ async def index_from_connector(
                 "entities_count": result.knowledge_result.entities_count if result.knowledge_result else 0,
                 "learned_context": learned_context_dict,
                 "semantic_type": (request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
-                "domain": (request.learned_context.domain if request.learned_context else None) or result.contextual_domain,
                 "folder_semantics": request.learned_context.folder_semantics if request.learned_context else {},
                 "property_weights": request.learned_context.property_weights if request.learned_context else {},
             },
@@ -853,7 +845,6 @@ async def index_from_connector(
                     "metadata": {
                         **chunk.metadata,
                         "semantic_type": (request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
-                        "domain": (request.learned_context.domain if request.learned_context else None) or result.contextual_domain,
                         "quality_score": result.analysis.confidence if result.analysis else 0.0,
                         "folder_path": folder_path,
                         "folder_hierarchy": folder_hierarchy,
@@ -912,7 +903,7 @@ async def index_from_connector(
                         document_id=request.document_id,
                         document_text=result.extracted_text,
                         filename=request.filename,
-                        domain=(request.learned_context.domain if request.learned_context else None) or result.contextual_domain or "",
+                        domain="",
                         semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
                     )
                 )
@@ -922,7 +913,7 @@ async def index_from_connector(
                         document_id=request.document_id,
                         document_text=result.extracted_text,
                         filename=request.filename,
-                        domain=(request.learned_context.domain if request.learned_context else None) or result.contextual_domain or "",
+                        domain="",
                         semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
                     )
                 )
@@ -933,7 +924,7 @@ async def index_from_connector(
                         document_id=request.document_id,
                         text_sample=result.extracted_text[:2000] if result.extracted_text else "",
                         semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
-                        domain=(request.learned_context.domain if request.learned_context else None) or result.contextual_domain or "",
+                        domain="",
                     )
                 )
             except Exception as e:
@@ -1262,7 +1253,6 @@ class HybridSearchRequest(BaseModel):
     alpha: float = 0.5
     filters: Optional[Dict[str, Any]] = None
     person_filter: Optional[str] = None
-    domain_filter: Optional[str] = None
     semantic_type_filter: Optional[str] = None
     min_quality: Optional[float] = None
     date_from: Optional[str] = Field(default=None, description="Filter docs created on or after this date (ISO 8601)")
@@ -1289,7 +1279,6 @@ async def hybrid_search(
             filters=request.filters,
             alpha=request.alpha,
             person_filter=request.person_filter,
-            domain_filter=request.domain_filter,
             semantic_type_filter=request.semantic_type_filter,
             min_quality=request.min_quality,
             date_from=request.date_from,

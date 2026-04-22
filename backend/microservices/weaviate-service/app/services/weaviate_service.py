@@ -291,11 +291,6 @@ class WeaviateService:
                     weaviate.classes.config.Property(name="connector_id", data_type=weaviate.classes.config.DataType.TEXT),
                     # Enrichment properties
                     weaviate.classes.config.Property(
-                        name="domain",
-                        data_type=weaviate.classes.config.DataType.TEXT,
-                        skip_vectorization=True,
-                    ),
-                    weaviate.classes.config.Property(
                         name="semantic_type",
                         data_type=weaviate.classes.config.DataType.TEXT,
                         skip_vectorization=True,
@@ -320,7 +315,6 @@ class WeaviateService:
             raise
 
     _ENRICHMENT_PROPERTIES = {
-        "domain": (weaviate.classes.config.DataType.TEXT, True),
         "semantic_type": (weaviate.classes.config.DataType.TEXT, True),
         "quality_score": (weaviate.classes.config.DataType.NUMBER, False),
         "associated_person": (weaviate.classes.config.DataType.TEXT, True),
@@ -395,7 +389,6 @@ class WeaviateService:
                     weaviate.classes.config.Property(name="entity_value", data_type=weaviate.classes.config.DataType.TEXT),
                     weaviate.classes.config.Property(name="entity_label", data_type=weaviate.classes.config.DataType.TEXT),
                     weaviate.classes.config.Property(name="context_text", data_type=weaviate.classes.config.DataType.TEXT),
-                    weaviate.classes.config.Property(name="domain", data_type=weaviate.classes.config.DataType.TEXT),
                     weaviate.classes.config.Property(name="source_document_id", data_type=weaviate.classes.config.DataType.TEXT),
                     weaviate.classes.config.Property(name="confidence", data_type=weaviate.classes.config.DataType.NUMBER),
                     weaviate.classes.config.Property(
@@ -431,7 +424,6 @@ class WeaviateService:
         entity_value: str,
         context_text: str,
         entity_label: Optional[str] = None,
-        domain: Optional[str] = None,
         source_document_id: Optional[str] = None,
         confidence: float = 0.0,
         related_entity_ids: Optional[List[str]] = None,
@@ -454,7 +446,6 @@ class WeaviateService:
                 "entity_value": entity_value,
                 "entity_label": entity_label or entity_value,
                 "context_text": context_text,
-                "domain": domain or "general",
                 "source_document_id": source_document_id or "",
                 "confidence": confidence,
                 "related_entity_ids": related_entity_ids or [],
@@ -483,7 +474,6 @@ class WeaviateService:
         query: str,
         user_roles: List[str],
         entity_types: Optional[List[str]] = None,
-        domain: Optional[str] = None,
         limit: int = 10,
         min_certainty: float = 0.5,
         is_admin: bool = False,
@@ -512,11 +502,6 @@ class WeaviateService:
                 else:
                     filters.append(weaviate.classes.query.Filter.any_of(type_filters))
 
-            if domain:
-                filters.append(
-                    weaviate.classes.query.Filter.by_property("domain").equal(domain)
-                )
-
             if not is_admin:
                 filters.append(_roles_filter(user_roles))
 
@@ -542,7 +527,6 @@ class WeaviateService:
                     "entity_type": obj.properties.get("entity_type"),
                     "entity_value": obj.properties.get("entity_value"),
                     "entity_label": obj.properties.get("entity_label"),
-                    "domain": obj.properties.get("domain"),
                     "source_document_id": obj.properties.get("source_document_id"),
                     "confidence": obj.properties.get("confidence"),
                     "context_text": obj.properties.get("context_text"),
@@ -943,7 +927,6 @@ class WeaviateService:
                 "folder_path": getattr(document, 'folder_path', '') or '',
                 "folder_hierarchy": getattr(document, 'folder_hierarchy', []) or [],
                 "connector_id": getattr(document, 'connector_id', '') or '',
-                "domain": getattr(document, 'domain', '') or '',
                 "semantic_type": getattr(document, 'semantic_type', '') or '',
                 "quality_score": float(getattr(document, 'quality_score', 0.0) or 0.0),
                 "associated_person": getattr(document, 'associated_person', '') or '',
@@ -973,7 +956,6 @@ class WeaviateService:
                         "folder_path": chunk_metadata.get("folder_path") or base_properties["folder_path"],
                         "folder_hierarchy": chunk_metadata.get("folder_hierarchy") or base_properties["folder_hierarchy"],
                         "connector_id": chunk_metadata.get("connector_id") or base_properties["connector_id"],
-                        "domain": chunk_metadata.get("domain", "") or base_properties.get("domain", ""),
                         "semantic_type": chunk_metadata.get("semantic_type", "") or base_properties.get("semantic_type", ""),
                         "quality_score": float(chunk_metadata.get("quality_score", 0.0) or base_properties.get("quality_score", 0.0)),
                         "associated_person": chunk_metadata.get("associated_person", "") or base_properties.get("associated_person", ""),
@@ -1261,12 +1243,6 @@ class WeaviateService:
                 _cfg = None
                 _schema_props = set()
 
-            domain_filter = getattr(search_request, 'domain_filter', None)
-            if domain_filter and "domain" in _schema_props:
-                f = Filter.by_property("domain").equal(domain_filter)
-                combined_filters = f if combined_filters is None else combined_filters & f
-                logger.debug(f"🏷️ Filtering by domain: {domain_filter}")
-
             semantic_type_filter = getattr(search_request, 'semantic_type_filter', None)
             if semantic_type_filter:
                 if "semantic_type" in _schema_props:
@@ -1400,7 +1376,6 @@ class WeaviateService:
             _has_enrichment = any([
                 getattr(search_request, 'semantic_type_filter', None),
                 getattr(search_request, 'person_filter', None),
-                getattr(search_request, 'domain_filter', None),
             ])
             if len(response.objects) == 0 and _has_enrichment:
                 logger.info("🔄 BM25 returned 0 with enrichment filters — retrying with filter-only fetch")
@@ -1448,7 +1423,6 @@ class WeaviateService:
                     connector_id=item.properties.get("connector_id", ""),
                     chunk_index=item.properties.get("chunk_index"),
                     page_number=item.properties.get("page_start"),
-                    domain=item.properties.get("domain", ""),
                     semantic_type=item.properties.get("semantic_type", ""),
                     quality_score=item.properties.get("quality_score"),
                     associated_person=item.properties.get("associated_person", ""),

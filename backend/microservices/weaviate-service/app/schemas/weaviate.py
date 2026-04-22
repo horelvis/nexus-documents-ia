@@ -24,7 +24,6 @@ class DocumentCreate(BaseModel):
     folder_hierarchy: List[str] = Field(default_factory=list, description="Array of folder levels for filtering")
     connector_id: Optional[str] = Field(default="", description="Connector that indexed this document")
     # Enrichment properties for multi-signal retrieval
-    domain: Optional[str] = Field(default="", description="Business domain (e.g., legal, fiscal, medical)")
     semantic_type: Optional[str] = Field(default="", description="Semantic document type (e.g., factura, contrato)")
     quality_score: Optional[float] = Field(default=0.0, description="Quality score 0.0-1.0")
     associated_person: Optional[str] = Field(default="", description="Associated person name")
@@ -87,7 +86,6 @@ class DocumentResponse(BaseModel):
     page_number: Optional[int] = None
     document_id: Optional[str] = None  # parent document UUID
     # Enrichment properties for multi-signal retrieval
-    domain: Optional[str] = None
     semantic_type: Optional[str] = None
     quality_score: Optional[float] = None
     associated_person: Optional[str] = None
@@ -112,7 +110,6 @@ class SearchRequest(BaseModel):
     folder_path: Optional[str] = Field(default=None, description="Filter to exact folder path (e.g., /Contracts/ACME)")
     folder_hierarchy_contains: Optional[str] = Field(default=None, description="Filter to documents in folder or any subfolder")
     # Enrichment filters for multi-signal retrieval
-    domain_filter: Optional[str] = Field(default=None, description="Filter by business domain (e.g., legal, fiscal)")
     semantic_type_filter: Optional[str] = Field(default=None, description="Filter by semantic type (e.g., factura, contrato)")
     person_filter: Optional[str] = Field(default=None, description="Filter by associated person name")
     min_quality: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Minimum quality score threshold")
