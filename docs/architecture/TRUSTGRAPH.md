@@ -60,7 +60,7 @@ Everything is represented with 3 label types and 1 edge type:
 
 | Label | Purpose | Key Properties |
 |-------|---------|----------------|
-| `:Node` | Named entities, documents, folders, concepts | `uri`, `user` (tenant), `collection`, `created_at` |
+| `:Node` | Named entities, documents, folders, concepts | `uri`, `user` (ACL scope property; currently always `EVERYONE` per role-isolation deferral — see ACL_SYSTEM.md), `collection`, `created_at` |
 | `:Literal` | Scalar values (dates, amounts, descriptions) | `value`, `user`, `collection` |
 | `:Rel` | ALL semantic relationships | `uri` (predicate), `user`, `collection`, `extraction_method`, `source_chunk`, `valid_from`, `valid_until` |
 | `:CollectionMetadata` | Lifecycle sentinel per collection | `user`, `collection`, `created_at`, `source_type` |
@@ -160,12 +160,15 @@ Each contradiction becomes a first-class `:Node` (`nouxcube://contradiction/{uui
 
 ## Mini-Ontology
 
-32 predicates seeded via `scripts/seed_ontology.py`, stored in `_ontology` collection, user=`_system`:
+72 predicates seeded via `scripts/seed_ontology.py`, stored in `_ontology` collection, user=`_system`:
 
 | Namespace | Count | Examples |
 |-----------|-------|---------|
-| `core/` | 12 | `label`, `definition`, `type`, `has-topic`, `mentioned-in`, `contained-in`, `part-of`, `instance-of`, `supports`, `contradicts`, `semantic-type`, `domain` |
-| `legal/` | 14 | `empleado-de`, `firmante-de`, `regulado-por`, `vigente-desde`, `tipo-contrato`, `salario-bruto`, `clausula`, `derogado-por` |
+| `core/` | 15 | `label`, `definition`, `type`, `has-topic`, `mentioned-in`, `contained-in`, `part-of`, `instance-of`, `supports`, `contradicts`, `semantic-type`, `domain` (semantic predicate — distinct from deleted `document.domain` field), `same-as`, `supersedes`, `related-to` |
+| `legal/` | 25 | `empleado-de`, `firmante-de`, `representante-de`, `regulado-por`, `vigente-desde`, `tipo-contrato`, `salario-bruto`, `clausula`, `derogado-por`, `references-law`, `parte-de-contrato`, `importe` |
+| `trust/` | 4 | `authority-weight`, `source-reliability`, `temporal-validity`, `consensus-score` |
+| `medical/` | 12 | `diagnosticado-con`, `prescrito-por`, `tratado-en`, `alergia-a`, `medicacion`, `antecedente`, `resultado-de`, `derivado-a` |
+| `documental/` | 10 | `autor-de`, `revisado-por`, `aprobado-por`, `version-de`, `fecha-creacion`, `destinatario-de`, `clasificado-como`, `referencia`, `adjunto-a` |
 | `prov/` | 6 | `derived-from`, `method`, `model`, `timestamp`, `chunk-text`, `chunk-offset` |
 
 ## API Endpoints (knowledge-tree-service, port 8011)
@@ -177,7 +180,7 @@ Each contradiction becomes a first-class `:Node` (`nouxcube://contradiction/{uui
 | `/triples/query` | POST | 8 SPO query patterns |
 | `/triples/context` | POST | Build LLM context from graph triples |
 | `/triples/stats` | GET | Node, literal, rel, and contradiction counts |
-| `/triples/clear` | DELETE | Clear tenant graph |
+| `/triples/clear` | DELETE | Clear graph |
 | `/health` | GET | Health check |
 
 ### Triple Query Patterns
@@ -201,7 +204,7 @@ Additionally, `build_context()` assembles a formatted text block from graph trip
 
 ### weaviate-service (port 8007)
 
-The indexing pipeline (`extraction_service.py`) calls `POST /extract/triples` on KTS after Weaviate indexing completes. The request includes tenant_id, document_id, chunks, and document metadata (title, file_path, semantic_type, domain).
+The indexing pipeline (`extraction_service.py`) calls `POST /extract/triples` on KTS after Weaviate indexing completes. The request includes document_id, chunks, and document metadata (title, file_path, semantic_type, document_type, roles).
 
 ### emma-agent-service (port 8009)
 
@@ -221,25 +224,25 @@ Full graph rebuild script for a tenant:
 ```bash
 # Standard reindex
 docker compose exec knowledge-tree-service \
-    python scripts/reindex_trustgraph.py --tenant-id TENANT_ID
+    python scripts/reindex_trustgraph.py
 
 # Dry run (show what would happen)
 docker compose exec knowledge-tree-service \
-    python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --dry-run
+    python scripts/reindex_trustgraph.py --dry-run
 
 # Single collection only
 docker compose exec knowledge-tree-service \
-    python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --collection legal
+    python scripts/reindex_trustgraph.py --collection legal
 
 # Incremental (skip graph clear)
 docker compose exec knowledge-tree-service \
-    python scripts/reindex_trustgraph.py --tenant-id TENANT_ID --skip-clear
+    python scripts/reindex_trustgraph.py --skip-clear
 ```
 
 **Pipeline**:
 1. Clear existing graph for tenant (unless `--skip-clear`)
 2. Re-create indexes (bootstrap schema)
-3. Seed mini-ontology (32 predicates)
+3. Seed mini-ontology (72 predicates)
 4. Fetch document list from weaviate-service
 5. For each document: get chunks → run 4 extractors in parallel → store triples → provenance → contradictions
 
@@ -247,20 +250,22 @@ docker compose exec knowledge-tree-service \
 - 10-chunk document: ~3 seconds
 - 100 documents: ~5 minutes
 - 1000 documents: ~50 minutes
-- BOE (47 laws, ~500 chunks): ~2.5 minutes
+- BOE corpus (47 laws, ~500 chunks, indexed via TrustGraph extraction same as user docs): ~2.5 minutes
 
 ## Setup After Deployment
 
 ```bash
-# 1. Seed ontology (32 predicates)
+# 1. Seed ontology (72 predicates into FalkorDB)
 docker compose exec knowledge-tree-service python scripts/seed_ontology.py
 
-# 2. Seed Langfuse extraction prompts (4 prompts)
+# 2. Seed OntologyTerms into Weaviate (semantic predicate resolution — Ontology RAG Phase 3a)
+docker compose exec knowledge-tree-service python scripts/seed_ontology_terms.py
+
+# 3. Seed Langfuse extraction prompts (4 prompts)
 docker compose exec knowledge-tree-service python scripts/seed_langfuse_extraction_prompts.py
 
-# 3. Reindex graph for tenant
-docker compose exec knowledge-tree-service \
-    python scripts/reindex_trustgraph.py --tenant-id 00000000-0000-0000-0000-000000000001
+# 4. Reindex graph
+docker compose exec knowledge-tree-service python scripts/reindex_trustgraph.py
 ```
 
 ## Implementation Phases
@@ -275,11 +280,11 @@ Entity embeddings in Weaviate (`TrustGraphEntities`), 7-stage graph_rag pipeline
 
 ### Phase 3a: Clean Graph (COMPLETE)
 
-Entity blacklist (YAML config + coordinator filtering), canonical name resolution (honorific/suffix stripping in URIBuilder), entity dedup script, Ontology RAG (`OntologyTerms` Weaviate collection, semantic predicate resolution in RelationshipsExtractor), expanded ontology (32→72 predicates with trust/medical/documental namespaces), predicate promotion pipeline, 4 new FalkorDB indexes (confidence, extraction_method, merged, has_contradiction).
+Entity blacklist (YAML config + coordinator filtering), canonical name resolution (honorific/suffix stripping in URIBuilder), entity dedup script, Ontology RAG (`OntologyTerms` Weaviate collection, semantic predicate resolution in RelationshipsExtractor — seeded via `seed_ontology_terms.py`), expanded ontology (32→72 predicates: added trust/4, medical/12, documental/10 namespaces; core expanded to 15, legal to 25), predicate promotion pipeline, 4 new FalkorDB indexes (confidence, extraction_method, merged, has_contradiction).
 
 ### Phase 3b: Smart Traversal (COMPLETE)
 
-Authority weight triples (14 document types seeded in `_authority` collection, resolved via Cypher — zero hardcode), consensus scoring (cross-source agreement counts stored as `consensus_count` on `:Rel` edges), multi-hop Cypher templates (5 templates: entity_relations, corporate_chain, org_people, count_by_predicate, applicable_regulations), LLM-guided expansion (Stage 2.5 in graph_rag — planner evaluates subgraph sufficiency), composite 5-signal edge scoring (semantic 0.35 + confidence 0.20 + authority 0.20 + consensus 0.15 + recency 0.10), chain-of-thought path formatting.
+Authority weight triples (14 document types seeded in `_authority` collection, resolved via Cypher — zero hardcode), consensus scoring (cross-source agreement counts stored as `consensus_count` on `:Rel` edges), multi-hop Cypher templates (5 templates: entity_relations, corporate_chain, org_people, count_by_predicate, applicable_regulations), LLM-guided expansion (Stage 2.5 in graph_rag — planner evaluates subgraph sufficiency), composite 5-signal edge scoring (semantic 0.35 + confidence 0.20 + authority 0.20 + consensus 0.15 + recency 0.10) — this is the TrustGraph edge-scoring formula used by `graph_rag`; SmartSearch uses a different 5-signal composite for document ranking (see CLAUDE.md), chain-of-thought path formatting.
 
 ### Phase 3c: Knowledge Expert (COMPLETE)
 
@@ -314,7 +319,8 @@ Authority weight triples (14 document types seeded in `_authority` collection, r
 | `knowledge-tree-service/app/api/triples.py` | REST endpoints: query, stats, context, clear |
 | `knowledge-tree-service/app/api/extract.py` | REST endpoint: trigger extraction |
 | `knowledge-tree-service/app/schemas/triples.py` | 13 Pydantic models |
-| `knowledge-tree-service/scripts/seed_ontology.py` | Seed 32 predicates |
+| `knowledge-tree-service/scripts/seed_ontology.py` | Seed 72 predicates into FalkorDB `_ontology` collection |
+| `knowledge-tree-service/scripts/seed_ontology_terms.py` | Seeds OntologyTerms Weaviate collection with predicate embeddings for semantic predicate resolution (Ontology RAG Phase 3a) |
 | `knowledge-tree-service/scripts/seed_langfuse_extraction_prompts.py` | Seed 4 Langfuse prompts |
 | `knowledge-tree-service/scripts/reindex_trustgraph.py` | Full graph rebuild |
 | `knowledge-tree-service/config/graphs/trustgraph_schema.cypher` | FalkorDB indexes |
