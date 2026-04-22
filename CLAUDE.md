@@ -18,7 +18,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Init database**: `cd backend && python -m scripts.init_db`
 - **Migrations**: `cd backend && alembic upgrade head`
 - **Run tests**: `cd backend/tests && ./run_tests.sh`
-- **Tests (real GCS)**: `cd backend/docker && docker compose -f docker-compose.test.yml up`
+- **Tests (real stores)**: `cd backend/docker && docker compose -f docker-compose.test.yml up`
 - **Stop**: `cd backend/docker && docker compose down`
 
 ### Frontend
@@ -47,7 +47,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Backend**: FastAPI (Python 3.9+), async/await throughout
 - **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
 - **Database**: PostgreSQL 15 + Weaviate (vectors) + FalkorDB (graph) + Elasticsearch (full-text)
-- **Storage**: Google Cloud Storage
+- **Storage**: MinIO (on-premise, bucket `nexus-storage`). Legacy GCS support remains as dormant config.
 - **AI/ML**: vLLM v0.18.0 (single-model: Qwen3.5-9B, dual-phase PLANNER/CHAT) + LangGraph multi-agent orchestration
 
 ### PostgreSQL
@@ -59,14 +59,18 @@ The `db` service uses vanilla `postgres:15`. Knowledge graph operations use **Fa
 | Service | Port | Purpose |
 |---------|------|---------|
 | Main API | 8000 | Core business logic, auth, document management |
-| Emma Agent Service | 8009 | LangGraph multi-agent RAG, Verified Generation |
+| Emma Agent Service | 8019 (→8009 internal) | LangGraph multi-agent RAG, Verified Generation |
 | Weaviate Service | 8007 | Vector search, document indexing (embeddings via intelligence-docs) |
 | Intelligence Docs Service | 8012 | Text extraction (Docling/GLM-OCR), embedding (BGE-M3), entity extraction |
 | Knowledge Tree Service | 8011 | TrustGraph triple store (:Node/:Literal/:Rel), 4 LLM extractors, PROV-O provenance |
-| Elasticsearch Service | 8008 | Full-text search, hybrid search |
 | Background Worker | 8100 | Celery async task processing |
 | Emma Reactive Worker | — | Event listener + trigger engine (Redis Streams consumer) |
+| Storage Service | 8010 (internal only) | MinIO abstraction for document blobs |
+| Document Forge Service | 8013 | PDF/DOCX generation (used by `forge_document` tool) |
+| MinIO | 9000/9001 | S3-compatible object storage, bucket `nexus-storage` |
 | vLLM | internal | GPU inference — Qwen3.5-9B (single-model, dual-phase PLANNER/CHAT) |
+
+Full-text search is planned (an `elasticsearch-service` microservice is scaffolded but not wired into docker-compose).
 
 ### Deployment Mode (On-Premise Only)
 
@@ -83,7 +87,7 @@ Single-tenant, on-premise only. Multi-tenancy and SaaS mode have been fully remo
 
 Sectors were removed (2026-03-31). `ACTIVE_SECTOR` is ignored. All 14 entity patterns are merged into a single unified configuration. `get_active_sector_config()` always returns the same config.
 
-**Key files**: `emma-agent-service/app/agents/langgraph/sectors/config.py` (unified config)
+**Key files**: `emma-agent-service/app/agents/langgraph/sectors/config.py` (unified config — directory name `sectors/` is historical from the pre-2026-03-31 multi-sector architecture; the module itself is now a single merged config)
 
 ### Emma Agent Service (LangGraph)
 
@@ -147,7 +151,7 @@ from app.agents.llm_router import get_llm_router
 from app.agents.llm_client import ModelRole
 
 router = await get_llm_router()
-# Tool calling (fast 4B model)
+# Tool calling (Qwen3.5-9B, temp=0.3, greedy for tool selection)
 response = await router.chat(messages, tools=tools, role=ModelRole.PLANNER)
 # Text generation (quality 9B model)
 response = await router.chat(messages, role=ModelRole.CHAT)
@@ -267,19 +271,19 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 > **Full docs**: [`docs/architecture/PROMPT_MANAGEMENT.md`](docs/architecture/PROMPT_MANAGEMENT.md)
 > **Langfuse Setup**: [`docs/guides/LANGFUSE_SETUP.md`](docs/guides/LANGFUSE_SETUP.md)
 
-Langfuse is the **primary** prompt source (`USE_LANGFUSE_PROMPTS=true` by default). YAML is the fallback.
+Langfuse is the **only** prompt source. Missing prompts raise `PromptNotFoundError` — there is no YAML fallback.
 
 | Component | Description | API Endpoint |
 |-----------|-------------|--------------|
 | **Langfuse** | Prompt versioning, A/B testing, rollback | Web UI: http://localhost:3002 (admin@nouxcube.com / LangfuseAdmin2024!) |
-| **Prompt Registry** | Single source of truth for all 54 prompt names | `prompt_registry.py` |
+| **Prompt Registry** | Single source of truth for all 91 prompt names | `prompt_registry.py` |
 | **Rules** | Dynamic prompt injection by context | `/prompts/rules` |
 | **Guardrails** | Post-LLM validation (PII, keywords) | `/prompts/guardrails` |
 | **Few-Shot** | Semantic example retrieval | `/prompts/few-shot` |
 
-**3-tier fallback**: Langfuse (label=`"production"`) → YAML (`config/prompts/emma_prompts.yaml`) → hardcoded constant
+**Prompt source**: Langfuse is the ONLY source (label=`"production"` by default via `LANGFUSE_PROMPT_LABEL`). Missing prompts raise `PromptNotFoundError` — there is no YAML fallback. The YAML file `config/prompts/emma_prompts.yaml` persists as historical reference only.
 
-**Architecture**: Emma Service (8009) → HTTP Proxy → Main API (8000) → PostgreSQL
+**Architecture**: Emma Service (8019/8009) → HTTP Proxy → Main API (8000) → PostgreSQL
 
 **Seed script** (safe by default):
 ```bash
@@ -299,7 +303,7 @@ docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py -
 **Production label pinning**: All `get_prompt()` calls default to `label="production"` (`LANGFUSE_PROMPT_LABEL`). Admin edits in Langfuse UI become "latest" but NOT "production" until explicitly promoted. This prevents draft/test prompts from accidentally going live.
 
 **Key files**:
-- `emma-agent-service/app/services/prompt_registry.py` — Unified registry (54 entries, both seed + client import from here)
+- `emma-agent-service/app/services/prompt_registry.py` — Unified registry (91 entries, both seed + client import from here)
 - `emma-agent-service/app/services/langfuse_prompt_client.py` — Langfuse client with production label pinning
 - `emma-agent-service/scripts/seed_langfuse_prompts.py` — Safe-by-default seed script
 - `emma-agent-service/app/api/prompts.py` — API endpoints (proxy to Main API)
@@ -336,7 +340,7 @@ Persistent user facts (name, department, preferences) that survive session expir
 
 **Fact categories**: `identity` (name, age), `work` (department, role, company), `preference` (language, style), `interest` (inferred topics)
 
-**API Endpoints** (Emma Agent Service, port 8009):
+**API Endpoints** (Emma Agent Service, external port 8019 → internal 8009):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -515,7 +519,7 @@ Then add `"slack"` to the `notification_channels` array in your triggers to rece
 
 ### LLM Prompts (IMPORTANT)
 - **Langfuse is the primary prompt source** (`USE_LANGFUSE_PROMPTS=true` by default), YAML is the fallback
-- All prompt names are defined in `app/services/prompt_registry.py` (54 entries) — add new prompts there
+- All prompt names are defined in `app/services/prompt_registry.py` (91 entries) — add new prompts there
 - `get_prompt()` defaults to `label="production"` — admin edits in Langfuse UI must be promoted to "production" to take effect
 - Pattern: Langfuse (label=`"production"`) → YAML fallback (`config/prompts/`) → hardcoded constant
 - Never hardcode prompts directly in LLM calls without a Langfuse lookup layer
@@ -527,7 +531,7 @@ Then add `"slack"` to the `notification_channels` array in your triggers to rece
 - Isolated PostgreSQL via Docker Compose
 - Run: `cd backend/tests && ./run_tests.sh`
 - Coverage in `backend/tests/coverage_report/`
-- Test environment uses **real GCS** (credentials at `./credentials`)
+- Test environment uses the same on-premise stack (MinIO, PostgreSQL, Weaviate, FalkorDB)
 
 ### Testing Best Practices (IMPORTANT)
 - **NEVER validate tests based only on server logs** — always verify the complete HTTP response (status code + body)
