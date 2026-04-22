@@ -2,7 +2,7 @@
 
 Emma's User Memory system gives the assistant **persistent recall across chat sessions**. When a user says "Me llamo Carlos, trabajo en Legal", Emma remembers that fact forever (or until the user asks to forget), even after session expiry, browser close, or server restart.
 
-User Memory uses **LangGraph AsyncPostgresStore** as the primary storage backend (shared psycopg3 pool with the checkpointer). Legacy asyncpg + Redis is kept as fallback when Store is unavailable. Facts survive indefinitely and are scoped to `(tenant_id, user_id)`.
+User Memory uses **LangGraph AsyncPostgresStore** as the primary storage backend (shared psycopg3 pool with the checkpointer). Legacy asyncpg + Redis is kept as fallback when Store is unavailable. Facts survive indefinitely and are scoped to `user_id`.
 
 Conversation history (short-term) is handled separately by the **PostgresSaver checkpointer** — thread-scoped, restored automatically on each invocation.
 
@@ -57,7 +57,7 @@ Conversation history (short-term) is handled separately by the **PostgresSaver c
 │                     │ Redis → PG      │──→ return facts             │
 │                     └─────────────────┘                             │
 │                                                                     │
-│  Store namespace: ("user_facts", tenant_id, user_id)                │
+│  Store namespace: ("user_facts", user_id)                           │
 │  Store key: "category/fact_key"                                     │
 │                                                                     │
 │  Facts formatted as:                                                │
@@ -80,7 +80,6 @@ Conversation history (short-term) is handled separately by the **PostgresSaver c
 | Column | Type | Nullable | Default | Description |
 |--------|------|----------|---------|-------------|
 | `id` | UUID | PK | `gen_random_uuid()` | Primary key |
-| `tenant_id` | UUID | NOT NULL | — | Tenant isolation |
 | `user_id` | VARCHAR(255) | NOT NULL | — | KeyCloak user ID |
 | `category` | VARCHAR(50) | NOT NULL | — | `identity`, `work`, `preference`, `interest` |
 | `fact_key` | VARCHAR(100) | NOT NULL | — | e.g. `name`, `department`, `language` |
@@ -96,13 +95,11 @@ Conversation history (short-term) is handled separately by the **PostgresSaver c
 
 | Name | Columns | Type | Description |
 |------|---------|------|-------------|
-| `idx_user_memory_tenant_id` | `tenant_id` | B-tree | Fast tenant lookup |
-| `idx_user_memory_user_id` | `user_id` | B-tree | Fast user lookup |
-| `idx_user_memory_tenant_user` | `tenant_id, user_id` | B-tree | Composite lookup |
-| `idx_user_memory_active` | `tenant_id, user_id, is_active` | B-tree | Active facts filter |
-| `uq_user_memory_active_fact` | `tenant_id, user_id, category, fact_key` | **Partial UNIQUE** (`WHERE is_active = true`) | One active fact per user+category+key |
+| `idx_user_memory_user` | `user_id` | B-tree | Fast user lookup |
+| `idx_user_memory_active` | `user_id, is_active` | B-tree | Active facts filter |
+| `uq_user_memory_active_fact` | `user_id, category, fact_key` | **Partial UNIQUE** (`WHERE is_active = true`) | One active fact per user+category+key |
 
-The partial unique index is the key design choice — it allows soft-deleted duplicates while guaranteeing exactly one active fact per `(tenant, user, category, key)` combination.
+The partial unique index is the key design choice — it allows soft-deleted duplicates while guaranteeing exactly one active fact per `(user, category, key)` combination.
 
 ### Migration
 
@@ -128,12 +125,12 @@ Migration file: `alembic/versions/d4e5f6g7h8i9_add_user_memory_facts.py`
 ## Read Path
 
 1. **State initialization** (`create_initial_react_state` in `state.py`):
-   - If `user_id` is present, calls `UserFactsService.format_facts_for_prompt(tenant_id, user_id)`
+   - If `user_id` is present, calls `UserFactsService.format_facts_for_prompt(user_id)`
    - Result stored in `state["user_memory"]`
 
 2. **Storage lookup** (primary → fallback):
-   - **Primary**: AsyncPostgresStore `asearch()` on namespace `("user_facts", tenant_id, user_id)` — returns all items up to `USER_MEMORY_MAX_FACTS`
-   - **Fallback** (when Store unavailable): Redis cache (key: `emma:facts:{tenant_id}:{user_id}`, TTL: 1h) → PostgreSQL `emma_user_memory_facts` table
+   - **Primary**: AsyncPostgresStore `asearch()` on namespace `("user_facts", user_id)` — returns all items up to `USER_MEMORY_MAX_FACTS`
+   - **Fallback** (when Store unavailable): Redis cache (key: `emma:facts:{user_id}`, TTL: 1h) → PostgreSQL `emma_user_memory_facts` table
 
 3. **Prompt injection** — two points in the LangGraph:
    - **classify_node** (`nodes/classify.py:192`): When intent is `conversational` or `identity`, `user_memory` is appended to the system prompt for personalized greetings
@@ -186,7 +183,7 @@ Migration file: `alembic/versions/d4e5f6g7h8i9_add_user_memory_facts.py`
 
 5. **Save logic**:
    - **Primary (Store)**: `aput()` with key `"category/fact_key"`. Reads existing item first for confidence maximization (`max(old, new)`). Declared source always wins.
-   - **Fallback (PostgreSQL)**: `ON CONFLICT (tenant_id, user_id, category, fact_key) WHERE is_active = true` — UPSERT with `GREATEST()` for confidence, declared source precedence. Redis cache invalidated after write.
+   - **Fallback (PostgreSQL)**: `ON CONFLICT (user_id, category, fact_key) WHERE is_active = true` — UPSERT with `GREATEST()` for confidence, declared source precedence. Redis cache invalidated after write.
 
 6. **Max facts limit**: If user already has `USER_MEMORY_MAX_FACTS` (50) facts, new extractions are silently skipped
 
@@ -222,7 +219,7 @@ START → classify ─── fast-path (conversational/identity) ──→ END
 user_memory = ""
 if user_id:
     facts_service = get_user_facts_service()
-    user_memory = await facts_service.format_facts_for_prompt(tenant_id, user_id)
+    user_memory = await facts_service.format_facts_for_prompt(user_id)
 ```
 
 ### 2. Classify Fast-Path (`classify.py:62-63`)
@@ -253,7 +250,7 @@ All endpoints are on the Emma Agent Service (port 8009), under `/emma/memory/fac
 ### GET `/emma/memory/facts` — List Facts
 
 ```bash
-curl -s "http://localhost:8009/emma/memory/facts?user_id=USER_ID&tenant_id=TENANT_ID" \
+curl -s "http://localhost:8009/emma/memory/facts?user_id=USER_ID" \
   -H "X-API-Key: $API_KEY" | python3 -m json.tool
 ```
 
@@ -277,7 +274,7 @@ Response:
 ### DELETE `/emma/memory/facts` — Clear All (GDPR)
 
 ```bash
-curl -s -X DELETE "http://localhost:8009/emma/memory/facts?user_id=USER_ID&tenant_id=TENANT_ID" \
+curl -s -X DELETE "http://localhost:8009/emma/memory/facts?user_id=USER_ID" \
   -H "X-API-Key: $API_KEY"
 ```
 
@@ -294,11 +291,11 @@ The route uses `{fact_id:path}` because Store keys contain slashes (e.g., `ident
 
 ```bash
 # Store key format (primary):
-curl -s -X DELETE "http://localhost:8009/emma/memory/facts/identity/name?user_id=USER_ID&tenant_id=TENANT_ID" \
+curl -s -X DELETE "http://localhost:8009/emma/memory/facts/identity/name?user_id=USER_ID" \
   -H "X-API-Key: $API_KEY"
 
 # Legacy UUID format (fallback):
-curl -s -X DELETE "http://localhost:8009/emma/memory/facts/a1b2c3d4-...?user_id=USER_ID&tenant_id=TENANT_ID" \
+curl -s -X DELETE "http://localhost:8009/emma/memory/facts/a1b2c3d4-...?user_id=USER_ID" \
   -H "X-API-Key: $API_KEY"
 ```
 
@@ -384,7 +381,6 @@ curl -s -X POST "http://localhost:8009/emma/query" \
   -H "X-API-Key: $API_KEY" \
   -d '{
     "query": "Hola, me llamo Carlos y trabajo en el departamento Legal",
-    "tenant_id": "00000000-0000-0000-0000-000000000001",
     "user_id": "test-user-1"
   }' > /tmp/response.json
 
@@ -394,7 +390,7 @@ python3 -c "import json; r=json.load(open('/tmp/response.json')); print(r['answe
 ### 2. Verify facts were extracted
 
 ```bash
-curl -s "http://localhost:8009/emma/memory/facts?user_id=test-user-1&tenant_id=00000000-0000-0000-0000-000000000001" \
+curl -s "http://localhost:8009/emma/memory/facts?user_id=test-user-1" \
   -H "X-API-Key: $API_KEY" > /tmp/facts.json
 
 python3 -c "import json; facts=json.load(open('/tmp/facts.json')); print(json.dumps(facts, indent=2))"
@@ -410,7 +406,6 @@ curl -s -X POST "http://localhost:8009/emma/query" \
   -H "X-API-Key: $API_KEY" \
   -d '{
     "query": "Hola",
-    "tenant_id": "00000000-0000-0000-0000-000000000001",
     "user_id": "test-user-1"
   }' > /tmp/response2.json
 
@@ -422,7 +417,7 @@ Expected: Response mentions "Carlos" and/or "Legal" proactively.
 ### 4. Test GDPR deletion
 
 ```bash
-curl -s -X DELETE "http://localhost:8009/emma/memory/facts?user_id=test-user-1&tenant_id=00000000-0000-0000-0000-000000000001" \
+curl -s -X DELETE "http://localhost:8009/emma/memory/facts?user_id=test-user-1" \
   -H "X-API-Key: $API_KEY"
 ```
 
