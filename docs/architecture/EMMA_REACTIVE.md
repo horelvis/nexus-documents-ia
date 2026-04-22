@@ -51,7 +51,6 @@ Inter-service event communication. When a document is indexed, a connector syncs
 class EmmaEvent(BaseModel):
     event_id: str          # UUID
     event_type: str        # "document.indexed", "connector.synced", etc.
-    tenant_id: str         # Tenant isolation
     payload: Dict[str, Any]  # Flexible event data
     timestamp: str         # ISO 8601
     source_service: str    # "weaviate-service", "background-worker", etc.
@@ -92,7 +91,6 @@ class EmmaEvent(BaseModel):
 # Publish event manually
 redis-cli XADD emma:events '*' \
   event_type document.indexed \
-  tenant_id 00000000-0000-0000-0000-000000000001 \
   payload '{"doc_id":"123","collection":"contracts"}'
 
 # Check stream
@@ -355,7 +353,6 @@ curl -X POST http://localhost:8009/channels \
   -H "Content-Type: application/json" \
   -H "X-API-Key: $API_KEY" \
   -d '{
-    "tenant_id": "YOUR_TENANT_ID",
     "channel_type": "slack",
     "channel_name": "emma-alerts",
     "config": {
@@ -550,7 +547,6 @@ HeartbeatConfig:
 |------|----------|---------|
 | `emma.heartbeat_check` | Every 30 min | Run heartbeat evaluation |
 | `emma.heartbeat_digest` | 9 AM daily | Generate and send daily digest |
-| `emma.heartbeat_all_tenants` | On-demand | Run heartbeat for all tenants |
 
 ### Database Tables
 
@@ -596,32 +592,32 @@ emma_proactive_insights     — Generated insights
 
 ```bash
 # Check heartbeat status
-curl "http://localhost:8009/emma/heartbeat/status?tenant_id=00000000-0000-0000-0000-000000000001" \
+curl "http://localhost:8009/emma/heartbeat/status" \
   -H "X-API-Key: $API_KEY"
 
 # Run heartbeat manually
-curl -X POST "http://localhost:8009/emma/heartbeat/run?tenant_id=00000000-0000-0000-0000-000000000001" \
+curl -X POST "http://localhost:8009/emma/heartbeat/run" \
   -H "X-API-Key: $API_KEY"
 
 # List generated insights
-curl "http://localhost:8009/emma/heartbeat/insights?tenant_id=00000000-0000-0000-0000-000000000001" \
+curl "http://localhost:8009/emma/heartbeat/insights" \
   -H "X-API-Key: $API_KEY"
 
 # Update configuration
-curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=00000000-0000-0000-0000-000000000001" \
+curl -X PATCH "http://localhost:8009/emma/heartbeat/config" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"priority_threshold": 0.5, "max_insights_per_day": 10}'
 
 # Add custom insight type priority
-curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=00000000-0000-0000-0000-000000000001" \
+curl -X PATCH "http://localhost:8009/emma/heartbeat/config" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"type_priorities": {"invoice_overdue": 0.75}}'
 
 # Test via Celery
 celery -A worker_app.celery_app call emma.heartbeat_check \
-  --args='["00000000-0000-0000-0000-000000000001"]' --queue=emma_reactive
+  --queue=emma_reactive
 ```
 
 ---
@@ -684,7 +680,6 @@ API_KEY=$(grep MICROSERVICES_API_KEY backend/docker/.env | cut -d= -f2)
 
 # 1. Test event bus
 redis-cli XADD emma:events '*' event_type document.indexed \
-  tenant_id 00000000-0000-0000-0000-000000000001 \
   payload '{"doc_id":"123"}'
 
 # 2. Test celery task
@@ -708,11 +703,11 @@ curl -X POST http://localhost:8009/channels \
   -d '{"channel_type":"telegram","channel_name":"Bot","config":{"bot_token":"test"}}'
 
 # 6. Test heartbeat status
-curl "http://localhost:8009/emma/heartbeat/status?tenant_id=00000000-0000-0000-0000-000000000001" \
+curl "http://localhost:8009/emma/heartbeat/status" \
   -H "X-API-Key: $API_KEY"
 
 # 7. Test heartbeat run
-curl -X POST "http://localhost:8009/emma/heartbeat/run?tenant_id=00000000-0000-0000-0000-000000000001" \
+curl -X POST "http://localhost:8009/emma/heartbeat/run" \
   -H "X-API-Key: $API_KEY"
 
 # 8. Test heartbeat via Celery
@@ -768,7 +763,7 @@ The change takes effect within 5 minutes (Langfuse prompt cache TTL).
 By default, unknown types get a priority weight of **0.50**. To customize:
 
 ```bash
-curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=TENANT_ID" \
+curl -X PATCH "http://localhost:8009/emma/heartbeat/config" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -785,7 +780,7 @@ The `type_priorities` dict is **merged** with `DEFAULT_TYPE_PRIORITIES` — exis
 If the tenant has a custom `enabled_insight_types` list, add the new type:
 
 ```bash
-curl -X PATCH "http://localhost:8009/emma/heartbeat/config?tenant_id=TENANT_ID" \
+curl -X PATCH "http://localhost:8009/emma/heartbeat/config" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
