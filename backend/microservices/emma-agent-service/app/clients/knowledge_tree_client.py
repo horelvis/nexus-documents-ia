@@ -81,7 +81,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
         summary: str,
         key_entities: Optional[List[str]] = None,
         key_topics: Optional[List[str]] = None,
-        domain: Optional[str] = None,
         semantic_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Store a document memory in the knowledge graph."""
@@ -90,7 +89,6 @@ class KnowledgeTreeClient(BaseHTTPClient):
             "summary": summary,
             "key_entities": key_entities or [],
             "key_topics": key_topics or [],
-            "domain": domain,
             "semantic_type": semantic_type,
         }
         try:
@@ -102,14 +100,12 @@ class KnowledgeTreeClient(BaseHTTPClient):
     async def recall_memories(
         self,
         query_topics: Optional[List[str]] = None,
-        domain: Optional[str] = None,
         semantic_type: Optional[str] = None,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
         """Recall document memories matching criteria. Used by planner for clue generation."""
         payload = {
             "query_topics": query_topics,
-            "domain": domain,
             "semantic_type": semantic_type,
             "limit": limit,
         }

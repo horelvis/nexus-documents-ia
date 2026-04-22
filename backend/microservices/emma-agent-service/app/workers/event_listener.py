@@ -55,7 +55,6 @@ async def _auto_index_to_falkordb(event: EmmaEvent):
         "file_path": payload.get("file_path", ""),
         "connector_metadata": {
             "title": payload.get("title", ""),
-            "domain": payload.get("domain", ""),
             "semantic_type": payload.get("semantic_type", ""),
         },
         "connector_id": payload.get("connector_id") or None,

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 _MAX_TEXT_CHARS = 8000
 
 async def _get_memory_prompts(
-    filename: str, semantic_type: str, domain: str, text: str, text_len: int
+    filename: str, semantic_type: str, text: str, text_len: int
 ) -> tuple:
     """Load memory generator prompts from Langfuse."""
     from app.services.langfuse_prompt_client import get_langfuse_prompt_client
@@ -36,7 +36,6 @@ async def _get_memory_prompts(
         variables={
             "filename": filename,
             "semantic_type": semantic_type,
-            "domain": domain,
             "text_len": str(text_len),
             "text": text,
         },
@@ -47,7 +46,6 @@ async def _get_memory_prompts(
 async def generate_document_memory(
     document_text: str,
     filename: str = "",
-    domain: str = "",
     semantic_type: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
@@ -56,7 +54,6 @@ async def generate_document_memory(
     Args:
         document_text: Full or partial document text
         filename: Document filename for context
-        domain: Business domain (legal, fiscal, etc.)
         semantic_type: Document type (factura, contrato, etc.)
 
     Returns:
@@ -73,7 +70,6 @@ async def generate_document_memory(
         system_prompt, user_prompt = await _get_memory_prompts(
             filename=filename or "desconocido",
             semantic_type=semantic_type or "desconocido",
-            domain=domain or "general",
             text=text,
             text_len=len(text),
         )
@@ -115,7 +111,6 @@ async def generate_and_store_memory(
     document_id: str,
     document_text: str,
     filename: str = "",
-    domain: str = "",
     semantic_type: str = "",
 ) -> Dict[str, Any]:
     """
@@ -127,7 +122,6 @@ async def generate_and_store_memory(
     memory = await generate_document_memory(
         document_text=document_text,
         filename=filename,
-        domain=domain,
         semantic_type=semantic_type,
     )
 
@@ -143,7 +137,6 @@ async def generate_and_store_memory(
             summary=memory["summary"],
             key_entities=memory["key_entities"],
             key_topics=memory["key_topics"],
-            domain=domain or None,
             semantic_type=semantic_type or None,
         )
 

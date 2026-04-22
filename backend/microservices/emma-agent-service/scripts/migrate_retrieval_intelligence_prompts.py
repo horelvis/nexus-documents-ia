@@ -41,7 +41,6 @@ FILTER_GUIDANCE_BLOCK = """
     - date_from / date_to: Fechas ISO 8601 (ej: "facturas de 2024" → date_from="2024-01-01", date_to="2024-12-31")
     - person_filter: Nombre de persona o empresa (ej: "contratos de ACME" → person_filter="ACME")
     - semantic_type_filter: Tipo de documento (ej: "facturas" → semantic_type_filter="factura")
-    - domain_filter: Dominio (ej: "documentos laborales" → domain_filter="laboral")
 
     Hoy es {current_date}. Para fechas relativas:
     - "último mes" → date_from/date_to del mes anterior completo

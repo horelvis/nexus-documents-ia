@@ -551,7 +551,6 @@ async def _generate_document_memory(
     document_id: str,
     document_text: str,
     filename: str,
-    domain: str,
     semantic_type: str,
 ) -> None:
     """Fire-and-forget call to emma-agent-service to generate a document memory."""
@@ -564,7 +563,6 @@ async def _generate_document_memory(
                     "document_id": document_id,
                     "document_text": document_text[:8000],
                     "filename": filename,
-                    "domain": domain,
                     "semantic_type": semantic_type,
                 },
                 headers={
@@ -584,7 +582,6 @@ async def _memorize_document(
     document_id: str,
     document_text: str,
     filename: str,
-    domain: str,
     semantic_type: str,
 ) -> None:
     """Fire-and-forget call to emma-agent-service MemoRAG memorize endpoint."""
@@ -597,7 +594,6 @@ async def _memorize_document(
                     "document_id": document_id,
                     "document_text": document_text[:8000],
                     "filename": filename,
-                    "domain": domain,
                     "semantic_type": semantic_type,
                 },
                 headers={
@@ -903,7 +899,6 @@ async def index_from_connector(
                         document_id=request.document_id,
                         document_text=result.extracted_text,
                         filename=request.filename,
-                        domain="",
                         semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
                     )
                 )
@@ -913,7 +908,6 @@ async def index_from_connector(
                         document_id=request.document_id,
                         document_text=result.extracted_text,
                         filename=request.filename,
-                        domain="",
                         semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
                     )
                 )
@@ -924,7 +918,6 @@ async def index_from_connector(
                         document_id=request.document_id,
                         text_sample=result.extracted_text[:2000] if result.extracted_text else "",
                         semantic_type=(request.learned_context.semantic_type if request.learned_context else None) or inferred_semantic_type or "",
-                        domain="",
                     )
                 )
             except Exception as e:

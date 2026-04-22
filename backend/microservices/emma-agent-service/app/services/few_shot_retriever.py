@@ -19,7 +19,6 @@ class FewShotExample:
     question: str
     answer: str
     category: Optional[str] = None
-    domain: Optional[str] = None
     tags: Optional[List[str]] = None
     quality_score: float = 1.0
     similarity_score: float = 0.0

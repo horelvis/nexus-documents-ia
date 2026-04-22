@@ -173,7 +173,6 @@ class EmmaQueryResponse(BaseModel):
     """Response from Emma."""
     success: bool
     answer: str = ""
-    domain: str = "general"
     tools_called: List[str] = Field(default_factory=list)
     iterations: int = 0
     sil_answered: bool = False
@@ -191,7 +190,6 @@ class EmmaQueryResponse(BaseModel):
             "example": {
                 "success": True,
                 "answer": "Tienes 5 contratos laborales.",
-                "domain": "labor",
                 "tools_called": [],
                 "iterations": 0,
                 "sil_answered": True,
@@ -360,7 +358,6 @@ async def emma_query(
         return EmmaQueryResponse(
             success=langgraph_result.success,
             answer=langgraph_result.answer,
-            domain="general",  # LangGraph handles domains internally
             tools_called=langgraph_result.agents_used,
             iterations=len(langgraph_result.agents_used),
             sil_answered=langgraph_result.fast_path,
@@ -1439,7 +1436,6 @@ class GenerateMemoryRequest(BaseModel):
     document_id: str
     document_text: str = Field(..., description="Full or partial document text")
     filename: str = Field("", description="Document filename")
-    domain: str = Field("", description="Business domain")
     semantic_type: str = Field("", description="Document type")
 
 
@@ -1463,7 +1459,6 @@ async def generate_document_memory(
         document_id=request.document_id,
         document_text=request.document_text,
         filename=request.filename,
-        domain=request.domain,
         semantic_type=request.semantic_type,
     )
     return result
@@ -1477,7 +1472,6 @@ class MemorizeRequest(BaseModel):
     document_id: str
     document_text: str = Field("", description="Full or partial document text")
     filename: str = Field("", description="Document filename")
-    domain: str = Field("", description="Business domain")
     semantic_type: str = Field("", description="Document type")
 
 

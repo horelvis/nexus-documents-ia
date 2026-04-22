@@ -82,7 +82,6 @@ async def get_explainability_graph():
             "type": frontend_type,
             "label": kts_node.get("label", ""),
             "properties": {
-                "domain": kts_node.get("domain", ""),
                 "semantic_type": kts_node.get("semantic_type", ""),
                 "folder_type": kts_node.get("folder_type", ""),
                 "doc_count": kts_node.get("doc_count", 0),

@@ -50,7 +50,6 @@ class PromptRuleConditions(BaseModel):
     document_type: Optional[str] = Field(None, description="Match specific document type")
     action: Optional[str] = Field(None, description="Match action intent (analyze, generate, retrieve)")
     sector: Optional[str] = Field(None, description="Match active sector (legal, medical, documental)")
-    domain: Optional[str] = Field(None, description="Match detected domain (labor, fiscal, etc.)")
     has_docs: Optional[bool] = Field(None, description="Match based on retrieved documents presence")
     user_role: Optional[str] = Field(None, description="Match user role (admin, user)")
     locale: Optional[str] = Field(None, description="Match locale (es, en)")
@@ -129,7 +128,6 @@ class RuleEvaluationRequest(BaseModel):
     document_type: Optional[str] = None
     action: Optional[str] = None
     sector: Optional[str] = None
-    domain: Optional[str] = None
     has_docs: Optional[bool] = None
     user_role: Optional[str] = None
     locale: Optional[str] = None

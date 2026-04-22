@@ -155,7 +155,6 @@ class WeaviateClient(BaseHTTPClient):
         alpha: float = 0.5,
         filters: Optional[dict[str, Any]] = None,
         person_filter: Optional[str] = None,
-        domain_filter: Optional[str] = None,
         semantic_type_filter: Optional[str] = None,
         min_quality: Optional[float] = None,
         folder_filter: Optional[str] = None,
@@ -173,7 +172,6 @@ class WeaviateClient(BaseHTTPClient):
             alpha: Balance between vector (1.0) and keyword (0.0)
             filters: Optional metadata filters
             person_filter: Filter by associated person name
-            domain_filter: Filter by business domain
             semantic_type_filter: Filter by semantic document type
             min_quality: Minimum quality score threshold
             folder_filter: Filter by folder path
@@ -190,8 +188,6 @@ class WeaviateClient(BaseHTTPClient):
             payload["filters"] = filters
         if person_filter:
             payload["person_filter"] = person_filter
-        if domain_filter:
-            payload["domain_filter"] = domain_filter
         if semantic_type_filter:
             payload["semantic_type_filter"] = semantic_type_filter
         if min_quality is not None:
@@ -223,7 +219,6 @@ class WeaviateClient(BaseHTTPClient):
                         "title": item.get("title", ""),
                         "document_type": item.get("document_type", ""),
                         "folder_path": item.get("folder_path", ""),
-                        "domain": item.get("domain", ""),
                         "semantic_type": item.get("semantic_type", ""),
                         "quality_score": item.get("quality_score"),
                         "associated_person": item.get("associated_person", ""),

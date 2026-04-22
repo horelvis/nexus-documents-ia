@@ -31,7 +31,6 @@ class MemoRAGService:
         user_roles: Optional[List[str]] = None,
         user_id: Optional[str] = None,
         limit: int = 20,
-        domain: Optional[str] = None,
         semantic_type: Optional[str] = None,
     ) -> List[RecallItem]:
         """Recall relevant document chunks via Weaviate hybrid search."""
@@ -45,7 +44,6 @@ class MemoRAGService:
                 user_id=user_id,
                 limit=limit,
                 alpha=0.5,
-                domain_filter=domain,
                 semantic_type_filter=semantic_type,
             )
 
@@ -67,7 +65,6 @@ class MemoRAGService:
         document_id: str,
         document_text: str,
         filename: str = "",
-        domain: str = "",
         semantic_type: str = "",
     ) -> Dict[str, Any]:
         """No-op: documents are already indexed in Weaviate by the indexing pipeline."""

@@ -572,7 +572,6 @@ def trace_emma_query(
     query: str,
     user_id: Optional[str] = None,
     thread_id: Optional[str] = None,
-    domain: Optional[str] = None,
 ):
     """
     Create a trace for an Emma v2 query.
@@ -584,11 +583,10 @@ def trace_emma_query(
         session_id=thread_id,
         user_id=user_id,
         metadata={
-            "domain": domain,
             "version": "2.0",
         },
         input={"query": query},
-        tags=["emma-v2", f"domain:{domain or 'general'}"],
+        tags=["emma-v2"],
     )
 
 

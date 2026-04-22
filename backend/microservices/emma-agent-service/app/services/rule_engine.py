@@ -38,7 +38,6 @@ class RuleContext:
     document_type: Optional[str] = None
     action: Optional[str] = None
     sector: Optional[str] = None
-    domain: Optional[str] = None
     has_docs: Optional[bool] = None
     user_role: Optional[str] = None
     locale: Optional[str] = None
@@ -63,7 +62,6 @@ class RuleContext:
             document_type=doc_type,
             action=metadata.get("action_intent"),
             sector=sector,
-            domain=metadata.get("domain") or (state.get("detected_domains", []) or [None])[0],
             has_docs=bool(retrieved_docs),
             user_role=metadata.get("user_role"),
             locale=metadata.get("locale", "es"),

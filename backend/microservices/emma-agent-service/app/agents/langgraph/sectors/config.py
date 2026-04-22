@@ -1,11 +1,11 @@
 """
 Unified RAG Configuration
 
-Single configuration for all domains. The knowledge graph provides
-dynamic context per query — static sector configs are no longer needed.
+Unified entity-pattern configuration.
 
-Entity patterns from all domains (legal, medical, documental) are merged
-into a single dict so any query benefits from comprehensive extraction.
+Entity patterns from all prior sector configs (legal, medical,
+documental) are merged into this single config. Per-query context is
+provided dynamically by the knowledge graph.
 """
 
 from __future__ import annotations
@@ -93,7 +93,7 @@ UNIFIED_RERANK_WEIGHTS: Dict[str, float] = {
 
 # ── All graph search properties (union of all domains) ──────────────
 UNIFIED_GRAPH_SEARCH_PROPERTIES: List[str] = [
-    "name", "title", "short_name", "boe_id", "domain",
+    "name", "title", "short_name", "boe_id",
     "code", "associated_person",
 ]
 

@@ -187,10 +187,6 @@ class SmartSearchInput(BaseModel):
         "NO uses este campo para temas, conceptos, o tipos de documento. "
         "Solo para nombres propios de personas físicas.",
     )
-    domain_filter: Optional[str] = Field(
-        default=None,
-        description="Filtrar por dominio: legal, fiscal, laboral, medical, etc.",
-    )
     folder_filter: Optional[str] = Field(
         default=None,
         description="Filtrar por ruta de carpeta (ej: /Contratos/ACME).",
@@ -236,7 +232,6 @@ class SmartSearchTool(EmmaTool):
 
         query = arguments["query"]
         person_filter = arguments.get("person_filter")
-        domain_filter = arguments.get("domain_filter")
         folder_filter = arguments.get("folder_filter")
         date_from = arguments.get("date_from")
         date_to = arguments.get("date_to")
@@ -261,7 +256,6 @@ class SmartSearchTool(EmmaTool):
         # ── Step 3: Filter enrichment from entities ──
         enriched_person = person_filter
         enriched_semantic_type = None
-        enriched_domain = domain_filter
 
         if not enriched_person and "persona" in entities:
             candidate = _sanitize_person_filter(entities["persona"][0])
@@ -308,7 +302,6 @@ class SmartSearchTool(EmmaTool):
                     return await self._search_documents(
                         decompose_client, user_roles, user_id, sq["query"], limit, decompose_alpha,
                         person_filter=enriched_person,
-                        domain_filter=enriched_domain,
                         semantic_type_filter=enriched_semantic_type,
                         date_from=date_from, date_to=date_to,
                     )
@@ -366,7 +359,6 @@ class SmartSearchTool(EmmaTool):
                 expanded_query=expanded_query,
                 alpha=alpha,
                 enriched_person=enriched_person,
-                enriched_domain=enriched_domain,
                 enriched_semantic_type=enriched_semantic_type,
                 folder_filter=folder_filter,
                 date_from=date_from,
@@ -378,7 +370,6 @@ class SmartSearchTool(EmmaTool):
             search_tasks.append(self._search_documents(
                 client, user_roles, user_id, expanded_query, limit, alpha,
                 person_filter=enriched_person,
-                domain_filter=enriched_domain,
                 semantic_type_filter=enriched_semantic_type,
                 folder_filter=folder_filter,
                 date_from=date_from,
@@ -623,7 +614,6 @@ class SmartSearchTool(EmmaTool):
         expanded_query: str,
         alpha: float,
         enriched_person: Optional[str],
-        enriched_domain: Optional[str],
         enriched_semantic_type: Optional[str],
         folder_filter: Optional[str],
         date_from: Optional[str],
@@ -650,7 +640,6 @@ class SmartSearchTool(EmmaTool):
                     limit=per_concept_limit,
                     alpha=alpha,
                     person_filter=enriched_person,
-                    domain_filter=enriched_domain,
                     semantic_type_filter=enriched_semantic_type,
                     folder_filter=folder_filter,
                     date_from=date_from,
@@ -701,7 +690,6 @@ class SmartSearchTool(EmmaTool):
                     "score": r.score,
                     "type": "tenant_document",
                     "quality_score": r.metadata.get("quality_score", 0.0),
-                    "domain": r.metadata.get("domain", ""),
                     "semantic_type": r.metadata.get("semantic_type", ""),
                     "associated_person": r.metadata.get("associated_person", ""),
                     "created_at": r.metadata.get("created_at", ""),
@@ -741,7 +729,6 @@ class SmartSearchTool(EmmaTool):
         limit: int,
         alpha: float,
         person_filter: Optional[str] = None,
-        domain_filter: Optional[str] = None,
         semantic_type_filter: Optional[str] = None,
         folder_filter: Optional[str] = None,
         date_from: Optional[str] = None,
@@ -751,20 +738,20 @@ class SmartSearchTool(EmmaTool):
         """Search tenant documents via Weaviate hybrid search.
 
         Implements enrichment-filter fallback: if enrichment filters
-        (semantic_type, domain, person) yield 0 results, retries without
+        (semantic_type, person) yield 0 results, retries without
         them so that un-enriched collections still return useful data.
 
         dropped_filters: mutable list — names of filters that had to be
-        dropped during progressive fallback (e.g. ["person", "domain"]).
+        dropped during progressive fallback (e.g. ["person"]).
         """
         if dropped_filters is None:
             dropped_filters = []
-        has_enrichment = bool(person_filter or domain_filter or semantic_type_filter)
+        has_enrichment = bool(person_filter or semantic_type_filter)
 
         if has_enrichment:
             filters_desc = ", ".join(
                 f"{k}={v}" for k, v in [
-                    ("person", person_filter), ("domain", domain_filter),
+                    ("person", person_filter),
                     ("semantic_type", semantic_type_filter),
                 ] if v
             )
@@ -778,7 +765,6 @@ class SmartSearchTool(EmmaTool):
                 limit=limit,
                 alpha=alpha,
                 person_filter=person_filter,
-                domain_filter=domain_filter,
                 semantic_type_filter=semantic_type_filter,
                 folder_filter=folder_filter,
                 date_from=date_from,
@@ -789,7 +775,7 @@ class SmartSearchTool(EmmaTool):
                 logger.info(f"✅ Enrichment search returned {len(results)} results")
 
             # Progressive fallback: drop filters one by one (least reliable first)
-            # Priority order to drop: person → domain → semantic_type
+            # Priority order to drop: person → semantic_type
             if not results and has_enrichment:
                 # Attempt 1: Drop person_filter (often empty in Weaviate)
                 if person_filter:
@@ -801,7 +787,6 @@ class SmartSearchTool(EmmaTool):
                         user_id=user_id,
                         limit=limit,
                         alpha=alpha,
-                        domain_filter=domain_filter,
                         semantic_type_filter=semantic_type_filter,
                         folder_filter=folder_filter,
                         date_from=date_from,
@@ -810,25 +795,7 @@ class SmartSearchTool(EmmaTool):
                     if results:
                         logger.info(f"✅ Without person filter: {len(results)} results")
 
-                # Attempt 2: Also drop domain_filter
-                if not results and domain_filter:
-                    logger.info(f"🔄 0 results with domain={domain_filter} — retrying with semantic_type only")
-                    dropped_filters.append(f"domain={domain_filter}")
-                    results = await client.hybrid_search(
-                        query=query,
-                        user_roles=user_roles,
-                        user_id=user_id,
-                        limit=limit,
-                        alpha=alpha,
-                        semantic_type_filter=semantic_type_filter,
-                        folder_filter=folder_filter,
-                        date_from=date_from,
-                        date_to=date_to,
-                    )
-                    if results:
-                        logger.info(f"✅ With semantic_type only: {len(results)} results")
-
-                # Attempt 3: Drop all enrichment filters
+                # Attempt 2: Drop all enrichment filters
                 if not results:
                     logger.info("🔄 All enrichment filters returned 0 — retrying without any filters")
                     results = await client.hybrid_search(
@@ -850,7 +817,6 @@ class SmartSearchTool(EmmaTool):
                     "score": r.score,
                     "type": "tenant_document",
                     "quality_score": r.metadata.get("quality_score", 0.0),
-                    "domain": r.metadata.get("domain", ""),
                     "semantic_type": r.metadata.get("semantic_type", ""),
                     "associated_person": r.metadata.get("associated_person", ""),
                     "created_at": r.metadata.get("created_at", ""),
@@ -1204,7 +1170,6 @@ def _rerank_results(
             match_fields = [
                 str(result.get("title", "")),
                 str(result.get("associated_person", "")),
-                str(result.get("domain", "")),
                 str(result.get("semantic_type", "")),
                 str(result.get("folder_path", "")),
                 str(result.get("content", "")),
