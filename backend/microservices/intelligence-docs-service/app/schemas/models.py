@@ -64,7 +64,6 @@ class ClassifyRequest(BaseModel):
 class ClassifyResponse(BaseModel):
     document_type: str
     confidence: float
-    domain: str = ""
     provider: str = ""
 
 

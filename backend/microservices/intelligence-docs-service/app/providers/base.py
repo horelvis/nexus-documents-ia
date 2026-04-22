@@ -26,7 +26,6 @@ class Entity:
 class ClassificationResult:
     document_type: str
     confidence: float
-    domain: str = ""
     provider: str = ""
 
 

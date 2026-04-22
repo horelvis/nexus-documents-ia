@@ -281,7 +281,6 @@ async def classify(request: ClassifyRequest):
     return ClassifyResponse(
         document_type=result.document_type,
         confidence=result.confidence,
-        domain=result.domain,
         provider=result.provider,
     )
 
