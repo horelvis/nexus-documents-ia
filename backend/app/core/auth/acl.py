@@ -24,7 +24,7 @@ from sqlalchemy import or_
 from sqlalchemy.sql.elements import BooleanClauseList
 
 from app.core.auth.base import UserProfile
-from app.api.dependencies import get_current_user
+from app.api.async_dependencies import get_current_user_async
 
 EVERYONE_ROLE = "EVERYONE"
 
@@ -91,7 +91,7 @@ def require_role(*allowed_roles: str):
             "Use Depends(get_current_user) for endpoints open to any authenticated user."
         )
 
-    def _dependency(user: UserProfile = Depends(get_current_user)) -> UserProfile:
+    async def _dependency(user: UserProfile = Depends(get_current_user_async)) -> UserProfile:
         if not any(role in user.roles for role in allowed_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
