@@ -486,7 +486,17 @@ class KnowledgeExtractionService:
                     )
 
             except Exception as e:
-                logger.warning(f"⚠️ Failed to trigger TrustGraph extraction: {e}")
+                # Pipeline-critical path: KTS /extract/triples failure leaves
+                # FalkorDB empty even though Weaviate indexing succeeded. We
+                # lived this bug on 2026-04-23 (FalkorDB had 0 nodes for
+                # hours while the sync reported 'indexed'). Elevate to ERROR
+                # so it surfaces in production log aggregators, include
+                # document_id for triage.
+                logger.error(
+                    "❌ TrustGraph extraction failed for document %s "
+                    "(Weaviate stored but graph will be incomplete): %s",
+                    document_id, e,
+                )
 
         logger.info(f"📦 Stored {len(entity_map)} entities in Weaviate")
         return entity_map
@@ -535,7 +545,18 @@ class KnowledgeExtractionService:
             return stored
 
         except Exception as e:
-            logger.warning(f"⚠️ Failed to store relationships in knowledge-tree: {e}")
+            # TODO(legacy-kts-endpoint): knowledge_tree_legal_client.store_entities
+            # POSTs /tree/entities/store which returns 404 in the current KTS
+            # (removed alongside the Phase-3 refactor). Every call through this
+            # path silently drops relationships. Either wire to a live endpoint
+            # or drop this whole method once callers migrate to
+            # /extract/triples. Until then, elevate to ERROR so the failure
+            # is visible in logs instead of hidden by WARNING.
+            logger.error(
+                "❌ Failed to store relationships for document %s via legacy "
+                "KTS endpoint (likely 404 — endpoint removed): %s",
+                document_id, e,
+            )
             return 0
 
     async def delete_document_knowledge(

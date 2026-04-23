@@ -232,8 +232,12 @@ class ExtractionCoordinator:
                 collection=collection,
             )
         except Exception as exc:
+            # Pipeline-critical: no :Chunk node means source_evidence can't
+            # link triples to chunks in evidence_graph. Errors[] already
+            # propagates to the API response; elevate log level so prod
+            # monitoring catches repeated failures.
             errors.append(f"merge_chunk: {exc}")
-            logger.warning("Chunk node MERGE failed: %s", exc)
+            logger.error("Chunk node MERGE failed for document %s: %s", document_id, exc)
 
         # ── Build batch triples ──────────────────────────────────────────
         batch_triples: List[Dict[str, Any]] = []
@@ -304,8 +308,13 @@ class ExtractionCoordinator:
                 batch_triples, user=user, collection=collection
             )
         except Exception as exc:
+            # Pipeline-critical: batch_store failure means NO triples are
+            # persisted for this chunk. This was the class of bug that
+            # surfaced on 2026-04-23 (FalkorDBClient missing methods).
+            # errors[] is already returned to the API; log at ERROR so the
+            # failure stops blending in with routine warnings.
             errors.append(f"batch_store: {exc}")
-            logger.warning("Batch store failed: %s", exc)
+            logger.error("Batch store failed for document %s: %s", document_id, exc)
 
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
 

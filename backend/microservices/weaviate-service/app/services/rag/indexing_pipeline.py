@@ -858,13 +858,32 @@ class IndexingPipeline:
 
                 knowledge_time = (time.time() - knowledge_start) * 1000
 
-                logger.info(
-                    f"[{document_id}] Extracted {knowledge_result.entities_count} entities, "
-                    f"{knowledge_result.relationships_count} relationships"
-                )
+                # Surface soft failures. extract_from_document catches
+                # internal exceptions and returns a result with success=False
+                # + errors populated — without this check, downstream sees
+                # "0 entities, 0 relationships" as if knowledge extraction
+                # chose to emit nothing. Logged at ERROR (not warning) so
+                # prod monitoring distinguishes a real extraction break
+                # from a successful doc with no extractable entities.
+                if knowledge_result and not getattr(knowledge_result, "success", True):
+                    err_msg = "; ".join(getattr(knowledge_result, "errors", []) or [])
+                    logger.error(
+                        f"[{document_id}] Knowledge extraction returned success=False: {err_msg}"
+                    )
+                    warnings.append(f"Knowledge extraction failed: {err_msg}")
+                else:
+                    logger.info(
+                        f"[{document_id}] Extracted {knowledge_result.entities_count} entities, "
+                        f"{knowledge_result.relationships_count} relationships"
+                    )
 
             except Exception as e:
-                logger.warning(f"[{document_id}] Knowledge extraction failed (non-blocking): {e}")
+                # Hard exception (extract_from_document itself raised).
+                # Remains classified as non-blocking at the pipeline level
+                # — the document is still in Weaviate — but the log level
+                # is ERROR so aggregators catch repeated outages instead
+                # of treating knowledge extraction failures as routine.
+                logger.error(f"[{document_id}] Knowledge extraction exception (non-blocking): {e}")
                 warnings.append(f"Knowledge extraction failed: {e}")
                 knowledge_time = (time.time() - knowledge_start) * 1000
 
