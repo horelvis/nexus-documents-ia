@@ -443,6 +443,25 @@ class ExtractionCoordinator:
             else:
                 total_consensus += result
 
+        # Step 3d: Person entity resolution — merge duplicate person :Nodes
+        # emitted under slightly different labels by the 4 extractors. Runs
+        # per-document over the full collection scope so cross-document
+        # duplicates collapse as soon as a later doc adds a clearer label
+        # variant of an existing person. Idempotent: re-running when nothing
+        # is duplicated returns zero-cost.
+        resolver_summary = {}
+        try:
+            from app.services.entity_resolver import EntityResolver
+
+            resolver = EntityResolver(self._store._client)
+            resolver_summary = await resolver.resolve_persons(
+                user=user,
+                collection=collection,
+            )
+        except Exception as exc:
+            errors.append(f"entity_resolution: {exc}")
+            logger.warning("Person entity resolution failed: %s", exc)
+
         # Step 4: Log extraction summary
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
         total_parse_failures = sum(
@@ -467,7 +486,7 @@ class ExtractionCoordinator:
         logger.info(
             "Document %s extraction complete: %d triples, %d parse_failures, "
             "%d empty_responses, %d validation_failures, %d contradictions, "
-            "%d consensus_predicates, %dms",
+            "%d consensus_predicates, person_clusters_merged=%d nodes_removed=%d, %dms",
             document_id,
             total_triples,
             total_parse_failures,
@@ -475,6 +494,8 @@ class ExtractionCoordinator:
             total_validation,
             contradictions_found,
             total_consensus,
+            resolver_summary.get("clusters_merged", 0),
+            resolver_summary.get("nodes_removed", 0),
             elapsed_ms,
         )
 
