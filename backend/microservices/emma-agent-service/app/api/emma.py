@@ -153,8 +153,6 @@ class EmmaQuery(BaseModel):
     thread_id: Optional[str] = Field(None, description="Conversation thread ID for history")
     session_id: Optional[str] = Field(None, description="Session ID (alias for thread_id)")
     context: Optional[Dict[str, Any]] = Field(None, description="Additional context (document_id, indexed_document_ids, attachments)")
-    enable_sil: bool = Field(True, description="Enable SIL fast path for structural queries")
-    enable_domain_routing: bool = Field(True, description="Enable domain-specific prompts")
     enable_streaming: bool = Field(False, description="Enable streaming (use /stream endpoint instead)")
     deep_reasoning: Optional[bool] = Field(default=None, description="Enable deep reasoning / thinking mode. None=use global default, True=force thinking, False=disable thinking")
 
@@ -164,7 +162,6 @@ class EmmaQuery(BaseModel):
                 "query": "¿Cuántos contratos laborales tengo?",
                 "user_id": "user-456",
                 "thread_id": "thread-789",
-                "enable_sil": True,
             }
         }
 
@@ -175,8 +172,6 @@ class EmmaQueryResponse(BaseModel):
     answer: str = ""
     tools_called: List[str] = Field(default_factory=list)
     iterations: int = 0
-    sil_answered: bool = False
-    tokens_saved: int = 0
     latency_ms: float = 0.0
     thread_id: str = ""
     metadata: Dict[str, Any] = Field(default_factory=dict)
@@ -192,8 +187,6 @@ class EmmaQueryResponse(BaseModel):
                 "answer": "Tienes 5 contratos laborales.",
                 "tools_called": [],
                 "iterations": 0,
-                "sil_answered": True,
-                "tokens_saved": 2500,
                 "latency_ms": 45.2,
                 "thread_id": "thread-789",
                 "sources": [
@@ -212,7 +205,6 @@ class HealthResponse(BaseModel):
     status: str
     version: str = "2.0"
     llm_connected: bool
-    sil_enabled: bool
     features: Dict[str, Any]
     orchestration: Optional[str] = None
 
@@ -360,8 +352,6 @@ async def emma_query(
             answer=langgraph_result.answer,
             tools_called=langgraph_result.agents_used,
             iterations=len(langgraph_result.agents_used),
-            sil_answered=langgraph_result.fast_path,
-            tokens_saved=0,
             latency_ms=langgraph_result.latency_ms,
             thread_id=langgraph_result.thread_id,
             metadata={
@@ -971,10 +961,8 @@ async def health_check():
             status="healthy" if llm_connected else "degraded",
             version="2.0",
             llm_connected=llm_connected,
-            sil_enabled=False,
             orchestration="LangGraph",
             features={
-                "sil_fast_path": False,
                 "emma_enabled": is_emma_enabled(),
                 "langgraph_enabled": True,
                 "user_memory_enabled": settings.user_memory_enabled,
@@ -988,7 +976,6 @@ async def health_check():
             status="unhealthy",
             version="2.0",
             llm_connected=False,
-            sil_enabled=False,
             features={"error": str(e)},
         )
 

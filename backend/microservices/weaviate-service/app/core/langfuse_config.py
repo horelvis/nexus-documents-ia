@@ -7,16 +7,13 @@ Features:
 - Trace: Full request lifecycle tracking with nested spans
 - Session: Multi-turn conversation grouping
 - Generation: LLM call details (model, tokens, latency)
-- Score: Custom metrics (tokens_saved, sil_fast_path, iterations)
+- Score: Custom metrics (iterations, latency_ms, tools_count)
 
 Architecture:
     ┌─────────────────────────────────────────────────────────────────────────┐
     │  POST /emma/v2/query                                                     │
     │  └── Root Trace (trace_id, session_id=thread_id)                        │
-    │      ├── metadata: user_id, domain                                       │
-    │      │                                                                   │
-    │      ├── [SIL Fast Path] (span: "sil.process_query")                    │
-    │      │   └── Cypher execution, tokens_saved                             │
+    │      ├── metadata: user_id                                               │
     │      │                                                                   │
     │      ├── [Agentic Loop] (span: "emma.agentic_loop")                     │
     │      │   ├── Generation: llm.chat (model, tokens, latency)              │
@@ -26,9 +23,9 @@ Architecture:
     │      │       └── span: "tool.analyze"                                   │
     │      │                                                                   │
     │      └── Scores                                                         │
-    │          ├── tokens_saved: int                                          │
-    │          ├── sil_answered: bool                                         │
-    │          └── iterations: int                                            │
+    │          ├── iterations: int                                            │
+    │          ├── latency_ms: float                                          │
+    │          └── tools_count: int                                           │
     └─────────────────────────────────────────────────────────────────────────┘
 
 Usage:
@@ -221,10 +218,10 @@ class LangfuseContext:
         """
         Add a score to the current trace.
 
-        Use this for custom metrics like tokens_saved, sil_fast_path, etc.
+        Use this for custom metrics like iterations, tools_count, etc.
 
         Args:
-            name: Score name (e.g., "tokens_saved", "sil_answered")
+            name: Score name (e.g., "iterations", "latency_ms")
             value: Score value (numeric or boolean)
             comment: Optional comment explaining the score
             data_type: "NUMERIC" or "BOOLEAN" (auto-detected if not specified)
@@ -592,22 +589,3 @@ def trace_emma_query(
     )
 
 
-def score_emma_result(
-    tokens_saved: int = 0,
-    sil_answered: bool = False,
-    iterations: int = 0,
-    tools_called: Optional[List[str]] = None,
-    latency_ms: float = 0.0,
-) -> None:
-    """
-    Score an Emma v2 result with standard metrics.
-
-    Call this at the end of query execution.
-    """
-    langfuse_context.score("tokens_saved", tokens_saved, "Tokens saved via SIL fast path")
-    langfuse_context.score("sil_answered", sil_answered, "Query answered by SIL without RAG")
-    langfuse_context.score("iterations", iterations, "Number of agentic loop iterations")
-    langfuse_context.score("latency_ms", latency_ms, "Total execution time in milliseconds")
-
-    if tools_called:
-        langfuse_context.score("tools_count", len(tools_called), "Number of tools called")

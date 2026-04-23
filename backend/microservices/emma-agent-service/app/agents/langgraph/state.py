@@ -206,9 +206,6 @@ class RAGState(TypedDict, total=False):
     # Total latency in milliseconds
     total_latency_ms: float
 
-    # Tokens saved vs naive approach
-    tokens_saved: int
-
     # =========================================================================
     # Knowledge Source Routing
     # =========================================================================
@@ -340,7 +337,6 @@ def create_initial_state(
         sources=[],
         success=False,
         total_latency_ms=0.0,
-        tokens_saved=0,
 
         # Knowledge Source
         knowledge_source=None,
@@ -388,9 +384,6 @@ class ExecutionConfig:
 
     # Whether to enable the classify fast-path (skip ReAct loop for greetings/identity)
     enable_fast_path: bool = True
-
-    # Whether to enable domain routing
-    enable_domain_routing: bool = True
 
     # Maximum retrieval results
     max_retrieval_results: int = 10
