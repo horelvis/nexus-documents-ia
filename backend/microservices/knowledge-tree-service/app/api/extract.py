@@ -13,6 +13,7 @@ from app.core.security import verify_api_key
 from app.services.falkordb_client import falkordb_client
 from app.services.triple_store import TripleStore
 from app.services.extractors.coordinator import ExtractionCoordinator
+from app.services.entity_resolver import EntityResolver
 from app.schemas.triples import (
     StructuralIndexRequest,
     StructuralIndexResponse,
@@ -71,3 +72,23 @@ async def structural_index(request: StructuralIndexRequest) -> StructuralIndexRe
     )
 
     return StructuralIndexResponse(success=True, document_uri=document_uri)
+
+
+@router.post("/resolve-persons")
+async def resolve_persons(collection: str = "default") -> dict:
+    """LLM-based deduplication of person entities in a collection.
+
+    Scans every :Node typed `person` in the collection, asks the LLM to
+    cluster URIs that represent the same individual, and MERGEs each
+    cluster: all `:Rel` edges of duplicates are repointed to the cluster's
+    canonical URI and the duplicate `:Node`s are deleted.
+
+    Idempotent: running twice on already-resolved data returns
+    `clusters_merged: 0`.
+    """
+    resolver = EntityResolver(falkordb_client)
+    summary = await resolver.resolve_persons(
+        user=EVERYONE_ROLE,
+        collection=collection,
+    )
+    return {"success": True, **summary}
