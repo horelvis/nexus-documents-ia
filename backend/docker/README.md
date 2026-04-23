@@ -381,7 +381,7 @@ curl http://localhost:8000/metrics | grep -E "vllm_gpu|vllm_cache"
 |---------|------|-------------|
 | Main API | 8000 | FastAPI main application |
 | Storage Service | 8003 | Google Cloud Storage operations |
-| Weaviate Service | 8007 | Emma AI + SLM Router + Verified Generation (Agent Framework + vLLM + RAG) |
+| Weaviate Service | 8007 | Emma AI + Verified Generation (Agent Framework + vLLM + RAG) |
 | Elasticsearch Service | 8008 | Full-text search & document indexing |
 | LangExtract Service | 8009 | Document language extraction |
 | TTS Service | 8010 | Text-to-Speech (Google TTS / VibeVoice) |
@@ -398,80 +398,6 @@ curl http://localhost:8000/metrics | grep -E "vllm_gpu|vllm_cache"
 | vLLM Server | interno | High-throughput GPU inference (Qwen/Qwen3-4B) |
 | Gotenberg | 3000 | Document conversion to PDF |
 | KeyCloak | 8080 | OIDC Identity Provider (on-premise auth) |
-
----
-
-## 🧠 SLM Router (Small Language Model Query Planning)
-
-### Descripción
-El SLM Router es un sistema de **planificación de queries** que utiliza un Small Language Model (SLM) para generar planes de ejecución estructurados llamados **TOON (Task-Oriented Orchestration Notation)**. Permite enrutar consultas al origen de datos óptimo, ahorrando hasta un **70-90% de tokens**.
-
-> **📖 Documentación completa**: [`docs/architecture/SLM_ROUTER.md`](../../docs/architecture/SLM_ROUTER.md)
-
-### Arquitectura
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  RAG TRADICIONAL                    →    SLM ROUTER                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  ❌ Siempre invocar RAG completo    →    ✅ Enrutar al origen de datos óptimo│
-│  ❌ Reglas hardcodeadas             →    ✅ Planes generados por LLM         │
-│  ❌ 10K+ tokens por consulta        →    ✅ 500-1000 tokens (70-90% ahorro)  │
-│  ❌ Sin capacidad de aprendizaje    →    ✅ Aprendizaje continuo automático  │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Tipos de Ruta (TOON Routes)
-
-| Ruta | Descripción | Ejemplo |
-|------|-------------|---------|
-| `GRAPH_ONLY` | Respuesta directa del grafo Apache AGE | "¿Cuántos contratos tiene ACME?" |
-| `VECTOR_ONLY` | Búsqueda semántica en Weaviate | "Busca información sobre X" |
-| `HYBRID` | Grafo + búsqueda semántica | "Lista contratos ACME y resume riesgos" |
-| `ASK_CLARIFY` | Query ambigua, pedir clarificación | "documentos" (muy vago) |
-
-### Endpoints SLM Router
-
-```bash
-# Planificar y ejecutar query
-POST /slm/route
-{
-  "query": "¿Cuántos contratos tiene ACME?",
-  "tenant_id": "tenant-uuid",
-  "session_id": "session-uuid"
-}
-
-# Solo generar plan TOON (sin ejecutar)
-POST /slm/plan
-{
-  "query": "Lista todos los contratos de ACME",
-  "tenant_id": "tenant-uuid"
-}
-
-# Health check
-GET /slm/health
-
-# Métricas del router
-GET /slm/metrics
-```
-
-### Flujo de Consulta
-```
-Usuario: "¿Cuántos contratos tiene ACME?"
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│ SLM Router                                                                   │
-│ 1. SLM genera plan TOON: route=GRAPH_ONLY, operation=COUNT                  │
-│ 2. Executor ejecuta Cypher contra Apache AGE                                 │
-│ 3. Resultado: count=5                                                        │
-└─────────────────────────────────────────────────────────────────────────────┘
-         │
-         ▼
-Emma recibe contexto estructurado → "ACME tiene 5 contratos..."
-         │
-         ▼
-🎯 SIN LECTURA DE CONTENIDO - 70% ahorro de tokens
-```
 
 ---
 
@@ -873,12 +799,10 @@ curl http://localhost:3001/health
 | Feature | Tiempo Típico | Tokens |
 |---------|---------------|--------|
 | RAG Tradicional | 3-8s | 10K+ |
-| SLM Router (Estructural) | 0.5-2s | 500-1K |
 | Verified Generation (por claim) | 30-50s | 2-3K |
 | Embedding (BGE-M3) | 50-100ms | - |
 
 ### Notas de Desarrollo
 - **Development mode**: Overhead leve por volume mounting
 - **Production mode**: Imágenes optimizadas, menor tamaño
-- **SLM Router**: Ahorra 70-90% de tokens en consultas estructurales
 - **Verified Generation**: Reduce alucinaciones ~70%, pero más lento (stop-and-go)
