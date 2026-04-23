@@ -153,7 +153,7 @@ async def run_http(host: str = "0.0.0.0", port: int = 8000):
                     login_hint = config.google_email
             except Exception:
                 pass
-            auth_url = oauth_service.generate_auth_url(connector_id, login_hint=login_hint)
+            auth_url = await oauth_service.generate_auth_url(connector_id, login_hint=login_hint)
             return RedirectResponse(url=auth_url)
         except Exception as e:
             logger.error(f"OAuth authorize failed: {e}")

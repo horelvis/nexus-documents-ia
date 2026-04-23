@@ -67,12 +67,16 @@ class OAuthService:
         flow.redirect_uri = settings.google_oauth_redirect_uri
         return flow
 
-    def generate_auth_url(self, connector_id: str, login_hint: str = None) -> str:
+    async def generate_auth_url(self, connector_id: str, login_hint: str = None) -> str:
         """
         Generate Google OAuth authorization URL.
 
         The state parameter encodes the connector_id so the callback knows
         where to store the tokens.
+
+        google-auth-oauthlib auto-enables PKCE on Flow.authorization_url(),
+        so we persist the generated code_verifier into connectors.config and
+        retrieve it at callback time (see exchange_code).
         """
         state = str(connector_id)
         flow = self._create_flow(state=state)
@@ -83,11 +87,26 @@ class OAuthService:
         if login_hint:
             kwargs["login_hint"] = login_hint
         authorization_url, _ = flow.authorization_url(**kwargs)
+
+        # Persist PKCE code_verifier for the callback handshake.
+        verifier = getattr(flow, "code_verifier", None)
+        if verifier:
+            await self._save_pkce_verifier(UUID(connector_id), verifier)
+
         return authorization_url
 
-    def exchange_code(self, code: str, state: str) -> Credentials:
-        """Exchange authorization code for credentials."""
+    async def exchange_code(self, code: str, state: str) -> Credentials:
+        """Exchange authorization code for credentials (with PKCE verifier)."""
         flow = self._create_flow(state=state)
+
+        # Retrieve the code_verifier persisted at authorize time. Restoring
+        # it on the Flow before fetch_token is the only way to pass it to
+        # the token endpoint via google-auth-oauthlib.
+        connector_id_str = state.split(":", 1)[0].strip()
+        verifier = await self._consume_pkce_verifier(UUID(connector_id_str))
+        if verifier:
+            flow.code_verifier = verifier
+
         flow.fetch_token(code=code)
         return flow.credentials
 
@@ -124,7 +143,7 @@ class OAuthService:
         connector_id = UUID(connector_id_str)
 
         # Exchange code for tokens
-        credentials = self.exchange_code(code, state)
+        credentials = await self.exchange_code(code, state)
 
         # Get user info
         userinfo = await self.fetch_userinfo(credentials.token)
@@ -353,6 +372,66 @@ class OAuthService:
                 connector_id,
             )
 
+        finally:
+            await conn.close()
+
+    async def _save_pkce_verifier(self, connector_id: UUID, verifier: str) -> None:
+        """Persist PKCE code_verifier into connectors.config for this authorize attempt."""
+        import asyncpg
+
+        db_url = settings.database_url
+        if db_url.startswith("postgresql+asyncpg://"):
+            db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+
+        conn = await asyncpg.connect(db_url)
+        try:
+            row = await conn.fetchrow(
+                "SELECT config FROM connectors WHERE id = $1", connector_id,
+            )
+            if not row:
+                return
+            raw_config = row['config']
+            if isinstance(raw_config, str):
+                config_data = json.loads(raw_config) if raw_config else {}
+            else:
+                config_data = raw_config or {}
+            config_data['oauth_pkce_verifier'] = verifier
+            await conn.execute(
+                "UPDATE connectors SET config = $1::jsonb WHERE id = $2",
+                json.dumps(config_data),
+                connector_id,
+            )
+        finally:
+            await conn.close()
+
+    async def _consume_pkce_verifier(self, connector_id: UUID) -> Optional[str]:
+        """Read + delete the persisted PKCE code_verifier. Returns None if absent."""
+        import asyncpg
+
+        db_url = settings.database_url
+        if db_url.startswith("postgresql+asyncpg://"):
+            db_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+
+        conn = await asyncpg.connect(db_url)
+        try:
+            row = await conn.fetchrow(
+                "SELECT config FROM connectors WHERE id = $1", connector_id,
+            )
+            if not row:
+                return None
+            raw_config = row['config']
+            if isinstance(raw_config, str):
+                config_data = json.loads(raw_config) if raw_config else {}
+            else:
+                config_data = raw_config or {}
+            verifier = config_data.pop('oauth_pkce_verifier', None)
+            if verifier is not None:
+                await conn.execute(
+                    "UPDATE connectors SET config = $1::jsonb WHERE id = $2",
+                    json.dumps(config_data),
+                    connector_id,
+                )
+            return verifier
         finally:
             await conn.close()
 
