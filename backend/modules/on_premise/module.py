@@ -1,10 +1,10 @@
 """
 On-Premise Module Registration.
 
-This module configures the application for on-premise deployment:
-    - Registers JSONBACLProvider as default ACL provider
-    - Includes on-premise-specific routers (connectors, user_sync)
-    - Configures OIDC as default auth provider
+Thin stub: the single-tenant on-premise stack no longer needs a module
+ACL provider (ACL is driven by IndexedDocument.roles[] via
+app.core.auth.acl.filter_visible_to_user). The module is kept for future
+on-premise-specific hooks (middleware, routers) and status reporting.
 
 Usage:
     from modules.on_premise import OnPremiseModule
@@ -17,22 +17,16 @@ Usage:
 import logging
 from fastapi import FastAPI
 
-from core.acl.factory import ACLProviderFactory
-from core.acl.base import ACLProviderType
-
 logger = logging.getLogger(__name__)
 
 
 class OnPremiseModule:
     """
-    On-Premise deployment module.
+    On-Premise deployment module (thin stub post 2026-04-23).
 
-    Configures the application for on-premise environments:
-        - Uses IndexedDocument for connector-sourced documents
-        - Uses JSONB fields for ACL (not separate table)
-        - Uses OIDC/SAML for authentication (not Clerk)
-        - No Stripe billing integration
-        - No digital signatures
+    Configures the application for on-premise environments. ACL is handled
+    by IndexedDocument.roles[] via the filter_visible_to_user helper — no
+    separate provider needed.
     """
 
     _registered = False
@@ -51,9 +45,6 @@ class OnPremiseModule:
 
         logger.info("Registering On-Premise module...")
 
-        # Register ACL provider
-        cls._register_acl_provider()
-
         # Include on-premise-specific routers
         cls._include_routers(app)
 
@@ -62,20 +53,6 @@ class OnPremiseModule:
 
         cls._registered = True
         logger.info("On-Premise module registered successfully")
-
-    @classmethod
-    def _register_acl_provider(cls) -> None:
-        """Register the JSONB ACL provider as default."""
-        try:
-            from modules.on_premise.acl.provider import JSONBACLProvider
-
-            ACLProviderFactory.register(ACLProviderType.JSONB, JSONBACLProvider)
-            ACLProviderFactory.set_default(ACLProviderType.JSONB)
-
-            logger.info("Registered JSONB ACL provider as default")
-        except ImportError as e:
-            logger.error(f"Failed to import JSONBACLProvider: {e}")
-            raise
 
     @classmethod
     def _include_routers(cls, app: FastAPI) -> None:
@@ -151,7 +128,7 @@ def get_module_info() -> dict:
         "name": "on_premise",
         "description": "On-premise deployment module with JSONB ACL and connector support",
         "version": "1.0.0",
-        "acl_provider": "JSONBACLProvider",
+        "acl_provider": "IndexedDocument.roles[] (filter_visible_to_user)",
         "auth_provider": "OIDC",
         "excluded_features": OnPremiseModule.get_excluded_features(),
         "required_features": OnPremiseModule.get_required_features(),

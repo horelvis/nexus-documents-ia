@@ -808,7 +808,10 @@ class AlfrescoAdapter(ConnectorAdapter):
             size_bytes=content_info.get("sizeInBytes", 0),
             source_created_at=source_created,
             source_modified_at=source_modified,
-            is_tenant_public=True,  # Service account = public to tenant
+            # Service account = public to every authenticated user → default
+            # UnifiedDocument.roles=["EVERYONE"] already covers this; the
+            # legacy `is_tenant_public` kwarg would have crashed anyway
+            # because UnifiedDocument doesn't declare that field.
             indexing_status=IndexingStatus.PENDING,
             custom_metadata={
                 # Alfresco system info

@@ -1301,7 +1301,6 @@ async def get_pending_documents(
             mime_type=doc.mime_type,
             file_extension=doc.file_extension,
             size_bytes=doc.size_bytes,
-            is_tenant_public=doc.is_tenant_public,
             indexing_status=doc.indexing_status,
             indexing_error=doc.indexing_error,
             source_created_at=doc.source_created_at,

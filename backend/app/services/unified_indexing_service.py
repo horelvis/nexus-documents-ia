@@ -528,9 +528,9 @@ class UnifiedIndexingService:
                     "source_modified_at": indexed_doc.source_modified_at.isoformat() if indexed_doc.source_modified_at else None,
                 },
                 acl={
-                    "is_tenant_public": indexed_doc.is_tenant_public,
-                    "shared_with_users": indexed_doc.shared_with_users or [],
-                    "shared_with_groups": indexed_doc.shared_with_groups or [],
+                    # Plan 5 (2026-04-23): role-based ACL replaces the
+                    # legacy is_tenant_public / shared_with_* columns.
+                    "roles": list(indexed_doc.roles or ["EVERYONE"]),
                 },
                 learned_context=learned_context,
                 indexing_strategy=indexing_strategy,

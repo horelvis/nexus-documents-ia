@@ -1611,10 +1611,10 @@ class IndexedDocument(Base):
     2. The document's `roles` column overlaps the user's KeyCloak roles
     3. They are the owner (owner_id = user_id)
 
-    The legacy multi-tenant fields (is_tenant_public, shared_with_users,
-    shared_with_groups, acl_user_ids, acl_role_ids) remain on the table
-    as dead columns; new code paths only use `roles`. They will be dropped
-    by a Plan 5 follow-up migration.
+    Plan 5 (dropped 2026-04-23): the legacy multi-tenant columns
+    (is_tenant_public, shared_with_users, shared_with_groups, acl_user_ids,
+    acl_role_ids) have been removed from the table and the model. The
+    `roles` ARRAY is the sole ACL mechanism.
     """
     __tablename__ = "indexed_documents"
     
@@ -1632,12 +1632,12 @@ class IndexedDocument(Base):
     
     # Ownership
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    
-    # Access control
-    is_tenant_public = Column(Boolean, default=False, nullable=False)  # All tenant users can see
-    shared_with_users = Column(JSONB, default=list)  # [user_id, user_id, ...]
-    shared_with_groups = Column(JSONB, default=list)  # [group_name, group_name, ...] - from SSO
-    
+
+    # Access control: role-based ACL lives in `roles` (ARRAY column below).
+    # Legacy multi-tenant columns (is_tenant_public, shared_with_users,
+    # shared_with_groups) were dropped on 2026-04-23 after the dead
+    # JSONBACLProvider was removed — nothing in the runtime reads them.
+
     # Document metadata
     title = Column(String(512), nullable=False)
     description = Column(Text, nullable=True)
