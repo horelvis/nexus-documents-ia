@@ -2,9 +2,8 @@
 Emma Agent Service - Intelligent Query Orchestration
 
 This microservice handles:
-- Emma v2 AI agent with SIL fast path
+- Emma v2 AI agent (LangGraph ReAct engine)
 - LangGraph multi-agent orchestration
-- SLM Router for TOON-based query planning
 - Session and conversation management
 - LLM client with multi-provider support
 

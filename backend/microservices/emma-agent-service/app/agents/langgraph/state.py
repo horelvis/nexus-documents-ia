@@ -386,7 +386,7 @@ class ExecutionConfig:
     # Maximum total execution time
     total_timeout_seconds: float = 120.0
 
-    # Whether to enable SLM fast path
+    # Whether to enable the classify fast-path (skip ReAct loop for greetings/identity)
     enable_fast_path: bool = True
 
     # Whether to enable domain routing

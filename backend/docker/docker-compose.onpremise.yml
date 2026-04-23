@@ -452,7 +452,7 @@ services:
   # Emma Agent Service - AI Agent Orchestration
   # =============================================================================
   # Provides:
-  #   - Emma v2 agent with LLM-based reasoning (replaces SLM Router)
+  #   - Emma v2 agent with LLM-based reasoning
   #   - LangGraph multi-agent orchestration
   #   - Session and conversation management
   #   - Domain-specific specialists (legal, fiscal, privacy, etc.)

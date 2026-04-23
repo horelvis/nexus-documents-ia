@@ -2,12 +2,9 @@
 Emma Agent Service - Intelligent Query Orchestration
 
 Provides AI agent capabilities:
-- Emma v2 agent with domain routing and LLM-based reasoning
+- Emma v2 agent with LLM-based reasoning
 - LangGraph multi-agent orchestration
 - Session and conversation management
-
-Note: Query planning and classification is now handled by LLM reasoning
-directly, replacing the previous rule-based SIL and SLM Router systems.
 
 Separated from weaviate-service to enable:
 - Independent scaling (agents vs retrieval)
@@ -287,7 +284,7 @@ async def service_info():
             "weaviate_service": settings.weaviate_service_url,
             "sglang": settings.sglang_base_url if settings.sglang_enabled else None,
         },
-        "note": "Query planning handled by LLM reasoning (SIL/SLM Router removed)"
+        "note": "Query planning handled by LLM reasoning"
     }
 
 
