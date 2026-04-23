@@ -64,6 +64,13 @@ class EntityResolver:
     ) -> Dict[str, Any]:
         """Cluster duplicate person URIs in a collection and merge each cluster.
 
+        Runs in two phases:
+            1. Deterministic pre-dedup: prefix + small-edit-distance matches
+               on slugs catch obvious truncations and typos without an LLM
+               round-trip (e.g. 'horelvi' ⊂ 'horelvis').
+            2. LLM semantic clustering on whatever remains: honorifics, name
+               order, abbreviations that no heuristic would confidently merge.
+
         Returns a summary dict with counts of clusters found, nodes merged,
         and edges repointed.
         """
@@ -76,11 +83,19 @@ class EntityResolver:
                 "edges_repointed": 0,
             }
 
-        clusters = await self._cluster_via_llm(persons)
+        # Phase 1 — deterministic pre-dedup
+        heuristic_clusters, remaining = self._heuristic_cluster(persons)
+
+        # Phase 2 — LLM handles what the heuristic didn't touch
+        llm_clusters: List[Dict[str, Any]] = []
+        if len(remaining) >= 2:
+            llm_clusters = await self._cluster_via_llm(remaining)
+
+        all_clusters = heuristic_clusters + llm_clusters
         total_edges_repointed = 0
         total_nodes_removed = 0
 
-        for cluster in clusters:
+        for cluster in all_clusters:
             canonical_uri = cluster.get("canonical_uri", "").strip()
             member_uris = [
                 m.strip() for m in cluster.get("member_uris", []) if m and isinstance(m, str)
@@ -110,13 +125,129 @@ class EntityResolver:
 
         return {
             "persons_scanned": len(persons),
+            "heuristic_clusters": len(heuristic_clusters),
+            "llm_clusters": len(llm_clusters),
             "clusters_merged": sum(
-                1 for c in clusters
+                1 for c in all_clusters
                 if len(c.get("member_uris", [])) > 1
             ),
             "nodes_removed": total_nodes_removed,
             "edges_repointed": total_edges_repointed,
         }
+
+    # ------------------------------------------------------------------
+    # Internals — deterministic heuristics
+    # ------------------------------------------------------------------
+
+    _HEURISTIC_MIN_LEN = 4  # minimum slug length to apply prefix/edit-distance rules
+    _MAX_EDIT_DIST = 2      # maximum Levenshtein distance for fuzzy match
+
+    @staticmethod
+    def _slug_from_uri(uri: str) -> str:
+        """Extract the trailing slug from a nouxcube entity URI."""
+        return uri.rstrip("/").rsplit("/", 1)[-1]
+
+    @staticmethod
+    def _levenshtein(a: str, b: str) -> int:
+        """Classic DP Levenshtein distance. O(len(a)*len(b))."""
+        if a == b:
+            return 0
+        if not a:
+            return len(b)
+        if not b:
+            return len(a)
+        prev = list(range(len(b) + 1))
+        for i, ca in enumerate(a, 1):
+            curr = [i] + [0] * len(b)
+            for j, cb in enumerate(b, 1):
+                curr[j] = min(
+                    curr[j - 1] + 1,
+                    prev[j] + 1,
+                    prev[j - 1] + (0 if ca == cb else 1),
+                )
+            prev = curr
+        return prev[-1]
+
+    @classmethod
+    def _same_person_heuristic(cls, slug_a: str, slug_b: str) -> bool:
+        """True if slug_a and slug_b almost certainly represent the same person.
+
+        Rules (either one sufficient):
+          - One slug is a prefix of the other, and the shorter is ≥ 4 chars.
+            Catches truncations: 'horelvi' ⊂ 'horelvis',
+            'horelvis-c' ⊂ 'horelvis-c-35-88'.
+          - Levenshtein distance ≤ 2 AND both ≥ 4 chars. Catches typos:
+            'horelvis' ~ 'horelviz' (1 edit).
+        """
+        if slug_a == slug_b:
+            return True
+        short, long = (slug_a, slug_b) if len(slug_a) <= len(slug_b) else (slug_b, slug_a)
+        if len(short) < cls._HEURISTIC_MIN_LEN:
+            return False
+        if long.startswith(short + "-") or long == short:
+            return True
+        if cls._levenshtein(slug_a, slug_b) <= cls._MAX_EDIT_DIST:
+            return True
+        return False
+
+    @classmethod
+    def _heuristic_cluster(
+        cls,
+        persons: List[Dict[str, str]],
+    ) -> tuple:
+        """Union-find over persons using `_same_person_heuristic` on slugs.
+
+        Returns (clusters, remaining) where clusters is the usual LLM-shape
+        list of {canonical_uri, canonical_label, member_uris} for each
+        non-singleton cluster the heuristic built, and remaining is the
+        singletons that still need LLM review.
+        """
+        n = len(persons)
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[rb] = ra
+
+        slugs = [cls._slug_from_uri(p["uri"]) for p in persons]
+        for i in range(n):
+            for j in range(i + 1, n):
+                if cls._same_person_heuristic(slugs[i], slugs[j]):
+                    union(i, j)
+
+        groups: Dict[int, List[int]] = {}
+        for i in range(n):
+            root = find(i)
+            groups.setdefault(root, []).append(i)
+
+        clusters: List[Dict[str, Any]] = []
+        remaining: List[Dict[str, str]] = []
+        for members in groups.values():
+            if len(members) == 1:
+                remaining.append(persons[members[0]])
+                continue
+            # Canonical = longest label; break ties by longest slug
+            members_sorted = sorted(
+                members,
+                key=lambda idx: (
+                    -len(persons[idx].get("label") or ""),
+                    -len(slugs[idx]),
+                ),
+            )
+            canonical_idx = members_sorted[0]
+            clusters.append({
+                "canonical_uri": persons[canonical_idx]["uri"],
+                "canonical_label": persons[canonical_idx].get("label", ""),
+                "member_uris": [persons[idx]["uri"] for idx in members],
+            })
+        return clusters, remaining
 
     # ------------------------------------------------------------------
     # Internals — fetch + LLM
