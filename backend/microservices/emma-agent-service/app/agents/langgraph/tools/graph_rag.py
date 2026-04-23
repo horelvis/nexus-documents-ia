@@ -779,6 +779,14 @@ class GraphRAGTool(EmmaTool):
                         "chunk_offset": src["chunk_offset"],
                         "relationship": f"{s_label} {p_name} {o_label}",
                         "confidence": src.get("confidence"),
+                        # URIs preserved for evidence_graph construction in
+                        # /emma/explainability/trace (Piece A, 2026-04-23).
+                        "subject_uri": src["subject_uri"],
+                        "predicate_uri": src["predicate_uri"],
+                        "object_uri": src["object_uri"],
+                        "subject_label": s_label,
+                        "object_label": o_label,
+                        "predicate_name": p_name,
                     })
         except Exception as e:
             logger.warning(f"graph_rag: source resolution failed: {e}", exc_info=True)
