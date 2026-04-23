@@ -235,11 +235,6 @@ class FeatureFlags:
 
 
 # Convenience functions for common checks
-def is_saas_mode() -> bool:
-    """Check if running in SaaS mode."""
-    return FeatureFlags.get_deployment_mode() == DeploymentMode.SAAS.value
-
-
 def is_on_premise_mode() -> bool:
     """Check if running in on-premise mode."""
     return FeatureFlags.get_deployment_mode() == DeploymentMode.ON_PREMISE.value

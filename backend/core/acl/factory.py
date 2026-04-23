@@ -160,22 +160,8 @@ class ACLProviderFactory:
 
     @classmethod
     def _detect_provider_type(cls) -> ACLProviderType:
-        """
-        Detect which provider type to use based on deployment mode.
-
-        Returns:
-            ACLProviderType based on environment
-        """
-        try:
-            from app.core.features import is_on_premise_mode
-            if is_on_premise_mode():
-                return ACLProviderType.JSONB
-            else:
-                return ACLProviderType.TABLE
-        except ImportError:
-            # Fallback to JSONB (on-premise) if features module not available
-            logger.warning("Could not import features module, defaulting to JSONB provider")
-            return ACLProviderType.JSONB
+        """Always return JSONB — this app is on-premise only."""
+        return ACLProviderType.JSONB
 
     @classmethod
     def clear_cache(
@@ -235,12 +221,6 @@ def _register_default_providers():
         ACLProviderFactory.register(ACLProviderType.JSONB, JSONBACLProvider)
     except ImportError:
         logger.debug("JSONB ACL provider not available (on-premise module not loaded)")
-
-    try:
-        from modules.saas.acl.provider import TableACLProvider
-        ACLProviderFactory.register(ACLProviderType.TABLE, TableACLProvider)
-    except ImportError:
-        logger.debug("Table ACL provider not available (SaaS module not loaded)")
 
 
 # Register providers when module loads

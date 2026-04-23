@@ -24,7 +24,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 class ACLProviderType(Enum):
     """Supported ACL provider types."""
-    TABLE = "table"      # Uses dedicated DocumentACL table (SaaS)
     JSONB = "jsonb"      # Uses JSONB fields in IndexedDocument (On-Premise)
 
 
