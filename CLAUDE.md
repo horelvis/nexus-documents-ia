@@ -285,27 +285,27 @@ Langfuse is the **only** prompt source. Missing prompts raise `PromptNotFoundErr
 
 **Architecture**: Emma Service (8019/8009) → HTTP Proxy → Main API (8000) → PostgreSQL
 
-**Seed script** (safe by default):
-```bash
-# Seed only MISSING prompts (default — won't overwrite existing):
-docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py
+**Seeding prompts**: There is no aggregate seed script. Each prompt (or coherent set of prompts) has its own one-off migration script under `emma-agent-service/scripts/` that pushes inline content to Langfuse via `langfuse.create_prompt()`. Adding a new prompt means: (1) add a name entry to `PROMPT_REGISTRY`, (2) write a `migrate_<feature>_prompts.py` script with the text inline, (3) run it inside the container.
 
-# Force overwrite all prompts (creates new Langfuse versions):
-docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py --force
+Current migration scripts:
 
-# Show diff between registry and Langfuse:
-docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py --diff
+| Script | What it seeds |
+|---|---|
+| `migrate_9b_prompt_optimization.py` | Streamlined `emma_react_system` for Qwen3.5-9B |
+| `migrate_explain_prompts.py` | `emma_explain_system` + `emma_explain_user` (humanized trace) |
+| `migrate_knowledge_report_prompt.py` | Adds `generate_knowledge_report` routing to `emma_react_system` |
+| `migrate_ner_prompts.py` | `ner_system` + NER few-shot prompts (intelligence-docs OpenAI NER) |
+| `migrate_retrieval_intelligence_prompts.py` | Phase 1 filter guidance + `emma_smart_search_decompose` |
+| `migrate_trustgraph_phase2_prompts.py` | `trustgraph_extract_concepts` + `trustgraph_edge_scoring` |
 
-# Dry run:
-docker compose exec emma-agent-service python scripts/seed_langfuse_prompts.py --dry-run
-```
+Most scripts support `--dry-run` and `--force`; check each script's docstring for exact flags.
 
 **Production label pinning**: All `get_prompt()` calls default to `label="production"` (`LANGFUSE_PROMPT_LABEL`). Admin edits in Langfuse UI become "latest" but NOT "production" until explicitly promoted. This prevents draft/test prompts from accidentally going live.
 
 **Key files**:
-- `emma-agent-service/app/services/prompt_registry.py` — Unified registry (91 entries, both seed + client import from here)
-- `emma-agent-service/app/services/langfuse_prompt_client.py` — Langfuse client with production label pinning
-- `emma-agent-service/scripts/seed_langfuse_prompts.py` — Safe-by-default seed script
+- `emma-agent-service/app/services/prompt_registry.py` — Unified registry (91 entries — names + descriptions only, no inline content)
+- `emma-agent-service/app/services/langfuse_prompt_client.py` — Langfuse client with production label pinning; raises `PromptNotFoundError` on miss
+- `emma-agent-service/scripts/migrate_*_prompts.py` — one-off migration scripts; each owns its prompts' content inline
 - `emma-agent-service/app/api/prompts.py` — API endpoints (proxy to Main API)
 - `emma-agent-service/app/services/rule_engine.py` — Rule evaluation
 - `emma-agent-service/app/services/guardrail_service.py` — Output validation
@@ -427,7 +427,7 @@ Events (Redis Streams) → Event Listener → Trigger Engine → Emma Background
 
 **Heartbeat System** (Phase 6):
 - **Context Gatherer**: Collects data (documents, contracts, activity)
-- **Insight Evaluator**: LLM Router + Langfuse prompt (`emma_heartbeat_evaluator`) with YAML fallback
+- **Insight Evaluator**: LLM Router + Langfuse prompt (`emma_heartbeat_evaluator`) — no YAML fallback; raises `PromptNotFoundError` if missing
 - **Priority Scorer**: Configurable weights via `type_priorities` (merged with `DEFAULT_TYPE_PRIORITIES`)
 - **Delivery Manager**: Rate limiting (5/day, 2/hour) + quiet hours (22:00-08:00)
 - **Insight Types**: Dynamic (string-based). Built-in: `contract_expiration`, `compliance_alert`, `risk_alert`, `anomaly_detected`, `task_reminder`, `deadline_approaching`, `document_update`, `activity_summary`. New types added via Langfuse prompt, no code changes needed.
@@ -518,13 +518,12 @@ Then add `"slack"` to the `notification_channels` array in your triggers to rece
 - Environment variables for all secrets
 
 ### LLM Prompts (IMPORTANT)
-- **Langfuse is the primary prompt source** (`USE_LANGFUSE_PROMPTS=true` by default), YAML is the fallback
+- **Langfuse is the ONLY prompt source**. Missing prompts raise `PromptNotFoundError` — there is no YAML fallback (the file `config/prompts/emma_prompts.yaml` persists only as historical reference).
 - All prompt names are defined in `app/services/prompt_registry.py` (91 entries) — add new prompts there
 - `get_prompt()` defaults to `label="production"` — admin edits in Langfuse UI must be promoted to "production" to take effect
-- Pattern: Langfuse (label=`"production"`) → YAML fallback (`config/prompts/`) → hardcoded constant
 - Never hardcode prompts directly in LLM calls without a Langfuse lookup layer
 - Langfuse prompt keys follow convention: `emma_{feature}_{system|user}` (e.g., `emma_verified_faithfulness_system`)
-- Seed script is safe by default: `python scripts/seed_langfuse_prompts.py` only creates missing prompts (use `--force` to overwrite)
+- To add or update a prompt: register the name in `prompt_registry.py`, then write a `migrate_<feature>_prompts.py` script with the content inline and run it inside the container
 - See `verified.py` `_resolve_prompts()` for reference implementation
 
 ### Testing
