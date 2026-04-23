@@ -128,10 +128,10 @@ export interface ClarificationOption {
   description?: string
 }
 
-import { ReasoningStepType, SLMThinkingStep, SLMThinkingStepType } from '@/lib/types/emma'
+import { ReasoningStepType } from '@/lib/types/emma'
 
 export interface EmmaStreamEvent {
-  event: 'start' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'complete' | 'error' | 'token' | 'first_token' | 'clarification' | 'hitl_review' | 'progress' | 'slm_thinking' | 'slm_plan' | 'structural_step'
+  event: 'start' | 'plan_created' | 'step_start' | 'step_complete' | 'step_error' | 'complete' | 'error' | 'token' | 'first_token' | 'clarification' | 'hitl_review' | 'progress' | 'structural_step'
   data: {
     message?: string
     text?: string // Token text for streaming events
@@ -159,9 +159,7 @@ export interface EmmaStreamEvent {
     elapsed_ms?: number // Time elapsed for delegation events
     // LangGraph chain-of-thought fields
     stage?: string // Current stage
-    slmIsThinking?: boolean // Whether LLM is currently reasoning
-    slmThinkingStep?: SLMThinkingStep // Individual thinking step
-    slmThinkingSteps?: SLMThinkingStep[] // All thinking steps so far
+    isReasoning?: boolean // Whether LLM is currently reasoning
     route?: string // LangGraph execution route
     // Interleaved thinking / structural_step fields
     step_type?: ReasoningStepType
@@ -195,7 +193,7 @@ const EMMA_QUERY_RESUME_STREAM_PATH = '/emma/query/resume/stream'
 const EMMA_TOOLS_PATH = '/emma/tools'
 
 // Re-export from canonical type definitions
-export type { SLMThinkingStepType, SLMThinkingStep } from '@/lib/types/emma'
+export type { ReasoningStepType, ReasoningStep } from '@/lib/types/emma'
 
 const fetchWithTimeout = async (url: string, options: RequestInit = {}, useEmmaTimeout = false) => {
   const controller = new AbortController()

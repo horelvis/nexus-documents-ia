@@ -14,7 +14,7 @@ export function ProgressBubble({ message }: { message: EmmaMessage }) {
   const hasContent = message.content && message.content.trim().length > 0
   const streamingText = message.metadata?.streaming_text || ''
   const hasStreamingText = streamingText.trim().length > 0
-  const slmIsThinking = message.metadata?.slmIsThinking ?? false
+  const isReasoning = message.metadata?.isReasoning ?? false
 
   const currentAgent = message.metadata?.agent ||
     workflowSteps.find(s => s.status === 'in_progress')?.agent ||
@@ -66,7 +66,7 @@ export function ProgressBubble({ message }: { message: EmmaMessage }) {
                 <span className="inline-block w-[3px] h-4 bg-primary/50 animate-pulse ml-0.5 align-middle rounded-full" />
               )}
             </div>
-          ) : !slmIsThinking && !hasSteps ? (
+          ) : !isReasoning && !hasSteps ? (
             <ThinkingDots />
           ) : null}
         </div>

@@ -123,7 +123,7 @@ export interface WorkflowStep {
 }
 
 // Semantic step types — human-readable action categories
-export type SLMThinkingStepType =
+export type ReasoningStepType =
   | 'searching'      // Search in documents/legislation/jurisprudence/internet
   | 'reading'        // Reading a specific document
   | 'analyzing'      // Domain analysis
@@ -141,18 +141,6 @@ export type SLMThinkingStepType =
   | 'swarm_worker'
   | 'swarm_worker_done'
   | 'swarm_synthesize'
-
-export interface SLMThinkingStep {
-  step: number
-  type: SLMThinkingStepType
-  content: string
-  detail?: string
-  entities?: string[]
-  confidence?: number
-}
-
-// ReasoningStep uses same semantic types
-export type ReasoningStepType = SLMThinkingStepType
 
 export interface ReasoningStep {
   type: ReasoningStepType
@@ -401,8 +389,7 @@ export interface EmmaMessage {
     // Human-in-the-Loop review (HITL Protocol Phase 1)
     hitl_review?: HITLReviewRequest
     // LangGraph chain-of-thought
-    slmIsThinking?: boolean
-    slmThinkingSteps?: SLMThinkingStep[]
+    isReasoning?: boolean
     stage?: string
     // Humanized reasoning explanation (from explain node)
     explanation?: string

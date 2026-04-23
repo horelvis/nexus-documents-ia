@@ -294,7 +294,7 @@ export function useMessageConverter(
 
     if (hasMetadata) {
       const stepsMetadata: EmmaMessage['metadata'] = {
-        slmIsThinking: !success && reasoningSteps.length > 0,
+        isReasoning: !success && reasoningSteps.length > 0,
         rawReasoningSteps: reasoningSteps,
         entityTags: entityTags.length > 0 ? entityTags : undefined,
       }

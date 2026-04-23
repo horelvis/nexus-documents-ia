@@ -446,10 +446,10 @@ async def _generate_langgraph_sse(
     Event mappings:
     - started → start
     - retrieve_complete → progress (stage='retrieval')
-    - plan_complete → slm_plan (with reasoning steps)
+    - plan_complete → agent_reasoning + progress (stage='planning')
     - agent_started → delegation
     - agent_complete → step_complete
-    - structural_step → slm_thinking (reasoning steps)
+    - structural_step → agent_reasoning
     - complete → complete
     - error → error
     """
@@ -526,8 +526,6 @@ async def _generate_langgraph_sse(
                 _track_step("preparing", f'Agentes seleccionados: {", ".join(agents)}')
                 yield f"event: agent_reasoning\ndata: {_dumps({'step': step_counter, 'type': 'preparing', 'content': f'Agentes seleccionados: {", ".join(agents)}', 'isThinking': True})}\n\n"
 
-                # Emit plan ready
-                yield f"event: slm_plan\ndata: {_dumps({'stage': 'slm_plan_ready', 'isThinking': False, 'slmPlan': {'route': 'MULTI_AGENT' if len(agents) > 1 else agents[0] if agents else 'general_agent', 'confidence': 0.9, 'agents': agents, 'domains': domains, 'reasoning': reasoning}})}\n\n"
                 yield f"event: progress\ndata: {_dumps({'message': f'Plan: {reasoning}', 'stage': 'planning', 'progress': 30})}\n\n"
 
             elif event_type == "agent_started":
@@ -787,8 +785,8 @@ async def emma_query_stream(
     - `content`: Response text chunks
     - `tool_call`: Tool invocation with name and arguments
     - `tool_result`: Result from tool execution
-    - `slm_thinking`: Reasoning step during structural query processing
-    - `slm_plan`: Execution plan ready
+    - `agent_reasoning`: Reasoning step emitted by the agent during tool use
+    - `progress`: Stage progress update (retrieval, planning, etc.)
     - `done`: Final result with full metadata
     - `error`: Error message
 
