@@ -964,54 +964,5 @@ class WeaviateClient(BaseHTTPClient):
             logger.exception("❌ Failed to get pending BOE updates | error=%s", e)
             raise
 
-    # =========================================================================
-    # SLM ROUTER (TOON-based query planning)
-    # =========================================================================
-
-    async def slm_health(self) -> Dict[str, Any]:
-        """Check SLM Router health status"""
-        try:
-            return await self.get_json("/slm/health")
-        except Exception as e:
-            logger.exception("❌ SLM health check failed | error=%s", e)
-            return {"status": "unhealthy", "error": str(e)}
-
-    async def slm_route(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Route a query through the SLM Router"""
-        try:
-            ctx = self._extract_context_headers(request)
-            logger.debug("🧠 SLM route | user=%s", ctx.get("user_id"))
-            return await self.post_json("/slm/route", json=request, timeout=60.0, **ctx)
-        except Exception as e:
-            logger.exception("❌ SLM route failed | error=%s", e)
-            raise
-
-    async def slm_plan(self, request: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate a TOON plan without executing it"""
-        try:
-            ctx = self._extract_context_headers(request)
-            logger.debug("🧠 SLM plan | user=%s", ctx.get("user_id"))
-            return await self.post_json("/slm/plan", json=request, timeout=30.0, **ctx)
-        except Exception as e:
-            logger.exception("❌ SLM plan failed | error=%s", e)
-            raise
-
-    async def slm_get_schema(self) -> Dict[str, Any]:
-        """Get the extracted schema"""
-        try:
-            return await self.get_json("/slm/schema")
-        except Exception as e:
-            logger.exception("❌ SLM get schema failed | error=%s", e)
-            raise
-
-    async def slm_learning_status(self) -> Dict[str, Any]:
-        """Get status of the continuous learning system"""
-        try:
-            return await self.get_json("/slm/learning/status")
-        except Exception as e:
-            logger.exception("❌ SLM learning status failed | error=%s", e)
-            raise
-
-
 # Global client instance
 weaviate_client = WeaviateClient()
