@@ -32,7 +32,7 @@ router = APIRouter(
 @router.post("/triples", response_model=TripleExtractionResponse)
 async def extract_triples(request: TripleExtractionRequest) -> TripleExtractionResponse:
     """Extract and store triples from document chunks via LLM extractors."""
-    coordinator = ExtractionCoordinator(falkordb_client)
+    coordinator = ExtractionCoordinator(TripleStore(falkordb_client))
 
     # Writes use the EVERYONE sentinel; the multi-role ACL filter is applied
     # at read time in a later wave of the tenancy removal refactor.
