@@ -443,24 +443,41 @@ class ExtractionCoordinator:
             else:
                 total_consensus += result
 
-        # Step 3d: Person entity resolution — merge duplicate person :Nodes
-        # emitted under slightly different labels by the 4 extractors. Runs
-        # per-document over the full collection scope so cross-document
-        # duplicates collapse as soon as a later doc adds a clearer label
-        # variant of an existing person. Idempotent: re-running when nothing
-        # is duplicated returns zero-cost.
-        resolver_summary = {}
+        # Step 3d: Entity resolution — merge duplicate :Nodes emitted under
+        # slightly different labels by the 4 extractors. Runs per-document
+        # over the full collection scope so cross-document duplicates
+        # collapse as soon as a later doc adds a clearer label variant of
+        # an existing entity. Idempotent: re-running when nothing is
+        # duplicated returns zero-cost.
+        #
+        # Scope: every SUPPORTED_TYPES key (person, organization, place).
+        # Unsupported types (amount, date, other) are skipped because they
+        # either need a different algorithm (dates → canonical format) or
+        # don't benefit from clustering (amounts are distinct values).
+        resolver_summaries: Dict[str, Any] = {}
         try:
             from app.services.entity_resolver import EntityResolver
 
             resolver = EntityResolver(self._store._client)
-            resolver_summary = await resolver.resolve_persons(
+            resolver_summaries = await resolver.resolve_all_supported(
                 user=user,
                 collection=collection,
             )
         except Exception as exc:
             errors.append(f"entity_resolution: {exc}")
-            logger.warning("Person entity resolution failed: %s", exc)
+            logger.warning("Entity resolution failed: %s", exc)
+
+        # Aggregate merge stats across all types for the summary log line.
+        resolver_total_merged = sum(
+            (s.get("clusters_merged", 0) or 0)
+            for s in resolver_summaries.values()
+            if isinstance(s, dict)
+        )
+        resolver_total_removed = sum(
+            (s.get("nodes_removed", 0) or 0)
+            for s in resolver_summaries.values()
+            if isinstance(s, dict)
+        )
 
         # Step 4: Log extraction summary
         elapsed_ms = int((time.monotonic() - t_start) * 1000)
@@ -494,8 +511,8 @@ class ExtractionCoordinator:
             total_validation,
             contradictions_found,
             total_consensus,
-            resolver_summary.get("clusters_merged", 0),
-            resolver_summary.get("nodes_removed", 0),
+            resolver_total_merged,
+            resolver_total_removed,
             elapsed_ms,
         )
 

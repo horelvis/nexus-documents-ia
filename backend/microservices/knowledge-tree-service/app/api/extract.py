@@ -76,19 +76,36 @@ async def structural_index(request: StructuralIndexRequest) -> StructuralIndexRe
 
 @router.post("/resolve-persons")
 async def resolve_persons(collection: str = "default") -> dict:
-    """LLM-based deduplication of person entities in a collection.
-
-    Scans every :Node typed `person` in the collection, asks the LLM to
-    cluster URIs that represent the same individual, and MERGEs each
-    cluster: all `:Rel` edges of duplicates are repointed to the cluster's
-    canonical URI and the duplicate `:Node`s are deleted.
-
-    Idempotent: running twice on already-resolved data returns
-    `clusters_merged: 0`.
-    """
+    """Backward-compat: resolve only person entities. See /resolve-entities."""
     resolver = EntityResolver(falkordb_client)
     summary = await resolver.resolve_persons(
         user=EVERYONE_ROLE,
         collection=collection,
     )
     return {"success": True, **summary}
+
+
+@router.post("/resolve-entities")
+async def resolve_entities(
+    collection: str = "default",
+    entity_type: str = "",
+) -> dict:
+    """LLM + heuristic deduplication of entity nodes in a collection.
+
+    Pass `entity_type` as one of person | organization | place to scope
+    to a single type. Leave it empty to run across every supported type
+    in turn (per-type summary in the response).
+    """
+    resolver = EntityResolver(falkordb_client)
+    if entity_type:
+        summary = await resolver.resolve_entities_of_type(
+            user=EVERYONE_ROLE,
+            collection=collection,
+            entity_type=entity_type,
+        )
+    else:
+        summary = await resolver.resolve_all_supported(
+            user=EVERYONE_ROLE,
+            collection=collection,
+        )
+    return {"success": True, "summary": summary}
