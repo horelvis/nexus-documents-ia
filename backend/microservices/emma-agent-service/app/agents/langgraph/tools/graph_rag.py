@@ -787,6 +787,10 @@ class GraphRAGTool(EmmaTool):
                         "subject_label": s_label,
                         "object_label": o_label,
                         "predicate_name": p_name,
+                        # :Chunk URI (Pieza B, 2026-04-23) so the
+                        # evidence_graph builder in emma.py can include
+                        # the chunk as a first-class node.
+                        "chunk_uri": src.get("chunk_uri"),
                     })
         except Exception as e:
             logger.warning(f"graph_rag: source resolution failed: {e}", exc_info=True)

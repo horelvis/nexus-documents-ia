@@ -512,12 +512,18 @@ class TripleQuery:
                     chunk_offset = 0
 
             if doc_id:
+                # Reconstruct the canonical :Chunk URI (Pieza B) so
+                # downstream consumers can traverse to the chunk node
+                # directly instead of re-parsing source_chunk strings.
+                col = collection or "default"
+                chunk_uri = f"nouxcube://chunk/{col}/{doc_id}:{chunk_offset}"
                 results.append({
                     "subject_uri": s_uri,
                     "predicate_uri": p_uri,
                     "object_uri": o_uri,
                     "document_id": doc_id,
                     "chunk_offset": chunk_offset,
+                    "chunk_uri": chunk_uri,
                     "confidence": confidence,
                     "source_chunk": source_chunk,
                 })

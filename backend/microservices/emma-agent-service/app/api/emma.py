@@ -517,6 +517,40 @@ async def _generate_langgraph_sse(
                             "properties": {"document_id": doc_id},
                         }
 
+                # :Chunk node (Pieza B, 2026-04-23) — added as a first-class
+                # node in the evidence subgraph, with an edge to its parent
+                # document so the frontend can render the doc→chunk
+                # hierarchy.
+                chunk_uri = src.get("chunk_uri") or ""
+                chunk_offset = src.get("chunk_offset")
+                if chunk_uri and chunk_uri not in evidence_nodes:
+                    chunk_label = (
+                        f"Chunk @ offset {chunk_offset}"
+                        if chunk_offset is not None
+                        else chunk_uri.rsplit("/", 1)[-1]
+                    )
+                    evidence_nodes[chunk_uri] = {
+                        "id": chunk_uri,
+                        "type": "chunk",
+                        "label": chunk_label,
+                        "properties": {
+                            "document_id": doc_id or None,
+                            "chunk_offset": chunk_offset,
+                        },
+                    }
+                    if doc_id:
+                        doc_uri = f"nouxcube://document/default/{doc_id}"
+                        edge_key = (chunk_uri, "of-document", doc_uri)
+                        if edge_key not in seen_evidence_edges:
+                            seen_evidence_edges.add(edge_key)
+                            evidence_edges.append({
+                                "id": f"{chunk_uri}|of-document|{doc_uri}",
+                                "source": chunk_uri,
+                                "target": doc_uri,
+                                "type": "of-document",
+                                "properties": {},
+                            })
+
                 if s_uri and o_uri and p_uri:
                     edge_key = (s_uri, p_uri, o_uri)
                     if edge_key not in seen_evidence_edges:
@@ -529,7 +563,8 @@ async def _generate_langgraph_sse(
                             "properties": {
                                 "confidence": src.get("confidence"),
                                 "document_id": doc_id or None,
-                                "chunk_offset": src.get("chunk_offset"),
+                                "chunk_offset": chunk_offset,
+                                "chunk_uri": chunk_uri or None,
                             },
                         })
         # Session loaded for document context restoration and TTL extension.
