@@ -137,11 +137,12 @@ async def get_reasoning_trace(
 
         if raw:
             trace = json.loads(raw)
+            evidence_graph = trace.get("evidence_graph") or {"nodes": [], "edges": []}
             return {
                 "message_id": f"{thread_id}:{message_index}",
                 "thread_id": thread_id,
                 "timeline": trace.get("timeline", []),
-                "evidence_graph": {"nodes": [], "edges": []},
+                "evidence_graph": evidence_graph,
                 "total_execution_ms": trace.get("total_execution_ms", 0),
                 "tools_used": trace.get("tools_used", []),
                 "sources_cited": trace.get("sources_cited", 0),

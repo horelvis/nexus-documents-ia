@@ -460,6 +460,14 @@ async def _generate_langgraph_sse(
         first_token_sent = False
         reasoning_steps: list[dict] = []  # Collect for persistence
 
+        # Evidence sub-graph accumulators — Piece A of TrustGraph Provenance DAG.
+        # Built from source_evidence payloads emitted by graph_rag (and future tools);
+        # stored alongside the reasoning_trace in Redis and returned by
+        # GET /emma/explainability/trace/{tid}/{idx}.
+        evidence_nodes: dict[str, dict] = {}  # URI → node dict (deduped)
+        evidence_edges: list[dict] = []
+        seen_evidence_edges: set[tuple] = set()  # (s_uri, p_uri, o_uri)
+
         def _track_step(step_type: str, content: str, detail: str = ""):
             """Append reasoning step for later persistence."""
             import time
@@ -470,6 +478,60 @@ async def _generate_langgraph_sse(
                 "detail": detail,
                 "timestamp_ms": int(time.time() * 1000),
             })
+
+        def _absorb_source_evidence(src_list: list) -> None:
+            """Merge a source_evidence list into evidence_nodes + evidence_edges."""
+            for src in src_list:
+                if not isinstance(src, dict):
+                    continue
+
+                s_uri = src.get("subject_uri") or ""
+                p_uri = src.get("predicate_uri") or ""
+                o_uri = src.get("object_uri") or ""
+                doc_id = src.get("document_id") or ""
+                s_label = src.get("subject_label") or (s_uri.rsplit("/", 1)[-1] if s_uri else "")
+                o_label = src.get("object_label") or (o_uri.rsplit("/", 1)[-1] if o_uri else "")
+                p_name = src.get("predicate_name") or (p_uri.rsplit("/", 1)[-1] if p_uri else "relates-to")
+
+                if s_uri and s_uri not in evidence_nodes:
+                    evidence_nodes[s_uri] = {
+                        "id": s_uri,
+                        "type": "entity",
+                        "label": s_label,
+                        "properties": {"uri": s_uri},
+                    }
+                if o_uri and o_uri not in evidence_nodes:
+                    evidence_nodes[o_uri] = {
+                        "id": o_uri,
+                        "type": "entity",
+                        "label": o_label,
+                        "properties": {"uri": o_uri},
+                    }
+                if doc_id:
+                    doc_uri = f"nouxcube://document/default/{doc_id}"
+                    if doc_uri not in evidence_nodes:
+                        evidence_nodes[doc_uri] = {
+                            "id": doc_uri,
+                            "type": "document",
+                            "label": src.get("document_title") or doc_id[:12],
+                            "properties": {"document_id": doc_id},
+                        }
+
+                if s_uri and o_uri and p_uri:
+                    edge_key = (s_uri, p_uri, o_uri)
+                    if edge_key not in seen_evidence_edges:
+                        seen_evidence_edges.add(edge_key)
+                        evidence_edges.append({
+                            "id": f"{s_uri}|{p_uri}|{o_uri}",
+                            "source": s_uri,
+                            "target": o_uri,
+                            "type": p_name,
+                            "properties": {
+                                "confidence": src.get("confidence"),
+                                "document_id": doc_id or None,
+                                "chunk_offset": src.get("chunk_offset"),
+                            },
+                        })
         # Session loaded for document context restoration and TTL extension.
         # Conversation history is NO LONGER loaded here — PostgresSaver
         # checkpointer restores previous messages automatically from its
@@ -589,8 +651,18 @@ async def _generate_langgraph_sse(
             elif event_type == "reasoning_step":
                 step_type = data.get("step_type", "thinking")
                 content = data.get("content", "")
+                # Intercept source_evidence payloads (JSON-encoded lists emitted
+                # by react_loop when graph_rag resolves provenance) and fold them
+                # into the evidence_graph accumulator instead of the timeline.
+                if step_type == "source_evidence":
+                    try:
+                        src_list = json.loads(content) if isinstance(content, str) else content
+                        if isinstance(src_list, list):
+                            _absorb_source_evidence(src_list)
+                    except (ValueError, TypeError) as ev_err:
+                        logger.warning(f"source_evidence absorb failed: {ev_err}")
                 # Skip internal routing markers (fast-path, terminate, etc.)
-                if step_type == "response":
+                elif step_type == "response":
                     pass  # Internal marker — not useful for the user
                 elif content and len(content.strip()) > 3 and not content.strip().isdigit():
                     # Map legacy step_type to semantic type
@@ -702,6 +774,10 @@ async def _generate_langgraph_sse(
                             "tools_used": data.get("agents_used", []),
                             "total_execution_ms": data.get("latency_ms", 0),
                             "sources_cited": len(data.get("sources", [])),
+                            "evidence_graph": {
+                                "nodes": list(evidence_nodes.values()),
+                                "edges": evidence_edges,
+                            },
                         }
                         await r.set(trace_key, json.dumps(trace_data), ex=86400)  # 24h TTL
                         # Also store latest message index for this thread
