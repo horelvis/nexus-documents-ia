@@ -849,19 +849,11 @@ class IndexingPipeline:
             knowledge_start = time.time()
 
             try:
-                # Get ACL info from metadata if available
-                acl_user_ids = metadata.get("acl_user_ids", [])
-                acl_role_ids = metadata.get("acl_role_ids", [])
-                acl_everyone = metadata.get("acl_everyone", False)
-
                 knowledge_result = await self.knowledge_extractor.extract_from_document(
                     document_id=document_id,
                     extracted_entities=extracted_entities,  # Use entities from LangExtract
                     content=text_for_chunking,
                     document_type=metadata.get("document_type", "general"),
-                    acl_user_ids=acl_user_ids,
-                    acl_role_ids=acl_role_ids,
-                    acl_everyone=acl_everyone,
                 )
 
                 knowledge_time = (time.time() - knowledge_start) * 1000

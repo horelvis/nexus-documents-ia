@@ -1,6 +1,5 @@
 """Pydantic schemas for Weaviate operations"""
-import json
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
@@ -27,24 +26,6 @@ class DocumentCreate(BaseModel):
     semantic_type: Optional[str] = Field(default="", description="Semantic document type (e.g., factura, contrato)")
     quality_score: Optional[float] = Field(default=0.0, description="Quality score 0.0-1.0")
     associated_person: Optional[str] = Field(default="", description="Associated person name")
-    # ACL properties for document-level access control
-    acl_user_ids: List[str] = Field(default_factory=list, description="User UUIDs with explicit access")
-    acl_role_ids: List[str] = Field(default_factory=list, description="Role UUIDs with access")
-    acl_everyone: bool = Field(default=True, description="If True, all tenant users can access")
-
-    @field_validator("acl_user_ids", "acl_role_ids", mode="before")
-    @classmethod
-    def _coerce_str_to_list(cls, v):
-        """Handle JSON-stringified lists from JSONB columns (e.g. '[]' → [])."""
-        if isinstance(v, str):
-            try:
-                parsed = json.loads(v)
-                if isinstance(parsed, list):
-                    return parsed
-            except (json.JSONDecodeError, TypeError):
-                pass
-            return []
-        return v
 
     # Chunks for batch insertion
     chunks: List[Dict[str, Any]] = Field(default_factory=list, description="Document chunks with content and metadata")

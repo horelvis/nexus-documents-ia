@@ -121,9 +121,6 @@ class KnowledgeExtractionService:
         extracted_entities: List[Dict[str, Any]],
         content: str,
         document_type: Optional[str] = None,
-        acl_user_ids: Optional[List[str]] = None,
-        acl_role_ids: Optional[List[str]] = None,
-        acl_everyone: bool = False,
     ) -> KnowledgeExtractionResult:
         """
         Extract and store knowledge from a document.
@@ -135,27 +132,10 @@ class KnowledgeExtractionService:
             extracted_entities: Raw entities from LangExtract
             content: Full document text
             document_type: Type of document (contract, invoice, etc.)
-            acl_*: Access control inherited from document
 
         Returns:
             KnowledgeExtractionResult with extracted entities and relationships
         """
-        # Ensure ACL fields are lists (callers may pass JSON strings from metadata)
-        if isinstance(acl_user_ids, str):
-            try:
-                acl_user_ids = json.loads(acl_user_ids) if acl_user_ids else []
-            except (json.JSONDecodeError, TypeError):
-                acl_user_ids = []
-        if isinstance(acl_role_ids, str):
-            try:
-                acl_role_ids = json.loads(acl_role_ids) if acl_role_ids else []
-            except (json.JSONDecodeError, TypeError):
-                acl_role_ids = []
-        if not isinstance(acl_user_ids, list):
-            acl_user_ids = []
-        if not isinstance(acl_role_ids, list):
-            acl_role_ids = []
-
         if not self._initialized:
             await self.initialize()
 
@@ -187,9 +167,6 @@ class KnowledgeExtractionService:
             stored_entities = await self._store_entities(
                 entities=normalized_entities,
                 document_id=document_id,
-                acl_user_ids=acl_user_ids,
-                acl_role_ids=acl_role_ids,
-                acl_everyone=acl_everyone,
             )
 
             stored_relationships = await self._store_relationships(
@@ -442,9 +419,6 @@ class KnowledgeExtractionService:
         self,
         entities: List[KnowledgeEntity],
         document_id: str,
-        acl_user_ids: Optional[List[str]] = None,
-        acl_role_ids: Optional[List[str]] = None,
-        acl_everyone: bool = False,
     ) -> Dict[str, str]:
         """
         Store entities in Weaviate and knowledge-tree-service graph.
