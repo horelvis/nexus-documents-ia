@@ -215,6 +215,26 @@ class ExtractionCoordinator:
         subject_uris: List[str] = []
         source_chunk_id = f"{document_uri}#offset={chunk_offset}"
 
+        # Materialize the chunk as a first-class :Chunk node and link it to
+        # its parent document. Every :Rel produced in this extraction run
+        # references the same chunk, so a single MERGE per chunk is enough.
+        # Legacy `source_chunk` string stays on each edge so trace_sources()
+        # keeps working during the migration to :Chunk-based traversal.
+        # document_id is derived from document_uri (last URI path segment).
+        _doc_id_from_uri = document_uri.rstrip("/").rsplit("/", 1)[-1]
+        chunk_uri = URIBuilder.chunk(collection, _doc_id_from_uri, chunk_offset)
+        try:
+            await self._store.merge_chunk_node(
+                chunk_uri=chunk_uri,
+                document_uri=document_uri,
+                chunk_offset=chunk_offset,
+                user=user,
+                collection=collection,
+            )
+        except Exception as exc:
+            errors.append(f"merge_chunk: {exc}")
+            logger.warning("Chunk node MERGE failed: %s", exc)
+
         # ── Build batch triples ──────────────────────────────────────────
         batch_triples: List[Dict[str, Any]] = []
 

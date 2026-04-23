@@ -47,6 +47,18 @@ class URIBuilder:
         return f"{cls.SCHEME}document/{collection}/{document_id}"
 
     @classmethod
+    def chunk(cls, collection: str, document_id: str, chunk_offset: int) -> str:
+        """Return a canonical chunk URI.
+
+        Chunks are first-class :Chunk nodes in FalkorDB; one URI per
+        (document, offset) pair. The colon separator was chosen instead of
+        the legacy '#offset=' fragment syntax so the URI is a clean
+        hierarchical identifier — matches the document/{id} pattern so that
+        chunks sort naturally alongside their parent.
+        """
+        return f"{cls.SCHEME}chunk/{collection}/{document_id}:{chunk_offset}"
+
+    @classmethod
     def folder(cls, collection: str, path: str) -> str:
         """Return a canonical folder URI using the first 16 hex chars of SHA-256(path)."""
         path_hash = hashlib.sha256(path.encode("utf-8")).hexdigest()[:16]

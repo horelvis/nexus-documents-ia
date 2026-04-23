@@ -49,6 +49,43 @@ class TripleStore:
     # Literal operations
     # ------------------------------------------------------------------
 
+    async def merge_chunk_node(
+        self,
+        chunk_uri: str,
+        document_uri: str,
+        chunk_offset: int,
+        user: str,
+        collection: str,
+    ) -> None:
+        """MERGE a :Chunk node and link it to its parent document.
+
+        The :Chunk node carries only the offset + a timestamp; the actual
+        chunk text lives in Weaviate (Nouxcube_documents collection) and
+        is resolved on demand via _resolve_chunk_texts on the Emma side.
+
+        The edge uses the reserved predicate `core/of-document` to mark the
+        chunk→document hierarchy so graph queries can traverse upward from
+        any chunk to its document without URI parsing.
+
+        Idempotent — MERGE on (uri, user, collection).
+        """
+        await self._client.execute_cypher(
+            "MERGE (c:Chunk {uri: $chunk_uri, user: $user, collection: $col}) "
+            "ON CREATE SET c.created_at = timestamp(), c.offset = $offset "
+            "MERGE (d:Node {uri: $doc_uri, user: $user, collection: $col}) "
+            "ON CREATE SET d.created_at = timestamp() "
+            "MERGE (c)-[r:Rel {uri: $of_doc_pred, user: $user, collection: $col}]->(d) "
+            "ON CREATE SET r.extraction_method = 'structural', r.confidence = 1.0",
+            params={
+                "chunk_uri": chunk_uri,
+                "doc_uri": document_uri,
+                "offset": chunk_offset,
+                "user": user,
+                "col": collection,
+                "of_doc_pred": "nouxcube://predicate/core/of-document",
+            },
+        )
+
     async def merge_literal(self, value: str, user: str, collection: str) -> None:
         """MERGE a :Literal deduped by (value, user, collection).
 
