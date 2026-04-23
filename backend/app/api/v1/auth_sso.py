@@ -16,7 +16,6 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
 from app.db.async_database import get_async_db
@@ -430,18 +429,14 @@ async def sso_login(
 
     # Try to find by sso_external_id first
     result = await db.execute(
-        select(User)
-        .options(selectinload(User.tenant))
-        .where(User.sso_external_id == sso_external_id)
+        select(User).where(User.sso_external_id == sso_external_id)
     )
     user = result.scalar_one_or_none()
 
     if not user:
         # Try to find by email (might be pre-provisioned)
         result = await db.execute(
-            select(User)
-            .options(selectinload(User.tenant))
-            .where(User.email == email)
+            select(User).where(User.email == email)
         )
         user = result.scalar_one_or_none()
 

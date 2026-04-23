@@ -15,7 +15,6 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from app.db.async_database import get_async_db
 from app.api.async_dependencies import get_current_user_async
@@ -181,9 +180,7 @@ async def login(
 
     # 3. Find user by clerk_user_id - NO JIT provisioning
     result = await db.execute(
-        select(User)
-        .options(selectinload(User.roles), selectinload(User.tenant))
-        .where(User.clerk_user_id == clerk_user_id)
+        select(User).where(User.clerk_user_id == clerk_user_id)
     )
     user = result.scalar_one_or_none()
 
