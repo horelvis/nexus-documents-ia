@@ -832,7 +832,51 @@ async def react_loop_node(state: ReActState) -> Dict[str, Any]:
     async def _run_tool(tc):
         return tc, await registry.execute(tc["name"], tc["args"], context=tool_context)
 
-    results = await asyncio.gather(*[_run_tool(tc) for tc in regular_tcs])
+    # Emit SSE heartbeats while tools run. Long tools (generate_document,
+    # forge_document, verified_generation) can block for 60–90s. Without
+    # intermediate events the browser / proxy / ISP NAT can close the
+    # stream — users see "API network error" even though the backend
+    # eventually finishes. The watchdog emits a reasoning_step every
+    # KEEPALIVE_INTERVAL seconds after KEEPALIVE_INITIAL_DELAY so fast
+    # tools (sub-second smart_search etc.) do not add noise.
+    KEEPALIVE_INITIAL_DELAY = 5
+    KEEPALIVE_INTERVAL = 15
+
+    async def _emit_tool_keepalive(writer, tool_names: List[str]):
+        try:
+            await asyncio.sleep(KEEPALIVE_INITIAL_DELAY)
+            elapsed = KEEPALIVE_INITIAL_DELAY
+            label = ", ".join(tool_names[:3]) + ("..." if len(tool_names) > 3 else "")
+            while True:
+                try:
+                    writer({
+                        "type": "reasoning_step",
+                        "data": {
+                            "step_type": "tool_running",
+                            "content": f"Ejecutando {label} ({elapsed}s transcurridos)",
+                        },
+                    })
+                except Exception:
+                    pass  # never let keepalive kill the tool loop
+                await asyncio.sleep(KEEPALIVE_INTERVAL)
+                elapsed += KEEPALIVE_INTERVAL
+        except asyncio.CancelledError:
+            raise
+
+    keepalive_task = None
+    if _stream_writer and regular_tcs:
+        keepalive_task = asyncio.create_task(
+            _emit_tool_keepalive(_stream_writer, [tc["name"] for tc in regular_tcs])
+        )
+    try:
+        results = await asyncio.gather(*[_run_tool(tc) for tc in regular_tcs])
+    finally:
+        if keepalive_task is not None:
+            keepalive_task.cancel()
+            try:
+                await keepalive_task
+            except asyncio.CancelledError:
+                pass
 
     # Process results in order
     last_retrieval_quality = None
