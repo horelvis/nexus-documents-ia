@@ -15,6 +15,7 @@ can translate them to event: messages for progressive rendering.
 
 import asyncio
 import logging
+import re
 import time
 from typing import Any, Dict, List
 
@@ -24,6 +25,67 @@ from ..state import ReActState
 from .guardrail_helper import apply_guardrails
 
 logger = logging.getLogger(__name__)
+
+_EXT_RE = re.compile(r"\.(pdf|docx?|xlsx?|txt|md|odt|rtf)$", re.IGNORECASE)
+_SPLIT_RE = re.compile(r"[\s_\-./]+")
+
+
+def _filter_cited_sources(
+    sources: List[Dict[str, Any]],
+    answer: str,
+) -> List[Dict[str, Any]]:
+    """Return only the sources whose identity appears in the answer text.
+
+    Mirrors the heuristic used by the frontend's `filterReferencedSources`
+    (frontend/src/components/emma-chat/hooks/useMessageConverter.ts) so that
+    backend and UI agree on what counts as "cited". Matches by:
+      1. boe_id substring
+      2. document_id / id substring (rare but happens when the LLM prints UUIDs)
+      3. title substring (short titles) or 50%+ keyword overlap (long titles)
+
+    Single-retrieve fallback: when exactly one source was retrieved and none
+    of the heuristics matched, assume the LLM cited it implicitly and keep it.
+    This covers terse answers like "El total es 94,45€" that reference a
+    single doc without naming it.
+    """
+    if not answer or not sources:
+        return sources
+
+    text_lower = answer.lower()
+    cited: List[Dict[str, Any]] = []
+
+    for src in sources:
+        boe_id = (src.get("boe_id") or "").lower()
+        if boe_id and boe_id in text_lower:
+            cited.append(src)
+            continue
+
+        doc_id = (src.get("document_id") or src.get("id") or "").lower()
+        if doc_id and doc_id in text_lower:
+            cited.append(src)
+            continue
+
+        name = (src.get("title") or src.get("name") or "").lower()
+        if not name:
+            continue
+
+        if 3 <= len(name) <= 40 and name in text_lower:
+            cited.append(src)
+            continue
+
+        stripped = _EXT_RE.sub("", name)
+        words = [w for w in _SPLIT_RE.split(stripped) if len(w) >= 3]
+        if not words:
+            continue
+        threshold = max(2, (len(words) + 1) // 2)
+        matched = sum(1 for w in words if w in text_lower)
+        if matched >= threshold:
+            cited.append(src)
+
+    if not cited and len(sources) == 1:
+        return sources
+
+    return cited
 
 
 async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
@@ -74,6 +136,16 @@ async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
     # Guardrail validation
     final_answer, guardrail_metadata = await apply_guardrails(final_answer, state)
 
+    # Filter retrieved sources down to those actually cited in the final answer.
+    # The react_loop accumulates every tool's retrieval into state.sources, but
+    # the user-facing "sources" panel must show only what the answer references.
+    cited_sources = _filter_cited_sources(unique_sources, final_answer)
+    if len(cited_sources) < len(unique_sources):
+        logger.info(
+            f"Synthesize: filtered sources {len(unique_sources)} retrieved → "
+            f"{len(cited_sources)} cited"
+        )
+
     # Stream tokens via get_stream_writer() for progressive rendering.
     # The adapter translates these custom events to event: messages SSE
     # events that the SDK accumulates via BaseMessageChunk.concat().
@@ -104,16 +176,17 @@ async def synthesize_react_node(state: ReActState) -> Dict[str, Any]:
 
     result = {
         "final_answer": final_answer,
-        "sources": unique_sources,
+        "sources": cited_sources,
         "success": True,
         "reasoning_steps": [{
             "type": "response",
-            "content": f"Synthesize: {len(unique_sources)} sources, answer length={len(final_answer)}",
+            "content": f"Synthesize: {len(cited_sources)} cited / {len(unique_sources)} retrieved, answer length={len(final_answer)}",
         }],
         "guardrail_metadata": guardrail_metadata,
         "metadata": {
             "synthesize_latency_ms": latency_ms,
-            "source_count": len(unique_sources),
+            "source_count": len(cited_sources),
+            "source_retrieved_count": len(unique_sources),
         },
     }
 

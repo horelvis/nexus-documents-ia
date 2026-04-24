@@ -26,6 +26,7 @@ from app.core.langfuse_config import observe
 from ..state import ReActState
 from ..reasoning_tracker import StepType
 from .guardrail_helper import apply_guardrails
+from .synthesize_react import _filter_cited_sources
 
 logger = logging.getLogger(__name__)
 
@@ -145,19 +146,21 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
         # Guardrail validation
         answer, guardrail_metadata = await apply_guardrails(answer, state)
 
+        cited_sources = _filter_cited_sources(unique_sources, answer)
+
         latency_ms = (time.time() - start) * 1000
 
         reasoning_steps.append({
             "type": StepType.RESPONSE.value,
             "content": (
                 f"Single worker result — using directly "
-                f"({len(unique_sources)} sources, {latency_ms:.0f}ms)"
+                f"({len(cited_sources)} cited / {len(unique_sources)} retrieved, {latency_ms:.0f}ms)"
             ),
         })
 
         return {
             "final_answer": answer,
-            "sources": unique_sources,
+            "sources": cited_sources,
             "success": True,
             "messages": [AIMessage(content=answer)],
             "reasoning_steps": reasoning_steps,
@@ -167,6 +170,8 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
                 "swarm_workers_successful": 1,
                 "swarm_single_worker": True,
                 "synthesize_latency_ms": latency_ms,
+                "source_count": len(cited_sources),
+                "source_retrieved_count": len(unique_sources),
             },
         }
 
@@ -265,25 +270,27 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
     # Guardrail validation
     synthesized_answer, guardrail_metadata = await apply_guardrails(synthesized_answer, state)
 
+    cited_sources = _filter_cited_sources(unique_sources, synthesized_answer)
+
     latency_ms = (time.time() - start) * 1000
 
     reasoning_steps.append({
         "type": StepType.RESPONSE.value,
         "content": (
             f"Synthesis complete: {len(successful)} workers, "
-            f"{len(unique_sources)} sources, {latency_ms:.0f}ms"
+            f"{len(cited_sources)} cited / {len(unique_sources)} retrieved, {latency_ms:.0f}ms"
         ),
     })
 
     logger.info(
         f"Synthesize swarm: {len(successful)}/{len(results)} workers, "
-        f"{len(unique_sources)} sources, {latency_ms:.0f}ms, "
+        f"{len(cited_sources)} cited / {len(unique_sources)} retrieved, {latency_ms:.0f}ms, "
         f"streamed={streamed_tokens}"
     )
 
     return {
         "final_answer": synthesized_answer,
-        "sources": unique_sources,
+        "sources": cited_sources,
         "success": True,
         "messages": [AIMessage(content=synthesized_answer)],
         "reasoning_steps": reasoning_steps,
@@ -293,7 +300,8 @@ async def synthesize_swarm_node(state: ReActState) -> Dict[str, Any]:
             "swarm_workers_successful": len(successful),
             "swarm_workers_failed": len(failed),
             "synthesize_latency_ms": latency_ms,
-            "source_count": len(unique_sources),
+            "source_count": len(cited_sources),
+            "source_retrieved_count": len(unique_sources),
             "streamed_tokens": streamed_tokens,
         },
     }
