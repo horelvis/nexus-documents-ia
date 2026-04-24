@@ -10,6 +10,7 @@ with search_documents before analyzing results.
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Type
 
 from pydantic import BaseModel, Field
@@ -17,6 +18,11 @@ from pydantic import BaseModel, Field
 from .base import EmmaTool, ToolResult, ToolError
 
 logger = logging.getLogger(__name__)
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 # ──────────────────────────────────────────────
@@ -176,7 +182,11 @@ class SearchDocumentsTool(EmmaTool):
 class GetDocumentContentInput(BaseModel):
     """Input for fetching a specific document's content."""
     document_id: str = Field(
-        description="ID del documento a leer. Obtén el ID desde smart_search."
+        description=(
+            "UUID del documento (formato 8-4-4-4-12, ej. "
+            "'48df41b3-2aa7-417a-b08c-81b45d719483'). Nunca pases un nombre "
+            "de archivo — obtén el UUID con smart_search primero."
+        )
     )
     include_chunks: bool = Field(
         default=False,
@@ -194,9 +204,10 @@ class GetDocumentContentTool(EmmaTool):
     @property
     def description(self) -> str:
         return (
-            "Lee el contenido completo de un documento específico por su ID. "
-            "Usa esto después de smart_search para leer un documento encontrado. "
-            "Útil para análisis detallado, revisión de contratos, o extracción de datos."
+            "Lee el contenido completo de un documento específico por su UUID "
+            "(formato 8-4-4-4-12). Requiere el UUID exacto, no un nombre de "
+            "archivo — úsalo después de smart_search. Útil para análisis "
+            "detallado, revisión de contratos, o extracción de datos."
         )
 
     @property
@@ -211,6 +222,20 @@ class GetDocumentContentTool(EmmaTool):
 
         document_id = arguments["document_id"]
         include_chunks = arguments.get("include_chunks", False)
+
+        # Fast-fail when the LLM passes a filename or other non-UUID token.
+        # Without this the request hits Weaviate, gets a 404, and the LLM
+        # often re-tries variations before recovering via smart_search —
+        # burning seconds of silent SSE on long-running synthesize calls.
+        if not _UUID_RE.match(document_id):
+            return ToolResult.from_error(
+                f"document_id debe ser un UUID (formato 8-4-4-4-12), no '{document_id}'.",
+                suggestion=(
+                    "Usa smart_search primero con el nombre o descripción del "
+                    "documento y obtén el UUID desde el campo 'document_id' "
+                    "del resultado."
+                ),
+            )
 
         client = get_weaviate_client()
 
