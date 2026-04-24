@@ -141,18 +141,14 @@ class AsyncDocumentService:
 
     async def _initialize(self, db: AsyncSession = None):
         """Initialize the service with async operations."""
-        # Single-tenant deployment: storage factory still takes a legacy
-        # positional bucket-scope string (slated for Plan 2 storage cleanup).
-        storage_scope = settings.DEFAULT_TENANT_ID
-
         if db:
             self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
-                storage_scope, self.user_id, db
+                self.user_id, db
             )
         else:
             async with AsyncSessionLocal() as new_db:
                 self.storage_service = await AsyncStorageServiceFactory.create_storage_service(
-                    storage_scope, self.user_id, new_db
+                    self.user_id, new_db
                 )
 
         # Single shared Weaviate collection for the deployment.
