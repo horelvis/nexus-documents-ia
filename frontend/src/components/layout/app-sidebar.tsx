@@ -24,6 +24,7 @@ import {
   IconFileText,
   IconBell,
   IconNetwork,
+  IconRobot,
 } from '@tabler/icons-react'
 import {
   Sidebar,
@@ -92,6 +93,11 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       title: 'Documentos',
       href: '/documents',
       icon: IconFileText,
+    },
+    {
+      title: 'Agentes',
+      href: '/agents',
+      icon: IconRobot,
     },
     {
       title: 'Data Learning',
