@@ -158,6 +158,9 @@ export function useMessageConverter(
   const success = values?.success
   const explanation = values?.explanation
   const interrupt = values?.__interrupt__
+  const guardrailWarnings = values?.guardrail_metadata?.guardrail_warnings ?? []
+  const guardrailBlocked = values?.guardrail_metadata?.guardrail_blocked ?? false
+  const guardrailWarningsKey = guardrailWarnings.join('|')
 
   const messages = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -290,7 +293,11 @@ export function useMessageConverter(
       } catch { /* ignore parse errors */ }
     }
 
-    const hasMetadata = reasoningSteps.length > 0 || sources.length > 0 || explanation
+    const hasMetadata =
+      reasoningSteps.length > 0 ||
+      sources.length > 0 ||
+      explanation ||
+      guardrailWarnings.length > 0
 
     if (hasMetadata) {
       const stepsMetadata: EmmaMessage['metadata'] = {
@@ -305,6 +312,11 @@ export function useMessageConverter(
 
       if (explanation) {
         stepsMetadata!.explanation = explanation
+      }
+
+      if (guardrailWarnings.length > 0) {
+        stepsMetadata!.guardrailsApplied = guardrailWarnings
+        stepsMetadata!.guardrailBlocked = guardrailBlocked
       }
 
       if (sources.length > 0) {
@@ -402,7 +414,7 @@ export function useMessageConverter(
 
     return converted
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sdkMessages, reasoningLen, sourcesLen, success, explanation, interrupt, isLoading])
+  }, [sdkMessages, reasoningLen, sourcesLen, success, explanation, interrupt, isLoading, guardrailWarningsKey, guardrailBlocked])
 
   // Write metadata to cache after render (side-effect, safe in useEffect)
   useEffect(() => {

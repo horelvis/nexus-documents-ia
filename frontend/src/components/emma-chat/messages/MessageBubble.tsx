@@ -22,6 +22,7 @@ import { ProgressBubble } from './ProgressBubble'
 import { EntityTags } from '../EntityTags'
 import { SourceEvidence } from '../SourceEvidence'
 import { ReportPanel } from '../ReportPanel'
+import { GuardrailBadge } from '../GuardrailBadge'
 
 export interface MessageBubbleProps {
   message: EmmaMessage
@@ -214,6 +215,14 @@ export function MessageBubble({
       <EmmaMarkdown content={isNewResult ? streamedContent : message.content} />
       {isRevealing && (
         <span className="inline-block w-[3px] h-4 bg-primary/50 animate-pulse ml-0.5 align-middle rounded-full" />
+      )}
+
+      {/* Guardrail notice — PII redactions or blocks */}
+      {message.metadata?.guardrailsApplied && message.metadata.guardrailsApplied.length > 0 && (
+        <GuardrailBadge
+          warnings={message.metadata.guardrailsApplied}
+          blocked={message.metadata.guardrailBlocked}
+        />
       )}
 
       {/* Generated doc download — island block */}

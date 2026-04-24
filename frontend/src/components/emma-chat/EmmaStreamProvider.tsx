@@ -27,6 +27,11 @@ export type EmmaStateType = {
   latency_ms?: number
   metadata?: Record<string, unknown>
   explanation?: string
+  guardrail_metadata?: {
+    guardrail_blocked?: boolean
+    guardrail_redacted?: boolean
+    guardrail_warnings?: string[]
+  }
 }
 
 type StreamContextType = ReturnType<typeof useStream<EmmaStateType>>

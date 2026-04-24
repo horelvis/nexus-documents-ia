@@ -399,6 +399,9 @@ export interface EmmaMessage {
     entityTags?: Array<{ uri: string; label: string; type: string }>
     // Source evidence from graph_rag provenance
     sourceEvidence?: SourceEvidenceItem[]
+    // Guardrails applied to the response (PII redaction, blocks, length warnings)
+    guardrailsApplied?: string[]
+    guardrailBlocked?: boolean
   }
   suggestions?: string[]
   isStreaming?: boolean
