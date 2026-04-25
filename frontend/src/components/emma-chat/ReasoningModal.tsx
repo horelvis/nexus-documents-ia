@@ -114,22 +114,37 @@ export default function ReasoningModal({
   const [graphData, setGraphData] = useState<{ nodes: ExplainNode[]; links: ExplainLink[] }>(
     () => buildEvidenceGraph(sources)
   )
+  const [traceStatus, setTraceStatus] = useState<{
+    state: 'idle' | 'loading' | 'ok' | 'empty' | 'error' | 'no-thread'
+    detail?: string
+  }>({ state: threadId ? 'loading' : 'no-thread' })
 
   // Fetch the rich evidence_graph from /emma/explainability/trace.
   // Backend already builds it from graph_rag's source_evidence, but the
   // SSE stream collapses everything into the timeline — only the trace
   // endpoint exposes the full {nodes, edges} typed graph.
   useEffect(() => {
-    if (!threadId) return
+    if (!threadId) {
+      setTraceStatus({ state: 'no-thread' })
+      return
+    }
     let cancelled = false
     const idx = messageIndex ?? 0
+    setTraceStatus({ state: 'loading', detail: `${threadId.slice(0, 8)}…/${idx}` })
     explainabilityApi
       .getReasoningTrace(threadId, idx)
       .then((res) => {
         if (cancelled) return
+        if (res.error) {
+          setTraceStatus({ state: 'error', detail: `HTTP ${res.status}: ${res.error}` })
+          return
+        }
         const data = res.data
         const eg = data?.evidence_graph
-        if (!eg || !Array.isArray(eg.nodes) || eg.nodes.length === 0) return
+        if (!eg || !Array.isArray(eg.nodes) || eg.nodes.length === 0) {
+          setTraceStatus({ state: 'empty', detail: `${threadId.slice(0, 8)}…/${idx}` })
+          return
+        }
         const nodes: ExplainNode[] = eg.nodes.map((n) => ({
           id: n.id,
           type: n.type,
@@ -144,10 +159,11 @@ export default function ReasoningModal({
           properties: e.properties || {},
         }))
         setGraphData({ nodes, links })
+        setTraceStatus({ state: 'ok', detail: `${nodes.length} nodes / ${links.length} edges` })
       })
-      .catch(() => {
-        // Silently keep the fallback graph — the trace can be missing if
-        // Redis evicted it (24h TTL) or the user opened a very old turn.
+      .catch((err) => {
+        if (cancelled) return
+        setTraceStatus({ state: 'error', detail: String(err).slice(0, 120) })
       })
     return () => {
       cancelled = true
@@ -202,6 +218,15 @@ export default function ReasoningModal({
         <Badge variant="secondary" className="gap-1 text-xs">
           <IconListNumbers size={12} />
           {steps.length} pasos
+        </Badge>
+
+        <Badge
+          variant={traceStatus.state === 'ok' ? 'secondary' : 'outline'}
+          className="gap-1 text-xs font-mono"
+          title={traceStatus.detail || ''}
+        >
+          trace: {traceStatus.state}
+          {traceStatus.detail ? ` (${traceStatus.detail})` : ''}
         </Badge>
 
         <Button
