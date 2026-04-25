@@ -201,10 +201,9 @@ class AlfrescoMetadataAdapter(MetadataAdapter):
         if "owner_id" in raw_metadata:
             ownership.owner_id = str(raw_metadata["owner_id"])
 
-        # ACL info from raw metadata
+        # ACL info from raw metadata — only is_public survives; per-user /
+        # per-group share lists were dropped with the legacy ACL columns.
         ownership.is_public = raw_metadata.get("is_tenant_public", False)
-        ownership.shared_with_users = raw_metadata.get("shared_with_users", [])
-        ownership.shared_with_groups = raw_metadata.get("shared_with_groups", [])
 
         return ownership
 

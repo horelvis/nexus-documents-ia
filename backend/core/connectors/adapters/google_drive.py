@@ -187,22 +187,13 @@ class GoogleDriveMetadataAdapter(MetadataAdapter):
             ownership.last_modifier_id = last_modifier.get("permissionId")
             ownership.last_modifier_name = last_modifier.get("displayName")
 
-        # Sharing from permissions
+        # Sharing from permissions — only is_public + role list survive;
+        # per-user/group share lists were dropped with the legacy ACL columns.
         permissions = raw_metadata.get("permissions", [])
         for perm in permissions:
-            perm_type = perm.get("type")
-            if perm_type == "anyone":
+            if perm.get("type") == "anyone":
                 ownership.is_public = True
-            elif perm_type == "user":
-                email = perm.get("emailAddress")
-                if email and email != ownership.owner_email:
-                    ownership.shared_with_users.append(email)
-            elif perm_type == "group":
-                email = perm.get("emailAddress")
-                if email:
-                    ownership.shared_with_groups.append(email)
 
-            # Collect permission roles
             role = perm.get("role")
             if role and role not in ownership.permissions:
                 ownership.permissions.append(role)

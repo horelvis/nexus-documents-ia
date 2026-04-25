@@ -259,8 +259,9 @@ async def _process_document(
     source_modified = _parse_alfresco_date(properties.get("cm:modified"))
 
     # Multi-tenancy removed: documents default to roles=["EVERYONE"].
-    # Alfresco per-node permissions (locallySet/inherited GROUP_*) are no longer
-    # mirrored into `shared_with_users`/`shared_with_groups` (dead legacy columns).
+    # Alfresco per-node permissions (locallySet/inherited GROUP_*) are not
+    # mirrored — the legacy per-user/per-group share columns are gone and
+    # role-based ACL is the sole authorization mechanism.
 
     # Check if document already exists
     existing = await conn.fetchrow(

@@ -160,10 +160,6 @@ class DropboxMetadataAdapter(MetadataAdapter):
             # If in a shared folder, it's not fully public but shared
             if sharing_info.get("shared_folder_id"):
                 ownership.is_public = False  # Shared folder, not public
-            if sharing_info.get("parent_shared_folder_id"):
-                ownership.shared_with_groups.append(
-                    f"shared_folder:{sharing_info['parent_shared_folder_id']}"
-                )
 
         # Team member info (if team Dropbox)
         if "team_member_info" in raw_metadata:

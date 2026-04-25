@@ -69,8 +69,6 @@ class OwnershipInfo(BaseModel):
     last_modifier_name: Optional[str] = None
     # ACL fields (for on-premise connectors)
     is_public: bool = False
-    shared_with_users: List[str] = Field(default_factory=list)
-    shared_with_groups: List[str] = Field(default_factory=list)
     permissions: List[str] = Field(default_factory=list)
 
 

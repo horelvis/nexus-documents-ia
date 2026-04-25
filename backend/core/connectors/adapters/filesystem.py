@@ -250,9 +250,8 @@ class FilesystemMetadataAdapter(MetadataAdapter):
         if "uid" in raw_metadata:
             ownership.owner_id = str(raw_metadata["uid"])
 
-        # Group as shared_with_groups (conceptually)
-        if "group" in raw_metadata:
-            ownership.shared_with_groups.append(raw_metadata["group"])
+        # POSIX group is no longer mirrored anywhere (the per-group share
+        # list was dropped with the legacy ACL columns).
 
         # Parse permissions from mode
         mode = raw_metadata.get("mode")
