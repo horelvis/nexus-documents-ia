@@ -216,13 +216,13 @@ async def stream_document(
     - Document (uploads directos): se obtienen del storage service
     - IndexedDocument (conectores): se obtienen del sistema externo (Alfresco, etc.)
 
-    Requires: VIEW permission on the document.
+    Requires: VIEW permission on the document. The per-table service
+    calls below (get_document / get_indexed_document) already enforce
+    role-based ACL via filter_visible_to_user / roles.overlap checks,
+    so no upfront visibility gate is needed — an extra _load_visible_document
+    call would only recognise Document-table rows and blanket-404 every
+    IndexedDocument preview.
     """
-    import uuid as uuid_module
-
-    # ACL Check: Verify user has view permission
-    await _load_visible_document(db, doc_id, current_user)
-
     # 1. Intentar obtener de tabla Document (uploads)
     try:
         document = await document_service.get_document(db=db, doc_id=doc_id)
