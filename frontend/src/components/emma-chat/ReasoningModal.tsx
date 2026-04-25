@@ -5,7 +5,10 @@ import { IconX, IconClock, IconListNumbers } from '@tabler/icons-react'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { ReasoningTimelineStep } from '@/lib/services/explainability.service'
+import {
+  ReasoningTimelineStep,
+  explainabilityApi,
+} from '@/lib/services/explainability.service'
 import { ExplainNode, ExplainLink } from '@/app/knowledge-graph/components/explainability-theme'
 import ReasoningTimeline from './ReasoningTimeline'
 import ReasoningClaimDetail from './ReasoningClaimDetail'
@@ -93,6 +96,8 @@ interface ReasoningModalProps {
   sources?: any[]
   executionTimeMs?: number
   onClose: () => void
+  threadId?: string
+  messageIndex?: number
 }
 
 export default function ReasoningModal({
@@ -100,11 +105,54 @@ export default function ReasoningModal({
   sources = [],
   executionTimeMs,
   onClose,
+  threadId,
+  messageIndex,
 }: ReasoningModalProps) {
   const [steps] = useState<ReasoningTimelineStep[]>(() => transformSteps(reasoningSteps))
-  const [graphData] = useState<{ nodes: ExplainNode[]; links: ExplainLink[] }>(
+  // Initial graph from cited sources (fallback). Replaced once the
+  // backend's evidence_graph (entities + edges + chunks) arrives.
+  const [graphData, setGraphData] = useState<{ nodes: ExplainNode[]; links: ExplainLink[] }>(
     () => buildEvidenceGraph(sources)
   )
+
+  // Fetch the rich evidence_graph from /emma/explainability/trace.
+  // Backend already builds it from graph_rag's source_evidence, but the
+  // SSE stream collapses everything into the timeline — only the trace
+  // endpoint exposes the full {nodes, edges} typed graph.
+  useEffect(() => {
+    if (!threadId) return
+    let cancelled = false
+    const idx = messageIndex ?? 0
+    explainabilityApi
+      .getReasoningTrace(threadId, idx)
+      .then((res) => {
+        if (cancelled) return
+        const data = res.data
+        const eg = data?.evidence_graph
+        if (!eg || !Array.isArray(eg.nodes) || eg.nodes.length === 0) return
+        const nodes: ExplainNode[] = eg.nodes.map((n) => ({
+          id: n.id,
+          type: n.type,
+          label: n.label,
+          properties: n.properties || {},
+        }))
+        const links: ExplainLink[] = (eg.edges || []).map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          type: e.type,
+          properties: e.properties || {},
+        }))
+        setGraphData({ nodes, links })
+      })
+      .catch(() => {
+        // Silently keep the fallback graph — the trace can be missing if
+        // Redis evicted it (24h TTL) or the user opened a very old turn.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [threadId, messageIndex])
   const [highlightedNodeIds, setHighlightedNodeIds] = useState<string[]>([])
   const [selectedNode, setSelectedNode] = useState<ExplainNode | null>(null)
 

@@ -7,6 +7,7 @@ import type { EmmaMessage, DocumentInfo } from '@/lib/types/emma'
 import { MessageBubble } from './messages/MessageBubble'
 import { LoadingBubble } from './messages/LoadingBubble'
 import { ErrorBubble } from './messages/ErrorBubble'
+import { useEmmaStream } from './EmmaStreamProvider'
 
 interface EmmaRenderChatProps {
   messages: EmmaMessage[]
@@ -42,6 +43,21 @@ export function EmmaRenderChat({
   const prevMessageCountRef = useRef(0)
   const isUserNearBottomRef = useRef(true)
   const lastContentRef = useRef('')
+  const stream = useEmmaStream()
+  const threadId = stream.values?.thread_id
+
+  // Pre-compute the AI-message index for each message in the list. Backend
+  // stores reasoning_trace per AI response keyed `reasoning_trace:{tid}:{i}`
+  // — counting result-type messages keeps that mapping aligned regardless
+  // of how many user/clarification rows sit between them.
+  const aiIndexByMessageId = new Map<string, number>()
+  let aiCounter = 0
+  for (const m of messages) {
+    if (m.type === 'result') {
+      aiIndexByMessageId.set(m.id, aiCounter)
+      aiCounter += 1
+    }
+  }
 
   useEffect(() => {
     const scrollArea = scrollRef.current?.querySelector('[data-radix-scroll-area-viewport]')
@@ -103,6 +119,8 @@ export function EmmaRenderChat({
               renderHITLReview={renderHITLReview}
               renderBranchSwitcher={renderBranchSwitcher}
               renderCommandBar={renderCommandBar}
+              threadId={threadId}
+              messageIndex={aiIndexByMessageId.get(message.id)}
             />
           ))}
 

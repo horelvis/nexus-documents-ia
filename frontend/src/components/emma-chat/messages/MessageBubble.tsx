@@ -35,6 +35,8 @@ export interface MessageBubbleProps {
   renderHITLReview?: (request: any, messageId: string) => React.ReactNode
   renderBranchSwitcher?: (messageId: string) => React.ReactNode
   renderCommandBar?: (messageId: string, content: string) => React.ReactNode
+  threadId?: string
+  messageIndex?: number
 }
 
 export function MessageBubble({
@@ -48,6 +50,8 @@ export function MessageBubble({
   renderHITLReview,
   renderBranchSwitcher,
   renderCommandBar,
+  threadId,
+  messageIndex,
 }: MessageBubbleProps) {
   const isNewResult = isLastMessage && message.type === 'result'
   const { displayText: streamedContent, isRevealing } = useStreamingText(
@@ -91,7 +95,7 @@ export function MessageBubble({
         {message.suggestions && message.suggestions.length > 0 && (
           <SuggestionChips suggestions={message.suggestions} onClick={onSuggestionClick} />
         )}
-        {onFeedback && <ActionBar message={message} onFeedback={onFeedback} />}
+        {onFeedback && <ActionBar message={message} onFeedback={onFeedback} threadId={threadId} messageIndex={messageIndex} />}
       </EmmaMessageFlow>
     )
   }
@@ -271,7 +275,7 @@ export function MessageBubble({
       )}
 
       {/* Action bar */}
-      {onFeedback && <ActionBar message={message} onFeedback={onFeedback} />}
+      {onFeedback && <ActionBar message={message} onFeedback={onFeedback} threadId={threadId} messageIndex={messageIndex} />}
 
       {/* Branch / command bar on hover */}
       {(renderBranchSwitcher || renderCommandBar) && (
@@ -353,7 +357,17 @@ function EmmaMessageFlow({ children }: { children: React.ReactNode }) {
 
 // ── Action bar: copy, feedback — appears on hover ──
 
-function ActionBar({ message, onFeedback }: { message: EmmaMessage; onFeedback: (id: string, fb: 'positive' | 'negative') => void }) {
+function ActionBar({
+  message,
+  onFeedback,
+  threadId,
+  messageIndex,
+}: {
+  message: EmmaMessage
+  onFeedback: (id: string, fb: 'positive' | 'negative') => void
+  threadId?: string
+  messageIndex?: number
+}) {
   const [copied, setCopied] = useState(false)
   const [showReasoning, setShowReasoning] = useState(false)
 
@@ -422,6 +436,8 @@ function ActionBar({ message, onFeedback }: { message: EmmaMessage; onFeedback: 
           sources={message.metadata?.documents}
           executionTimeMs={message.metadata?.execution_time_ms}
           onClose={() => setShowReasoning(false)}
+          threadId={threadId}
+          messageIndex={messageIndex}
         />
       )}
     </>
