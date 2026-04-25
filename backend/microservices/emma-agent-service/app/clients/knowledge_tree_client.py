@@ -1,5 +1,15 @@
 """
 HTTP client for knowledge-tree-service.
+
+History note (2026-04-25): KTS was modernised to expose `/triples/*`,
+`/extract/*` and `/graph/*` route prefixes. This client previously held
+nine `/tree/*` methods (get_tree_context, get_structural_summary,
+structural_query, graph_query, store_memory, recall_memories,
+get_memorized_document_ids, get_documents_by_person, extract_subgraph)
+that all 404'd silently against the modern service.
+
+This file ports / deletes / marks-TODO each one explicitly so future
+sessions don't re-introduce the same drift. See MEMORY entry #15.
 """
 
 import logging
@@ -29,145 +39,7 @@ class KnowledgeTreeClient(BaseHTTPClient):
             "X-API-Key": settings.MICROSERVICES_API_KEY,
         }
 
-    async def get_tree_context(self, limit: int = 15) -> Dict[str, Any]:
-        payload = {"limit": limit}
-        try:
-            return await self.post_json("/tree/context", json=payload, headers=self._headers())
-        except Exception as e:
-            logger.warning(f"Knowledge tree context failed: {e}")
-            return {"success": False, "context_for_llm": "", "metadata": {"error": str(e)}}
-
-    async def get_structural_summary(self) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {}
-        try:
-            return await self.post_json("/tree/summary", json=payload, headers=self._headers())
-        except Exception as e:
-            logger.warning(f"Knowledge tree summary failed: {e}")
-            return {"summary": ""}
-
-    async def structural_query(self, query: str, max_results: int = 100) -> Dict[str, Any]:
-        payload = {
-            "query": query,
-            "max_results": max_results,
-        }
-        try:
-            return await self.post_json("/tree/structural/query", json=payload, headers=self._headers())
-        except Exception as e:
-            logger.warning(f"Knowledge tree structural query failed: {e}")
-            return {
-                "route": "ERROR",
-                "confidence": 0.0,
-                "context": "",
-                "data": {"error": str(e)},
-            }
-
-
-    async def graph_query(self, cypher: str, graph_name: str) -> Dict[str, Any]:
-        payload = {
-            "cypher": cypher,
-            "graph_name": graph_name,
-        }
-        try:
-            return await self.post_json("/tree/graph/query", json=payload, headers=self._headers())
-        except Exception as e:
-            logger.warning(f"Knowledge tree graph query failed: {e}")
-            return {"results": [], "paths": []}
-
-    # ─── Memory Bank ──────────────────────────────────────────
-
-    async def store_memory(
-        self,
-        document_id: str,
-        summary: str,
-        key_entities: Optional[List[str]] = None,
-        key_topics: Optional[List[str]] = None,
-        semantic_type: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Store a document memory in the knowledge graph."""
-        payload = {
-            "document_id": document_id,
-            "summary": summary,
-            "key_entities": key_entities or [],
-            "key_topics": key_topics or [],
-            "semantic_type": semantic_type,
-        }
-        try:
-            return await self.post_json("/tree/memory/store", json=payload, headers=self._headers())
-        except Exception as e:
-            logger.warning(f"Memory bank store failed: {e}")
-            return {"success": False, "error": str(e)}
-
-    async def recall_memories(
-        self,
-        query_topics: Optional[List[str]] = None,
-        semantic_type: Optional[str] = None,
-        limit: int = 50,
-    ) -> List[Dict[str, Any]]:
-        """Recall document memories matching criteria. Used by planner for clue generation."""
-        payload = {
-            "query_topics": query_topics,
-            "semantic_type": semantic_type,
-            "limit": limit,
-        }
-        try:
-            result = await self.post_json("/tree/memory/recall", json=payload, headers=self._headers())
-            return result if isinstance(result, list) else []
-        except Exception as e:
-            logger.warning(f"Memory bank recall failed: {e}")
-            return []
-
-    async def get_memorized_document_ids(self) -> List[str]:
-        """Get document IDs that already have memories. Used to skip re-generation."""
-        try:
-            result = await self.get_json(
-                "/tree/memory/", headers=self._headers()
-            )
-            return result if isinstance(result, list) else []
-        except Exception as e:
-            logger.warning(f"Memory bank list failed: {e}")
-            return []
-
-    async def get_documents_by_person(
-        self, person_name: str, entity_type: str = "person"
-    ) -> List[str]:
-        """Get document IDs linked to a person via the FalkorDB knowledge graph."""
-        payload = {
-            "entity_name": person_name,
-            "entity_type": entity_type,
-        }
-        try:
-            result = await self.post_json(
-                "/tree/graph/documents-by-entity", json=payload, headers=self._headers()
-            )
-            return result.get("document_ids", [])
-        except Exception as e:
-            logger.warning(f"Documents-by-person query failed: {e}")
-            return []
-
-
-    async def extract_subgraph(
-        self,
-        entities: List[Dict[str, Any]],
-        max_hops: int = 2,
-        max_nodes: int = 30,
-        include_legal: bool = True,
-    ) -> Dict[str, Any]:
-        """Extract a multi-hop subgraph rooted at entities from FalkorDB (GraphRAG).
-
-        Returns structured nodes/edges for LLM context, not flat document IDs.
-        """
-        payload = {
-            "entities": entities,
-            "max_hops": max_hops,
-            "max_nodes": max_nodes,
-            "include_legal": include_legal,
-        }
-        try:
-            return await self.post_json("/tree/graph/subgraph", json=payload, headers=self._headers())
-        except Exception as e:
-            logger.warning(f"Subgraph extraction failed: {e}")
-            return {"nodes": [], "edges": [], "root_entities": [], "pruned_count": 0}
-
+    # ─── Modern endpoints (work) ──────────────────────────────────────
 
     async def query_triples(
         self,
@@ -176,10 +48,8 @@ class KnowledgeTreeClient(BaseHTTPClient):
         object_value: Optional[str] = None,
         limit: int = 100,
     ) -> Dict[str, Any]:
-        """Query triples from TrustGraph."""
-        payload: Dict[str, Any] = {
-            "limit": limit,
-        }
+        """Query triples from TrustGraph by SPO filter."""
+        payload: Dict[str, Any] = {"limit": limit}
         if subject_uri is not None:
             payload["subject_uri"] = subject_uri
         if predicate_uri is not None:
@@ -204,9 +74,7 @@ class KnowledgeTreeClient(BaseHTTPClient):
     async def get_triple_stats(self) -> Dict[str, Any]:
         """Get graph statistics."""
         try:
-            return await self.get_json(
-                "/triples/stats", headers=self._headers()
-            )
+            return await self.get_json("/triples/stats", headers=self._headers())
         except Exception as e:
             logger.warning(f"Triple stats failed: {e}")
             return {"success": False, "error": str(e)}
@@ -232,23 +100,180 @@ class KnowledgeTreeClient(BaseHTTPClient):
             logger.warning(f"Batch neighbors failed: {e}")
             return {"edges": [], "entities_visited": 0, "hops_used": 0}
 
-
     async def trace_sources(
         self,
         edges: List[Dict[str, str]],
         collection: str = "default",
     ) -> List[Dict[str, Any]]:
         """Trace graph edges back to source document chunks."""
-        payload = {
-            "edges": edges,
-            "collection": collection,
-        }
+        payload = {"edges": edges, "collection": collection}
         try:
             result = await self.post_json("/triples/trace-sources", json=payload, headers=self._headers())
             return result.get("sources", []) if isinstance(result, dict) else []
         except Exception as e:
             logger.warning(f"trace_sources failed: {e}")
             return []
+
+    # ─── Ported from legacy /tree/* (now use modern endpoints) ────────
+
+    async def get_structural_summary(self) -> Dict[str, Any]:
+        """High-level graph summary. Ported from legacy POST /tree/summary
+        to GET /triples/stats — returns counts (nodes, literals, rels,
+        contradictions) plus an entity_types breakdown.
+        """
+        try:
+            stats = await self.get_json("/triples/stats", headers=self._headers())
+            entity_types = stats.get("entity_types") or {}
+            summary_parts = [
+                f"{stats.get('nodes', 0)} nodes",
+                f"{stats.get('literals', 0)} literals",
+                f"{stats.get('rels', 0)} relations",
+            ]
+            if entity_types:
+                top = sorted(entity_types.items(), key=lambda kv: kv[1], reverse=True)[:5]
+                summary_parts.append(
+                    "top entity types: " + ", ".join(f"{n} {t}" for t, n in top)
+                )
+            return {
+                "summary": "; ".join(summary_parts),
+                "stats": stats,
+            }
+        except Exception as e:
+            logger.warning(f"Structural summary failed: {e}")
+            return {"summary": "", "stats": {}}
+
+    async def extract_subgraph(
+        self,
+        entities: List[Dict[str, Any]],
+        max_hops: int = 2,
+        max_nodes: int = 30,
+        include_legal: bool = True,
+    ) -> Dict[str, Any]:
+        """Extract a multi-hop subgraph around entities (GraphRAG).
+
+        Ported from legacy POST /tree/graph/subgraph to /triples/neighbors.
+        The modern endpoint returns edges only, so node URIs are derived
+        from edge endpoints. Callers that read .nodes[].properties (e.g.
+        smart_search re-ranker filtering by document_id / boe_id) will get
+        empty property dicts — those filters become best-effort no-ops
+        until a backend extension hydrates per-node properties.
+
+        TODO: extend KTS /triples/neighbors (or add a new endpoint) to
+        return per-node properties so smart_search graph expansion can
+        filter by document_id / boe_id again.
+        """
+        # Build seed URIs from entities. Entities arrive as
+        # [{"value": "movistar", "type": "organization"}, ...] — the URI
+        # convention in TrustGraph is nouxcube://entity/{collection}/{slug}.
+        seed_uris: List[str] = []
+        for ent in entities:
+            value = (ent.get("value") or ent.get("uri") or "").strip()
+            if not value:
+                continue
+            if value.startswith("nouxcube://"):
+                seed_uris.append(value)
+            else:
+                slug = value.lower().replace(" ", "-").replace("/", "-")
+                seed_uris.append(f"nouxcube://entity/default/{slug}")
+
+        if not seed_uris:
+            return {"nodes": [], "edges": [], "root_entities": [], "pruned_count": 0}
+
+        exclude = ["prov/.*"]
+        if not include_legal:
+            exclude.append("legal/.*")
+
+        try:
+            result = await self.batch_neighbors(
+                seed_uris=seed_uris,
+                max_hops=max_hops,
+                max_edges=max_nodes * 5,  # rough heuristic — N nodes ~ 5N edges
+                exclude_predicates=exclude,
+            )
+        except Exception as e:
+            logger.warning(f"extract_subgraph: neighbors call failed: {e}")
+            return {"nodes": [], "edges": [], "root_entities": seed_uris, "pruned_count": 0}
+
+        edges = result.get("edges", []) if isinstance(result, dict) else []
+
+        # Derive node list from unique edge endpoints (URIs only — see TODO)
+        node_uris: Dict[str, Dict[str, Any]] = {}
+        for e in edges:
+            for key in ("subject_uri", "object_uri"):
+                uri = e.get(key)
+                if uri and uri not in node_uris:
+                    node_uris[uri] = {"uri": uri, "properties": {}}
+
+        return {
+            "nodes": list(node_uris.values()),
+            "edges": edges,
+            "root_entities": seed_uris,
+            "pruned_count": 0,
+            "entities_visited": result.get("entities_visited", 0) if isinstance(result, dict) else 0,
+        }
+
+    # ─── Legacy methods with no modern equivalent (TODO #15b) ────────
+
+    # The following kept as stubs that fail gracefully so callers do not
+    # crash. They need backend work in knowledge-tree-service before they
+    # can do anything useful again. Tracked under MEMORY #15b.
+
+    async def structural_query(self, query: str, max_results: int = 100) -> Dict[str, Any]:
+        """LEGACY: high-level aggregation queries (counts, type breakdowns).
+
+        TODO #15b: KTS does not yet expose the rich structural router that
+        the legacy `/tree/structural/query` provided. Until a replacement
+        lands, return the ERROR shape so the structural_query tool falls
+        back to suggesting smart_search.
+        """
+        return {
+            "route": "ERROR",
+            "confidence": 0.0,
+            "context": "structural_query no disponible — usa smart_search",
+            "data": {"error": "endpoint not implemented post-modernisation"},
+        }
+
+    async def get_documents_by_person(
+        self, person_name: str, entity_type: str = "person"
+    ) -> List[str]:
+        """LEGACY: list documents associated with a person via the graph.
+
+        TODO #15b: needs a dedicated KTS endpoint that walks the predicates
+        linking persons to documents. The previous /tree/graph/documents-
+        by-entity is gone; replicating it via /triples/query would require
+        knowing the linking predicate URIs per ontology.
+        """
+        return []
+
+    # ─── Memory bank methods — no modern equivalent (TODO #15c) ──────
+
+    async def store_memory(
+        self,
+        document_id: str,
+        summary: str,
+        key_entities: Optional[List[str]] = None,
+        key_topics: Optional[List[str]] = None,
+        semantic_type: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """LEGACY memory bank store. TODO #15c: KTS does not implement a
+        memory bank module any more — the feature was scaffolded but
+        never wired into the modern service. Returning a non-success
+        shape so memory_generator skips quietly.
+        """
+        return {"success": False, "error": "memory bank not implemented"}
+
+    async def recall_memories(
+        self,
+        query_topics: Optional[List[str]] = None,
+        semantic_type: Optional[str] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """LEGACY memory bank recall. See store_memory note."""
+        return []
+
+    async def get_memorized_document_ids(self) -> List[str]:
+        """LEGACY memory bank list. See store_memory note."""
+        return []
 
 
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None
