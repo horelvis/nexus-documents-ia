@@ -212,13 +212,6 @@ disk_usage_bytes = Gauge(
 # BUSINESS KPIs
 # ===========================================
 
-# Tenant metrics
-tenant_count = Gauge(
-    'nexus_tenant_count',
-    'Total number of tenants',
-    registry=registry
-)
-
 # Document metrics
 document_count_total = Gauge(
     'nexus_document_count_total',
@@ -415,11 +408,6 @@ def update_business_metrics():
         from sqlalchemy import text
 
         with engine.connect() as conn:
-            # Tenant count
-            result = conn.execute(text("SELECT COUNT(*) FROM tenants"))
-            tenant_count_val = result.fetchone()[0]
-            tenant_count.set(tenant_count_val)
-
             # User count by status
             result = conn.execute(text("SELECT COUNT(*) FROM users WHERE is_active = true"))
             users_active = result.fetchone()[0]
