@@ -159,6 +159,13 @@ async def create_document(
     return new_doc
 
 
+_INDEXED_STATUS_TO_INT = {
+    "indexed": 1,
+    "processing": 3,
+    "error": 2,
+}
+
+
 @router.get("/{doc_id}", response_model=DocumentDetail)
 async def get_document(
     doc_id: str,
@@ -169,36 +176,75 @@ async def get_document(
     """
     Obtiene detalles de un documento específico.
 
+    Soporta dos kinds: Document (uploads directos) e IndexedDocument
+    (sincronizados por conector). Las dos tablas tienen ACL propia en
+    sus service methods, así que no hace falta el chequeo upfront que
+    el handler antiguo tenía y que blanket-404eaba todo IndexedDoc.
+
     Requires: VIEW permission on the document.
     """
-    # ACL Check: Verify user has view permission
-    await _load_visible_document(db, doc_id, current_user)
+    # 1. Try Document table (direct uploads)
+    try:
+        doc = await document_service.get_document(db=db, doc_id=doc_id)
+    except HTTPException as e:
+        if e.status_code != 404:
+            raise
+        doc = None
 
-    doc = await document_service.get_document(db=db, doc_id=doc_id)
-    
-    # Convert to DocumentDetail schema
-    # Note: Tags are already loaded via selectinload in the service
-    tags_list = [
-        Tag(id=tag.id, name=tag.name, created_at=tag.created_at)
-        for tag in doc.tags
-    ] if hasattr(doc, 'tags') else []
+    if doc is not None:
+        tags_list = [
+            Tag(id=tag.id, name=tag.name, created_at=tag.created_at)
+            for tag in doc.tags
+        ] if hasattr(doc, 'tags') else []
+
+        return DocumentDetail(
+            id=str(doc.id),
+            title=doc.title,
+            description=doc.description,
+            filename=doc.filename,
+            file_type=doc.file_type,
+            file_size=doc.file_size,
+            mime_type=doc.mime_type,
+            category=doc.category,
+            created_by=doc.created_by,
+            indexed=doc.indexed,
+            created_at=doc.created_at,
+            updated_at=doc.updated_at,
+            tags=tags_list,
+            extracted_entities=doc.extracted_entities,
+            document_metadata=doc.document_metadata,
+        )
+
+    # 2. Fallback to IndexedDocument (connector-synced docs)
+    indexed = await document_service.get_indexed_document(db=db, doc_id=doc_id)
+
+    indexed_int = _INDEXED_STATUS_TO_INT.get(
+        (indexed.indexing_status or "").lower(), 0
+    )
+    file_type = (
+        indexed.file_extension
+        or (indexed.mime_type.split("/")[-1] if indexed.mime_type else "unknown")
+    )
+    filename = indexed.title or (
+        indexed.external_path.rsplit("/", 1)[-1] if indexed.external_path else "documento"
+    )
 
     return DocumentDetail(
-        id=str(doc.id),
-        title=doc.title,
-        description=doc.description,
-        filename=doc.filename,
-        file_type=doc.file_type,
-        file_size=doc.file_size,
-        mime_type=doc.mime_type,
-        category=doc.category,
-        created_by=doc.created_by,
-        indexed=doc.indexed,
-        created_at=doc.created_at,
-        updated_at=doc.updated_at,
-        tags=tags_list,
-        extracted_entities=doc.extracted_entities,
-        document_metadata=doc.document_metadata
+        id=str(indexed.id),
+        title=indexed.title,
+        description=indexed.description,
+        filename=filename,
+        file_type=file_type,
+        file_size=indexed.size_bytes or 0,
+        mime_type=indexed.mime_type,
+        category=None,
+        created_by=indexed.owner_id,
+        indexed=indexed_int,
+        created_at=indexed.created_at,
+        updated_at=indexed.updated_at or indexed.created_at,
+        tags=[],
+        extracted_entities=[],
+        document_metadata=indexed.source_metadata,
     )
 
 
