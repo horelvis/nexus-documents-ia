@@ -485,6 +485,7 @@ class IndexingPipeline:
             errors=errors,
             warnings=warnings,
             indexing_strategy=indexing_strategy,
+            extractor_chunks=getattr(extract_result, "chunks", None),
         )
 
         # Update timing
@@ -580,8 +581,14 @@ class IndexingPipeline:
         errors: List[str],
         warnings: List[str],
         indexing_strategy: Optional[Dict[str, Any]] = None,
+        extractor_chunks: Optional[List[Any]] = None,
     ) -> IndexingResult:
-        """Internal text processing (analysis + chunking with adaptive strategy)"""
+        """Internal text processing (analysis + chunking with adaptive strategy).
+
+        extractor_chunks: optional pre-built chunks (with page metadata) from
+        a page-aware extractor. When present, the pipeline uses them directly
+        instead of calling SemanticChunker on the flat text.
+        """
 
         # === Stage 2: Document Intelligence ===
         logger.info(f"[{document_id}] Analyzing document quality...")
@@ -669,7 +676,6 @@ class IndexingPipeline:
             # HybridChunker), use them directly so per-chunk page numbers
             # survive into Weaviate. Fall through to SemanticChunker for
             # extractors that only return flat text (Tika, plaintext).
-            extractor_chunks = getattr(extract_result, "chunks", None)
             if extractor_chunks:
                 from app.services.rag.semantic_chunker import DocumentChunk
                 chunks = []
@@ -688,7 +694,7 @@ class IndexingPipeline:
                     ))
                 logger.info(
                     f"[{document_id}] Using {len(chunks)} extractor-provided chunks "
-                    f"(page-aware, source={extract_result.metadata.get('extraction_provider', 'unknown')})"
+                    f"(page-aware, source={metadata.get('extraction_provider', 'unknown')})"
                 )
             else:
                 # Chunk the document
@@ -728,7 +734,9 @@ class IndexingPipeline:
             )
 
         # === Stage 3b: Parent-Child Chunking (optional, replaces flat chunks) ===
-        if settings.parent_child_chunking_enabled:
+        # Skip when the chunks came from a page-aware extractor — re-chunking
+        # the flat text would discard page_start / page_end / headings.
+        if settings.parent_child_chunking_enabled and not extractor_chunks:
             try:
                 from .parent_child_chunker import parent_child_chunker
 

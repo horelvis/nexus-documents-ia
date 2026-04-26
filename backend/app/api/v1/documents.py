@@ -595,6 +595,87 @@ async def delete_document(
     return await document_service.delete_document(db=db, doc_id=doc_id)
 
 
+@router.post("/{doc_id}/reindex", response_model=dict)
+async def reindex_document(
+    doc_id: str,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserProfile = Depends(get_current_user_async),
+    document_service: AsyncDocumentService = Depends(get_document_service),
+):
+    """Re-run the indexing pipeline for an IndexedDocument.
+
+    Used after upgrades that change how chunks are produced (e.g. enabling
+    page-aware chunking) so existing docs pick up the new metadata without
+    re-syncing the source connector. Re-fetches the original from MinIO
+    cache, deletes the stale chunks from Weaviate, and feeds the bytes
+    back through `/index/from-connector`.
+
+    Requires: ACL access via the IndexedDocument roles filter.
+    """
+    import base64
+
+    indexed = await document_service.get_indexed_document(db=db, doc_id=doc_id)
+    if not indexed.cached_path:
+        raise HTTPException(
+            status_code=409,
+            detail="IndexedDocument has no cached_path — re-indexing requires the original to live in MinIO",
+        )
+
+    headers = {"X-API-Key": settings.MICROSERVICES_API_KEY or ""}
+    storage_url = f"{settings.STORAGE_SERVICE_URL}/files/{indexed.cached_path}"
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
+        # 1. Fetch the original binary
+        binary_resp = await client.get(storage_url)
+        if binary_resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not fetch cached binary from MinIO: HTTP {binary_resp.status_code}",
+            )
+        file_bytes = binary_resp.content
+
+        # 2. Drop existing chunks so we don't double-index
+        await client.delete(
+            f"{settings.WEAVIATE_SERVICE_URL}/weaviate/collections/Nouxcube_documents/documents/{doc_id}",
+            headers=headers,
+        )
+
+        # 3. Re-feed through the indexing pipeline
+        payload = {
+            "document_id": str(indexed.id),
+            "filename": indexed.title or doc_id,
+            "mime_type": indexed.mime_type or "application/pdf",
+            "owner_id": str(indexed.owner_id),
+            "file_bytes_base64": base64.b64encode(file_bytes).decode("ascii"),
+            "roles": list(indexed.roles or ["EVERYONE"]),
+            "metadata": {
+                "external_id": indexed.external_id or "",
+                "external_path": indexed.external_path or "",
+                "connector_id": str(indexed.connector_id) if indexed.connector_id else "",
+                "source": "reindex",
+            },
+        }
+        index_resp = await client.post(
+            f"{settings.WEAVIATE_SERVICE_URL}/weaviate/index/from-connector",
+            json=payload,
+            headers=headers,
+        )
+        if index_resp.status_code != 200:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Re-index pipeline failed: HTTP {index_resp.status_code} — {index_resp.text[:300]}",
+            )
+        result = index_resp.json()
+
+    return {
+        "success": result.get("success", False),
+        "document_id": doc_id,
+        "chunks_created": result.get("chunks_created"),
+        "page_aware": result.get("metadata", {}).get("hybrid_chunks_count"),
+        "error": result.get("error"),
+    }
+
+
 @router.get("/{doc_id}/summary", response_model=dict)
 async def get_document_summary(
     doc_id: str,
