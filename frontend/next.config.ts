@@ -4,6 +4,13 @@ import path from "path"
 const nextConfig: NextConfig = {
   transpilePackages: ["framer-motion"],
 
+  // Next.js 15+ blocks /_next/* requests in dev when the page is loaded from
+  // a different origin than the dev server (localhost). Our deployment serves
+  // the dev frontend through the public DDNS via the tls-proxy, so HMR
+  // websockets, RSC payloads and chunk loads need this allowlist or the
+  // browser sees blank panels / hydration errors.
+  allowedDevOrigins: ["nouxcubeai.ddns.net", "*.ddns.net", "localhost"],
+
   // Force single React instance across monorepo (works with both npm and pnpm)
   webpack: (config) => {
     config.resolve.alias = {
