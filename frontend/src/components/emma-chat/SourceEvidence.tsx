@@ -88,7 +88,11 @@ export function SourceEvidence({ sources, onDocumentClick }: SourceEvidenceProps
                     src.chunk_text && 'hover:text-foreground cursor-pointer underline decoration-dotted'
                   )}
                 >
-                  chunk {src.chunk_offset}
+                  {src.page_start && src.page_start > 0
+                    ? src.page_end && src.page_end !== src.page_start
+                      ? `pág. ${src.page_start}–${src.page_end}`
+                      : `pág. ${src.page_start}`
+                    : `sección ${src.chunk_offset}`}
                 </button>
                 <ConfidenceBadge confidence={src.confidence} />
               </div>

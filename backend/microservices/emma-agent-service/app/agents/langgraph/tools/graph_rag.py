@@ -253,21 +253,36 @@ async def _resolve_chunk_texts(
                 user_roles=user_roles,
                 user_id=user_id,
             )
-            # Build offset→content map
-            chunk_map = {}
+            # Build offset→{content,page_start,page_end} map
+            chunk_map: Dict[int, Dict[str, Any]] = {}
             for ch in (chunks if isinstance(chunks, list) else chunks.get("chunks", [])):
                 idx = ch.get("chunk_index")
                 if idx is not None:
-                    chunk_map[idx] = ch.get("content", "")
+                    chunk_map[idx] = {
+                        "content": ch.get("content", ""),
+                        "page_start": ch.get("page_start") or 0,
+                        "page_end": ch.get("page_end") or 0,
+                    }
 
             for src in sources:
                 offset = src.get("chunk_offset")
-                text = chunk_map.get(offset, "")
+                meta = chunk_map.get(offset)
+                if not meta:
+                    continue
+                text = meta["content"]
                 if text:
                     # Strip metadata prefix [CONTEXTO]...[CONTENIDO]
                     if "[CONTENIDO]" in text:
                         text = text.split("[CONTENIDO]", 1)[1].strip()
                     src["chunk_text"] = text[:max_snippet_chars]
+                # Propagate page numbers when the indexer has captured them.
+                # Until intelligence-docs-service stores per-chunk page (see
+                # MEMORY entry #15e), these stay 0 and the frontend falls
+                # back to "Sección N" using chunk_offset.
+                if meta["page_start"]:
+                    src["page_start"] = meta["page_start"]
+                if meta["page_end"]:
+                    src["page_end"] = meta["page_end"]
         except Exception as exc:
             logger.warning("graph_rag: chunk fetch failed for doc %s: %s", doc_id, exc)
 

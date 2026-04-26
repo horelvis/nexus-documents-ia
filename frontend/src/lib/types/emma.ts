@@ -35,6 +35,8 @@ export interface SourceEvidenceItem {
   relationship: string
   confidence?: number
   chunk_text?: string
+  page_start?: number
+  page_end?: number
 }
 
 export interface DocumentInfo {

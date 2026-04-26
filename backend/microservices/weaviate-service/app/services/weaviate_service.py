@@ -1131,7 +1131,14 @@ class WeaviateService:
             filters=doc_filter,
             offset=offset,
             limit=limit,
-            return_properties=["content", "chunk_index", "document_id", "title"],
+            return_properties=[
+                "content",
+                "chunk_index",
+                "document_id",
+                "title",
+                "page_start",
+                "page_end",
+            ],
         )
 
         chunks = []
@@ -1141,6 +1148,8 @@ class WeaviateService:
                 "chunk_index": obj.properties.get("chunk_index", 0),
                 "document_id": obj.properties.get("document_id", ""),
                 "title": obj.properties.get("title", ""),
+                "page_start": obj.properties.get("page_start", 0),
+                "page_end": obj.properties.get("page_end", 0),
             })
 
         chunks.sort(key=lambda c: c.get("chunk_index", 0))
