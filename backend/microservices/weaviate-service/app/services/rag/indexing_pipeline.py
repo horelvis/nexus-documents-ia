@@ -665,12 +665,38 @@ class IndexingPipeline:
             # Strategy-based chunking config would require chunker reconfiguration
             # For now, use chunker's default settings
 
-            # Chunk the document
-            chunks = self.chunker.chunk_document(
-                text=text_for_chunking,
-                metadata=chunk_metadata,
-                document_type=doc_type,
-            )
+            # If the extractor produced page-aware chunks (e.g. Docling
+            # HybridChunker), use them directly so per-chunk page numbers
+            # survive into Weaviate. Fall through to SemanticChunker for
+            # extractors that only return flat text (Tika, plaintext).
+            extractor_chunks = getattr(extract_result, "chunks", None)
+            if extractor_chunks:
+                from app.services.rag.semantic_chunker import DocumentChunk
+                chunks = []
+                for ec in extractor_chunks:
+                    chunks.append(DocumentChunk(
+                        content=(ec.text or "").strip(),
+                        metadata={
+                            **chunk_metadata,
+                            "page_start": ec.page_start,
+                            "page_end": ec.page_end,
+                            "headings": list(ec.headings or []),
+                        },
+                        section_title=(ec.headings[0] if ec.headings else None),
+                        chunk_index=ec.chunk_index,
+                        token_count=len(ec.text.split()),
+                    ))
+                logger.info(
+                    f"[{document_id}] Using {len(chunks)} extractor-provided chunks "
+                    f"(page-aware, source={extract_result.metadata.get('extraction_provider', 'unknown')})"
+                )
+            else:
+                # Chunk the document
+                chunks = self.chunker.chunk_document(
+                    text=text_for_chunking,
+                    metadata=chunk_metadata,
+                    document_type=doc_type,
+                )
 
             chunking_time = (time.time() - chunking_start) * 1000
 

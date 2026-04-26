@@ -4,11 +4,25 @@ from typing import Any, Optional
 
 
 @dataclass
+class ExtractedChunk:
+    """Pre-built chunk with positional metadata (e.g. from Docling HybridChunker)."""
+    text: str
+    chunk_index: int
+    page_start: int = 0
+    page_end: int = 0
+    headings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class ExtractionResult:
     text: str
     language: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
     quality_score: float = 0.0
+    # Optional pre-built chunks. When present, the indexing pipeline can
+    # skip its own chunker and use these directly — preserving per-chunk
+    # page numbers that only the source extractor knows.
+    chunks: Optional[list["ExtractedChunk"]] = None
 
 
 @dataclass

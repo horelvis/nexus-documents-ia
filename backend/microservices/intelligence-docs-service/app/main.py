@@ -236,6 +236,16 @@ async def extract(
         text=result.text,
         language=result.language,
         metadata=result.metadata,
+        chunks=[
+            {
+                "text": c.text,
+                "chunk_index": c.chunk_index,
+                "page_start": c.page_start,
+                "page_end": c.page_end,
+                "headings": c.headings,
+            }
+            for c in (result.chunks or [])
+        ] or None,
     )
 
 

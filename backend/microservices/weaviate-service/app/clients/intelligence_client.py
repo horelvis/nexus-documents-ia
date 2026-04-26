@@ -62,6 +62,16 @@ async def close_client() -> None:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class ExtractedChunk:
+    """Pre-built chunk with page metadata from a page-aware extractor."""
+    text: str
+    chunk_index: int
+    page_start: int = 0
+    page_end: int = 0
+    headings: List[str] = field(default_factory=list)
+
+
+@dataclass
 class TextExtractResult:
     """Result dataclass for intelligence-docs-service text extraction."""
     success: bool
@@ -70,6 +80,7 @@ class TextExtractResult:
     language: Optional[str]
     metadata: Dict[str, Any]
     error: Optional[str] = None
+    chunks: Optional[List[ExtractedChunk]] = None
 
     @classmethod
     def error_result(cls, error: str) -> "TextExtractResult":
@@ -112,12 +123,24 @@ async def extract_from_bytes(
         response.raise_for_status()
         data = response.json()
 
+        chunks_raw = data.get("chunks") or []
+        chunks = [
+            ExtractedChunk(
+                text=c.get("text", ""),
+                chunk_index=c.get("chunk_index", i),
+                page_start=c.get("page_start", 0),
+                page_end=c.get("page_end", 0),
+                headings=list(c.get("headings") or []),
+            )
+            for i, c in enumerate(chunks_raw)
+        ] or None
         return TextExtractResult(
             success=True,
             text=data.get("text", ""),
             characters=len(data.get("text", "")),
             language=data.get("language"),
             metadata=data.get("metadata", {}),
+            chunks=chunks,
         )
     except Exception as e:
         logger.error(f"Intelligence extraction failed: {e}")
@@ -141,12 +164,24 @@ async def extract_from_url(
         response.raise_for_status()
         data = response.json()
 
+        chunks_raw = data.get("chunks") or []
+        chunks = [
+            ExtractedChunk(
+                text=c.get("text", ""),
+                chunk_index=c.get("chunk_index", i),
+                page_start=c.get("page_start", 0),
+                page_end=c.get("page_end", 0),
+                headings=list(c.get("headings") or []),
+            )
+            for i, c in enumerate(chunks_raw)
+        ] or None
         return TextExtractResult(
             success=True,
             text=data.get("text", ""),
             characters=len(data.get("text", "")),
             language=data.get("language"),
             metadata=data.get("metadata", {}),
+            chunks=chunks,
         )
     except Exception as e:
         logger.error(f"Intelligence URL extraction failed: {e}")

@@ -26,10 +26,23 @@ class EmbedBatchResponse(BaseModel):
 
 # --- Extraction ---
 
+class ExtractedChunkResponse(BaseModel):
+    """Pre-built chunk from a page-aware extractor (Docling HybridChunker)."""
+    text: str
+    chunk_index: int
+    page_start: int = 0
+    page_end: int = 0
+    headings: list[str] = []
+
+
 class ExtractResponse(BaseModel):
     text: str
     language: str
     metadata: dict[str, Any] = {}
+    # When the extractor exposes its own page-aware chunker, the chunks
+    # ride alongside the flat text. Consumers (weaviate-service) use them
+    # directly so per-chunk page numbers survive into Weaviate.
+    chunks: list[ExtractedChunkResponse] | None = None
 
 
 # --- Entities ---
