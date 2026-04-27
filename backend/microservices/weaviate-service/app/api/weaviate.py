@@ -1491,6 +1491,39 @@ async def batch_upsert_entities(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/entities/upsert-subset")
+async def upsert_subset_entities(
+    request: EntityBatchUpsertRequest,
+    _: bool = Depends(verify_api_key),
+):
+    """Idempotent per-object upsert for arbitrary subsets.
+
+    Use this from per-document hooks where a global DELETE+INSERT cycle
+    would re-process the entire scope on every extraction. Existing
+    entries are replaced in place (vectors and properties refreshed),
+    new ones are inserted. Entity UUIDs are derived from entity_uri so
+    repeated calls converge.
+    """
+    try:
+        if len(request.entities) != len(request.embeddings):
+            raise HTTPException(
+                status_code=422,
+                detail="entities and embeddings must have the same length",
+            )
+
+        count = await weaviate_service.upsert_trustgraph_entities_subset(
+            entities=request.entities,
+            embeddings=request.embeddings,
+        )
+        return {"count": count}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Entity subset-upsert failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/entities/delete")
 async def delete_entities(
     _: bool = Depends(verify_api_key),

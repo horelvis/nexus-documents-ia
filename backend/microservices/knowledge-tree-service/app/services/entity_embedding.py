@@ -1,25 +1,24 @@
 """Embed FalkorDB :Node entities into Weaviate TrustGraphEntities collection.
 
-Used by:
-- scripts/reindex_trustgraph.py (full re-embed during reindex).
-- ExtractionCoordinator.extract_document (per-document hook to keep
-  graph_rag entity index in sync with new extractions).
+Two flows are exposed:
 
-The Weaviate batch-upsert endpoint is currently NOT idempotent — it uses
-insert_many with deterministic UUIDv5 which collides on re-insert. To
-work around that, this helper wipes ALL entity embeddings before
-re-upserting the full set. This is fine for the reindex script and
-acceptable as a per-document hook when extraction volume is low. For
-higher throughput, the proper fix is to make the Weaviate endpoint a
-true upsert (existing="UPDATE" in v4) and switch this helper to
-incremental subset upserts.
+- ``populate_entity_embeddings(scope, collection)``: full re-embed of every
+  :Node in the scope. Used by ``scripts/reindex_trustgraph.py`` and by the
+  weekly drift-safety cron. Wipes the collection and rebuilds it, so
+  obsolete entities (deleted from FalkorDB since the last run) drop out.
 
-TODO(15b1-idempotency): incremental upsert by URI subset.
+- ``populate_entity_embeddings_subset(scope, collection, subset_uris)``:
+  incremental, idempotent upsert of just the URIs in ``subset_uris``.
+  Used by ``ExtractionCoordinator.extract_document`` so the graph_rag
+  entity index reflects new extractions without paying the cost of a
+  full re-embed. Backed by the weaviate-service ``/entities/upsert-subset``
+  endpoint, which uses replace-or-insert per object and therefore tolerates
+  re-runs against existing UUIDs.
 """
 
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import httpx
 
@@ -30,12 +29,11 @@ logger = logging.getLogger(__name__)
 
 EMBED_BATCH_SIZE = 64
 
-# Serializes concurrent invocations. Two extractions finishing at the
-# same moment would otherwise race on DELETE /entities/delete and emit
-# duplicate UUIDv5 errors during batch-upsert. Acquiring the lock makes
-# the second caller wait for the first to complete and then re-runs the
-# full re-embed, which naturally picks up the second extraction's
-# additions. Cost: at most 2 full re-embeds back-to-back per burst.
+# Serializes the full re-embed against itself and against subset upserts.
+# A full re-embed runs DELETE+INSERT on the collection; if a subset upsert
+# raced through that window, anything it just wrote could be wiped by the
+# DELETE. The subset path is cheap (per-object replace), so making it
+# wait for the rare full re-embed is the right trade.
 _lock = asyncio.Lock()
 
 _HEADERS = {
@@ -194,3 +192,161 @@ async def _populate_entity_embeddings_impl(scope: str, collection: str) -> int:
             )
 
     return upserted
+
+
+async def populate_entity_embeddings_subset(
+    scope: str,
+    collection: str,
+    subset_uris: Iterable[str],
+) -> int:
+    """Idempotent re-embed of just the entities whose URIs are in ``subset_uris``.
+
+    Designed for the per-document hook in ExtractionCoordinator: keeps
+    the graph_rag entity index in sync with new extractions without
+    re-processing the whole scope. Skips any URI that does not resolve
+    to a :Node (already deleted, or filtered out by blacklist).
+    """
+    uri_list = [u for u in subset_uris if u]
+    if not uri_list:
+        return 0
+
+    async with _lock:
+        return await _populate_entity_embeddings_subset_impl(
+            scope=scope, collection=collection, uri_list=uri_list,
+        )
+
+
+async def _populate_entity_embeddings_subset_impl(
+    scope: str, collection: str, uri_list: List[str],
+) -> int:
+    falkordb = FalkorDBClient()
+    await falkordb.initialize()
+
+    try:
+        rows = await falkordb.execute_cypher(
+            "MATCH (n:Node {user: $user}) WHERE n.uri IN $uris "
+            "OPTIONAL MATCH (n)-[r1:Rel {uri: 'nouxcube://predicate/core/label'}]->(l:Literal) "
+            "OPTIONAL MATCH (n)-[r2:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal) "
+            "OPTIONAL MATCH (n)-[r3:Rel {uri: 'nouxcube://predicate/core/definition'}]->(d:Literal) "
+            "RETURN n.uri AS uri, l.value AS label, t.value AS type, d.value AS definition",
+            {"user": scope, "uris": uri_list},
+        )
+    finally:
+        await falkordb.close()
+
+    if not rows:
+        logger.info(
+            "  Subset upsert: no :Node entities resolved for %d URIs (scope=%s) — skipping",
+            len(uri_list),
+            scope,
+        )
+        return 0
+
+    entities, embed_texts = _build_embed_payload(rows, collection)
+    if not entities:
+        return 0
+
+    weaviate_url = settings.WEAVIATE_SERVICE_URL.rstrip("/")
+    intelligence_url = settings.INTELLIGENCE_DOCS_SERVICE_URL.rstrip("/")
+    all_embeddings = await _embed_texts(intelligence_url, embed_texts)
+
+    if len(all_embeddings) != len(entities):
+        raise RuntimeError(
+            f"Embedding count mismatch: got {len(all_embeddings)} for {len(entities)} entities"
+        )
+
+    upserted = 0
+    async with httpx.AsyncClient(timeout=120) as http:
+        for batch_start in range(0, len(entities), EMBED_BATCH_SIZE):
+            batch_entities = entities[batch_start: batch_start + EMBED_BATCH_SIZE]
+            batch_embeddings = all_embeddings[batch_start: batch_start + EMBED_BATCH_SIZE]
+            resp = await http.post(
+                f"{weaviate_url}/weaviate/entities/upsert-subset",
+                json={
+                    "entities": batch_entities,
+                    "embeddings": batch_embeddings,
+                },
+                headers=_HEADERS,
+            )
+            if resp.status_code not in (200, 201):
+                raise RuntimeError(
+                    f"weaviate-service /entities/upsert-subset returned HTTP "
+                    f"{resp.status_code}: {resp.text[:300]}"
+                )
+            upserted += len(batch_entities)
+
+    logger.info(
+        "  Subset upsert: %d entities (replace-or-insert) for scope=%s",
+        upserted,
+        scope,
+    )
+    return upserted
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers shared by full and subset paths
+# ---------------------------------------------------------------------------
+
+
+def _build_embed_payload(
+    rows: List[Dict[str, Any]],
+    collection: str,
+) -> tuple[List[Dict[str, Any]], List[str]]:
+    """Turn FalkorDB rows into the (entities, embed_texts) tuple expected
+    by intelligence-docs and weaviate-service.
+    """
+    entities: List[Dict[str, Any]] = []
+    embed_texts: List[str] = []
+    for row in rows:
+        uri: str = row.get("uri") or ""
+        if not uri:
+            continue
+        label: Optional[str] = row.get("label")
+        entity_type: Optional[str] = row.get("type")
+        definition: Optional[str] = row.get("definition")
+
+        if not label:
+            slug = uri.rsplit("/", 1)[-1]
+            label = slug.replace("-", " ").replace("_", " ").title()
+
+        type_str = entity_type or "entity"
+        text = (
+            f"{label} ({type_str}). {definition}"
+            if definition
+            else f"{label} ({type_str})"
+        )
+
+        entities.append({
+            "entity_uri": uri,
+            "label": label,
+            "entity_type": type_str,
+            "definition": definition or "",
+            "collection": collection,
+        })
+        embed_texts.append(text)
+    return entities, embed_texts
+
+
+async def _embed_texts(
+    intelligence_url: str,
+    embed_texts: List[str],
+) -> List[List[float]]:
+    """Batch-embed via intelligence-docs-service /embed endpoint."""
+    all_embeddings: List[List[float]] = []
+    async with httpx.AsyncClient(timeout=120) as http:
+        for batch_start in range(0, len(embed_texts), EMBED_BATCH_SIZE):
+            batch = embed_texts[batch_start: batch_start + EMBED_BATCH_SIZE]
+            resp = await http.post(
+                f"{intelligence_url}/embed",
+                json={"texts": batch, "task": "retrieval.passage"},
+                headers=_HEADERS,
+            )
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"intelligence-docs-service /embed returned HTTP {resp.status_code}: "
+                    f"{resp.text[:300]}"
+                )
+            data = resp.json()
+            batch_embeddings: List[List[float]] = data.get("embeddings", data)
+            all_embeddings.extend(batch_embeddings)
+    return all_embeddings

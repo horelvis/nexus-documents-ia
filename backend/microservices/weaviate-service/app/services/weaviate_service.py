@@ -2408,6 +2408,69 @@ class WeaviateService:
             logger.error(f"Failed to batch-upsert TrustGraphEntities: {e}")
             raise
 
+    async def upsert_trustgraph_entities_subset(
+        self,
+        entities: List[Dict[str, Any]],
+        embeddings: List[List[float]],
+    ) -> int:
+        """Idempotent per-object upsert into TrustGraphEntities.
+
+        Unlike upsert_trustgraph_entities_batch — which relies on the
+        caller wiping the collection first because insert_many collides
+        on existing UUIDs — this variant uses replace-or-insert, so the
+        caller can pass arbitrary subsets and existing rows are updated
+        in place. Entity UUIDs are derived deterministically from
+        ``entity_uri`` so repeated calls converge on the latest props.
+
+        Returns the number of entities written (replaced + inserted).
+        """
+        try:
+            await self.ensure_trustgraph_entities_collection()
+            col = self.client.collections.get(self.TRUSTGRAPH_ENTITIES_COLLECTION)
+
+            written = 0
+            for entity, vector in zip(entities, embeddings):
+                embed_text = f"{entity.get('label', '')} {entity.get('definition', '')}".strip()
+                props = {
+                    "entity_uri": entity.get("entity_uri", ""),
+                    "label": entity.get("label", ""),
+                    "definition": entity.get("definition", ""),
+                    "entity_type": entity.get("entity_type", ""),
+                    "roles": [EVERYONE_ROLE],
+                    "collection": entity.get("collection", ""),
+                    "embed_text": embed_text,
+                }
+                obj_uuid = str(uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"trustgraph:{entity.get('entity_uri', embed_text)}",
+                ))
+                # replace fails with 404 if the object isn't there yet —
+                # in that case fall through to insert. Any other error is
+                # propagated so transient issues don't silently drop rows.
+                try:
+                    col.data.replace(
+                        uuid=obj_uuid,
+                        properties=props,
+                        vector=vector,
+                    )
+                except UnexpectedStatusCodeException as exc:
+                    if exc.status_code == 404 or "not found" in str(exc).lower():
+                        col.data.insert(
+                            properties=props,
+                            uuid=obj_uuid,
+                            vector=vector,
+                        )
+                    else:
+                        raise
+                written += 1
+
+            logger.info(f"Subset-upserted {written} TrustGraphEntities (replace-or-insert)")
+            return written
+
+        except Exception as e:
+            logger.error(f"Failed to subset-upsert TrustGraphEntities: {e}")
+            raise
+
     async def delete_trustgraph_entities(self) -> int:
         """Delete all TrustGraphEntities (single-org full wipe)."""
         try:
