@@ -43,6 +43,18 @@ class Settings(BaseSettings):
     # Weaviate (for reindexation)
     WEAVIATE_SERVICE_URL: str = os.getenv("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
 
+    # Intelligence Docs (for entity embedding)
+    INTELLIGENCE_DOCS_SERVICE_URL: str = os.getenv(
+        "INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000"
+    )
+
+    # Auto-embed entities into Weaviate after each extraction.
+    # Disable when extraction throughput is high — the current upsert is
+    # not idempotent (DELETE-all + re-upsert), which is expensive at scale.
+    auto_entity_embedding_enabled: bool = os.getenv(
+        "AUTO_ENTITY_EMBEDDING_ENABLED", "true"
+    ).lower() == "true"
+
     # Microservice auth
     MICROSERVICES_API_KEY: str = os.getenv("MICROSERVICES_API_KEY", "")
 

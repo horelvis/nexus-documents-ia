@@ -19,6 +19,11 @@ os.environ.setdefault("ACTIVE_SECTOR", "legal")
 os.environ.setdefault("LOG_LEVEL", "DEBUG")
 # Keep AGE settings to avoid import errors (not used in FalkorDB tests)
 os.environ.setdefault("DATABASE_URL", "postgresql://nexus_user:nexus_password@localhost:5432/nouxcube")
+# Disable post-extraction Weaviate embed hook in tests — the task would
+# fire HTTP to weaviate-service / intelligence-docs-service which are
+# not part of the unit-test fixture set, leaving an unawaited coroutine
+# pending at teardown.
+os.environ.setdefault("AUTO_ENTITY_EMBEDDING_ENABLED", "false")
 
 
 @pytest_asyncio.fixture

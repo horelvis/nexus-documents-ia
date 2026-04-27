@@ -545,6 +545,17 @@ class ExtractionCoordinator:
             elapsed_ms,
         )
 
+        # Step 5: Auto-embed entities into Weaviate (fire-and-forget).
+        # Without this hook, freshly extracted entities only become
+        # searchable in graph_rag after a manual reindex run. The current
+        # implementation re-embeds the entire scope on every call because
+        # the Weaviate batch-upsert endpoint is not idempotent — see the
+        # TODO in app/services/entity_embedding.py for the proper fix.
+        if settings.auto_entity_embedding_enabled and total_triples > 0:
+            asyncio.create_task(
+                _safe_populate_embeddings(scope=user, collection=collection)
+            )
+
         return {
             "success": True,
             "document_uri": document_uri,
@@ -557,3 +568,15 @@ class ExtractionCoordinator:
             "validation_failures": total_validation,
             "errors": errors,
         }
+
+
+async def _safe_populate_embeddings(scope: str, collection: str) -> None:
+    """Wrap populate_entity_embeddings so a failure in the fire-and-forget
+    task does not surface as an unawaited-exception warning.
+    """
+    try:
+        from app.services.entity_embedding import populate_entity_embeddings
+        upserted = await populate_entity_embeddings(scope=scope, collection=collection)
+        logger.info("Auto entity embedding refreshed %d entities", upserted)
+    except Exception as exc:
+        logger.warning("Auto entity embedding failed: %s", exc, exc_info=True)
