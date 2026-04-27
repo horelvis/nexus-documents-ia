@@ -179,6 +179,16 @@ class ReindexResponse(BaseModel):
     errors: List[str] = []
 
 
+class RefreshEmbeddingsRequest(BaseModel):
+    collection: str = "default"
+
+
+class RefreshEmbeddingsResponse(BaseModel):
+    success: bool
+    entities_upserted: int = 0
+    error: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Template execution
 # ---------------------------------------------------------------------------

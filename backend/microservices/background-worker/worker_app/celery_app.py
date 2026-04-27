@@ -74,5 +74,10 @@ celery_app.conf.update(
             "task": "emma.heartbeat_digest",
             "schedule": crontab(hour=9, minute=0),  # 9 AM daily
         },
+        # TrustGraph drift safety net — Mondays 04:00 UTC
+        "trustgraph-refresh-entity-embeddings": {
+            "task": "trustgraph.refresh_entity_embeddings",
+            "schedule": crontab(day_of_week="mon", hour=4, minute=0),
+        },
     },
 )

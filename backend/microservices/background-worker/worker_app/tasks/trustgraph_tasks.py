@@ -10,6 +10,12 @@ Task Flow:
     reindex_graph_task:
         1. DELETE /triples/clear on knowledge-tree-service (wipes graph)
         2. Logs that re-indexing will happen via the normal indexing pipeline
+
+    refresh_entity_embeddings_task:
+        1. POST to /triples/refresh-embeddings on knowledge-tree-service
+        2. Drift safety net for the per-extraction auto-embed hook —
+           covers cases where the hook was disabled, failed, or hadn't
+           caught up to the latest entities
 """
 
 import logging
@@ -29,6 +35,11 @@ MICROSERVICES_API_KEY = os.getenv("MICROSERVICES_API_KEY", "")
 # Timeout for extraction requests — LLM calls can take a while
 EXTRACTION_TIMEOUT = 260  # seconds (soft_time_limit is 280)
 CLEAR_TIMEOUT = 60  # seconds
+# Embed-refresh covers the full graph: query FalkorDB → batch embed
+# every entity via intelligence-docs → DELETE+INSERT in Weaviate. With
+# a few thousand entities this stays under a minute, but we leave room
+# for slower fleets.
+REFRESH_EMBEDDINGS_TIMEOUT = 600  # seconds
 
 
 def _get_headers() -> Dict[str, str]:
@@ -185,3 +196,70 @@ def reindex_graph_task(
             "trustgraph.reindex_graph: failed: %s", exc
         )
         return {"success": False, "deleted": 0, "message": str(exc)}
+
+
+@celery_app.task(
+    name="trustgraph.refresh_entity_embeddings",
+    bind=True,
+    max_retries=1,
+    default_retry_delay=300,
+    time_limit=900,
+    soft_time_limit=850,
+)
+def refresh_entity_embeddings_task(
+    self,
+    collection: str = "default",
+) -> Dict[str, Any]:
+    """Re-embed every :Node entity into Weaviate (TrustGraphEntities).
+
+    Drift safety net for the per-extraction auto-embed hook on
+    knowledge-tree-service. Runs weekly via Celery beat so any entity
+    that escaped the hook (disabled flag, hook failure, race condition)
+    becomes searchable in graph_rag without manual intervention.
+
+    Args:
+        collection: Collection scope (default: "default").
+
+    Returns:
+        Dict with keys:
+          success           — True on HTTP 200
+          entities_upserted — count returned by KTS
+          message           — human-readable summary
+    """
+    url = f"{KTS_URL}/triples/refresh-embeddings"
+    payload = {"collection": collection}
+
+    logger.info(
+        "trustgraph.refresh_entity_embeddings: collection=%s",
+        collection,
+    )
+
+    try:
+        with httpx.Client(timeout=REFRESH_EMBEDDINGS_TIMEOUT) as client:
+            response = client.post(url, json=payload, headers=_get_headers())
+
+        if response.status_code == 200:
+            result = response.json()
+            upserted = result.get("entities_upserted", 0)
+            logger.info(
+                "trustgraph.refresh_entity_embeddings: OK — %d entities upserted",
+                upserted,
+            )
+            return {
+                "success": True,
+                "entities_upserted": upserted,
+                "message": f"Refreshed {upserted} entity embeddings.",
+            }
+        else:
+            msg = f"KTS returned HTTP {response.status_code}: {response.text[:300]}"
+            logger.error("trustgraph.refresh_entity_embeddings: %s", msg)
+            raise ValueError(msg)
+
+    except Exception as exc:
+        logger.warning(
+            "trustgraph.refresh_entity_embeddings: attempt %d/%d failed: %s",
+            self.request.retries + 1,
+            self.max_retries + 1,
+            exc,
+        )
+        raise self.retry(exc=exc)

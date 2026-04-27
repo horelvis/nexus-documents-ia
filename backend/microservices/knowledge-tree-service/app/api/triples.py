@@ -23,6 +23,8 @@ from app.schemas.triples import (
     BatchNeighborsResponse,
     ContextRequest,
     ContextResponse,
+    RefreshEmbeddingsRequest,
+    RefreshEmbeddingsResponse,
     StatsResponse,
     TemplateListItem,
     TemplateRequest,
@@ -33,6 +35,7 @@ from app.schemas.triples import (
     TripleQueryResponse,
     TripleResult,
 )
+from app.services.entity_embedding import populate_entity_embeddings
 from app.services.template_executor import TemplateExecutor
 
 logger = logging.getLogger(__name__)
@@ -306,3 +309,24 @@ async def execute_template(request: TemplateRequest) -> TemplateResponse:
 async def list_templates() -> List[TemplateListItem]:
     """List all available Cypher templates."""
     return _template_executor.list_templates()
+
+
+@router.post("/refresh-embeddings", response_model=RefreshEmbeddingsResponse)
+async def refresh_embeddings(
+    request: RefreshEmbeddingsRequest,
+    user_roles: List[str] = Depends(extract_user_roles),
+) -> RefreshEmbeddingsResponse:
+    """Re-embed every :Node entity into TrustGraphEntities (Weaviate).
+
+    Used by the weekly Celery beat job (`trustgraph.refresh_entity_embeddings`)
+    to detect drift between FalkorDB and Weaviate. The post-extraction
+    auto-embed hook covers the happy path; this endpoint is the safety net
+    for runs where the hook was disabled, failed, or not yet caught up.
+    """
+    scope = _graph_scope(user_roles)
+    try:
+        upserted = await populate_entity_embeddings(scope=scope, collection=request.collection)
+        return RefreshEmbeddingsResponse(success=True, entities_upserted=upserted)
+    except Exception as exc:
+        logger.exception("refresh_embeddings failed: %s", exc)
+        return RefreshEmbeddingsResponse(success=False, error=str(exc))
