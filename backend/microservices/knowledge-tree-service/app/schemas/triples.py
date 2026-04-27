@@ -152,6 +152,7 @@ class TraceSourceResult(BaseModel):
     object_uri: str
     document_id: str
     chunk_offset: int = 0
+    chunk_uri: Optional[str] = None
     confidence: Optional[float] = None
     source_chunk: str = ""
 
