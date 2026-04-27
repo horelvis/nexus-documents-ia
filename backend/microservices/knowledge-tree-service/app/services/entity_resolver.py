@@ -155,6 +155,16 @@ class EntityResolver:
             )
 
         all_clusters = heuristic_clusters + llm_clusters
+
+        # Type-specific safety net. For places, two labels with mismatched
+        # numeric tokens (street numbers) almost certainly point at distinct
+        # addresses even when slug similarity or the LLM grouped them.
+        if entity_type == "place":
+            uri_to_label = {e["uri"]: e.get("label", "") for e in entities}
+            all_clusters = self._reject_distinct_numeric_members(
+                all_clusters, uri_to_label,
+            )
+
         total_edges_repointed = 0
         total_nodes_removed = 0
 
@@ -480,6 +490,56 @@ class EntityResolver:
         if isinstance(parsed, list):
             return parsed
         return []
+
+    # ------------------------------------------------------------------
+    # Internals — type-specific guards
+    # ------------------------------------------------------------------
+
+    _NUMERIC_TOKEN_RE = re.compile(r"\d+")
+
+    @classmethod
+    def _reject_distinct_numeric_members(
+        cls,
+        clusters: List[Dict[str, Any]],
+        uri_to_label: Dict[str, str],
+    ) -> List[Dict[str, Any]]:
+        """Drop cluster members whose numeric tokens conflict with the canonical.
+
+        Used for `place` entities so two distinct addresses on the same
+        street ('Calle Mayor 5' vs 'Calle Mayor 47') are never fused even
+        if the LLM phase recommended the merge. The check is deliberately
+        conservative: when only one side has numbers, the merge is allowed
+        (the other label is treated as the unspecified parent address).
+        Clusters that collapse to a single canonical-only member after
+        filtering are dropped entirely so downstream merge skips them.
+        """
+        filtered: List[Dict[str, Any]] = []
+        for cluster in clusters:
+            canonical_uri = cluster.get("canonical_uri", "")
+            canonical_nums = set(
+                cls._NUMERIC_TOKEN_RE.findall(uri_to_label.get(canonical_uri, ""))
+            )
+            kept: List[str] = []
+            for uri in cluster.get("member_uris", []):
+                if uri == canonical_uri:
+                    kept.append(uri)
+                    continue
+                member_nums = set(cls._NUMERIC_TOKEN_RE.findall(uri_to_label.get(uri, "")))
+                if canonical_nums and member_nums and canonical_nums != member_nums:
+                    logger.info(
+                        "EntityResolver[place]: rejected merge %s ('%s') → %s ('%s') — distinct numeric tokens",
+                        uri,
+                        uri_to_label.get(uri, ""),
+                        canonical_uri,
+                        uri_to_label.get(canonical_uri, ""),
+                    )
+                    continue
+                kept.append(uri)
+            if len(kept) > 1:
+                new_cluster = dict(cluster)
+                new_cluster["member_uris"] = kept
+                filtered.append(new_cluster)
+        return filtered
 
     # ------------------------------------------------------------------
     # Internals — graph merge
