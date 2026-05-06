@@ -121,3 +121,6 @@ wget-log*
 backend/microservices/presentation-service/*.pptx
 !backend/microservices/presentation-service/templates/*.pptx
 !backend/microservices/presentation-service/templates/*.potx
+
+# Git worktrees
+.worktrees/
