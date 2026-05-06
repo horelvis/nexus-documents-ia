@@ -41,6 +41,7 @@ interface User {
   email: string
   full_name?: string
   is_active: boolean
+  is_superuser: boolean
   onboarding_completed: boolean
 }
 
@@ -123,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [roles, setRoles] = useState<string[]>([])
 
-  const isAdmin = roles.includes('admin') || roles.includes('realm-admin')
+  const isAdmin = user?.is_superuser === true
 
   // Fetch user from backend using SSO token
   const fetchUser = useCallback(async (accessToken: string) => {
