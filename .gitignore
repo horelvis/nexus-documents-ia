@@ -124,3 +124,6 @@ backend/microservices/presentation-service/*.pptx
 
 # Git worktrees
 .worktrees/
+
+# Superpowers brainstorming session data
+.superpowers/
