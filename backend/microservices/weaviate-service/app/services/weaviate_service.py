@@ -1,9 +1,11 @@
 """Weaviate service implementation — embeddings via intelligence-docs-service.
 
-Single-org refactor: collections are fixed (Nouxcube_documents,
+Single-tenant on-premise: collections are fixed (Nouxcube_documents,
 Nouxcube_knowledge, Nouxcube_visual, TrustGraphEntities, OntologyTerms).
-ACL is enforced by the ``roles`` TEXT_ARRAY property + the ``EVERYONE``
-sentinel. Legal/BOE knowledge is unified into TrustGraph (FalkorDB).
+All authenticated users can read every object — there is no per-document
+or per-role filter at the vector store layer. The ``roles`` TEXT_ARRAY
+property and its ACL filter were removed on 2026-05-04. Legal/BOE
+knowledge is unified into TrustGraph (FalkorDB).
 """
 import weaviate
 import logging
