@@ -4,7 +4,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ConnectorType(str, Enum):
@@ -606,18 +606,12 @@ class DatabaseConfig(BaseModel):
 
 class ConnectorBase(BaseModel):
     """Base connector fields."""
+    model_config = ConfigDict(extra='forbid')
+
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     sync_enabled: bool = Field(default=True, description="Enable automatic sync")
     sync_interval_hours: int = Field(default=24, ge=1, le=168, description="Sync interval in hours")
-    default_document_roles: List[str] = Field(
-        default_factory=lambda: ["EVERYONE"],
-        description=(
-            "Roles applied to documents ingested through this connector. "
-            "Use ['EVERYONE'] for organization-wide visibility, or specify "
-            "roles like ['SALES'] to restrict to a department."
-        ),
-    )
 
 
 class ConnectorCreate(ConnectorBase):
@@ -635,16 +629,14 @@ class ConnectorCreate(ConnectorBase):
 
 class ConnectorUpdate(BaseModel):
     """Schema for updating a connector (admin only)."""
+    model_config = ConfigDict(extra='forbid')
+
     name: Optional[str] = Field(None, min_length=1, max_length=255)
     description: Optional[str] = None
     config: Optional[Dict[str, Any]] = None
     sync_enabled: Optional[bool] = None
     sync_interval_hours: Optional[int] = Field(None, ge=1, le=168)
     is_active: Optional[bool] = None
-    default_document_roles: Optional[List[str]] = Field(
-        default=None,
-        description="Roles applied to newly ingested documents (admin only).",
-    )
 
 
 class ConnectorResponse(ConnectorBase):
@@ -802,10 +794,6 @@ class IndexedDocumentResponse(BaseModel):
     mime_type: Optional[str] = None
     file_extension: Optional[str] = None
     size_bytes: int = 0
-    roles: List[str] = Field(
-        default_factory=lambda: ["EVERYONE"],
-        description="KeyCloak role names that can see this indexed document.",
-    )
     indexing_status: str
     indexing_error: Optional[str] = None
     source_created_at: Optional[datetime] = None

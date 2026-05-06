@@ -58,8 +58,8 @@ class UnifiedDocument:
     - All IDs are UUIDs for consistency with PostgreSQL
     - `file_bytes` is Optional - allows for lazy loading (discovery vs download)
     - `content_hash` enables deduplication across sources
-    - ACL is role-based: each document carries `roles=["EVERYONE"]` (default)
-      or a list of KeyCloak roles such as `["LEGAL", "HR"]`.
+    - Single-tenant on-premise: every authenticated user can read every document.
+      Authorization is gated solely by `User.is_superuser` for admin operations.
 
     Example Usage:
         # From Alfresco adapter
@@ -72,7 +72,6 @@ class UnifiedDocument:
             filename="contract.pdf",
             mime_type="application/pdf",
             owner_id=admin.id,
-            roles=["EVERYONE"],
         )
     """
 
@@ -102,9 +101,8 @@ class UnifiedDocument:
     source_created_at: Optional[datetime] = None
     source_modified_at: Optional[datetime] = None
 
-    # === Ownership and ACL ===
+    # === Ownership ===
     owner_id: UUID = field(default_factory=lambda: UUID(int=0))
-    roles: List[str] = field(default_factory=lambda: ["EVERYONE"])
 
     # === Processing State ===
     indexing_status: IndexingStatus = IndexingStatus.PENDING
@@ -155,7 +153,6 @@ class UnifiedDocument:
             "source_created_at": self.source_created_at.isoformat() if self.source_created_at else None,
             "source_modified_at": self.source_modified_at.isoformat() if self.source_modified_at else None,
             "owner_id": str(self.owner_id),
-            "roles": self.roles,
             "indexing_status": self.indexing_status.value,
             "indexing_error": self.indexing_error,
             "weaviate_id": str(self.weaviate_id) if self.weaviate_id else None,

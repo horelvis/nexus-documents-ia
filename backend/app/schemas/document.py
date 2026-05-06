@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional, Any, Dict
 from uuid import UUID
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 from app.core.config import settings
 from .enums import IndexingStatus
 
@@ -11,15 +11,10 @@ class TagBase(BaseModel):
     name: str
 
 class DocumentBase(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
     title: str
     description: Optional[str] = None
-    roles: List[str] = Field(
-        default=["EVERYONE"],
-        description=(
-            "KeyCloak role names that can see this document. "
-            "Use ['EVERYONE'] for organization-wide visibility."
-        ),
-    )
 
 
 # Esquemas para DocumentMetrics
@@ -133,17 +128,12 @@ class TagUpdate(TagBase):
     pass
 
 class DocumentUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
     title: Optional[str] = None
     description: Optional[str] = None
     tags: Optional[List[str]] = None
     category: Optional[str] = None
-    roles: Optional[List[str]] = Field(
-        default=None,
-        description=(
-            "KeyCloak role names that can see this document. "
-            "Use ['EVERYONE'] for organization-wide visibility."
-        ),
-    )
 
 # Esquemas para respuestas
 class Tag(TagBase):
