@@ -13,7 +13,6 @@ import hashlib
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
 from app.db.async_database import get_async_db
 from app.db.models import User, Document, DocumentView, SignatureContact
 from app.schemas.entity import Entity, EntitySearchResponse
@@ -38,15 +37,12 @@ async def search_entities(
     entities = []
     search_pattern = f"%{q.lower()}%"
 
-    # Build base query for documents with extracted entities (ACL-filtered)
-    doc_query = filter_visible_to_user(
-        select(Document).where(
-            and_(
-                Document.extracted_entities.isnot(None),
-                Document.extracted_entities != [],
-            )
-        ),
-        current_user,
+    # Build base query for documents with extracted entities
+    doc_query = select(Document).where(
+        and_(
+            Document.extracted_entities.isnot(None),
+            Document.extracted_entities != [],
+        )
     )
 
     # Filter by specific document if provided (skip if document_id is "general" for global search)
@@ -173,12 +169,9 @@ async def get_document_entities(
     """
     Get entities extracted from a specific document
     """
-    # Verify document exists and user has access (ACL-filtered)
-    doc_query = filter_visible_to_user(
-        select(Document).where(Document.id == UUID(document_id)),
-        current_user,
+    result = await db.execute(
+        select(Document).where(Document.id == UUID(document_id))
     )
-    result = await db.execute(doc_query)
     document = result.scalar_one_or_none()
 
     if not document:

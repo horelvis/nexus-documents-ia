@@ -14,8 +14,6 @@ from app.services.elasticsearch_client import elasticsearch_client, SearchUserCo
 from app.db.database import SessionLocal
 from app.db.models import Document
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
-
 logger = logging.getLogger(__name__)
 
 # Weaviate service URL for Emma AI
@@ -29,12 +27,10 @@ class SearchService:
         self,
         user: Optional[UserProfile] = None,
         user_id: str = None,
-        role_ids: List[str] = None,
         is_admin: bool = False
     ):
         self.user = user
         self.user_id = user_id or (user.sub if user else None)
-        self.role_ids = role_ids or (list(user.roles) if user else [])
         self.is_admin = is_admin
         self.collection_name = "Nouxcube_documents"
         self._emma_timeout = 120.0  # 2 minutes for AI operations
@@ -144,12 +140,11 @@ class SearchService:
                 # Use Elasticsearch for hybrid/keyword search with ACL filtering
                 logger.info("🔍 Using Elasticsearch for hybrid/keyword search")
 
-                # Build user context for ACL filtering
                 user_context = None
                 if self.user_id:
                     user_context = SearchUserContext(
                         user_id=self.user_id,
-                        role_ids=self.role_ids,
+                        role_ids=[],
                         is_admin=self.is_admin
                     )
 

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.db.async_database import get_async_db
 from app.db.models import (
     Connector,

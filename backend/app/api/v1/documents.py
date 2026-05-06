@@ -27,7 +27,6 @@ from app.api.async_dependencies import (
     get_async_db
 )
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
 from app.db.models import Document as DBDocument, Tag, IndexedDocument, Connector
 from app.schemas.document import (
     Document, DocumentDetail,
@@ -40,21 +39,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ========================================
-# ACL — role-based access enforced via filter_visible_to_user
-# ========================================
-
 async def _load_visible_document(
     db: AsyncSession,
     doc_id: str,
     user: UserProfile,
 ) -> DBDocument:
-    """Load a Document enforcing role-based visibility or raise 403/404."""
-    query = filter_visible_to_user(
-        select(DBDocument).where(DBDocument.id == UUID(doc_id)),
-        user,
+    """Load a Document by ID or raise 404. All authenticated users can see all documents."""
+    result = await db.execute(
+        select(DBDocument).where(DBDocument.id == UUID(doc_id))
     )
-    result = await db.execute(query)
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -89,8 +82,6 @@ async def list_documents(
     - If folder is "": Returns documents in root folder + subfolders as items
     - If folder is "/path": Returns documents in that folder + subfolders as items
     """
-    # Role-based ACL filtering is applied by the service layer via
-    # filter_visible_to_user using current_user.roles.
     return await document_service.get_documents(
         db=db,
         user=current_user,
@@ -262,12 +253,9 @@ async def stream_document(
     - Document (uploads directos): se obtienen del storage service
     - IndexedDocument (conectores): se obtienen del sistema externo (Alfresco, etc.)
 
-    Requires: VIEW permission on the document. The per-table service
-    calls below (get_document / get_indexed_document) already enforce
-    role-based ACL via filter_visible_to_user / roles.overlap checks,
-    so no upfront visibility gate is needed — an extra _load_visible_document
-    call would only recognise Document-table rows and blanket-404 every
-    IndexedDocument preview.
+    All authenticated users can stream any document. The per-table service
+    calls below (get_document / get_indexed_document) look up documents
+    without role filtering, so no upfront visibility gate is needed.
     """
     # 1. Intentar obtener de tabla Document (uploads)
     try:
@@ -960,11 +948,7 @@ async def recategorize_all_documents(
     """
     Recategoriza documentos visibles para el usuario.
     """
-    # Build query; role-based visibility applied via filter_visible_to_user
-    query = filter_visible_to_user(
-        select(DBDocument).filter(DBDocument.indexed > 0),
-        current_user,
-    )
+    query = select(DBDocument).filter(DBDocument.indexed > 0)
 
     if only_uncategorized:
         query = query.filter(

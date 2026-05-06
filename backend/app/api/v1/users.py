@@ -10,7 +10,7 @@ import logging
 
 from app.api.async_dependencies import get_async_db, get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.db.models import User, Document
 from app.schemas.user import (
     UserResponse,
@@ -28,7 +28,7 @@ router = APIRouter()
 
 @router.get("/list", response_model=List[UserWithStats])
 async def list_users(
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
@@ -109,7 +109,7 @@ async def list_users(
 @router.post("/invite")
 async def invite_user(
     invite_data: UserInvite,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -167,7 +167,7 @@ async def invite_user(
 async def update_user_role(
     user_id: str,
     role_update: UserRoleUpdate,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -223,7 +223,7 @@ async def update_user_role(
 @router.delete("/{user_id}")
 async def delete_user(
     user_id: str,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -292,7 +292,7 @@ async def delete_user(
 @router.get("/{user_id}/activity")
 async def get_user_activity(
     user_id: str,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db),
     days: int = Query(30, ge=1, le=365)
 ):

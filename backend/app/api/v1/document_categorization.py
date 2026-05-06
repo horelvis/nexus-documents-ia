@@ -12,7 +12,6 @@ import re
 
 from app.api.async_dependencies import get_current_active_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
 from app.db.async_database import get_async_db
 from app.db.models import Document
 from app.core.config import settings
@@ -69,9 +68,9 @@ async def categorize_documents(
     - Can force recategorization of already categorized documents
     """
     try:
-        # Get documents to categorize (ACL-filtered)
-        query = filter_visible_to_user(select(Document), current_user)
-        
+        # Get documents to categorize
+        query = select(Document)
+
         if request.document_ids:
             # Specific documents
             query = query.filter(Document.id.in_(request.document_ids))
@@ -396,12 +395,9 @@ async def update_document_category(
     db: AsyncSession = Depends(get_async_db)
 ):
     """Manually update document category"""
-    # Get document (ACL-filtered)
-    query = filter_visible_to_user(
-        select(Document).filter(Document.id == document_id),
-        current_user,
+    result = await db.execute(
+        select(Document).filter(Document.id == document_id)
     )
-    result = await db.execute(query)
     document = result.scalar_one_or_none()
 
     if not document:
@@ -434,12 +430,9 @@ async def update_document_tags(
     db: AsyncSession = Depends(get_async_db)
 ):
     """Manually update document tags"""
-    # Get document (ACL-filtered)
-    query = filter_visible_to_user(
-        select(Document).filter(Document.id == document_id),
-        current_user,
+    result = await db.execute(
+        select(Document).filter(Document.id == document_id)
     )
-    result = await db.execute(query)
     document = result.scalar_one_or_none()
 
     if not document:

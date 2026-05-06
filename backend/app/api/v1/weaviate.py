@@ -12,13 +12,7 @@ import httpx
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
 from app.services.weaviate_client import weaviate_client
-
-
-def _require_admin(user: UserProfile) -> None:
-    if "ADMIN" not in (user.roles or []):
-        raise HTTPException(status_code=403, detail="Admin access required")
 from app.clients.exceptions import HTTPClientError, ServiceTimeoutError
 from app.core.config import settings
 
@@ -43,7 +37,6 @@ async def emma_query(
         body = await request.json()
         # Extract ACL context from authenticated user
         body["user_id"] = current_user.sub
-        body["user_roles"] = current_user.roles
 
         logger.debug(f"🔐 Emma query with ACL: user={current_user.sub}, roles={len(current_user.roles or [])}")
 
@@ -84,7 +77,6 @@ async def emma_query_stream(
         body = await request.json()
         # Extract ACL context from authenticated user
         body["user_id"] = current_user.sub
-        body["user_roles"] = current_user.roles
 
         async def stream_sse() -> AsyncGenerator[bytes, None]:
             """Stream SSE events from Emma Agent Service to client."""
@@ -203,7 +195,6 @@ async def emma_v2_query(
     try:
         body = await request.json()
         body["user_id"] = current_user.sub
-        body["user_roles"] = current_user.roles
 
         logger.debug(f"🧠 Emma v2 query with ACL: user={current_user.sub}")
 
@@ -244,7 +235,6 @@ async def emma_v2_query_stream(
     try:
         body = await request.json()
         body["user_id"] = current_user.sub
-        body["user_roles"] = current_user.roles
 
         async def stream_sse() -> AsyncGenerator[bytes, None]:
             """Stream SSE events from Emma Agent Service to client."""
@@ -481,7 +471,6 @@ async def knowledge_search(
     try:
         body = await request.json()
         body["user_id"] = current_user.sub
-        body["user_roles"] = current_user.roles
 
         return await weaviate_client.knowledge_search(body)
     except HTTPClientError as e:

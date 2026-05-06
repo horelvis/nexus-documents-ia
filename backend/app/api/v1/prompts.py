@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from app.db.database import get_db
 from app.core.config import settings
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ def create_rule(
     rule: PromptRuleCreate,
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """Create a new prompt injection rule."""
     try:
@@ -202,7 +202,7 @@ def update_rule(
     rule: PromptRuleUpdate,
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """Update an existing prompt rule."""
     try:
@@ -275,7 +275,7 @@ def delete_rule(
     rule_id: UUID,
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """Delete (deactivate) a prompt rule."""
     try:
@@ -311,7 +311,7 @@ def create_guardrail(
     guardrail: GuardrailCreate,
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """Create a new guardrail."""
     try:
@@ -414,7 +414,7 @@ def delete_guardrail(
     guardrail_id: UUID,
     db: Session = Depends(get_db),
     _: bool = Depends(verify_api_key),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """Delete (deactivate) a guardrail."""
     try:

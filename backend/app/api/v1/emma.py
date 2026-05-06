@@ -17,10 +17,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _require_admin(user: UserProfile) -> None:
-    if "ADMIN" not in (user.roles or []):
-        raise HTTPException(status_code=403, detail="Admin access required")
-
 # Emma Agent Service URL
 EMMA_SERVICE_URL = settings.EMMA_SERVICE_URL.rstrip("/")
 
@@ -39,9 +35,8 @@ async def emma_query(
         body = await request.json()
         # Extract ACL context from authenticated user
         body["user_id"] = current_user.sub
-        body["user_roles"] = current_user.roles
 
-        logger.debug(f"🧠 Emma query with ACL: user={current_user.sub}, roles={len(current_user.roles or [])}")
+        logger.debug(f"🧠 Emma query: user={current_user.sub}")
 
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
             response = await client.post(
@@ -86,7 +81,6 @@ async def emma_query_stream(
         body = await request.json()
         # Extract ACL context from authenticated user
         body["user_id"] = current_user.sub
-        body["user_roles"] = current_user.roles
 
         return await proxy_sse_stream(
             f"{EMMA_SERVICE_URL}/emma/query/stream", body,
@@ -388,7 +382,7 @@ async def emma_training_start(
     current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Start sector QA embedding training."""
-    if "ADMIN" not in (current_user.roles or []):
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Solo administradores pueden iniciar entrenamiento")
     try:
         body = await request.json()
@@ -528,7 +522,7 @@ async def emma_heartbeat_config_update(
     current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Update heartbeat configuration for the tenant."""
-    if "ADMIN" not in (current_user.roles or []):
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Solo administradores pueden modificar la configuración")
     try:
         body = await request.json()
@@ -578,7 +572,7 @@ async def emma_heartbeat_run(
     current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Manually trigger a heartbeat evaluation for the tenant."""
-    if "ADMIN" not in (current_user.roles or []):
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Solo administradores pueden ejecutar el heartbeat")
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(180.0)) as client:
@@ -1067,7 +1061,7 @@ async def emma_cendoj_status_update(
     current_user: UserProfile = Depends(get_current_user_async)
 ):
     """Toggle CENDOJ jurisprudence search on/off."""
-    if "ADMIN" not in (current_user.roles or []):
+    if not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Solo administradores pueden modificar CENDOJ")
     try:
         body = await request.json()

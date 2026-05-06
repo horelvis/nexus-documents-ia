@@ -20,7 +20,6 @@ from app.api.async_dependencies import (
     get_async_db
 )
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
 from app.db.models import Document as DBDocument, IndexedDocument, DocumentAnalysis
 from app.schemas.analysis import (
     AnalysisStatus, AnalysisType,
@@ -49,12 +48,10 @@ async def queue_analysis(
     Creates a new analysis job in pending state.
     The analysis will be processed asynchronously.
     """
-    # Verify document exists and is visible to current user (via ACL)
-    doc_query = filter_visible_to_user(
-        select(DBDocument).where(DBDocument.id == request.document_id),
-        current_user,
+    # Look up document (all authenticated users can see all documents)
+    doc_result = await db.execute(
+        select(DBDocument).where(DBDocument.id == request.document_id)
     )
-    doc_result = await db.execute(doc_query)
     document = doc_result.scalar_one_or_none()
 
     # If not found, try IndexedDocument table (connector documents)
@@ -131,12 +128,10 @@ async def queue_batch_analysis(
     Creates analysis jobs for each document in the batch.
     Returns list of created jobs (skips documents that already have pending analyses).
     """
-    # Verify all documents exist and are visible to current user (via ACL)
-    docs_query = filter_visible_to_user(
-        select(DBDocument).where(DBDocument.id.in_(request.document_ids)),
-        current_user,
+    # Look up all documents (all authenticated users can see all documents)
+    docs_result = await db.execute(
+        select(DBDocument).where(DBDocument.id.in_(request.document_ids))
     )
-    docs_result = await db.execute(docs_query)
     documents = docs_result.scalars().all()
     found_ids = {doc.id for doc in documents}
 
@@ -456,12 +451,9 @@ async def get_document_analysis_history(
 
     Returns the most recent analyses for the document.
     """
-    # Verify document exists and is visible to current user (via ACL)
-    doc_query = filter_visible_to_user(
-        select(DBDocument).where(DBDocument.id == document_id),
-        current_user,
+    doc_result = await db.execute(
+        select(DBDocument).where(DBDocument.id == document_id)
     )
-    doc_result = await db.execute(doc_query)
     document = doc_result.scalar_one_or_none()
 
     if not document:

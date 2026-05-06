@@ -44,7 +44,7 @@ def _get_mcp_url(connector_type: str) -> str:
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.db.async_database import get_async_db
 from app.db.models import Connector, UserConnectorAuth, UserDocumentSync
 from app.schemas.connector import (
@@ -151,7 +151,7 @@ async def list_connectors(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     List all connectors (admin view).
@@ -193,7 +193,7 @@ async def list_connectors(
 async def create_connector(
     connector_data: ConnectorCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Create a new connector (admin only).
@@ -240,7 +240,7 @@ async def create_connector(
 async def get_connector(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Get details of a specific connector (admin only).
@@ -261,7 +261,7 @@ async def update_connector(
     connector_id: UUID,
     connector_data: ConnectorUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Update a connector's configuration (admin only).
@@ -297,7 +297,7 @@ async def update_connector(
 async def delete_connector(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Delete a connector (admin only).
@@ -337,7 +337,7 @@ async def delete_connector(
 async def check_connector_health(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Check the health of a connector (admin only).
@@ -403,7 +403,7 @@ async def check_connector_health(
 async def get_connector_stats(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Get detailed statistics for a connector (admin only).
@@ -561,7 +561,7 @@ async def get_failed_documents(
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     error_filter: Optional[str] = Query(None, description="Filter by error message (partial match)"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     List failed documents for a connector with full details (admin only).
@@ -656,7 +656,7 @@ async def retry_failed_documents(
     document_ids: Optional[List[str]] = Body(None, description="Specific document IDs to retry, or null for all"),
     error_filter: Optional[str] = Body(None, description="Only retry documents matching this error"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Retry indexing for failed documents (admin only).
@@ -741,7 +741,7 @@ async def retry_failed_documents(
 async def sync_content_model(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Discover and sync the content model (types, aspects, properties) from Alfresco.
@@ -852,7 +852,7 @@ async def get_content_model(
     connector_id: UUID,
     include_properties: bool = Query(True, description="Include full property definitions"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Get the discovered content model for a connector.
@@ -914,7 +914,7 @@ async def sync_folders(
     root_node_id: str = Query("-root-", description="Root folder node ID to start from"),
     max_depth: int = Query(10, description="Maximum folder depth to crawl"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Sync folders with their properties from Alfresco.
@@ -973,7 +973,7 @@ async def trigger_connector_sync(
     full_sync: bool = Query(False, description="Force full resync instead of incremental"),
     retry_failed: bool = Query(False, description="Also retry previously failed documents"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Trigger a manual sync for a connector (admin only).
@@ -1121,7 +1121,7 @@ async def trigger_index_pending(
     max_documents: Optional[int] = Query(None, ge=1, description="Max documents to process"),
     retry_failed: bool = Query(False, description="Also retry previously failed documents"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Trigger indexing of pending documents for a connector (admin only).
@@ -1251,7 +1251,7 @@ async def get_pending_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     List pending documents for a connector (admin only).
@@ -1397,7 +1397,7 @@ async def get_all_indexed_documents(
 async def oauth_authorize(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Initiate OAuth2 flow for an OAuth connector (admin only).
@@ -1512,7 +1512,7 @@ button:hover{{background:#27272a}}</style></head>
 async def oauth_status(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """Check OAuth status for an OAuth connector (Google Drive, OneDrive)."""
     result = await db.execute(
@@ -1552,7 +1552,7 @@ async def list_drive_folders(
     connector_id: UUID,
     parent_id: str = Query("root", description="Parent folder ID"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     List folders for an OAuth connector (admin only).
@@ -1600,7 +1600,7 @@ async def list_drive_folders(
 async def oauth_revoke(
     connector_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """Revoke OAuth tokens for an OAuth connector (admin only)."""
     result = await db.execute(

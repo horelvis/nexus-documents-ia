@@ -8,8 +8,8 @@ email, name, and the canonical KeyCloak roles obtained via
 SQLAlchemy `User` row (e.g. for FK joins in their own queries) should
 look it up explicitly via the User table using `user.sub`.
 
-Tenant-related dependencies and the role-based admin checks were
-removed. Use `require_role` from `app.core.auth.acl` for admin gating.
+Tenant-related dependencies and role-based ACL were removed entirely.
+Use `require_superuser` from `app.core.auth.superuser` for admin gating.
 
 Authentication flow:
 - SaaS mode: Clerk JWT token validation
@@ -48,24 +48,17 @@ logger = logging.getLogger(__name__)
 def _build_profile(user: User, sso_roles: Optional[List[str]] = None) -> UserProfile:
     """Build a UserProfile DTO from the SQLAlchemy User row.
 
-    `sso_roles` is the canonical role list from the SSO provider after
-    `map_groups_to_roles()`. If None (e.g. Clerk SaaS mode), the profile
-    falls back to `['ADMIN']` for superusers and `[]` otherwise.
-
-    The 'EVERYONE' wildcard is stripped defensively — it must never
-    appear in UserProfile.roles (it is for documents only).
+    `sso_roles` is preserved as informational metadata on the profile
+    (displayed in /auth/me, never consumed for authorization). Authorization
+    rides exclusively on `is_superuser` after the role-based ACL removal.
     """
-    if sso_roles is None:
-        roles = ["ADMIN"] if user.is_superuser else []
-    else:
-        roles = [r for r in sso_roles if r != "EVERYONE"]
-        if user.is_superuser and "ADMIN" not in roles:
-            roles.append("ADMIN")
+    roles = [r for r in (sso_roles or []) if r != "EVERYONE"]
     return UserProfile(
         sub=str(user.id),
         email=user.email,
         name=user.full_name,
         roles=roles,
+        is_superuser=user.is_superuser,
     )
 
 

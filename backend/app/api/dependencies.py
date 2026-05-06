@@ -11,8 +11,8 @@ email, name, and the canonical KeyCloak roles). Endpoints that need the
 SQLAlchemy `User` row (e.g. for FK joins in their own queries) should
 look it up explicitly via `db.query(User).filter(User.id == user.sub)`.
 
-Tenant-related dependencies were removed entirely. Use `require_role`
-from `app.core.auth.acl` for admin gating.
+Tenant-related dependencies and role-based ACL were removed entirely.
+Use `require_superuser` from `app.core.auth.superuser` for admin gating.
 """
 import warnings
 from typing import Optional
@@ -36,18 +36,13 @@ __all__ = [
 
 
 def _user_to_profile(user: User) -> UserProfile:
-    """Build a UserProfile DTO from the SQLAlchemy User row.
-
-    Sync legacy path: Clerk SaaS mode does not carry KeyCloak roles, so
-    the profile gets `roles=['ADMIN']` if `is_superuser`, else `[]`. The
-    real role mapping happens in the async path through SSO groups.
-    """
-    roles = ["ADMIN"] if user.is_superuser else []
+    """Build a UserProfile DTO from the SQLAlchemy User row."""
     return UserProfile(
         sub=str(user.id),
         email=user.email,
         name=user.full_name,
-        roles=roles,
+        roles=[],
+        is_superuser=user.is_superuser,
     )
 
 

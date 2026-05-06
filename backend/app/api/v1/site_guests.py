@@ -15,7 +15,7 @@ from sqlalchemy import select, func
 from app.db.async_database import get_async_db
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.db.models import SiteGuestShareDocument
 from app.services.site_guest_service import SiteGuestService
 from app.schemas.site_guest import (
@@ -119,7 +119,7 @@ async def get_site_statistics(
 @router.post("", response_model=SiteGuestResponse, status_code=status.HTTP_201_CREATED)
 async def create_guest(
     guest_data: SiteGuestCreate,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -184,7 +184,7 @@ async def get_guest(
 async def update_guest(
     guest_id: UUID,
     updates: SiteGuestUpdate,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -206,7 +206,7 @@ async def update_guest(
 @router.delete("/{guest_id}", response_model=SuccessResponse)
 async def deactivate_guest(
     guest_id: UUID,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -230,7 +230,7 @@ async def deactivate_guest(
 async def resend_invitation(
     guest_id: UUID,
     invite_request: Optional[SiteGuestInviteRequest] = None,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -256,7 +256,7 @@ async def resend_invitation(
 @router.post("/with-share", response_model=CreateGuestWithShareResponse, status_code=status.HTTP_201_CREATED)
 async def create_guest_with_share(
     request: CreateGuestWithShareRequest,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -388,7 +388,7 @@ async def list_guest_permissions(
 async def grant_document_permission(
     guest_id: UUID,
     permission_data: SiteGuestDocumentPermissionCreate,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -418,7 +418,7 @@ async def grant_document_permission(
 async def grant_folder_permission(
     guest_id: UUID,
     permission_data: SiteGuestFolderPermissionCreate,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -449,7 +449,7 @@ async def grant_folder_permission(
 async def revoke_permission(
     guest_id: UUID,
     permission_id: UUID,
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
