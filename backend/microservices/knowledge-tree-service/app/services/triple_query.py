@@ -4,8 +4,8 @@ TripleQuery — SPO query layer for TrustGraph on FalkorDB.
 Provides 8 query patterns over the Node/Literal/Rel graph model,
 plus aggregation helpers for stats and LLM context building.
 
-All methods are async and enforce multi-tenant isolation via `user`
-and optional `collection` scope.
+All methods are async and enforce collection-scope namespace filtering
+via the optional `collection` parameter.
 """
 
 import logging
@@ -60,9 +60,9 @@ class TripleQuery:
         return triple
 
     def _base_params(
-        self, user: str, collection: Optional[str], **extra: Any
+        self, collection: Optional[str], **extra: Any
     ) -> Dict[str, Any]:
-        params: Dict[str, Any] = {"user": user, **extra}
+        params: Dict[str, Any] = {**extra}
         if collection:
             params["collection"] = collection
         return params
@@ -74,14 +74,13 @@ class TripleQuery:
     async def by_subject(
         self,
         subject_uri: str,
-        user: str,
         collection: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """All triples where subject = subject_uri."""
         col_filter = _col_where("s", collection)
         query = (
-            "MATCH (s:Node {uri: $subject_uri, user: $user})"
+            "MATCH (s:Node {uri: $subject_uri})"
             "-[r:Rel]->(o) "
             f"WHERE (o:Node OR o:Literal){col_filter} "
             "RETURN s.uri AS subject, r.uri AS predicate, "
@@ -90,7 +89,7 @@ class TripleQuery:
             "LIMIT $limit"
         )
         params = self._base_params(
-            user, collection, subject_uri=subject_uri, limit=limit
+            collection, subject_uri=subject_uri, limit=limit
         )
         rows = await self._client.execute_cypher(query, params=params)
         return [self._row_to_triple(r) for r in rows]
@@ -102,14 +101,13 @@ class TripleQuery:
     async def by_predicate(
         self,
         predicate_uri: str,
-        user: str,
         collection: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """All triples with the given predicate URI."""
         col_filter = _col_where("s", collection)
         query = (
-            "MATCH (s:Node {user: $user})"
+            "MATCH (s:Node)"
             "-[r:Rel {uri: $predicate_uri}]->(o) "
             f"WHERE (o:Node OR o:Literal){col_filter} "
             "RETURN s.uri AS subject, r.uri AS predicate, "
@@ -118,7 +116,7 @@ class TripleQuery:
             "LIMIT $limit"
         )
         params = self._base_params(
-            user, collection, predicate_uri=predicate_uri, limit=limit
+            collection, predicate_uri=predicate_uri, limit=limit
         )
         rows = await self._client.execute_cypher(query, params=params)
         return [self._row_to_triple(r) for r in rows]
@@ -130,7 +128,6 @@ class TripleQuery:
     async def by_object_value(
         self,
         value: str,
-        user: str,
         collection: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
@@ -138,15 +135,15 @@ class TripleQuery:
         col_filter_s = _col_where("s", collection)
         col_filter_o = _col_where("o", collection)
         query = (
-            "MATCH (s:Node {user: $user})"
-            "-[r:Rel]->(o:Literal {value: $value, user: $user}) "
+            "MATCH (s:Node)"
+            "-[r:Rel]->(o:Literal {value: $value}) "
             f"WHERE true{col_filter_s}{col_filter_o} "
             "RETURN s.uri AS subject, r.uri AS predicate, "
             "o.value AS object, 'literal' AS object_type, "
             "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk "
             "LIMIT $limit"
         )
-        params = self._base_params(user, collection, value=value, limit=limit)
+        params = self._base_params(collection, value=value, limit=limit)
         rows = await self._client.execute_cypher(query, params=params)
         return [self._row_to_triple(r) for r in rows]
 
@@ -157,22 +154,21 @@ class TripleQuery:
     async def by_object_node(
         self,
         object_uri: str,
-        user: str,
         collection: Optional[str] = None,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
         """All triples pointing to a :Node with the given URI (inbound edges)."""
         col_filter = _col_where("s", collection)
         query = (
-            "MATCH (s:Node {user: $user})"
-            "-[r:Rel]->(o:Node {uri: $object_uri, user: $user}) "
+            "MATCH (s:Node)"
+            "-[r:Rel]->(o:Node {uri: $object_uri}) "
             f"WHERE true{col_filter} "
             "RETURN s.uri AS subject, r.uri AS predicate, "
             "o.uri AS object, 'node' AS object_type, "
             "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk "
             "LIMIT $limit"
         )
-        params = self._base_params(user, collection, object_uri=object_uri, limit=limit)
+        params = self._base_params(collection, object_uri=object_uri, limit=limit)
         rows = await self._client.execute_cypher(query, params=params)
         return [self._row_to_triple(r) for r in rows]
 
@@ -184,13 +180,12 @@ class TripleQuery:
         self,
         subject_uri: str,
         predicate_uri: str,
-        user: str,
         collection: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Exact S-P-O lookup — returns all matching triples."""
         col_filter = _col_where("s", collection)
         query = (
-            "MATCH (s:Node {uri: $subject_uri, user: $user})"
+            "MATCH (s:Node {uri: $subject_uri})"
             "-[r:Rel {uri: $predicate_uri}]->(o) "
             f"WHERE (o:Node OR o:Literal){col_filter} "
             "RETURN s.uri AS subject, r.uri AS predicate, "
@@ -198,7 +193,7 @@ class TripleQuery:
             "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk"
         )
         params = self._base_params(
-            user, collection, subject_uri=subject_uri, predicate_uri=predicate_uri
+            collection, subject_uri=subject_uri, predicate_uri=predicate_uri
         )
         rows = await self._client.execute_cypher(query, params=params)
         return [self._row_to_triple(r) for r in rows]
@@ -211,10 +206,9 @@ class TripleQuery:
         self,
         subject_uri: str,
         predicate_uri: str,
-        user: str,
     ) -> List[Dict[str, Any]]:
         """All objects for a given subject + predicate (delegates to by_spo)."""
-        return await self.by_spo(subject_uri, predicate_uri, user)
+        return await self.by_spo(subject_uri, predicate_uri)
 
     # ------------------------------------------------------------------
     # 7. by_predicate_object
@@ -224,22 +218,21 @@ class TripleQuery:
         self,
         predicate_uri: str,
         object_value: str,
-        user: str,
         object_is_node: bool = False,
     ) -> List[Dict[str, Any]]:
         """All subjects that have predicate_uri → object_value."""
         if object_is_node:
             query = (
-                "MATCH (s:Node {user: $user})"
-                "-[r:Rel {uri: $predicate_uri}]->(o:Node {uri: $object_value, user: $user}) "
+                "MATCH (s:Node)"
+                "-[r:Rel {uri: $predicate_uri}]->(o:Node {uri: $object_value}) "
                 "RETURN s.uri AS subject, r.uri AS predicate, "
                 "o.uri AS object, 'node' AS object_type, "
                 "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk"
             )
         else:
             query = (
-                "MATCH (s:Node {user: $user})"
-                "-[r:Rel {uri: $predicate_uri}]->(o:Literal {value: $object_value, user: $user}) "
+                "MATCH (s:Node)"
+                "-[r:Rel {uri: $predicate_uri}]->(o:Literal {value: $object_value}) "
                 "RETURN s.uri AS subject, r.uri AS predicate, "
                 "o.value AS object, 'literal' AS object_type, "
                 "r.extraction_method AS extraction_method, r.source_chunk AS source_chunk"
@@ -247,7 +240,6 @@ class TripleQuery:
         params: Dict[str, Any] = {
             "predicate_uri": predicate_uri,
             "object_value": object_value,
-            "user": user,
         }
         rows = await self._client.execute_cypher(query, params=params)
         return [self._row_to_triple(r) for r in rows]
@@ -259,7 +251,6 @@ class TripleQuery:
     async def neighbors(
         self,
         uri: str,
-        user: str,
         max_hops: int = 2,
         limit: int = 50,
     ) -> List[Dict[str, Any]]:
@@ -272,16 +263,15 @@ class TripleQuery:
         """
         # max_hops must be inlined — FalkorDB rejects parameterized *1..$n bounds
         query = (
-            f"MATCH (start:Node {{uri: $uri, user: $user}})"
+            f"MATCH (start:Node {{uri: $uri}})"
             f"-[:Rel*1..{max_hops}]-(neighbor:Node) "
-            f"WHERE neighbor.user = $user AND neighbor.uri <> $uri "
+            f"WHERE neighbor.uri <> $uri "
             f"WITH DISTINCT neighbor "
             f"RETURN neighbor.uri AS uri "
             f"LIMIT $limit"
         )
         params: Dict[str, Any] = {
             "uri": uri,
-            "user": user,
             "limit": limit,
         }
         rows = await self._client.execute_cypher(query, params=params)
@@ -294,7 +284,6 @@ class TripleQuery:
     async def batch_neighbors(
         self,
         seed_uris: List[str],
-        user: str,
         collection: Optional[str] = None,
         max_hops: int = 2,
         max_edges: int = 150,
@@ -355,8 +344,8 @@ class TripleQuery:
             # reachable too.
             query = (
                 "UNWIND $frontier AS seed_uri "
-                "MATCH (s:Node {user: $user})"
-                "-[r:Rel]-(o:Node {user: $user}) "
+                "MATCH (s:Node)"
+                "-[r:Rel]-(o:Node) "
                 f"WHERE (s.uri = seed_uri OR o.uri = seed_uri){col_filter} "
                 "RETURN s.uri AS subject, r.uri AS predicate, "
                 "o.uri AS object, 'node' AS object_type, "
@@ -366,7 +355,7 @@ class TripleQuery:
             )
             # Safety limit: allow headroom for post-query predicate filtering
             query_limit = max_edges * 3
-            params = self._base_params(user, collection, frontier=frontier, query_limit=query_limit)
+            params = self._base_params(collection, frontier=frontier, query_limit=query_limit)
             rows = await self._client.execute_cypher(query, params=params)
 
             new_frontier: List[str] = []
@@ -403,7 +392,7 @@ class TripleQuery:
             # Pass 1: Essential properties (no limit — one per entity per pred)
             essential_query = (
                 "UNWIND $uris AS entity_uri "
-                "MATCH (s:Node {uri: entity_uri, user: $user})"
+                "MATCH (s:Node {uri: entity_uri})"
                 "-[r:Rel]->(o:Literal) "
                 "WHERE r.uri ENDS WITH '/core/label' "
                 "   OR r.uri ENDS WITH '/core/type' "
@@ -413,7 +402,7 @@ class TripleQuery:
                 "r.extraction_method AS extraction_method, "
                 "r.source_chunk AS source_chunk"
             )
-            essential_params = self._base_params(user, collection, uris=all_entity_uris)
+            essential_params = self._base_params(collection, uris=all_entity_uris)
             essential_rows = await self._client.execute_cypher(essential_query, params=essential_params)
             for row in essential_rows:
                 all_edges.append(self._row_to_triple(row))
@@ -421,7 +410,7 @@ class TripleQuery:
             # Pass 2: Other literals (capped)
             other_query = (
                 "UNWIND $uris AS entity_uri "
-                "MATCH (s:Node {uri: entity_uri, user: $user})"
+                "MATCH (s:Node {uri: entity_uri})"
                 "-[r:Rel]->(o:Literal) "
                 "WHERE NOT (r.uri ENDS WITH '/core/label' "
                 "        OR r.uri ENDS WITH '/core/type' "
@@ -433,7 +422,7 @@ class TripleQuery:
                 "LIMIT $lit_limit"
             )
             other_params = self._base_params(
-                user, collection, uris=all_entity_uris, lit_limit=len(all_entity_uris) * 5
+                collection, uris=all_entity_uris, lit_limit=len(all_entity_uris) * 5
             )
             other_rows = await self._client.execute_cypher(other_query, params=other_params)
             for row in other_rows:
@@ -460,7 +449,6 @@ class TripleQuery:
     async def trace_sources(
         self,
         edges: List[Dict[str, str]],
-        user: str,
         collection: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Trace edges back to their source document chunks.
@@ -483,14 +471,14 @@ class TripleQuery:
                 continue
 
             query = (
-                "MATCH (s:Node {uri: $s_uri, user: $user})"
+                "MATCH (s:Node {uri: $s_uri})"
                 "-[r:Rel {uri: $p_uri}]->"
-                "(o {user: $user}) "
+                "(o) "
                 f"WHERE (o.uri = $o_uri OR o.value = $o_uri){col_filter} "
                 "RETURN r.source_chunk AS source_chunk, r.confidence AS confidence "
                 "LIMIT 1"
             )
-            params = {"s_uri": s_uri, "p_uri": p_uri, "o_uri": o_uri, "user": user}
+            params = {"s_uri": s_uri, "p_uri": p_uri, "o_uri": o_uri}
             if collection:
                 params["collection"] = collection
 
@@ -536,26 +524,25 @@ class TripleQuery:
 
     async def get_stats(
         self,
-        user: str,
         collection: Optional[str] = None,
     ) -> Dict[str, int]:
-        """Count nodes, literals, and relationships for user+collection."""
+        """Count nodes, literals, and relationships for collection scope."""
         col_filter = _col_where("n", collection)
         col_filter_s = _col_where("s", collection)
 
         node_query = (
-            f"MATCH (n:Node {{user: $user}}) WHERE true{col_filter} RETURN count(n) AS cnt"
+            f"MATCH (n:Node) WHERE true{col_filter} RETURN count(n) AS cnt"
         )
         lit_query = (
-            f"MATCH (n:Literal {{user: $user}}) WHERE true{col_filter} RETURN count(n) AS cnt"
+            f"MATCH (n:Literal) WHERE true{col_filter} RETURN count(n) AS cnt"
         )
         rel_query = (
-            "MATCH (s:Node {user: $user})-[r:Rel]->(o) "
+            "MATCH (s:Node)-[r:Rel]->(o) "
             f"WHERE (o:Node OR o:Literal){col_filter_s} "
             "RETURN count(r) AS cnt"
         )
 
-        params: Dict[str, Any] = {"user": user}
+        params: Dict[str, Any] = {}
         if collection:
             params["collection"] = collection
 
@@ -575,10 +562,9 @@ class TripleQuery:
 
     async def build_context(
         self,
-        user: str,
         limit: int = 20,
     ) -> str:
-        """Build a text context for LLM consumption from the user's graph.
+        """Build a text context for LLM consumption from the knowledge graph.
 
         Returns a markdown-formatted string with:
         - Total entity/literal/relationship counts
@@ -591,21 +577,21 @@ class TripleQuery:
         label_pred_uri = URIBuilder.predicate("core", "label")
 
         # --- Totals ---
-        stats = await self.get_stats(user)
+        stats = await self.get_stats()
         total_nodes = stats["nodes"]
         total_literals = stats["literals"]
         total_rels = stats["rels"]
 
         # --- Entity type breakdown ---
         type_query = (
-            "MATCH (s:Node {user: $user})"
-            "-[r:Rel {uri: $type_pred}]->(o:Literal {user: $user}) "
+            "MATCH (s:Node)"
+            "-[r:Rel {uri: $type_pred}]->(o:Literal) "
             "RETURN o.value AS entity_type, count(s) AS cnt "
             "ORDER BY cnt DESC"
         )
         type_rows = await self._client.execute_cypher(
             type_query,
-            params={"user": user, "type_pred": type_pred_uri},
+            params={"type_pred": type_pred_uri},
         )
 
         type_parts = [
@@ -616,12 +602,12 @@ class TripleQuery:
 
         # --- Top entities by outgoing connection count ---
         top_query = (
-            "MATCH (s:Node {user: $user})-[r:Rel]->(o) "
+            "MATCH (s:Node)-[r:Rel]->(o) "
             "WHERE (o:Node OR o:Literal) "
             "WITH s, count(r) AS conn_count "
             "ORDER BY conn_count DESC "
             "LIMIT $limit "
-            "OPTIONAL MATCH (s)-[lr:Rel {uri: $label_pred}]->(lbl:Literal {user: $user}) "
+            "OPTIONAL MATCH (s)-[lr:Rel {uri: $label_pred}]->(lbl:Literal) "
             "RETURN "
             "CASE WHEN lbl IS NOT NULL THEN lbl.value ELSE s.uri END AS display_name, "
             "conn_count"
@@ -629,7 +615,6 @@ class TripleQuery:
         top_rows = await self._client.execute_cypher(
             top_query,
             params={
-                "user": user,
                 "limit": limit,
                 "label_pred": label_pred_uri,
             },

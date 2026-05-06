@@ -43,7 +43,7 @@ class TestTemplateBuilding:
         executor = TemplateExecutor()
         params = executor.build_params(
             "entity_relations",
-            user="test-user",
+
             entity_uri="nouxcube://entity/default/juan",
         )
         assert params["user"] == "test-user"

@@ -64,12 +64,12 @@ async def _populate_entity_embeddings_impl(scope: str, collection: str) -> int:
 
     try:
         rows = await falkordb.execute_cypher(
-            "MATCH (n:Node {user: $user}) "
+            "MATCH (n:Node) "
             "OPTIONAL MATCH (n)-[r1:Rel {uri: 'nouxcube://predicate/core/label'}]->(l:Literal) "
             "OPTIONAL MATCH (n)-[r2:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal) "
             "OPTIONAL MATCH (n)-[r3:Rel {uri: 'nouxcube://predicate/core/definition'}]->(d:Literal) "
             "RETURN n.uri AS uri, l.value AS label, t.value AS type, d.value AS definition",
-            {"user": scope},
+            {},
         )
     finally:
         await falkordb.close()
@@ -224,12 +224,12 @@ async def _populate_entity_embeddings_subset_impl(
 
     try:
         rows = await falkordb.execute_cypher(
-            "MATCH (n:Node {user: $user}) WHERE n.uri IN $uris "
+            "MATCH (n:Node) WHERE n.uri IN $uris "
             "OPTIONAL MATCH (n)-[r1:Rel {uri: 'nouxcube://predicate/core/label'}]->(l:Literal) "
             "OPTIONAL MATCH (n)-[r2:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal) "
             "OPTIONAL MATCH (n)-[r3:Rel {uri: 'nouxcube://predicate/core/definition'}]->(d:Literal) "
             "RETURN n.uri AS uri, l.value AS label, t.value AS type, d.value AS definition",
-            {"user": scope, "uris": uri_list},
+            {"uris": uri_list},
         )
     finally:
         await falkordb.close()

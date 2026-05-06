@@ -42,7 +42,6 @@ class ProvenanceService:
         model_name: str,
         chunk_text: str,
         chunk_offset: int,
-        user: str,
         collection: str,
     ) -> str:
         """Create an extraction :Node and record 6 provenance triples.
@@ -53,7 +52,6 @@ class ProvenanceService:
             model_name:        Model identifier (e.g. "Qwen3.5-9B").
             chunk_text:        Raw chunk text (truncated to 500 chars for storage).
             chunk_offset:      Character/byte offset of the chunk within the document.
-            user:              Tenant/user identifier.
             collection:        Collection scope.
 
         Returns:
@@ -64,14 +62,13 @@ class ProvenanceService:
         truncated_chunk = chunk_text[:_MAX_CHUNK_TEXT]
 
         # Merge the extraction :Node itself
-        await self._store.merge_node(extraction_uri, user=user, collection=collection)
+        await self._store.merge_node(extraction_uri, collection=collection)
 
         # Triple 1: prov/derived-from → document_uri (Node→Node)
         await self._store.create_rel(
             subject_uri=extraction_uri,
             predicate_uri=URIBuilder.predicate(_PROV, "derived-from"),
             object_value=document_uri,
-            user=user,
             collection=collection,
             object_is_node=True,
             extraction_method="system",
@@ -86,12 +83,11 @@ class ProvenanceService:
             ("chunk-offset", str(chunk_offset)),
         ]
         for predicate_name, value in literal_triples:
-            await self._store.merge_literal(value, user=user, collection=collection)
+            await self._store.merge_literal(value, collection=collection)
             await self._store.create_rel(
                 subject_uri=extraction_uri,
                 predicate_uri=URIBuilder.predicate(_PROV, predicate_name),
                 object_value=value,
-                user=user,
                 collection=collection,
                 object_is_node=False,
                 extraction_method="system",
@@ -110,7 +106,6 @@ class ProvenanceService:
         self,
         document_uri: str,
         chunks_metadata: list,
-        user: str,
         collection: str,
     ) -> int:
         """Record provenance for multiple chunks in 2 batch UNWIND queries.
@@ -119,7 +114,6 @@ class ProvenanceService:
             document_uri:    URI of the source document :Node.
             chunks_metadata: List of dicts with keys:
                 extraction_method, model_name, chunk_text, chunk_offset
-            user:           Tenant/user identifier.
             collection:     Collection scope.
 
         Returns:
@@ -144,5 +138,5 @@ class ProvenanceService:
             })
 
         return await self._store.batch_store_provenance(
-            records, user=user, collection=collection
+            records, collection=collection
         )

@@ -22,7 +22,7 @@ def tq(mock_client):
 async def test_batch_neighbors_empty_seeds(tq):
     """Empty seed list returns empty result."""
     result = await tq.batch_neighbors(
-        seed_uris=[], user="tenant-1",
+        seed_uris=[],
     )
     assert result["edges"] == []
     assert result["entities_visited"] == 0
@@ -44,7 +44,7 @@ async def test_batch_neighbors_single_hop(tq, mock_client):
     ])
     result = await tq.batch_neighbors(
         seed_uris=["nouxcube://entity/default/lgt"],
-        user="tenant-1",
+
         max_hops=1,
         max_edges=150,
     )
@@ -74,7 +74,7 @@ async def test_batch_neighbors_excludes_prov_predicates(tq, mock_client):
     ])
     result = await tq.batch_neighbors(
         seed_uris=["nouxcube://entity/default/lgt"],
-        user="tenant-1",
+
         max_hops=1,
         exclude_predicates=["prov/.*"],
     )
@@ -97,7 +97,7 @@ async def test_batch_neighbors_respects_max_edges(tq, mock_client):
     mock_client.execute_cypher = AsyncMock(return_value=edges)
     result = await tq.batch_neighbors(
         seed_uris=["nouxcube://entity/default/e0"],
-        user="tenant-1",
+
         max_hops=3,
         max_edges=5,
     )
@@ -130,7 +130,7 @@ async def test_batch_neighbors_multi_hop(tq, mock_client):
     mock_client.execute_cypher = AsyncMock(side_effect=mock_cypher)
     result = await tq.batch_neighbors(
         seed_uris=["nouxcube://entity/default/a"],
-        user="tenant-1",
+
         max_hops=2,
         max_edges=150,
     )

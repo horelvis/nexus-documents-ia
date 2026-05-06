@@ -101,7 +101,6 @@ class EntityResolver:
 
     async def resolve_entities_of_type(
         self,
-        user: str,
         collection: str,
         entity_type: str,
     ) -> Dict[str, Any]:
@@ -128,7 +127,7 @@ class EntityResolver:
             }
 
         entities = await self._fetch_entities(
-            user=user, collection=collection, entity_type=entity_type,
+            collection=collection, entity_type=entity_type,
         )
         if len(entities) < 2:
             return {
@@ -184,7 +183,6 @@ class EntityResolver:
                 repointed = await self._merge_node(
                     duplicate_uri=dup_uri,
                     canonical_uri=canonical_uri,
-                    user=user,
                     collection=collection,
                 )
                 total_edges_repointed += repointed
@@ -211,11 +209,11 @@ class EntityResolver:
         }
 
     async def resolve_persons(
-        self, user: str, collection: str,
+        self, collection: str,
     ) -> Dict[str, Any]:
         """Backward-compat alias. Resolves 'person' entities."""
         result = await self.resolve_entities_of_type(
-            user=user, collection=collection, entity_type="person",
+            collection=collection, entity_type="person",
         )
         # Preserve old key for any external caller that parses the JSON.
         if "entities_scanned" in result:
@@ -223,13 +221,13 @@ class EntityResolver:
         return result
 
     async def resolve_all_supported(
-        self, user: str, collection: str,
+        self, collection: str,
     ) -> Dict[str, Any]:
         """Resolve every supported entity type. Returns per-type summaries."""
         results: Dict[str, Any] = {}
         for entity_type in self.SUPPORTED_TYPES.keys():
             results[entity_type] = await self.resolve_entities_of_type(
-                user=user, collection=collection, entity_type=entity_type,
+                collection=collection, entity_type=entity_type,
             )
         return results
 
@@ -375,19 +373,18 @@ class EntityResolver:
     # ------------------------------------------------------------------
 
     async def _fetch_entities(
-        self, user: str, collection: str, entity_type: str,
+        self, collection: str, entity_type: str,
     ) -> List[Dict[str, str]]:
         """Return all nodes of a given type in the collection as [{uri, label}]."""
         query = (
             "MATCH (n:Node)-[rt:Rel {uri: $type_pred}]->(t:Literal) "
-            "WHERE n.user = $user AND n.collection = $collection "
+            "WHERE n.collection = $collection "
             "  AND t.value = $entity_type "
             "WITH DISTINCT n "
             "OPTIONAL MATCH (n)-[rl:Rel {uri: $label_pred}]->(lab:Literal) "
             "RETURN n.uri AS uri, collect(lab.value)[0] AS label"
         )
         params = {
-            "user": user,
             "collection": collection,
             "entity_type": entity_type,
             "type_pred": self.TYPE_PREDICATE_URI,
@@ -549,7 +546,6 @@ class EntityResolver:
         self,
         duplicate_uri: str,
         canonical_uri: str,
-        user: str,
         collection: str,
     ) -> int:
         """Repoint every :Rel of `duplicate_uri` to `canonical_uri` and delete the node.
@@ -559,9 +555,9 @@ class EntityResolver:
         # Ensure the canonical node exists — may not if the LLM picked one that
         # was never the duplicate target.
         await self._client.execute_cypher(
-            "MERGE (n:Node {uri: $uri, user: $user, collection: $collection}) "
+            "MERGE (n:Node {uri: $uri, collection: $collection}) "
             "ON CREATE SET n.created_at = timestamp()",
-            params={"uri": canonical_uri, "user": user, "collection": collection},
+            params={"uri": canonical_uri, "collection": collection},
         )
 
         # Repoint outgoing edges (duplicate)-[r]->(target)
@@ -569,12 +565,12 @@ class EntityResolver:
         # not support setting relationship properties from another rel in one
         # statement, so we copy the predicate URI + key metadata explicitly.
         outgoing_q = (
-            "MATCH (d:Node {uri: $dup, user: $user, collection: $collection})"
+            "MATCH (d:Node {uri: $dup, collection: $collection})"
             "-[r:Rel]->(t) "
-            "MATCH (c:Node {uri: $can, user: $user, collection: $collection}) "
+            "MATCH (c:Node {uri: $can, collection: $collection}) "
             "CREATE (c)-[r2:Rel]->(t) "
             "SET r2.uri = r.uri, r2.method = r.method, r2.source_chunk = r.source_chunk, "
-            "    r2.confidence = r.confidence, r2.user = r.user, r2.collection = r.collection "
+            "    r2.confidence = r.confidence, r2.collection = r.collection "
             "DELETE r "
             "RETURN count(r2) AS repointed"
         )
@@ -583,7 +579,6 @@ class EntityResolver:
             params={
                 "dup": duplicate_uri,
                 "can": canonical_uri,
-                "user": user,
                 "collection": collection,
             },
         )
@@ -591,11 +586,11 @@ class EntityResolver:
 
         # Repoint incoming edges (src)-[r]->(duplicate)
         incoming_q = (
-            "MATCH (s)-[r:Rel]->(d:Node {uri: $dup, user: $user, collection: $collection}) "
-            "MATCH (c:Node {uri: $can, user: $user, collection: $collection}) "
+            "MATCH (s)-[r:Rel]->(d:Node {uri: $dup, collection: $collection}) "
+            "MATCH (c:Node {uri: $can, collection: $collection}) "
             "CREATE (s)-[r2:Rel]->(c) "
             "SET r2.uri = r.uri, r2.method = r.method, r2.source_chunk = r.source_chunk, "
-            "    r2.confidence = r.confidence, r2.user = r.user, r2.collection = r.collection "
+            "    r2.confidence = r.confidence, r2.collection = r.collection "
             "DELETE r "
             "RETURN count(r2) AS repointed"
         )
@@ -604,7 +599,6 @@ class EntityResolver:
             params={
                 "dup": duplicate_uri,
                 "can": canonical_uri,
-                "user": user,
                 "collection": collection,
             },
         )
@@ -612,8 +606,8 @@ class EntityResolver:
 
         # Delete the now-orphan duplicate node
         await self._client.execute_cypher(
-            "MATCH (d:Node {uri: $dup, user: $user, collection: $collection}) DELETE d",
-            params={"dup": duplicate_uri, "user": user, "collection": collection},
+            "MATCH (d:Node {uri: $dup, collection: $collection}) DELETE d",
+            params={"dup": duplicate_uri, "collection": collection},
         )
 
         return int(out_count) + int(in_count)

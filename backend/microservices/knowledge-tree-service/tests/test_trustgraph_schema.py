@@ -61,8 +61,8 @@ class TestTrustGraphSchema:
 
         # Create a :Node with a uri
         await falkordb_client.execute_cypher(
-            "CREATE (n:Node {uri: $uri, user: $user, collection: $collection})",
-            params={"uri": "urn:test:node:001", "user": "user1", "collection": "col1"},
+            "CREATE (n:Node {uri: $uri, collection: $collection})",
+            params={"uri": "urn:test:node:001", "collection": "col1"},
         )
 
         # Match by uri — should return exactly one result
@@ -75,19 +75,19 @@ class TestTrustGraphSchema:
 
     @pytest.mark.asyncio
     async def test_literal_dedup_key(self, falkordb_client):
-        """Two MERGEs with same (value, user, collection) produce one :Literal node."""
+        """Two MERGEs with same (value, collection) produce one :Literal node."""
         await falkordb_client.bootstrap_schema()
 
         merge_query = (
-            "MERGE (l:Literal {value: $value, user: $user, collection: $collection})"
+            "MERGE (l:Literal {value: $value, collection: $collection})"
         )
-        params = {"value": "hello world", "user": "user1", "collection": "col1"}
+        params = {"value": "hello world", "collection": "col1"}
 
         await falkordb_client.execute_cypher(merge_query, params=params)
         await falkordb_client.execute_cypher(merge_query, params=params)
 
         rows = await falkordb_client.execute_cypher(
-            "MATCH (l:Literal {value: $value, user: $user, collection: $collection}) "
+            "MATCH (l:Literal {value: $value, collection: $collection}) "
             "RETURN count(l) AS cnt",
             params=params,
         )

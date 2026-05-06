@@ -12,7 +12,6 @@ from app.services.triple_store import TripleStore
 from app.services.uri_builder import URIBuilder
 
 
-USER = "tenant-test"
 COLLECTION = "col-contradiction-tests"
 
 
@@ -23,7 +22,6 @@ async def _seed_juan_contradicting_salaries(store: TripleStore) -> str:
         predicate_name="salario-anual",
         object_value="30000 EUR",
         object_is_node=False,
-        user=USER,
         collection=COLLECTION,
         extraction_method="ner",
         source_chunk="chunk-001",
@@ -34,7 +32,6 @@ async def _seed_juan_contradicting_salaries(store: TripleStore) -> str:
         predicate_name="salario-anual",
         object_value="28000 EUR",
         object_is_node=False,
-        user=USER,
         collection=COLLECTION,
         extraction_method="ner",
         source_chunk="chunk-002",
@@ -49,7 +46,6 @@ async def _seed_maria_same_salary(store: TripleStore) -> str:
         predicate_name="salario-anual",
         object_value="25000 EUR",
         object_is_node=False,
-        user=USER,
         collection=COLLECTION,
         extraction_method="ner",
         source_chunk="chunk-010",
@@ -60,7 +56,6 @@ async def _seed_maria_same_salary(store: TripleStore) -> str:
         predicate_name="salario-anual",
         object_value="25000 EUR",
         object_is_node=False,
-        user=USER,
         collection=COLLECTION,
         extraction_method="ner",
         source_chunk="chunk-011",
@@ -74,7 +69,7 @@ class TestContradictionDetection:
         store = TripleStore(falkordb_client)
         detector = ContradictionDetector(falkordb_client)
         subject_uri = await _seed_juan_contradicting_salaries(store)
-        contradictions = await detector.detect_for_subject(subject_uri, user=USER)
+        contradictions = await detector.detect_for_subject(subject_uri)
         assert len(contradictions) == 1
         c = contradictions[0]
         assert c["predicate"] == URIBuilder.predicate("fiscal", "salario-anual")
@@ -87,7 +82,7 @@ class TestContradictionDetection:
         store = TripleStore(falkordb_client)
         detector = ContradictionDetector(falkordb_client)
         subject_uri = await _seed_juan_contradicting_salaries(store)
-        count = await detector.detect_and_mark(subject_uri, user=USER)
+        count = await detector.detect_and_mark(subject_uri)
         assert count == 1
 
         rows = await falkordb_client.execute_cypher(
@@ -110,5 +105,5 @@ class TestContradictionDetection:
         store = TripleStore(falkordb_client)
         detector = ContradictionDetector(falkordb_client)
         subject_uri = await _seed_maria_same_salary(store)
-        contradictions = await detector.detect_for_subject(subject_uri, user=USER)
+        contradictions = await detector.detect_for_subject(subject_uri)
         assert contradictions == []

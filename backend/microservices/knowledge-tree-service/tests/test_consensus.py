@@ -17,7 +17,6 @@ class TestConsensusScorer:
         scorer = ConsensusScorer(mock_client)
         result = await scorer.compute_for_subject(
             subject_uri="nouxcube://entity/default/juan",
-            user="test-user",
         )
         assert len(result) == 1
         assert result[0]["consensus_score"] == pytest.approx(0.33, abs=0.01)
@@ -32,7 +31,6 @@ class TestConsensusScorer:
         scorer = ConsensusScorer(mock_client)
         result = await scorer.compute_for_subject(
             subject_uri="nouxcube://entity/default/juan",
-            user="test-user",
         )
         assert len(result) == 1
         assert result[0]["consensus_score"] == 1.0
@@ -48,7 +46,6 @@ class TestConsensusScorer:
         scorer = ConsensusScorer(mock_client)
         await scorer.compute_and_store(
             subject_uri="nouxcube://entity/default/juan",
-            user="test-user",
         )
 
         assert mock_client.execute_cypher.call_count == 2
@@ -63,6 +60,5 @@ class TestConsensusScorer:
         scorer = ConsensusScorer(mock_client)
         result = await scorer.compute_for_subject(
             subject_uri="nouxcube://entity/default/empty",
-            user="test-user",
         )
         assert result == []

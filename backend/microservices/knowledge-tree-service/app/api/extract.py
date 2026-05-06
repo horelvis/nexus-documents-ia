@@ -34,12 +34,9 @@ async def extract_triples(request: TripleExtractionRequest) -> TripleExtractionR
     """Extract and store triples from document chunks via LLM extractors."""
     coordinator = ExtractionCoordinator(TripleStore(falkordb_client))
 
-    # Writes use the EVERYONE sentinel; the multi-role ACL filter is applied
-    # at read time in a later wave of the tenancy removal refactor.
     result = await coordinator.extract_document(
         chunks=request.chunks,
         document_id=request.document_id,
-        user="EVERYONE",
         collection=request.collection,
         title=request.title,
         file_path=request.file_path,
@@ -63,7 +60,6 @@ async def structural_index(request: StructuralIndexRequest) -> StructuralIndexRe
 
     document_uri = await ts.store_document_node(
         document_id=request.document_id,
-        user="EVERYONE",
         collection=request.collection,
         title=request.title,
         file_path=request.file_path,
@@ -78,7 +74,6 @@ async def resolve_persons(collection: str = "default") -> dict:
     """Backward-compat: resolve only person entities. See /resolve-entities."""
     resolver = EntityResolver(falkordb_client)
     summary = await resolver.resolve_persons(
-        user="EVERYONE",
         collection=collection,
     )
     return {"success": True, **summary}
@@ -98,13 +93,11 @@ async def resolve_entities(
     resolver = EntityResolver(falkordb_client)
     if entity_type:
         summary = await resolver.resolve_entities_of_type(
-            user="EVERYONE",
             collection=collection,
             entity_type=entity_type,
         )
     else:
         summary = await resolver.resolve_all_supported(
-            user="EVERYONE",
             collection=collection,
         )
     return {"success": True, "summary": summary}

@@ -70,18 +70,18 @@ async def seed_authority_weights(dry_run: bool = False, force: bool = False) -> 
         if force and not dry_run:
             await client.execute_cypher(
                 "MATCH (n) WHERE (n:Node OR n:Literal) "
-                "AND n.user = $user AND n.collection = $collection "
+                "AND n.collection = $collection "
                 "DETACH DELETE n",
-                params={"user": AUTHORITY_USER, "collection": AUTHORITY_COLLECTION},
+                params={"collection": AUTHORITY_COLLECTION},
             )
             print(f"  {YELLOW}Cleared existing authority weights{RESET}")
 
         existing = set()
         if not force:
             rows = await client.execute_cypher(
-                "MATCH (n:Node {user: $user, collection: $collection}) "
+                "MATCH (n:Node {collection: $collection}) "
                 "RETURN n.uri AS uri",
-                params={"user": AUTHORITY_USER, "collection": AUTHORITY_COLLECTION},
+                params={"collection": AUTHORITY_COLLECTION},
             )
             existing = {r["uri"] for r in rows if r.get("uri")}
 
@@ -106,7 +106,7 @@ async def seed_authority_weights(dry_run: bool = False, force: bool = False) -> 
                     subject_uri=entity_uri,
                     predicate_uri=URIBuilder.predicate("core", "label"),
                     object_value=slug,
-                    user=AUTHORITY_USER,
+
                     collection=AUTHORITY_COLLECTION,
                     object_is_node=False,
                     extraction_method="seed",
@@ -117,7 +117,7 @@ async def seed_authority_weights(dry_run: bool = False, force: bool = False) -> 
                     subject_uri=entity_uri,
                     predicate_uri=URIBuilder.predicate("trust", "authority-weight"),
                     object_value=weight,
-                    user=AUTHORITY_USER,
+
                     collection=AUTHORITY_COLLECTION,
                     object_is_node=False,
                     extraction_method="seed",
