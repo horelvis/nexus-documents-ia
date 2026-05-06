@@ -502,8 +502,13 @@ class TripleStore:
             query, params={"user": user, "collection": collection}
         )
 
-    async def clear_tenant(self, user: str) -> None:
-        """DETACH DELETE all nodes and literals for a given user/tenant."""
+    async def clear_scope(self, user: str = "EVERYONE") -> None:
+        """DETACH DELETE all nodes and literals for the given scope.
+
+        Formerly `clear_tenant`; renamed after tenancy + role-based ACL removal.
+        The `user` parameter is kept for backward compatibility with the
+        existing FalkorDB property until Commit 5 physically drops it.
+        """
         query = (
             "MATCH (n) "
             "WHERE (n:Node OR n:Literal) AND n.user = $user "

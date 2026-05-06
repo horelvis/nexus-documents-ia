@@ -70,7 +70,6 @@ import logging
 from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
-from app.core.auth_headers import EVERYONE_ROLE, allowed_roles
 
 logger = logging.getLogger(__name__)
 
@@ -177,13 +176,13 @@ def get_user_roles() -> List[str]:
 
 
 def get_user_roles_or_default() -> List[str]:
-    """Get user roles plus the EVERYONE wildcard.
+    """Get user roles from the execution context (informational only after ACL removal).
 
-    This is the most common helper used by tools that build ACL-filtered
-    queries against stores with a `roles: List[str]` column. Returns at
-    least ["EVERYONE"] even if the user has no explicit roles.
+    After role-based ACL removal, all documents are visible to all authenticated
+    users. This function is kept for API compatibility; callers that used it to
+    build ACL-filtered queries should now drop those filters.
     """
-    return allowed_roles(_user_roles_var.get() or [])
+    return list(_user_roles_var.get() or [])
 
 
 def get_is_admin() -> bool:

@@ -23,7 +23,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.auth_headers import EVERYONE_ROLE
 from app.services.falkordb_client import FalkorDBClient
 from app.services.uri_builder import URIBuilder
 
@@ -130,7 +129,7 @@ async def run(apply: bool, output_json: str | None) -> dict:
             if apply:
                 await merge_group(
                     client, group,
-                    user=EVERYONE_ROLE,
+                    user="EVERYONE",
                     collection="default",
                 )
                 total_stats["merged"] += 1

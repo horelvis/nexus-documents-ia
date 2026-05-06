@@ -43,7 +43,6 @@ import httpx
 # Allow imports from app when running inside the container
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.auth_headers import EVERYONE_ROLE
 from app.core.config import settings
 from app.services.falkordb_client import FalkorDBClient
 from app.services.triple_store import TripleStore
@@ -264,7 +263,7 @@ async def _clear_graph(client: FalkorDBClient, scope: str) -> int:
     except Exception:
         count = 0
 
-    await store.clear_tenant(user=scope)
+    await store.clear_scope(user=scope)
     return count
 
 
@@ -277,7 +276,7 @@ async def reindex(
 ) -> None:
     t_total = time.monotonic()
 
-    scope = EVERYONE_ROLE
+    scope = "EVERYONE"
 
     print(f"\n{BOLD}TrustGraph Reindexation{RESET}")
     print(f"  scope      : {scope}")

@@ -10,7 +10,6 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Query
 
 from app.core.auth_headers import (
-    EVERYONE_ROLE,
     extract_user_id,
     extract_user_roles,
 )
@@ -47,23 +46,12 @@ router = APIRouter(
 )
 
 
-def _graph_scope(user_roles: List[str]) -> str:
-    """Resolve the scalar scope token used by the current single-storage model.
-
-    Until the full Node property rename (`user` → `role`) lands, every write
-    uses the EVERYONE sentinel and every read queries that same sentinel. The
-    multi-role ACL filter (`role IN $allowed_roles`) is handled in a later
-    wave; for now we collapse the caller's roles to the EVERYONE bucket so
-    the existing Cypher in the service layer keeps working unchanged.
-    """
-    return EVERYONE_ROLE
-
 
 @router.post("/query", response_model=TripleQueryResponse)
 async def query_triples(request: TripleQueryRequest) -> TripleQueryResponse:
     """Dispatch to the appropriate TripleQuery method based on which fields are set."""
     tq = TripleQuery(falkordb_client)
-    scope = _graph_scope(request.user_roles)
+    scope = "EVERYONE"
 
     rows = []
 
@@ -132,7 +120,7 @@ async def top_entities(
     entity is selected.
     """
     tq = TripleQuery(falkordb_client)
-    scope = _graph_scope(user_roles)
+    scope = "EVERYONE"
     # Find entities with the most Node→Node connections (excluding
     # contradiction edges), prioritizing semantic hubs that produce
     # a rich, connected graph visualization.
@@ -165,7 +153,7 @@ async def batch_neighbors(request: BatchNeighborsRequest) -> BatchNeighborsRespo
 
     result = await tq.batch_neighbors(
         seed_uris=request.seed_uris,
-        user=_graph_scope(request.user_roles),
+        user="EVERYONE",
         collection=request.collection,
         max_hops=request.max_hops,
         max_edges=request.max_edges,
@@ -188,7 +176,7 @@ async def trace_sources(request: TraceSourcesRequest) -> TraceSourcesResponse:
 
     sources = await tq.trace_sources(
         edges=request.edges,
-        user=_graph_scope(request.user_roles),
+        user="EVERYONE",
         collection=request.collection,
     )
     return TraceSourcesResponse(sources=sources)
@@ -198,7 +186,7 @@ async def trace_sources(request: TraceSourcesRequest) -> TraceSourcesResponse:
 async def build_context(request: ContextRequest) -> ContextResponse:
     """Build an LLM-ready text context from the user's knowledge graph."""
     tq = TripleQuery(falkordb_client)
-    scope = _graph_scope(request.user_roles)
+    scope = "EVERYONE"
 
     context_text = await tq.build_context(user=scope, limit=request.limit)
     stats = await tq.get_stats(user=scope)
@@ -218,7 +206,7 @@ async def get_stats(
 ) -> StatsResponse:
     """Return node/literal/rel counts, contradiction count, and entity type breakdown."""
     tq = TripleQuery(falkordb_client)
-    scope = _graph_scope(user_roles)
+    scope = "EVERYONE"
 
     stats = await tq.get_stats(user=scope, collection=collection)
 
@@ -268,7 +256,7 @@ async def clear_graph(
     user_id: Optional[str] = Depends(extract_user_id),
 ) -> dict:
     """Delete all triples for the current scope. Returns deleted node count."""
-    scope = _graph_scope(user_roles)
+    scope = "EVERYONE"
     # Count before deletion
     count_query = (
         "MATCH (n) WHERE (n:Node OR n:Literal) AND n.user = $user RETURN count(n) AS cnt"
@@ -279,7 +267,7 @@ async def clear_graph(
     deleted = int(count_rows[0]["cnt"]) if count_rows else 0
 
     ts = TripleStore(falkordb_client)
-    await ts.clear_tenant(user=scope)
+    await ts.clear_scope(user=scope)
 
     return {"success": True, "deleted": deleted}
 
@@ -296,7 +284,7 @@ async def execute_template(request: TemplateRequest) -> TemplateResponse:
         result = await _template_executor.execute(
             name=request.template_name,
             client=falkordb_client,
-            user=_graph_scope(request.user_roles),
+            user="EVERYONE",
             collection=request.collection,
             **request.params,
         )
@@ -323,7 +311,7 @@ async def refresh_embeddings(
     auto-embed hook covers the happy path; this endpoint is the safety net
     for runs where the hook was disabled, failed, or not yet caught up.
     """
-    scope = _graph_scope(user_roles)
+    scope = "EVERYONE"
     try:
         upserted = await populate_entity_embeddings(scope=scope, collection=request.collection)
         return RefreshEmbeddingsResponse(success=True, entities_upserted=upserted)

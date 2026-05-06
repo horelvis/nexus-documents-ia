@@ -8,7 +8,6 @@ import logging
 
 from fastapi import APIRouter, Depends
 
-from app.core.auth_headers import EVERYONE_ROLE
 from app.core.security import verify_api_key
 from app.services.falkordb_client import falkordb_client
 from app.services.triple_store import TripleStore
@@ -40,7 +39,7 @@ async def extract_triples(request: TripleExtractionRequest) -> TripleExtractionR
     result = await coordinator.extract_document(
         chunks=request.chunks,
         document_id=request.document_id,
-        user=EVERYONE_ROLE,
+        user="EVERYONE",
         collection=request.collection,
         title=request.title,
         file_path=request.file_path,
@@ -64,7 +63,7 @@ async def structural_index(request: StructuralIndexRequest) -> StructuralIndexRe
 
     document_uri = await ts.store_document_node(
         document_id=request.document_id,
-        user=EVERYONE_ROLE,
+        user="EVERYONE",
         collection=request.collection,
         title=request.title,
         file_path=request.file_path,
@@ -79,7 +78,7 @@ async def resolve_persons(collection: str = "default") -> dict:
     """Backward-compat: resolve only person entities. See /resolve-entities."""
     resolver = EntityResolver(falkordb_client)
     summary = await resolver.resolve_persons(
-        user=EVERYONE_ROLE,
+        user="EVERYONE",
         collection=collection,
     )
     return {"success": True, **summary}
@@ -99,13 +98,13 @@ async def resolve_entities(
     resolver = EntityResolver(falkordb_client)
     if entity_type:
         summary = await resolver.resolve_entities_of_type(
-            user=EVERYONE_ROLE,
+            user="EVERYONE",
             collection=collection,
             entity_type=entity_type,
         )
     else:
         summary = await resolver.resolve_all_supported(
-            user=EVERYONE_ROLE,
+            user="EVERYONE",
             collection=collection,
         )
     return {"success": True, "summary": summary}

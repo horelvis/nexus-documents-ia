@@ -5,7 +5,7 @@ from typing import List, Dict, Any, Optional
 import logging
 
 from app.core.security import verify_api_key
-from app.core.auth_headers import extract_user_roles, extract_user_id, EVERYONE_ROLE
+from app.core.auth_headers import extract_user_roles, extract_user_id
 from app.core.config import settings
 from app.services.weaviate_service import (
     weaviate_service,
@@ -708,14 +708,12 @@ async def index_from_connector(
 
         pipeline = IndexingPipeline()
 
-        doc_roles = request.roles or [EVERYONE_ROLE]
-
         metadata = {
             **request.metadata,
             "source": "connector",
             "owner_id": request.owner_id,
             "mime_type": request.mime_type,
-            "roles": doc_roles,
+            "roles": ["EVERYONE"],  # vestigial field — physically removed in Commit 5
         }
 
         strategy_config = None

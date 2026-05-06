@@ -14,7 +14,6 @@ from datetime import datetime
 import uuid
 
 from app.core.config import settings
-from app.core.auth_headers import allowed_roles, EVERYONE_ROLE
 from app.schemas.weaviate import (
     DocumentCreate, DocumentResponse, SearchRequest, SearchResponse,
     CollectionInfo, VectorQuery
@@ -76,15 +75,6 @@ async def generate_embedding_batch(texts: list[str], task: str = "") -> list[lis
     return await intelligence_client.embed_batch(texts, task=task)
 
 
-def _roles_filter(user_roles: List[str]):
-    """Build the single-clause roles ACL filter.
-
-    ``allowed_roles()`` folds in the EVERYONE wildcard so one
-    ``contains_any`` call covers both private and public documents.
-    """
-    return weaviate.classes.query.Filter.by_property("roles").contains_any(
-        allowed_roles(user_roles or [])
-    )
 
 
 class WeaviateService:
@@ -450,7 +440,7 @@ class WeaviateService:
                 "confidence": confidence,
                 "related_entity_ids": related_entity_ids or [],
                 "related_document_ids": related_document_ids or [],
-                "roles": roles or [EVERYONE_ROLE],
+                "roles": ["EVERYONE"],  # vestigial field — physically removed in Commit 5
                 "attributes": json.dumps(attributes or {}),
                 "created_at": datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ'),
             }
@@ -501,9 +491,6 @@ class WeaviateService:
                     filters.append(type_filters[0])
                 else:
                     filters.append(weaviate.classes.query.Filter.any_of(type_filters))
-
-            if not is_admin:
-                filters.append(_roles_filter(user_roles))
 
             combined_filter = None
             if filters:
@@ -677,7 +664,7 @@ class WeaviateService:
                 "content_type": content_type,
                 "caption": caption or "",
                 "document_id": document_id,
-                "roles": roles or [EVERYONE_ROLE],
+                "roles": ["EVERYONE"],  # vestigial field — physically removed in Commit 5
                 "page_number": page_number,
                 "bbox_x0": bbox[0] if bbox else 0.0,
                 "bbox_y0": bbox[1] if bbox else 0.0,
@@ -721,7 +708,7 @@ class WeaviateService:
         try:
             collection = self.client.collections.get(collection_name)
 
-            filters = None if is_admin else _roles_filter(user_roles)
+            filters = None
 
             if content_types:
                 type_filter = None
@@ -910,7 +897,7 @@ class WeaviateService:
             doc_id = document.id or str(uuid.uuid4())
             collection = self.client.collections.get(collection_name)
 
-            doc_roles = getattr(document, 'roles', None) or [EVERYONE_ROLE]
+            doc_roles = ["EVERYONE"]  # vestigial field — physically removed in Commit 5
 
             base_properties = {
                 "document_id": doc_id,
@@ -1211,16 +1198,7 @@ class WeaviateService:
 
             collection = self.client.collections.get(collection_name)
 
-            # ------------------------------------------------------------------
-            # ACL filter (single clause — allowed_roles() folds in EVERYONE)
-            # ------------------------------------------------------------------
-            request_roles = getattr(search_request, 'user_roles', None) or []
-            is_admin = getattr(search_request, 'is_admin', False)
-
-            if is_admin:
-                combined_filters = None
-            else:
-                combined_filters = _roles_filter(request_roles)
+            combined_filters = None
 
             if search_request.filters:
                 for key, value in search_request.filters.items():
@@ -1547,28 +1525,14 @@ class WeaviateService:
                     logger.debug(f"Error searching in {collection_name}: {e}")
                     return None
 
-            def has_acl_access(doc: Dict[str, Any]) -> bool:
-                if is_admin:
-                    return True
-                doc_roles = doc.get("roles") or []
-                if not doc_roles:
-                    # Legacy doc without roles → treat as public
-                    return True
-                caller_allowed = set(allowed_roles(user_roles or []))
-                return any(r in caller_allowed for r in doc_roles)
-
             results = await asyncio.gather(*[search_in_collection(coll) for coll in candidate])
 
             for result in results:
                 if result:
-                    if has_acl_access(result):
-                        logger.info(
-                            f"✅ Found document {document_id} in {result['_source_collection']} (ACL verified)"
-                        )
-                        return result
-                    else:
-                        logger.warning(f"🔐 Document {document_id} found but denied by role ACL")
-                        return None
+                    logger.info(
+                        f"Found document {document_id} in {result['_source_collection']}"
+                    )
+                    return result
 
             logger.warning(f"⚠️ Document {document_id} not found in any collection")
             return None
@@ -1595,9 +1559,7 @@ class WeaviateService:
 
             import weaviate.classes.query as wq
             response = collection.query.fetch_objects(
-                filters=(
-                    wq.Filter.by_property("title").like(f"*{title}*") & _roles_filter(user_roles)
-                ),
+                filters=wq.Filter.by_property("title").like(f"*{title}*"),
                 limit=1,
             )
 
@@ -1854,7 +1816,7 @@ class WeaviateService:
                 props = collection.config.get().properties
                 prop_names = [p.name for p in props]
 
-                where_filter = None if is_admin else _roles_filter(user_roles)
+                where_filter = None
 
                 if filters:
                     for key, value in filters.items():
@@ -1943,7 +1905,7 @@ class WeaviateService:
                     "title": document.title,
                     "content": document.content,
                     "document_id": document.id,
-                    "roles": getattr(document, 'roles', None) or [EVERYONE_ROLE],
+                    "roles": ["EVERYONE"],  # vestigial field — physically removed in Commit 5
                     "document_type": document.document_type,
                     "tags": document.tags,
                     "created_at": datetime.now().isoformat(),
@@ -1997,14 +1959,16 @@ class WeaviateService:
             start_time = datetime.now()
             collection = self.client.collections.get(collection_name)
 
-            request_roles = getattr(query, 'user_roles', None) or []
-            where_filter = _roles_filter(request_roles)
+            where_filter = None
 
             if query.filters:
                 for key, value in query.filters.items():
                     additional_filter = self._build_property_filter(key, value)
                     if additional_filter is not None:
-                        where_filter = where_filter & additional_filter
+                        where_filter = (
+                            additional_filter if where_filter is None
+                            else where_filter & additional_filter
+                        )
 
             return_metadata = [weaviate.classes.query.MetadataQuery.certainty()]
             if query.include_vector:
@@ -2329,10 +2293,9 @@ class WeaviateService:
         try:
             col = self.client.collections.get(self.TRUSTGRAPH_ENTITIES_COLLECTION)
 
-            combined_filter = _roles_filter(user_roles)
+            combined_filter = None
             if collection:
-                col_filter = weaviate.classes.query.Filter.by_property("collection").equal(collection)
-                combined_filter = combined_filter & col_filter
+                combined_filter = weaviate.classes.query.Filter.by_property("collection").equal(collection)
 
             response = col.query.near_vector(
                 near_vector=query_embedding,
@@ -2381,7 +2344,7 @@ class WeaviateService:
                     "label": entity.get("label", ""),
                     "definition": entity.get("definition", ""),
                     "entity_type": entity.get("entity_type", ""),
-                    "roles": [EVERYONE_ROLE],
+                    "roles": ["EVERYONE"],  # vestigial field — physically removed in Commit 5
                     "collection": entity.get("collection", ""),
                     "embed_text": embed_text,
                 }
@@ -2436,7 +2399,7 @@ class WeaviateService:
                     "label": entity.get("label", ""),
                     "definition": entity.get("definition", ""),
                     "entity_type": entity.get("entity_type", ""),
-                    "roles": [EVERYONE_ROLE],
+                    "roles": ["EVERYONE"],  # vestigial field — physically removed in Commit 5
                     "collection": entity.get("collection", ""),
                     "embed_text": embed_text,
                 }

@@ -5,7 +5,6 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.core.auth_headers import EVERYONE_ROLE
 from app.core.security import verify_api_key
 from app.schemas.reports import AssembleRequest, AssembleResponse
 from app.services.falkordb_client import falkordb_client
@@ -42,7 +41,7 @@ async def assemble_graph(request: AssembleRequest):
         result = await assembler.assemble(
             entity_uri=request.entity_uri,
             report_type=request.report_type,
-            user=EVERYONE_ROLE,
+            user="EVERYONE",
             collection=request.collection,
         )
     except Exception as exc:
