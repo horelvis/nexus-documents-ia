@@ -20,7 +20,9 @@ export const agentsService = {
     if (opts?.active !== undefined) params.set('active', String(opts.active))
     if (opts?.slug) params.set('slug', opts.slug)
     if (opts?.order_by) params.set('order_by', opts.order_by)
-    const url = params.toString() ? `${BASE}/?${params}` : `${BASE}/`
+    // No trailing slash — backend route is defined as `""` so we don't trigger
+    // the FastAPI redirect-with-absolute-Location that breaks the browser.
+    const url = params.toString() ? `${BASE}?${params}` : BASE
     return apiClient.get<Agent[]>(url)
   },
 
@@ -29,7 +31,7 @@ export const agentsService = {
   },
 
   create(payload: AgentCreatePayload) {
-    return apiClient.post<Agent>(`${BASE}/`, payload)
+    return apiClient.post<Agent>(BASE, payload)
   },
 
   update(id: string, payload: AgentUpdatePayload) {

@@ -33,7 +33,7 @@ def _service(db: AsyncSession = Depends(get_async_db)) -> AgentService:
     return AgentService(db=db, langfuse=LangfusePersonaAdapter())
 
 
-@router.get("/", response_model=list[AgentResponse])
+@router.get("", response_model=list[AgentResponse])
 async def list_agents(
     active: Optional[bool] = None,
     slug: Optional[str] = None,
@@ -57,7 +57,7 @@ async def get_agent(
     return AgentResponse.model_validate(await svc.get(agent_id))
 
 
-@router.post("/", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
 async def create_agent(
     payload: AgentCreate,
     admin: UserProfile = Depends(require_superuser),
