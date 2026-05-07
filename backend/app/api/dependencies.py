@@ -48,6 +48,7 @@ def _user_to_profile(user: User) -> UserProfile:
         email=user.email,
         name=user.full_name,
         roles=roles,
+        is_superuser=bool(user.is_superuser),
     )
 
 

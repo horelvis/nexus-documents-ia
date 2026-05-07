@@ -270,3 +270,4 @@ class UserProfile:
     email: str
     name: Optional[str] = None
     roles: List[str] = field(default_factory=list)
+    is_superuser: bool = False

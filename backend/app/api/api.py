@@ -13,7 +13,7 @@ Deployment modes:
 
 from app.api.v1 import (
     document_insights, documents, document_categorization, auth, admin,
-    agents, webhooks, search, users, entities,
+    webhooks, search, users, entities,
     weaviate, lgpd, analysis_queue, channels,
     internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
     folders, classification, emma,
@@ -45,9 +45,6 @@ api_router.include_router(document_categorization.router, prefix="/categorizatio
 api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])
 api_router.include_router(google_drive.router)
-
-# AI Agents (always enabled - core Emma functionality)
-api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
 
 # Emma AI Assistant - dedicated endpoints (replaces /weaviate/emma/*)
 api_router.include_router(emma.router, prefix="/emma", tags=["emma"])

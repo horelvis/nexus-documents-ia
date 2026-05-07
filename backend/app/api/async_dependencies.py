@@ -66,6 +66,7 @@ def _build_profile(user: User, sso_roles: Optional[List[str]] = None) -> UserPro
         email=user.email,
         name=user.full_name,
         roles=roles,
+        is_superuser=bool(user.is_superuser),
     )
 
 

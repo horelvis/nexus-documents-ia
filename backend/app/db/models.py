@@ -11,12 +11,6 @@ from sqlalchemy.sql import func
 from app.db.base_class import Base
 from app.db.edit_session_models import TemplateEditSession  # noqa: F401
 
-# Import agent models
-from app.db.agent_models import (
-    AgentType, AgentExecutionMode, AgentDefinition, 
-    AgentConfiguration, AgentExecution, AgentExecutionLog
-)
-
 # =====================================
 # TABLAS DE ASOCIACIÓN (Many-to-Many)
 # =====================================
