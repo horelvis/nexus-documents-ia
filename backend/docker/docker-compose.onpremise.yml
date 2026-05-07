@@ -75,6 +75,15 @@ services:
       DEFAULT_VECTORIZER_MODULE: 'none'
       ENABLE_MODULES: ''
       CLUSTER_HOSTNAME: 'node1'
+      # Single-node Raft: tells weaviate not to wait for peers and binds
+      # the advertise address to its container hostname. Avoids
+      # "Failed to get final advertise address: No private IP address found"
+      # on hosts where docker bridges aren't auto-detected.
+      RAFT_BOOTSTRAP_EXPECT: '1'
+      RAFT_JOIN: 'node1'
+      CLUSTER_GOSSIP_BIND_PORT: '7946'
+      CLUSTER_DATA_BIND_PORT: '7947'
+    hostname: node1
     networks:
       - backend-network
     volumes:
