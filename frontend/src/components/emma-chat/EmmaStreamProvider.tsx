@@ -105,7 +105,11 @@ export function EmmaStreamProvider({
     messagesKey: 'messages',
     defaultHeaders,
     onThreadId,
-    fetchStateHistory: true,
+    // ``true`` makes the SDK call ``client.threads.getHistory(threadId, { limit: true })``
+    // which is invalid (limit must be a number or false). Use the explicit
+    // limit form so a real number is passed; the SDK pulls the latest 10
+    // checkpoints and exposes them as ``stream.history`` plus ``stream.messages``.
+    fetchStateHistory: { limit: 10 },
   })
 
   return (
