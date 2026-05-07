@@ -178,11 +178,23 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
   }, [initialQuery, user?.id, allMessages.length, submit])
 
   // ── Render ──
+  // ``stream.isThreadLoading`` is true while the SDK is fetching the
+  // initial thread state from ``GET /api/threads/<id>/history`` after
+  // the user opens an old conversation. The fetch can take ~1–2s
+  // depending on checkpoint size; without a loader the chat looks
+  // frozen on the welcome screen.
+  const isHydrating = stream.isThreadLoading && !hasMessages
+
   return (
     <div className={cn('flex h-full', className)}>
       {/* Chat area */}
       <div className="flex flex-1 flex-col min-w-0">
-        {hasMessages ? (
+        {isHydrating ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+            <div className="h-8 w-8 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin" />
+            <p className="text-sm">Cargando conversación…</p>
+          </div>
+        ) : hasMessages ? (
           <div className="flex-1 overflow-hidden min-h-0">
             <EmmaRenderChat
               messages={allMessages}
