@@ -13,6 +13,7 @@ from typing import Optional, Protocol
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.agent_models import Agent
@@ -77,7 +78,11 @@ class AgentService:
             owner_id=owner_id,
         )
         self.db.add(agent)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise self._translate_integrity_error(exc, payload.name, payload.slug) from exc
 
         try:
             await self.langfuse.push_persona(
@@ -95,6 +100,28 @@ class AgentService:
         await self.db.commit()
         await self.db.refresh(agent)
         return agent
+
+    @staticmethod
+    def _translate_integrity_error(
+        exc: IntegrityError, name: Optional[str], slug: Optional[str]
+    ) -> HTTPException:
+        """Convert UNIQUE constraint violations into a friendly 409."""
+        msg = str(exc.orig) if exc.orig else str(exc)
+        if "uq_agents_slug" in msg or "ix_agents_slug" in msg:
+            return HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Agent slug '{slug}' is already in use.",
+            )
+        if "uq_agents_name" in msg or "ix_agents_name" in msg:
+            return HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Agent name '{name}' is already in use.",
+            )
+        # Anything else (FK on owner_id, etc.) → 400 instead of 500.
+        return HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Database integrity error: {msg}",
+        )
 
     async def update(self, agent_id: uuid.UUID, payload: AgentUpdate) -> Agent:
         agent = await self.get(agent_id)
@@ -115,7 +142,11 @@ class AgentService:
                 agent.scope = value
             else:
                 setattr(agent, key, value)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise self._translate_integrity_error(exc, agent.name, agent.slug) from exc
 
         if new_instructions is not None:
             try:
@@ -167,7 +198,11 @@ class AgentService:
             owner_id=owner_id,
         )
         self.db.add(dup)
-        await self.db.flush()
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise self._translate_integrity_error(exc, dup.name, dup.slug) from exc
 
         try:
             await self.langfuse.push_persona(
