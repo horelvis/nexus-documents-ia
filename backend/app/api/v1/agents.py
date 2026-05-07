@@ -92,3 +92,33 @@ async def duplicate_agent(
 ) -> AgentResponse:
     dup = await svc.duplicate(agent_id, owner_id=uuid.UUID(admin.sub))
     return AgentResponse.model_validate(dup)
+
+
+@router.post(
+    "/{agent_id}/usage",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    include_in_schema=False,
+)
+async def increment_agent_usage(
+    agent_id: uuid.UUID,
+    _user: UserProfile = Depends(get_user_or_internal),
+    svc: AgentService = Depends(_service),
+):
+    """Internal: emma-agent-service bumps usage_count after invoke_agent."""
+    await svc.increment_usage(agent_id)
+
+
+@router.get("/{agent_id}/metrics", response_model=dict)
+async def get_metrics(
+    agent_id: uuid.UUID,
+    _user: UserProfile = Depends(get_user_or_internal),
+    svc: AgentService = Depends(_service),
+) -> dict:
+    """Light metrics: usage_count from DB. Latency / last_used reserved for follow-up."""
+    agent = await svc.get(agent_id)
+    return {
+        "usage_count": agent.usage_count,
+        "last_used_at": None,
+        "avg_latency_ms": None,
+    }
