@@ -305,8 +305,14 @@ export function EmmaChat(props: EmmaChatProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.conversationId])
 
+  // ``useStream`` from @langchain/langgraph-sdk only fetches the thread
+  // state during mount; subsequent changes to its ``threadId`` prop do
+  // NOT re-fetch. We force a remount with a key tied to the active
+  // thread, so opening a new conversation from the sidebar triggers
+  // a fresh hydration including the persisted message history.
   return (
     <EmmaStreamProvider
+      key={streamThreadId ?? 'new-thread'}
       threadId={streamThreadId}
       onThreadId={setStreamThreadId}
     >
