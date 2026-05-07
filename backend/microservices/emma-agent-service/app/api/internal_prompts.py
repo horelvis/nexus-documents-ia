@@ -82,14 +82,27 @@ El admin está definiendo un agente con estos datos:
 - Tipos semánticos del corpus que verá: {semantic_types}
 {mode_block}
 
-Devuelve UN ÚNICO system prompt en español que cumpla:
-1. Defina identidad clara ("Eres el asistente de ...").
-2. Especifique área de expertise basada en descripción y tipos semánticos.
-3. Indique estilo: respuestas concisas, profesionales; cita fuentes cuando aplique; no inventes.
-4. Indique comportamiento fuera de scope: redirigir al asistente general si la pregunta no es de su dominio.
-5. NO uses meta-comentarios, markdown headers ni explicaciones — sólo el prompt listo para pegar.
+Devuelve UN ÚNICO system prompt en español, ESTRUCTURADO en secciones markdown:
 
-Devuelve únicamente el texto del system prompt."""
+## Identidad
+Una frase: "Eres el asistente de <X>, especializado en <Y>." Sin adornos.
+
+## Estilo
+Lista de bullets con: tono, longitud objetivo, idioma, formato preferido.
+
+## Conocimiento
+Bullets con áreas de experticia derivadas de la descripción y los semantic_types.
+
+## Restricciones
+Bullets con: cita siempre fuentes cuando aplique, no inventes datos, prefiere documentos del corpus sobre conocimiento general.
+
+## Fuera de scope
+Una frase: cuándo redirigir al asistente general (consultas fuera del dominio).
+
+Reglas duras:
+- Cada sección con su header `##`. Ningún texto fuera de las secciones.
+- Bullets cortos (≤ 15 palabras).
+- Ningún meta-comentario, ningún preámbulo, ninguna explicación. Devuelve sólo el contenido del system prompt comenzando por `## Identidad`."""
 
 
 @router.post("/agents/helpers/generate-prompt", response_model=GeneratePromptResponse)
