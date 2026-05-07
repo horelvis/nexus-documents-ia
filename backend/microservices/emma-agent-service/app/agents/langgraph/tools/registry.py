@@ -58,7 +58,7 @@ class ToolRegistry:
         from .search import GetDocumentContentTool
         from .graph import StructuralQueryTool
         from .graph_rag import GraphRAGTool
-        from .specialists import AnalyzeDomainTool
+        from .invoke_agent import InvokeAgentTool
         from .web import WebSearchTool
         from .discovery import ListSourcesTool
         from .connectors import QueryConnectorTool
@@ -75,7 +75,7 @@ class ToolRegistry:
             GraphRAGTool(),            # Graph RAG: entity relationships via knowledge graph
             GetDocumentContentTool(),
             StructuralQueryTool(),
-            AnalyzeDomainTool(),
+            InvokeAgentTool(),         # Replaces AnalyzeDomainTool (admin-curated agents)
             WebSearchTool(),
             CendojSearchTool(),
             ListSourcesTool(),

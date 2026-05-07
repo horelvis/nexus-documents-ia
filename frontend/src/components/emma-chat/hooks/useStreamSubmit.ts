@@ -10,6 +10,7 @@
  */
 import { useCallback, useRef } from 'react'
 import type { Attachment } from '@/lib/types/emma'
+import { extractAgentSlug } from '@/lib/utils/parse-agent-mention'
 
 // Use loose types to match the SDK's actual signatures without coupling
 interface StreamLike {
@@ -103,20 +104,28 @@ export function useStreamSubmit(
       const userContent = query || (attachments?.length ? 'Analiza estos documentos' : '')
       const newMessage = { type: 'human' as const, content: userContent }
 
+      // Extract @<slug> from the user input and forward as state field;
+      // classify_node short-circuits to invoke_agent when present.
+      const agentSlug = extractAgentSlug(userContent)
+
       stream.submit(
-        { messages: [newMessage] },
+        agentSlug
+          ? { messages: [newMessage], agent_slug: agentSlug }
+          : { messages: [newMessage] },
         {
           streamMode: ['values', 'messages'],
           config: { configurable },
           optimisticValues: (prev: any) => ({
             ...prev,
             messages: [...(prev?.messages ?? []), newMessage],
+            agent_slug: agentSlug ?? undefined,
             // Clear turn-specific fields to prevent stale metadata from
             // creating phantom progress bubbles in useMessageConverter
             reasoning_steps: [],
             sources: [],
             success: undefined,
             explanation: undefined,
+            agent_metadata: undefined,
           }),
         },
       )

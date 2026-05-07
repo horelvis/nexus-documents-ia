@@ -99,6 +99,8 @@ export interface EmmaQuery {
   context?: Record<string, unknown>
   enable_debug?: boolean
   deep_reasoning?: boolean
+  /** When set, force invoke_agent for this admin-curated agent slug. */
+  agent_slug?: string
 }
 
 export interface EmmaResponse {

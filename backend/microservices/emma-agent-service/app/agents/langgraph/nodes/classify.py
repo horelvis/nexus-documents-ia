@@ -97,6 +97,27 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
             "metadata": {"classify_intent": "empty", "classify_latency_ms": 0, "_checkpoint_offsets": _checkpoint_offsets},
         }
 
+    # Admin-curated agent invocation (@<slug>) — short-circuit BEFORE intent
+    # classification: when the user explicitly mentions an agent, we resolve
+    # its metadata (for the SSE agent_metadata event) and let the react_loop
+    # constrain itself to invoke_agent in its first turn.
+    requested_slug = state.get("agent_slug")
+    if requested_slug:
+        agent_meta = await _resolve_agent_metadata(requested_slug)
+        return {
+            "agent_slug": requested_slug,
+            "agent_metadata": agent_meta,
+            "reasoning_steps": [{
+                "type": StepType.ROUTING.value,
+                "content": f"User invoked @{requested_slug} — forcing invoke_agent",
+            }],
+            "metadata": {
+                "classify_intent": "agent_invocation",
+                "classify_latency_ms": 0,
+                "_checkpoint_offsets": _checkpoint_offsets,
+            },
+        }
+
     # Intent classification (for metadata/logging, NOT for routing)
     intent = "document_query"
     confidence = 0.5
@@ -198,3 +219,32 @@ async def classify_node(state: ReActState) -> Dict[str, Any]:
         result["query"] = query
 
     return result
+
+
+async def _resolve_agent_metadata(slug: str) -> Dict[str, Any]:
+    """Best-effort fetch of agent metadata for SSE event emission.
+
+    Returns sane defaults if the Main API is unreachable so the request
+    still succeeds (the LLM-side will return an error from invoke_agent).
+    """
+    try:
+        from app.services.main_api_client import MainAPIClient
+        row = await MainAPIClient().get_agent_by_slug(slug)
+    except Exception:  # noqa: BLE001
+        row = None
+
+    if row is None:
+        return {
+            "agent_slug": slug,
+            "agent_name": slug,
+            "agent_color": "blue",
+            "agent_icon": "IconRobot",
+        }
+    return {
+        "agent_id": row.get("id"),
+        "agent_slug": row["slug"],
+        "agent_name": row["name"],
+        "agent_color": row.get("color", "blue"),
+        "agent_icon": row.get("icon", "IconRobot"),
+    }
+

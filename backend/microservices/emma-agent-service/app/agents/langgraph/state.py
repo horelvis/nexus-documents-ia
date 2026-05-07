@@ -542,6 +542,17 @@ class ReActState(TypedDict, total=False):
     # SSE events from swarm nodes (merge_lists reducer for streaming)
     swarm_pending_events: Annotated[List[Dict[str, Any]], merge_lists]
 
+    # =========================================================================
+    # Admin-Curated Agents (@<slug> mention)
+    # =========================================================================
+    # Slug of an agent the user explicitly invoked via @<slug>. When set,
+    # classify short-circuits to invoke_agent for this slug exactly once.
+    agent_slug: Optional[str]
+
+    # Resolved metadata of the invoked agent, emitted as the SSE
+    # ``agent_metadata`` event. Populated by classify after slug is set.
+    agent_metadata: Optional[Dict[str, Any]]
+
 
 async def create_initial_react_state(
     query: str,
@@ -553,6 +564,7 @@ async def create_initial_react_state(
     request_context: Optional[Dict[str, Any]] = None,
     max_steps: int = 10,
     enable_thinking: Optional[bool] = None,
+    agent_slug: Optional[str] = None,
 ) -> ReActState:
     """Create initial state for the ReAct graph.
 
@@ -701,4 +713,8 @@ async def create_initial_react_state(
         swarm_worker_id=None,
         swarm_worker_results=[],
         swarm_pending_events=[],
+
+        # Admin-curated agents (@<slug>)
+        agent_slug=agent_slug,
+        agent_metadata=None,
     )

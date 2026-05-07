@@ -372,6 +372,14 @@ export interface EmmaMessage {
     agent_flow?: string[]
     suggestions?: string[]
     documents?: DocumentInfo[]
+    // Admin-curated agent invocation (set by classify when @<slug> used)
+    agent_invocation?: {
+      agent_id?: string
+      agent_slug?: string
+      agent_name?: string
+      agent_color?: string
+      agent_icon?: string
+    }
     // Progress streaming fields
     progress?: number
     step?: number
