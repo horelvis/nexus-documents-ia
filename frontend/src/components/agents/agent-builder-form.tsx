@@ -75,9 +75,6 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
   const [language, setLanguage] = useState<Agent['persona']['language']>(
     initial?.persona?.language ?? 'es',
   )
-  const [semanticTypes, setSemanticTypes] = useState(
-    (initial?.scope?.semantic_types ?? []).join(', '),
-  )
   const [modelRole, setModelRole] = useState<AgentModelRole>(initial?.model_role ?? 'CHAT')
   const [temperature, setTemperature] = useState<number>(initial?.temperature ?? 0.5)
   const [isActive, setIsActive] = useState(initial?.is_active ?? false)
@@ -100,10 +97,10 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
         {
           name,
           description: description ?? '',
-          semantic_types: semanticTypes
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
+          // Scope is preserved on the row but no longer edited from the UI;
+          // pass through whatever the agent already had so the meta-prompt
+          // can still benefit from it when present.
+          semantic_types: initial?.scope?.semantic_types ?? [],
           current_instructions: instructions,
         },
       )
@@ -121,13 +118,10 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
     setError(null)
     setIsSaving(true)
     try {
-      const scope = {
-        semantic_types: semanticTypes
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
-      }
       if (mode === 'create') {
+        // Scope intentionally omitted — backend defaults to {} (no filters,
+        // agent sees whole corpus). Power users can populate it via API
+        // directly; UI surface is kept minimal per admin request.
         const payload: AgentCreatePayload = {
           name,
           slug,
@@ -135,7 +129,6 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
           icon,
           color,
           persona: { style, language, instructions },
-          scope,
           is_active: isActive,
           model_role: modelRole,
           temperature,
@@ -144,13 +137,14 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
         if (r.error || !r.data) throw new Error(r.error || 'create failed')
         router.push('/admin/agents')
       } else if (initial) {
+        // On update we deliberately do NOT send scope so we don't clobber
+        // a value the admin might have set via API.
         const payload: AgentUpdatePayload = {
           name,
           description: description || null,
           icon,
           color,
           persona: { style, language, instructions },
-          scope,
           is_active: isActive,
           model_role: modelRole,
           temperature,
@@ -370,31 +364,6 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
                 </SelectContent>
               </Select>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Scope */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Scope</CardTitle>
-          <CardDescription>
-            Limita el corpus que ven las herramientas internas (smart_search, graph_rag).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="agent-semantic-types">Semantic types</Label>
-            <Input
-              id="agent-semantic-types"
-              value={semanticTypes}
-              onChange={(e) => setSemanticTypes(e.target.value)}
-              placeholder="factura, contrato, sentencia"
-              className="font-mono text-sm"
-            />
-            <p className="text-xs text-muted-foreground">
-              Separados por coma. v1: solo se expone esta dimensión desde la UI. Folders, fechas y quality_min se editan vía API.
-            </p>
           </div>
         </CardContent>
       </Card>
