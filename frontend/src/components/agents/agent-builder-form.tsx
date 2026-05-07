@@ -47,6 +47,10 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
 
   const [name, setName] = useState(initial?.name ?? '')
   const [slug, setSlug] = useState(initial?.slug ?? '')
+  // True once the admin has edited the slug field directly. Prevents
+  // autoSlug from clobbering manual edits, while still keeping the
+  // slug in sync with the name on a fresh form.
+  const [slugTouched, setSlugTouched] = useState(mode === 'edit')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [instructions, setInstructions] = useState(initial?.persona?.instructions ?? '')
   const [temperature, setTemperature] = useState<number>(initial?.temperature ?? 0.5)
@@ -183,8 +187,9 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
               id="agent-name"
               value={name}
               onChange={(e) => {
-                setName(e.target.value)
-                if (mode === 'create' && !slug) setSlug(autoSlug(e.target.value))
+                const newName = e.target.value
+                setName(newName)
+                if (mode === 'create' && !slugTouched) setSlug(autoSlug(newName))
               }}
               required
               maxLength={100}
@@ -202,7 +207,10 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
             <Input
               id="agent-slug"
               value={slug}
-              onChange={(e) => setSlug(e.target.value)}
+              onChange={(e) => {
+                setSlug(e.target.value)
+                setSlugTouched(true)
+              }}
               required
               pattern="^[a-z][a-z0-9_]{1,49}$"
               disabled={mode === 'edit'}
