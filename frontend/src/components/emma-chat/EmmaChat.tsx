@@ -21,7 +21,6 @@ import { FullscreenDocumentViewer } from './FullscreenDocumentViewer'
 import { EmmaStreamProvider, useEmmaStream } from './EmmaStreamProvider'
 import { BranchSwitcher } from './messages/BranchSwitcher'
 import { CommandBar } from './messages/CommandBar'
-import { ThreadHistory } from './ThreadHistory'
 
 // Extracted hooks
 import { useMessageConverter } from './hooks/useMessageConverter'
@@ -47,7 +46,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 
   // ── Local state ──
   const [deepReasoning, setDeepReasoning] = useState(false)
-  const [showThreadHistory, setShowThreadHistory] = useState(false)
   const [fullscreenDoc, setFullscreenDoc] = useState<DocumentInfo | null>(null)
   const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false)
   const [activeArtifactTab, setActiveArtifactTab] = useState<string | null>(null)
@@ -182,14 +180,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
   // ── Render ──
   return (
     <div className={cn('flex h-full', className)}>
-      {/* Thread History sidebar */}
-      {showThreadHistory && (
-        <ThreadHistory
-          currentThreadId={null}
-          onSelectThread={() => {}}
-        />
-      )}
-
       {/* Chat area */}
       <div className="flex flex-1 flex-col min-w-0">
         {hasMessages ? (
@@ -254,8 +244,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
             <ChatToolbar
               deepReasoning={deepReasoning}
               onDeepReasoningChange={setDeepReasoning}
-              showThreadHistory={showThreadHistory}
-              onToggleThreadHistory={() => setShowThreadHistory(prev => !prev)}
               isLoading={displayIsLoading}
             />
 
