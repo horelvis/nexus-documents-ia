@@ -10,6 +10,8 @@ import logging
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from app.db.models import Base
+# Domain model imports — ensure their tables are in Base.metadata for autogenerate.
+from app.db.agent_models import Agent  # noqa: F401
 from app.core.config import settings
 
 logger = logging.getLogger("alembic.env")

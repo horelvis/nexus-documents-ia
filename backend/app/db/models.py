@@ -10,6 +10,8 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.base_class import Base
 from app.db.edit_session_models import TemplateEditSession  # noqa: F401
+from app.db.enums import ModelRole  # noqa: F401  (re-export for legacy importers)
+
 
 # =====================================
 # TABLAS DE ASOCIACIÓN (Many-to-Many)

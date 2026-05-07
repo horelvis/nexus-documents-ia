@@ -1,0 +1,93 @@
+"""REST endpoints for the admin-curated agents catalog.
+
+Reads (list/get) are open to every authenticated user.
+Writes (create/update/delete/duplicate) require ``is_superuser=True``.
+"""
+from __future__ import annotations
+
+import uuid
+from typing import Optional
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.async_dependencies import get_current_user_async
+from app.core.auth.base import UserProfile
+from app.core.auth.superuser import require_superuser
+from app.db.async_database import get_async_db
+from app.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
+from app.services.agent_service import AgentService
+from app.services.langfuse.persona import LangfusePersonaAdapter
+
+router = APIRouter(prefix="/agents", tags=["agents"])
+
+
+def _service(db: AsyncSession = Depends(get_async_db)) -> AgentService:
+    return AgentService(db=db, langfuse=LangfusePersonaAdapter())
+
+
+@router.get("/", response_model=list[AgentResponse])
+async def list_agents(
+    active: Optional[bool] = None,
+    slug: Optional[str] = None,
+    order_by: Optional[str] = "name",
+    _user: UserProfile = Depends(get_current_user_async),
+    svc: AgentService = Depends(_service),
+) -> list[AgentResponse]:
+    if slug is not None:
+        agent = await svc.get_by_slug(slug)
+        return [AgentResponse.model_validate(agent)] if agent else []
+    rows = await svc.list(active_only=bool(active), order_by=order_by or "name")
+    return [AgentResponse.model_validate(a) for a in rows]
+
+
+@router.get("/{agent_id}", response_model=AgentResponse)
+async def get_agent(
+    agent_id: uuid.UUID,
+    _user: UserProfile = Depends(get_current_user_async),
+    svc: AgentService = Depends(_service),
+) -> AgentResponse:
+    return AgentResponse.model_validate(await svc.get(agent_id))
+
+
+@router.post("/", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
+async def create_agent(
+    payload: AgentCreate,
+    admin: UserProfile = Depends(require_superuser),
+    svc: AgentService = Depends(_service),
+) -> AgentResponse:
+    agent = await svc.create(payload, owner_id=uuid.UUID(admin.sub))
+    return AgentResponse.model_validate(agent)
+
+
+@router.put("/{agent_id}", response_model=AgentResponse)
+async def update_agent(
+    agent_id: uuid.UUID,
+    payload: AgentUpdate,
+    _admin: UserProfile = Depends(require_superuser),
+    svc: AgentService = Depends(_service),
+) -> AgentResponse:
+    return AgentResponse.model_validate(await svc.update(agent_id, payload))
+
+
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_agent(
+    agent_id: uuid.UUID,
+    _admin: UserProfile = Depends(require_superuser),
+    svc: AgentService = Depends(_service),
+):
+    await svc.delete(agent_id)
+
+
+@router.post(
+    "/{agent_id}/duplicate",
+    response_model=AgentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_agent(
+    agent_id: uuid.UUID,
+    admin: UserProfile = Depends(require_superuser),
+    svc: AgentService = Depends(_service),
+) -> AgentResponse:
+    dup = await svc.duplicate(agent_id, owner_id=uuid.UUID(admin.sub))
+    return AgentResponse.model_validate(dup)

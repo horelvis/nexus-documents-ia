@@ -13,7 +13,7 @@ from app.api.v1.emma import router as emma_router
 # Import all modules needed by api.py
 from app.api.v1 import (
     document_insights, documents, document_categorization, auth, admin,
-    signatures, webhooks, search, users, entities, dashboard,
+    agents, signatures, webhooks, search, users, entities, dashboard,
     analysis_queue, channels, gemini_voice,
     site_guests, site_portal, emma,
 )
