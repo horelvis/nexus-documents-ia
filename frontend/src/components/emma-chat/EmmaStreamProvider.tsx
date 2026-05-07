@@ -108,11 +108,14 @@ export function EmmaStreamProvider({
     messagesKey: 'messages',
     defaultHeaders,
     onThreadId,
-    // ``true`` makes the SDK call ``client.threads.getHistory(threadId, { limit: true })``
-    // which is invalid (limit must be a number or false). Use the explicit
-    // limit form so a real number is passed; the SDK pulls the latest 10
-    // checkpoints and exposes them as ``stream.history`` plus ``stream.messages``.
-    fetchStateHistory: { limit: 10 },
+    // ``false`` triggers ``client.threads.getState(threadId)`` (single
+    // snapshot with the final ``values.messages``). The other modes
+    // (``true`` or ``{limit: N}``) call ``getHistory`` which returns an
+    // array of checkpoint snapshots; each checkpoint contains the
+    // accumulated messages up to that step, so the SDK ends up
+    // surfacing duplicates as it walks the array. We don't need
+    // time-travel here, so the cleaner contract is ``getState``.
+    fetchStateHistory: false,
   })
 
   return (
