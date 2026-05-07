@@ -85,10 +85,13 @@ export function EmmaStreamProvider({
   threadId,
   onThreadId,
 }: EmmaStreamProviderProps) {
-  // Memoize token read so it doesn't re-evaluate on every render
-  const token = useMemo(() => getSSOToken(), [])
-
-  // Memoize headers to prevent useStream from recreating the client
+  // Read the SSO token fresh on every render. ``apiClient`` (axios) has
+  // an interceptor that may have refreshed the token in sessionStorage
+  // between the provider's initial mount and a later thread switch;
+  // memoising once meant the SDK kept stale (or empty) credentials and
+  // ``GET /api/threads/<id>/state`` came back as 401, with the SDK
+  // surfacing nothing in the network tab.
+  const token = getSSOToken()
   const defaultHeaders = useMemo(
     () => ({
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
