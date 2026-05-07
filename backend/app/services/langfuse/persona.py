@@ -25,18 +25,17 @@ class LangfusePersonaAdapter:
     """Pushes ``agent_<slug>_persona`` to Langfuse via emma-agent-service."""
 
     def __init__(self, *, base_url: Optional[str] = None) -> None:
-        # ``EMMA_INTERNAL_URL`` is preferred; fall back to settings.MAIN_API_URL
-        # neighbours so deployments without the variable still load.
-        self._base_url = (base_url or getattr(settings, "EMMA_INTERNAL_URL", "")).rstrip("/")
+        # Reuse the existing EMMA_SERVICE_URL (already configured for the
+        # Main-API → emma-agent-service hop).
+        self._base_url = (base_url or getattr(settings, "EMMA_SERVICE_URL", "")).rstrip("/")
         self._api_key = getattr(settings, "MICROSERVICES_API_KEY", "")
 
     async def push_persona(self, *, slug: str, instructions: str) -> None:
         """Best-effort push. Raises only on hard 4xx/5xx from emma."""
         if not self._base_url:
-            # Phase 1 deployment: emma endpoint not wired yet. Defer silently.
             logger.warning(
-                "LangfusePersonaAdapter: EMMA_INTERNAL_URL not set; "
-                "push of agent_%s_persona deferred (TODO Phase 2)",
+                "LangfusePersonaAdapter: EMMA_SERVICE_URL not set; "
+                "push of agent_%s_persona skipped",
                 slug,
             )
             return

@@ -155,6 +155,7 @@ class EmmaQuery(BaseModel):
     context: Optional[Dict[str, Any]] = Field(None, description="Additional context (document_id, indexed_document_ids, attachments)")
     enable_streaming: bool = Field(False, description="Enable streaming (use /stream endpoint instead)")
     deep_reasoning: Optional[bool] = Field(default=None, description="Enable deep reasoning / thinking mode. None=use global default, True=force thinking, False=disable thinking")
+    agent_slug: Optional[str] = Field(default=None, description="If set, force invoke_agent with this slug exactly once (admin-curated agents catalog). Pattern: ^[a-z][a-z0-9_]{1,49}$", pattern=r"^[a-z][a-z0-9_]{1,49}$")
 
     class Config:
         json_schema_extra = {
@@ -595,6 +596,7 @@ async def _generate_langgraph_sse(
             thread_id=thread_id,
             context=query.context,
             enable_thinking=getattr(query, "deep_reasoning", None),
+            agent_slug=getattr(query, "agent_slug", None),
         ):
             event_type = event.get("type", "")
             data = event.get("data", {})

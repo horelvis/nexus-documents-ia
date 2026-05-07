@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.async_dependencies import get_current_user_async
+from app.api.auth_helpers import get_user_or_internal
 from app.core.auth.base import UserProfile
 from app.core.auth.superuser import require_superuser
 from app.db.async_database import get_async_db
@@ -31,7 +32,7 @@ async def list_agents(
     active: Optional[bool] = None,
     slug: Optional[str] = None,
     order_by: Optional[str] = "name",
-    _user: UserProfile = Depends(get_current_user_async),
+    _user: UserProfile = Depends(get_user_or_internal),
     svc: AgentService = Depends(_service),
 ) -> list[AgentResponse]:
     if slug is not None:
@@ -44,7 +45,7 @@ async def list_agents(
 @router.get("/{agent_id}", response_model=AgentResponse)
 async def get_agent(
     agent_id: uuid.UUID,
-    _user: UserProfile = Depends(get_current_user_async),
+    _user: UserProfile = Depends(get_user_or_internal),
     svc: AgentService = Depends(_service),
 ) -> AgentResponse:
     return AgentResponse.model_validate(await svc.get(agent_id))

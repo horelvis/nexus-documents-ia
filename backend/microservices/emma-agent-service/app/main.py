@@ -44,6 +44,7 @@ from app.api import emma_router, uploads_router, training_router, background_rou
 from app.api.explainability import router as explainability_router
 from app.api.langgraph_protocol import router as langgraph_protocol_router
 from app.api.report_downloads import router as report_downloads_router
+from app.api.internal_prompts import router as internal_prompts_router
 from app.clients import get_weaviate_client
 
 # Configure logging
@@ -230,6 +231,7 @@ app.include_router(generated_documents_router, tags=["generated-documents"])
 app.include_router(explainability_router, prefix="/emma", tags=["explainability"])
 app.include_router(langgraph_protocol_router, tags=["langgraph-protocol"])
 app.include_router(report_downloads_router, tags=["reports"])
+app.include_router(internal_prompts_router)
 
 
 # Health check
