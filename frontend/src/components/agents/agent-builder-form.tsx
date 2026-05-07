@@ -2,19 +2,53 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { IconCopy, IconTrash, IconDeviceFloppy, IconX } from '@tabler/icons-react'
+import {
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  Input,
+  Label,
+  Textarea,
+  Switch,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Separator,
+} from '@/components/ui'
 import { agentsService } from '@/lib/services/agents.service'
-import type { Agent, AgentCreatePayload, AgentUpdatePayload, AgentModelRole } from '@/lib/types/agent'
+import type {
+  Agent,
+  AgentCreatePayload,
+  AgentUpdatePayload,
+  AgentModelRole,
+} from '@/lib/types/agent'
 
 interface AgentBuilderFormProps {
   initial?: Agent
   mode: 'create' | 'edit'
 }
 
-const COLOR_OPTIONS = ['blue', 'green', 'orange', 'purple', 'red', 'pink', 'indigo']
+const COLOR_OPTIONS = [
+  { value: 'blue', label: 'Azul' },
+  { value: 'green', label: 'Verde' },
+  { value: 'orange', label: 'Naranja' },
+  { value: 'purple', label: 'Morado' },
+  { value: 'red', label: 'Rojo' },
+  { value: 'pink', label: 'Rosa' },
+  { value: 'indigo', label: 'Índigo' },
+] as const
 
 function autoSlug(name: string): string {
-  return name.toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 50)
@@ -30,8 +64,12 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
   const [color, setColor] = useState(initial?.color ?? 'blue')
   const [instructions, setInstructions] = useState(initial?.persona?.instructions ?? '')
   const [style, setStyle] = useState<Agent['persona']['style']>(initial?.persona?.style ?? 'concise')
-  const [language, setLanguage] = useState<Agent['persona']['language']>(initial?.persona?.language ?? 'es')
-  const [semanticTypes, setSemanticTypes] = useState((initial?.scope?.semantic_types ?? []).join(', '))
+  const [language, setLanguage] = useState<Agent['persona']['language']>(
+    initial?.persona?.language ?? 'es',
+  )
+  const [semanticTypes, setSemanticTypes] = useState(
+    (initial?.scope?.semantic_types ?? []).join(', '),
+  )
   const [modelRole, setModelRole] = useState<AgentModelRole>(initial?.model_role ?? 'CHAT')
   const [temperature, setTemperature] = useState<number>(initial?.temperature ?? 0.5)
   const [isActive, setIsActive] = useState(initial?.is_active ?? false)
@@ -46,11 +84,18 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
     setIsSaving(true)
     try {
       const scope = {
-        semantic_types: semanticTypes.split(',').map((s) => s.trim()).filter(Boolean),
+        semantic_types: semanticTypes
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
       }
       if (mode === 'create') {
         const payload: AgentCreatePayload = {
-          name, slug, description: description || null, icon, color,
+          name,
+          slug,
+          description: description || null,
+          icon,
+          color,
           persona: { style, language, instructions },
           scope,
           is_active: isActive,
@@ -62,7 +107,10 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
         router.push('/admin/agents')
       } else if (initial) {
         const payload: AgentUpdatePayload = {
-          name, description: description || null, icon, color,
+          name,
+          description: description || null,
+          icon,
+          color,
           persona: { style, language, instructions },
           scope,
           is_active: isActive,
@@ -111,141 +159,279 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-3xl">
-      {error && <div className="text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2 rounded">{error}</div>}
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {error && (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 px-3 py-2 rounded">
+          {error}
+        </div>
+      )}
 
-      <fieldset className="border border-gray-200 rounded p-4 space-y-3">
-        <legend className="px-2 text-sm font-semibold">Identidad</legend>
-        <div>
-          <label className="block text-sm mb-1">Nombre</label>
-          <input
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value)
-              if (mode === 'create' && !slug) setSlug(autoSlug(e.target.value))
-            }}
-            required maxLength={100}
-            className="w-full border rounded px-3 py-1.5"
-          />
-        </div>
-        <div>
-          <label className="block text-sm mb-1">Slug (lowercase, sin espacios)</label>
-          <input
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            required pattern="^[a-z][a-z0-9_]{1,49}$"
-            disabled={mode === 'edit'}
-            className="w-full border rounded px-3 py-1.5 font-mono disabled:bg-gray-100"
-          />
-        </div>
-        <div>
-          <label className="block text-sm mb-1">Descripción</label>
-          <textarea
-            value={description ?? ''} onChange={(e) => setDescription(e.target.value)}
-            rows={2} className="w-full border rounded px-3 py-1.5"
-          />
-        </div>
-        <div className="flex gap-3">
-          <div>
-            <label className="block text-sm mb-1">Color</label>
-            <select value={color} onChange={(e) => setColor(e.target.value)} className="border rounded px-2 py-1.5">
-              {COLOR_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Icon (Tabler name)</label>
-            <input value={icon} onChange={(e) => setIcon(e.target.value)} className="border rounded px-3 py-1.5 font-mono" />
-          </div>
-        </div>
-      </fieldset>
-
-      <fieldset className="border border-gray-200 rounded p-4 space-y-3">
-        <legend className="px-2 text-sm font-semibold">Persona</legend>
-        <div>
-          <label className="block text-sm mb-1">Instructions (system prompt)</label>
-          <textarea
-            value={instructions} onChange={(e) => setInstructions(e.target.value)}
-            rows={6} className="w-full border rounded px-3 py-1.5 font-mono text-sm"
-            placeholder="Eres el asistente de Contabilidad. Cita siempre la factura origen."
-          />
-        </div>
-        <div className="flex gap-3">
-          <div>
-            <label className="block text-sm mb-1">Estilo</label>
-            <select value={style} onChange={(e) => setStyle(e.target.value as Agent['persona']['style'])} className="border rounded px-2 py-1.5">
-              <option value="concise">Conciso</option>
-              <option value="detailed">Detallado</option>
-              <option value="conversational">Conversacional</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Idioma</label>
-            <select value={language} onChange={(e) => setLanguage(e.target.value as Agent['persona']['language'])} className="border rounded px-2 py-1.5">
-              <option value="es">Español</option>
-              <option value="en">English</option>
-              <option value="auto">Auto</option>
-            </select>
-          </div>
-        </div>
-      </fieldset>
-
-      <fieldset className="border border-gray-200 rounded p-4 space-y-3">
-        <legend className="px-2 text-sm font-semibold">Scope</legend>
-        <div>
-          <label className="block text-sm mb-1">Semantic types (separados por coma)</label>
-          <input
-            value={semanticTypes} onChange={(e) => setSemanticTypes(e.target.value)}
-            placeholder="factura, contrato, sentencia"
-            className="w-full border rounded px-3 py-1.5 font-mono text-sm"
-          />
-          <p className="text-xs text-gray-500 mt-1">v1: solo se expone semantic_types desde la UI. Otros filtros del scope (folders, dates, quality_min) se pueden añadir editando la fila por API.</p>
-        </div>
-      </fieldset>
-
-      <fieldset className="border border-gray-200 rounded p-4 space-y-3">
-        <legend className="px-2 text-sm font-semibold">Runtime</legend>
-        <div className="flex gap-3 items-end">
-          <div>
-            <label className="block text-sm mb-1">Modelo</label>
-            <select value={modelRole} onChange={(e) => setModelRole(e.target.value as AgentModelRole)} className="border rounded px-2 py-1.5">
-              <option value="CHAT">CHAT (calidad)</option>
-              <option value="PLANNER">PLANNER (rápido)</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm mb-1">Temperature: {temperature.toFixed(2)}</label>
-            <input
-              type="range" min={0} max={2} step={0.05}
-              value={temperature} onChange={(e) => setTemperature(Number(e.target.value))}
-              className="w-48"
+      {/* Identidad */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Identidad</CardTitle>
+          <CardDescription>Nombre visible, slug para mención y aspecto.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="agent-name">Nombre</Label>
+            <Input
+              id="agent-name"
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value)
+                if (mode === 'create' && !slug) setSlug(autoSlug(e.target.value))
+              }}
+              required
+              maxLength={100}
+              placeholder="Contabilidad"
             />
           </div>
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-          Activo (visible para todos los usuarios)
-        </label>
-      </fieldset>
 
-      <div className="flex items-center gap-3">
-        <button type="submit" disabled={isSaving} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
-          {isSaving ? 'Guardando…' : (mode === 'create' ? 'Crear' : 'Guardar')}
-        </button>
-        <button type="button" onClick={() => router.push('/admin/agents')} className="px-4 py-2 border rounded">
+          <div className="grid gap-2">
+            <Label htmlFor="agent-slug">
+              Slug
+              <span className="text-xs text-muted-foreground font-normal ml-2">
+                lowercase, sin espacios — usado como <code className="px-1 rounded bg-muted">@&lt;slug&gt;</code> en el chat
+              </span>
+            </Label>
+            <Input
+              id="agent-slug"
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+              required
+              pattern="^[a-z][a-z0-9_]{1,49}$"
+              disabled={mode === 'edit'}
+              className="font-mono"
+              placeholder="contabilidad"
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="agent-description">Descripción</Label>
+            <Textarea
+              id="agent-description"
+              value={description ?? ''}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={2}
+              placeholder="Análisis de facturas, pagos y conciliaciones."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="agent-color">Color</Label>
+              <Select value={color} onValueChange={setColor}>
+                <SelectTrigger id="agent-color">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {COLOR_OPTIONS.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="agent-icon">
+                Icon
+                <span className="text-xs text-muted-foreground font-normal ml-2">
+                  (Tabler component name)
+                </span>
+              </Label>
+              <Input
+                id="agent-icon"
+                value={icon}
+                onChange={(e) => setIcon(e.target.value)}
+                className="font-mono"
+                placeholder="IconRobot"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Persona */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Persona</CardTitle>
+          <CardDescription>
+            Las instrucciones se publican en Langfuse como <code className="px-1 rounded bg-muted text-xs">agent_&lt;slug&gt;_persona</code> al guardar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="agent-instructions">Instructions (system prompt)</Label>
+            <Textarea
+              id="agent-instructions"
+              value={instructions}
+              onChange={(e) => setInstructions(e.target.value)}
+              rows={6}
+              className="font-mono text-sm"
+              placeholder="Eres el asistente de Contabilidad. Cita siempre la factura origen."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="agent-style">Estilo</Label>
+              <Select value={style} onValueChange={(v) => setStyle(v as typeof style)}>
+                <SelectTrigger id="agent-style">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="concise">Conciso</SelectItem>
+                  <SelectItem value="detailed">Detallado</SelectItem>
+                  <SelectItem value="conversational">Conversacional</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="agent-language">Idioma</Label>
+              <Select value={language} onValueChange={(v) => setLanguage(v as typeof language)}>
+                <SelectTrigger id="agent-language">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="es">Español</SelectItem>
+                  <SelectItem value="en">English</SelectItem>
+                  <SelectItem value="auto">Auto</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Scope */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Scope</CardTitle>
+          <CardDescription>
+            Limita el corpus que ven las herramientas internas (smart_search, graph_rag).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="agent-semantic-types">Semantic types</Label>
+            <Input
+              id="agent-semantic-types"
+              value={semanticTypes}
+              onChange={(e) => setSemanticTypes(e.target.value)}
+              placeholder="factura, contrato, sentencia"
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">
+              Separados por coma. v1: solo se expone esta dimensión desde la UI. Folders, fechas y quality_min se editan vía API.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Runtime */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Runtime</CardTitle>
+          <CardDescription>Modelo y comportamiento.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="agent-model-role">Modelo</Label>
+              <Select
+                value={modelRole}
+                onValueChange={(v) => setModelRole(v as AgentModelRole)}
+              >
+                <SelectTrigger id="agent-model-role">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CHAT">CHAT — alta calidad</SelectItem>
+                  <SelectItem value="PLANNER">PLANNER — rápido</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="agent-temperature">
+                Temperature
+                <span className="ml-2 font-mono text-xs text-muted-foreground">
+                  {temperature.toFixed(2)}
+                </span>
+              </Label>
+              <Input
+                id="agent-temperature"
+                type="range"
+                min={0}
+                max={2}
+                step={0.05}
+                value={temperature}
+                onChange={(e) => setTemperature(Number(e.target.value))}
+                className="cursor-pointer"
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="flex items-center justify-between">
+            <div>
+              <Label htmlFor="agent-is-active" className="cursor-pointer">
+                Activo
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Cuando se activa, todos los usuarios autenticados ven y pueden invocar este agente.
+              </p>
+            </div>
+            <Switch
+              id="agent-is-active"
+              checked={isActive}
+              onCheckedChange={setIsActive}
+              disabled={initial?.is_seed && initial.is_active}
+            />
+          </div>
+          {initial?.is_seed && (
+            <p className="text-xs text-muted-foreground">
+              Este agente es <strong>seed</strong>: no se puede desactivar ni eliminar.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2 sticky bottom-0 bg-background py-3 border-t">
+        <Button type="submit" disabled={isSaving}>
+          <IconDeviceFloppy className="h-4 w-4 mr-1" />
+          {isSaving ? 'Guardando…' : mode === 'create' ? 'Crear agente' : 'Guardar cambios'}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => router.push('/admin/agents')}
+        >
+          <IconX className="h-4 w-4 mr-1" />
           Cancelar
-        </button>
+        </Button>
         {mode === 'edit' && initial && (
           <>
-            <button type="button" onClick={handleDuplicate} className="ml-auto px-3 py-2 border rounded text-sm">
-              Duplicar
-            </button>
-            <button
-              type="button" onClick={handleDelete} disabled={isDeleting || initial.is_seed}
-              title={initial.is_seed ? 'No se puede eliminar un agente seed' : ''}
-              className="px-3 py-2 border border-red-300 text-red-700 rounded text-sm disabled:opacity-50"
-            >
-              {isDeleting ? 'Eliminando…' : 'Eliminar'}
-            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <Button type="button" variant="outline" onClick={handleDuplicate} disabled={isSaving}>
+                <IconCopy className="h-4 w-4 mr-1" />
+                Duplicar
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={handleDelete}
+                disabled={isDeleting || initial.is_seed}
+                title={initial.is_seed ? 'Los agentes seed no se pueden eliminar' : ''}
+              >
+                <IconTrash className="h-4 w-4 mr-1" />
+                {isDeleting ? 'Eliminando…' : 'Eliminar'}
+              </Button>
+            </div>
           </>
         )}
       </div>
