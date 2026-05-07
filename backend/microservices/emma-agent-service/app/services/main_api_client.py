@@ -27,7 +27,7 @@ class MainAPIClient:
     async def get_agent_by_slug(self, slug: str) -> Optional[dict]:
         async with httpx.AsyncClient(timeout=5.0) as c:
             r = await c.get(
-                f"{self._base_url}/api/v1/agents/",
+                f"{self._base_url}/api/v1/agents",
                 params={"slug": slug, "active": True},
                 headers=self._headers,
             )
@@ -43,7 +43,7 @@ class MainAPIClient:
     async def list_active_agents(self, *, limit: int = 50) -> list[dict]:
         async with httpx.AsyncClient(timeout=5.0) as c:
             r = await c.get(
-                f"{self._base_url}/api/v1/agents/",
+                f"{self._base_url}/api/v1/agents",
                 params={"active": True, "order_by": "usage_count"},
                 headers=self._headers,
             )

@@ -86,6 +86,14 @@ class AgentLoader:
     @staticmethod
     def _row_to_loaded(row: dict, *, persona_instructions: str) -> LoadedAgent:
         persona = row.get("persona") or {}
+        # Cross-service enum mismatch: Main API stores uppercase ('CHAT',
+        # 'PLANNER'); the microservice ModelRole values are lowercase
+        # ('chat', 'planner'). Normalise + fall back to CHAT on unknowns.
+        raw_role = str(row.get("model_role") or "CHAT").lower()
+        try:
+            model_role = ModelRole(raw_role)
+        except ValueError:
+            model_role = ModelRole.CHAT
         return LoadedAgent(
             id=str(row["id"]),
             slug=row["slug"],
@@ -93,7 +101,7 @@ class AgentLoader:
             color=row.get("color", "blue"),
             icon=row.get("icon", "IconRobot"),
             is_active=bool(row["is_active"]),
-            model_role=ModelRole(row.get("model_role", "CHAT")),
+            model_role=model_role,
             temperature=float(row.get("temperature", 0.5)),
             scope=row.get("scope") or {},
             persona_style=persona.get("style", "concise"),
