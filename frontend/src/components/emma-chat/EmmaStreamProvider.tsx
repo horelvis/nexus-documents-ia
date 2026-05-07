@@ -32,6 +32,16 @@ export type EmmaStateType = {
     guardrail_redacted?: boolean
     guardrail_warnings?: string[]
   }
+  /** Slug forwarded by useStreamSubmit when the user typed @<slug>. */
+  agent_slug?: string
+  /** Resolved agent metadata emitted by classify_node for the bubble badge. */
+  agent_metadata?: {
+    agent_id?: string
+    agent_slug?: string
+    agent_name?: string
+    agent_color?: string
+    agent_icon?: string
+  }
 }
 
 type StreamContextType = ReturnType<typeof useStream<EmmaStateType>>
