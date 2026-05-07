@@ -2,7 +2,15 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { IconCopy, IconTrash, IconDeviceFloppy, IconX } from '@tabler/icons-react'
+import {
+  IconCopy,
+  IconTrash,
+  IconDeviceFloppy,
+  IconX,
+  IconWand,
+  IconLoader2,
+} from '@tabler/icons-react'
+import { apiClient } from '@/lib/api-client'
 import {
   Button,
   Card,
@@ -76,7 +84,37 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
 
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  async function handleGeneratePrompt() {
+    if (!name.trim()) {
+      setError('Define primero el nombre del agente para generar el prompt.')
+      return
+    }
+    setError(null)
+    setIsGenerating(true)
+    try {
+      const r = await apiClient.post<{ instructions: string }>(
+        '/api/v1/agents/_helpers/generate-prompt',
+        {
+          name,
+          description: description ?? '',
+          semantic_types: semanticTypes
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean),
+          current_instructions: instructions,
+        },
+      )
+      if (r.error || !r.data) throw new Error(r.error || 'No data')
+      setInstructions(r.data.instructions)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsGenerating(false)
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -263,7 +301,34 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-2">
-            <Label htmlFor="agent-instructions">Instructions (system prompt)</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="agent-instructions">Instructions (system prompt)</Label>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleGeneratePrompt}
+                disabled={isGenerating || !name.trim()}
+                title={
+                  !name.trim()
+                    ? 'Define primero el nombre del agente'
+                    : instructions.trim()
+                      ? 'Mejorar el prompt actual con IA'
+                      : 'Generar prompt desde cero con IA'
+                }
+              >
+                {isGenerating ? (
+                  <IconLoader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <IconWand className="h-4 w-4 mr-1" />
+                )}
+                {isGenerating
+                  ? 'Generando…'
+                  : instructions.trim()
+                    ? 'Mejorar con IA'
+                    : 'Generar con IA'}
+              </Button>
+            </div>
             <Textarea
               id="agent-instructions"
               value={instructions}
@@ -271,7 +336,11 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
               rows={6}
               className="font-mono text-sm"
               placeholder="Eres el asistente de Contabilidad. Cita siempre la factura origen."
+              disabled={isGenerating}
             />
+            <p className="text-xs text-muted-foreground">
+              El botón usa el modelo CHAT con un meta-prompt. Si hay texto, lo mejora; si está vacío, lo genera desde cero a partir de nombre, descripción y semantic_types.
+            </p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -365,12 +434,16 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
                 id="agent-temperature"
                 type="range"
                 min={0}
-                max={2}
+                max={1}
                 step={0.05}
                 value={temperature}
                 onChange={(e) => setTemperature(Number(e.target.value))}
                 className="cursor-pointer"
               />
+              <div className="flex justify-between text-[10px] text-muted-foreground -mt-1 px-0.5">
+                <span>0 — determinista</span>
+                <span>1 — creativo</span>
+              </div>
             </div>
           </div>
 

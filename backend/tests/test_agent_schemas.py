@@ -30,9 +30,11 @@ class TestSlugValidation:
 
 class TestTemperatureRange:
     def test_accepts_valid(self) -> None:
-        AgentCreate(name="X", slug="x_x", temperature=1.5)
+        AgentCreate(name="X", slug="x_x", temperature=0.7)
+        AgentCreate(name="X", slug="x_x", temperature=0.0)
+        AgentCreate(name="X", slug="x_x", temperature=1.0)
 
-    @pytest.mark.parametrize("bad", [-0.1, 2.01, 5.0])
+    @pytest.mark.parametrize("bad", [-0.1, 1.01, 1.5, 2.0, 5.0])
     def test_rejects_out_of_range(self, bad: float) -> None:
         with pytest.raises(ValidationError):
             AgentCreate(name="X", slug="x_x", temperature=bad)

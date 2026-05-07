@@ -61,7 +61,7 @@ class AgentBase(BaseModel):
     scope: Scope = Field(default_factory=Scope)
     is_active: bool = False
     model_role: ModelRole = ModelRole.CHAT
-    temperature: float = Field(0.5, ge=0.0, le=2.0)
+    temperature: float = Field(0.5, ge=0.0, le=1.0)
 
     @field_validator("slug")
     @classmethod
@@ -91,7 +91,7 @@ class AgentUpdate(BaseModel):
     scope: Optional[Scope] = None
     is_active: Optional[bool] = None
     model_role: Optional[ModelRole] = None
-    temperature: Optional[float] = Field(default=None, ge=0.0, le=2.0)
+    temperature: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 class AgentResponse(AgentBase):

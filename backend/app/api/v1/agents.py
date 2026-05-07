@@ -5,20 +5,26 @@ Writes (create/update/delete/duplicate) require ``is_superuser=True``.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Depends, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.async_dependencies import get_current_user_async
 from app.api.auth_helpers import get_user_or_internal
 from app.core.auth.base import UserProfile
 from app.core.auth.superuser import require_superuser
+from app.core.config import settings
 from app.db.async_database import get_async_db
 from app.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
 from app.services.agent_service import AgentService
 from app.services.langfuse.persona import LangfusePersonaAdapter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/agents", tags=["agents"])
 
@@ -122,3 +128,42 @@ async def get_metrics(
         "last_used_at": None,
         "avg_latency_ms": None,
     }
+
+
+class GeneratePromptBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(default="", max_length=2000)
+    semantic_types: list[str] = Field(default_factory=list)
+    current_instructions: str = Field(default="", max_length=20000)
+
+
+@router.post("/_helpers/generate-prompt", response_model=dict)
+async def generate_prompt_helper(
+    payload: GeneratePromptBody,
+    _admin: UserProfile = Depends(require_superuser),
+) -> dict:
+    """Generate or improve an agent system prompt via the chat LLM.
+
+    Proxies to emma-agent-service, which holds the LLM client. Admin-only
+    so we don't leak generation cycles to anonymous callers.
+    """
+    base_url = getattr(settings, "EMMA_SERVICE_URL", "").rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=503, detail="EMMA_SERVICE_URL not configured")
+    api_key = getattr(settings, "MICROSERVICES_API_KEY", "")
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as c:
+            r = await c.post(
+                f"{base_url}/internal/agents/helpers/generate-prompt",
+                headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+                json=payload.model_dump(),
+            )
+    except httpx.RequestError as exc:
+        logger.error("generate-prompt proxy unreachable: %s", exc)
+        raise HTTPException(status_code=502, detail=f"emma unreachable: {exc}") from exc
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    return r.json()
