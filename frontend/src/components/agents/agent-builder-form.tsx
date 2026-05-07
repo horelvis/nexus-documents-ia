@@ -22,21 +22,10 @@ import {
   Label,
   Textarea,
   Switch,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
   Separator,
 } from '@/components/ui'
-// Color and Icon are no longer edited from the form — backend defaults apply.
 import { agentsService } from '@/lib/services/agents.service'
-import type {
-  Agent,
-  AgentCreatePayload,
-  AgentUpdatePayload,
-  AgentModelRole,
-} from '@/lib/types/agent'
+import type { Agent, AgentCreatePayload, AgentUpdatePayload } from '@/lib/types/agent'
 
 interface AgentBuilderFormProps {
   initial?: Agent
@@ -60,7 +49,6 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
   const [slug, setSlug] = useState(initial?.slug ?? '')
   const [description, setDescription] = useState(initial?.description ?? '')
   const [instructions, setInstructions] = useState(initial?.persona?.instructions ?? '')
-  const [modelRole, setModelRole] = useState<AgentModelRole>(initial?.model_role ?? 'CHAT')
   const [temperature, setTemperature] = useState<number>(initial?.temperature ?? 0.5)
   const [isActive, setIsActive] = useState(initial?.is_active ?? false)
 
@@ -103,11 +91,11 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
     setError(null)
     setIsSaving(true)
     try {
-      // Scope, color, icon, persona.style, persona.language are omitted
-      // intentionally: the backend applies defaults on create and we
-      // don't clobber existing values on update. The system prompt
-      // (persona.instructions) is the single place to encode style and
-      // language preferences for the agent.
+      // model_role, scope, color, icon, persona.style, persona.language are
+      // intentionally omitted from the payload. Backend applies defaults
+      // on create (model_role=CHAT, color=blue, icon=IconRobot, style=
+      // concise, language=es, scope={}). The instructions textarea is the
+      // single canvas for tone, language and behaviour.
       const persona = {
         style: initial?.persona?.style ?? 'concise',
         language: initial?.persona?.language ?? 'es',
@@ -120,7 +108,6 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
           description: description || null,
           persona,
           is_active: isActive,
-          model_role: modelRole,
           temperature,
         }
         const r = await agentsService.create(payload)
@@ -132,7 +119,6 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
           description: description || null,
           persona,
           is_active: isActive,
-          model_role: modelRole,
           temperature,
         }
         const r = await agentsService.update(initial.id, payload)
@@ -289,60 +275,35 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
               Indica aquí estilo (conciso/detallado), idioma (español/inglés) y comportamiento del agente. El botón usa el modelo CHAT con un meta-prompt: si hay texto lo mejora, si está vacío lo genera desde cero a partir de nombre y descripción.
             </p>
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Runtime */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Runtime</CardTitle>
-          <CardDescription>Modelo y comportamiento.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label htmlFor="agent-model-role">Modelo</Label>
-              <Select
-                value={modelRole}
-                onValueChange={(v) => setModelRole(v as AgentModelRole)}
-              >
-                <SelectTrigger id="agent-model-role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CHAT">CHAT — alta calidad</SelectItem>
-                  <SelectItem value="PLANNER">PLANNER — rápido</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+          <Separator />
 
-            <div className="grid gap-2">
-              <Label htmlFor="agent-temperature">
-                Temperature
-                <span className="ml-2 font-mono text-xs text-muted-foreground">
-                  {temperature.toFixed(2)}
-                </span>
-              </Label>
-              <Input
-                id="agent-temperature"
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={temperature}
-                onChange={(e) => setTemperature(Number(e.target.value))}
-                className="cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] text-muted-foreground -mt-1 px-0.5">
-                <span>0 — determinista</span>
-                <span>1 — creativo</span>
-              </div>
+          <div className="grid gap-2">
+            <Label htmlFor="agent-temperature">
+              Temperature
+              <span className="ml-2 font-mono text-xs text-muted-foreground">
+                {temperature.toFixed(2)}
+              </span>
+            </Label>
+            <Input
+              id="agent-temperature"
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={temperature}
+              onChange={(e) => setTemperature(Number(e.target.value))}
+              className="cursor-pointer"
+            />
+            <div className="flex justify-between text-[10px] text-muted-foreground -mt-1 px-0.5">
+              <span>0 — determinista</span>
+              <span>1 — creativo</span>
             </div>
           </div>
 
           <Separator />
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="agent-is-active" className="cursor-pointer">
                 Activo
