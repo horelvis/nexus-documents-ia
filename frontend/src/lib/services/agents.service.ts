@@ -11,7 +11,8 @@
 import { apiClient } from '@/lib/api-client'
 import type { Agent, AgentCreatePayload, AgentUpdatePayload } from '@/lib/types/agent'
 
-const BASE = '/api/v1/agents'
+// apiClient already prepends /api/v1 via its baseURL — paths here are relative.
+const BASE = '/agents'
 
 export const agentsService = {
   list(opts?: { active?: boolean; slug?: string; order_by?: 'name' | 'usage_count' }) {

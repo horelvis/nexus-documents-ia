@@ -66,7 +66,7 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
     setIsGenerating(true)
     try {
       const r = await apiClient.post<{ instructions: string }>(
-        '/api/v1/agents/_helpers/generate-prompt',
+        '/agents/_helpers/generate-prompt',
         {
           name,
           description: description ?? '',
