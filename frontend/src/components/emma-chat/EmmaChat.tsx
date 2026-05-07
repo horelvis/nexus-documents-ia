@@ -190,9 +190,48 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
       {/* Chat area */}
       <div className="flex flex-1 flex-col min-w-0">
         {isHydrating ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
-            <div className="h-8 w-8 rounded-full border-2 border-muted-foreground/30 border-t-primary animate-spin" />
-            <p className="text-sm">Cargando conversación…</p>
+          <div className="flex-1 overflow-hidden min-h-0">
+            <div
+              className="max-w-3xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6"
+              aria-busy="true"
+              aria-label="Cargando conversación"
+            >
+              {/* User bubble — aligned right */}
+              <div className="flex justify-end">
+                <div className="max-w-[70%] space-y-2">
+                  <div className="h-3.5 bg-primary/15 rounded-md animate-pulse w-48" />
+                  <div className="h-3.5 bg-primary/15 rounded-md animate-pulse w-32" />
+                </div>
+              </div>
+
+              {/* AI bubble — aligned left, longer */}
+              <div className="flex justify-start gap-3">
+                <div className="h-7 w-7 rounded-full bg-muted animate-pulse shrink-0" />
+                <div className="flex-1 max-w-[80%] space-y-2">
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-3/4" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-full" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-5/6" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-2/3" />
+                </div>
+              </div>
+
+              {/* User bubble — short */}
+              <div className="flex justify-end">
+                <div className="max-w-[70%] space-y-2">
+                  <div className="h-3.5 bg-primary/15 rounded-md animate-pulse w-40" />
+                </div>
+              </div>
+
+              {/* AI bubble — second */}
+              <div className="flex justify-start gap-3">
+                <div className="h-7 w-7 rounded-full bg-muted animate-pulse shrink-0" />
+                <div className="flex-1 max-w-[80%] space-y-2">
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-full" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-4/5" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-3/5" />
+                </div>
+              </div>
+            </div>
           </div>
         ) : hasMessages ? (
           <div className="flex-1 overflow-hidden min-h-0">
