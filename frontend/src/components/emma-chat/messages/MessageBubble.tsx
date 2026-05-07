@@ -244,18 +244,66 @@ export function MessageBubble({
         return docIdMatch?.[1] ? <GeneratedDocDownload docId={docIdMatch[1]} /> : null
       })()}
 
-      {/* Related documents — inline source cards */}
-      {message.metadata?.documents && message.metadata.documents.length > 0 && (
-        <div className="mt-3 flex flex-col gap-3">
-          {message.metadata.documents.map((doc, idx) => (
-            <InlineSourceCard
-              key={doc.id || idx}
-              document={doc}
-              onOpenFullscreen={onOpenFullscreen}
-            />
-          ))}
-        </div>
-      )}
+      {/* Related documents — split by "central source" vs "ancillary":
+          a doc is considered a central source when its title (or stem) is
+          mentioned literally in Emma's response. Counting/listing answers
+          ("¿cuántas facturas hay?") rarely mention each document by name,
+          so those collapse to compact link chips instead of full cards. */}
+      {(() => {
+        const docs = message.metadata?.documents ?? []
+        if (docs.length === 0) return null
+
+        const lcContent = (message.content ?? '').toLowerCase()
+        const isCited = (doc: DocumentInfo) => {
+          const name = (doc.name ?? '').toLowerCase()
+          if (!name) return false
+          const stem = name.replace(/\.[^.]+$/, '')
+          // Avoid false positives on very short stems (e.g. "fra")
+          if (stem.length < 5) return lcContent.includes(name)
+          return lcContent.includes(stem) || lcContent.includes(name)
+        }
+
+        const cited = docs.filter(isCited)
+        const ancillary = docs.filter((d) => !isCited(d))
+
+        return (
+          <>
+            {cited.length > 0 && (
+              <div className="mt-3 flex flex-col gap-3">
+                {cited.map((doc, idx) => (
+                  <InlineSourceCard
+                    key={doc.id || idx}
+                    document={doc}
+                    onOpenFullscreen={onOpenFullscreen}
+                  />
+                ))}
+              </div>
+            )}
+            {ancillary.length > 0 && (
+              <div className="mt-3">
+                <p className="text-xs text-muted-foreground mb-1.5">
+                  {cited.length > 0 ? 'También relacionados' : 'Documentos relacionados'}:
+                </p>
+                <ul className="flex flex-wrap gap-1.5">
+                  {ancillary.map((doc, idx) => (
+                    <li key={doc.id || idx}>
+                      <button
+                        type="button"
+                        onClick={() => onOpenFullscreen?.(doc)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-muted hover:bg-accent rounded text-xs text-foreground transition-colors max-w-[260px]"
+                        title={doc.name}
+                      >
+                        <IconPaperclip className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{doc.name}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        )
+      })()}
 
       {/* Source evidence from graph_rag provenance */}
       {message.metadata?.sourceEvidence && message.metadata.sourceEvidence.length > 0 && (
