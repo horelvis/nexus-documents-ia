@@ -319,6 +319,13 @@ export function useMessageConverter(
         stepsMetadata!.guardrailBlocked = guardrailBlocked
       }
 
+      // Forward admin-curated agent invocation metadata so the bubble
+      // can render the 🤖 <agent_name> chip when the user used @<slug>.
+      const agentMeta = values?.agent_metadata
+      if (agentMeta && agentMeta.agent_slug && agentMeta.agent_slug !== 'emma_general') {
+        stepsMetadata!.agent_invocation = agentMeta
+      }
+
       if (sources.length > 0) {
         const allDocs = sources.map((s) => {
           const src = s as Record<string, unknown>
@@ -414,7 +421,7 @@ export function useMessageConverter(
 
     return converted
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sdkMessages, reasoningLen, sourcesLen, success, explanation, interrupt, isLoading, guardrailWarningsKey, guardrailBlocked])
+  }, [sdkMessages, reasoningLen, sourcesLen, success, explanation, interrupt, isLoading, guardrailWarningsKey, guardrailBlocked, values?.agent_metadata?.agent_slug])
 
   // Write metadata to cache after render (side-effect, safe in useEffect)
   useEffect(() => {

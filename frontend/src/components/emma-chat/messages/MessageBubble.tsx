@@ -221,6 +221,15 @@ export function MessageBubble({
         <span className="inline-block w-[3px] h-4 bg-primary/50 animate-pulse ml-0.5 align-middle rounded-full" />
       )}
 
+      {/* Admin-curated agent badge — only when user invoked @<slug> */}
+      {message.metadata?.agent_invocation?.agent_slug &&
+        message.metadata.agent_invocation.agent_slug !== 'emma_general' && (
+        <div className="mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs bg-blue-100 text-blue-700">
+          <span aria-hidden="true">🤖</span>
+          <span>{message.metadata.agent_invocation.agent_name ?? message.metadata.agent_invocation.agent_slug}</span>
+        </div>
+      )}
+
       {/* Guardrail notice — PII redactions or blocks */}
       {message.metadata?.guardrailsApplied && message.metadata.guardrailsApplied.length > 0 && (
         <GuardrailBadge
