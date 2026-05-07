@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { AgentMentionDropdown, useAgentMentionMatches } from './AgentMentionDropdown'
 import { IconSend, IconPlayerStop, IconPlus, IconUpload, IconFolder, IconFileCheck, IconScale } from '@tabler/icons-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -50,6 +51,14 @@ export function EmmaQueryInput({
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [slashMenuOpen, setSlashMenuOpen] = useState(false)
   const [slashMenuIndex, setSlashMenuIndex] = useState(0)
+  // Agent @-mention autocomplete state.
+  // mentionQuery is the partial slug typed after '@' (null = no active mention)
+  // mentionStart is the index of the '@' character in `query` so we can replace
+  // the partial when the user picks one from the dropdown.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null)
+  const [mentionStart, setMentionStart] = useState<number>(0)
+  const [mentionHighlight, setMentionHighlight] = useState(0)
+  const mentionMatches = useAgentMentionMatches(mentionQuery)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -165,6 +174,30 @@ export function EmmaQueryInput({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Agent @-mention navigation (takes precedence over slash and submit).
+    if (mentionQuery !== null && mentionMatches.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setMentionHighlight((i) => Math.min(i + 1, mentionMatches.length - 1))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setMentionHighlight((i) => Math.max(i - 1, 0))
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        insertMention(mentionMatches[mentionHighlight].slug)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setMentionQuery(null)
+        return
+      }
+    }
+
     // Slash menu navigation
     if (slashMenuOpen && filteredCommands.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -208,11 +241,47 @@ export function EmmaQueryInput({
       setSlashMenuOpen(false)
     }
 
+    // @-mention detection: find an "@" before the caret with no whitespace
+    // between it and the caret. The match captures the partial slug already
+    // typed after the @. The character after @ must match the slug pattern
+    // (lowercase, digits, underscore) to avoid triggering on emails etc.
+    const caret = e.target.selectionStart ?? text.length
+    const before = text.slice(0, caret)
+    const m = before.match(/(?:^|\s)@([a-z0-9_]*)$/)
+    if (m) {
+      setMentionStart(caret - m[1].length - 1)
+      setMentionQuery(m[1])
+      setMentionHighlight(0)
+    } else if (mentionQuery !== null) {
+      setMentionQuery(null)
+    }
+
     const textarea = e.target
     textarea.style.height = 'auto'
     const newHeight = Math.min(Math.max(textarea.scrollHeight, 52), 200)
     textarea.style.height = `${newHeight}px`
   }
+
+  const insertMention = useCallback(
+    (slug: string) => {
+      const partialLen = (mentionQuery ?? '').length
+      const before = query.slice(0, mentionStart)
+      const after = query.slice(mentionStart + 1 + partialLen)
+      const next = `${before}@${slug} ${after}`
+      setQuery(next)
+      setMentionQuery(null)
+      // Restore caret right after the inserted "@<slug> "
+      const newCaret = before.length + slug.length + 2
+      requestAnimationFrame(() => {
+        const ta = textareaRef.current
+        if (ta) {
+          ta.focus()
+          ta.setSelectionRange(newCaret, newCaret)
+        }
+      })
+    },
+    [mentionQuery, mentionStart, query],
+  )
 
   const handleLocalUpload = () => {
     setIsDropdownOpen(false)
@@ -355,6 +424,13 @@ export function EmmaQueryInput({
             })}
           </div>
         )}
+
+        <AgentMentionDropdown
+          query={mentionQuery}
+          highlightedIndex={mentionHighlight}
+          onHighlight={setMentionHighlight}
+          onSelect={insertMention}
+        />
 
         <Textarea
           ref={textareaRef}
