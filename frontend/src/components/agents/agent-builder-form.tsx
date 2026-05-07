@@ -227,9 +227,9 @@ export function AgentBuilderForm({ initial, mode }: AgentBuilderFormProps) {
       {/* Persona */}
       <Card>
         <CardHeader>
-          <CardTitle>Persona</CardTitle>
+          <CardTitle>Personalidad</CardTitle>
           <CardDescription>
-            Las instrucciones se publican en Langfuse como <code className="px-1 rounded bg-muted text-xs">agent_&lt;slug&gt;_persona</code> al guardar.
+            Define cómo se comporta el agente. Las instrucciones se publican en Langfuse como <code className="px-1 rounded bg-muted text-xs">agent_&lt;slug&gt;_persona</code> al guardar.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
