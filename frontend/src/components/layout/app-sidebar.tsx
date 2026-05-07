@@ -123,6 +123,11 @@ export function AppSidebar({ onNewConversation, onOpenHistory, ...props }: AppSi
       icon: IconDashboard,
     },
     {
+      title: 'Agentes',
+      href: '/admin/agents',
+      icon: IconRobot,
+    },
+    {
       title: 'Knowledge Graph',
       href: '/knowledge-graph',
       icon: IconNetwork,
