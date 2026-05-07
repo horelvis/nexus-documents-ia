@@ -339,31 +339,18 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 // ── Exported wrapper: wraps Inner in EmmaStreamProvider ──
 
 export function EmmaChat(props: EmmaChatProps) {
-  // Initialise from the parent-provided conversationId so opening an old
-  // thread from the sidebar hydrates state via the LangGraph SDK
-  // (fetchStateHistory: true). Without this, the prop was ignored and
-  // the chat always started a fresh thread.
+  // The parent (``app/page.tsx``) keys this component on
+  // ``activeConversationId``, so a thread switch (sidebar click, "Nueva
+  // consulta") unmounts and remounts the whole tree — both the SDK
+  // provider and EmmaChatInner's local state. We just have to track
+  // ``onThreadId`` for the case where a fresh thread (no prop) gets
+  // a server-assigned id on the first submit.
   const [streamThreadId, setStreamThreadId] = useState<string | null>(
     props.conversationId ?? null,
   )
 
-  // Sync external selection → SDK. When the parent flips conversationId
-  // (sidebar click, "New conversation"), reflect it on the stream.
-  useEffect(() => {
-    if ((props.conversationId ?? null) !== streamThreadId) {
-      setStreamThreadId(props.conversationId ?? null)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.conversationId])
-
-  // ``useStream`` from @langchain/langgraph-sdk only fetches the thread
-  // state during mount; subsequent changes to its ``threadId`` prop do
-  // NOT re-fetch. We force a remount with a key tied to the active
-  // thread, so opening a new conversation from the sidebar triggers
-  // a fresh hydration including the persisted message history.
   return (
     <EmmaStreamProvider
-      key={streamThreadId ?? 'new-thread'}
       threadId={streamThreadId}
       onThreadId={setStreamThreadId}
     >

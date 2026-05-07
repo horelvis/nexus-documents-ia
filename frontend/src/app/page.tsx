@@ -170,6 +170,11 @@ export default function EmmaPage() {
         {/* Main Content Area - Emma Chat */}
         <div className="flex-1 min-h-0 overflow-hidden">
           <EmmaChat
+            // Remount the whole chat (including the LangGraph SDK provider)
+            // when the active conversation changes. This guarantees a clean
+            // ``stream.messages`` and resets local input/attachment state
+            // — important for "Nueva consulta" and for switching threads.
+            key={activeConversationId ?? 'new-thread'}
             className="h-full"
             messages={conversationMessages}
             onMessagesChange={handleMessagesChange}
