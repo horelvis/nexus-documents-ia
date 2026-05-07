@@ -14,7 +14,6 @@ Provider-Specific Formats:
     - Hermes (SGLang, Qwen3): Uses <tool_call> XML tags in assistant messages
     - OpenAI: Uses structured tool_calls array in API response
     - Anthropic: Uses tool_use content blocks in API response
-    - Ollama: Similar to Hermes but may vary by model
 
 Each adapter must handle:
     1. Converting ToolDefinition → Provider's tool format (for requests)

@@ -2,8 +2,7 @@
 LangExtract entity provider — few-shot extraction with source grounding.
 
 Uses the langextract library directly (no HTTP) with SGLang as the LLM
-backend via its OpenAI-compatible API. Replaces both sglang_ner (basic NER)
-and the standalone langextract-service microservice.
+backend via its OpenAI-compatible API.
 
 Includes a monkey-patch for langextract's JSON parser to handle malformed
 output from small LLMs (e.g., Qwen3.5-9B generating trailing tokens after
@@ -191,7 +190,7 @@ class LangExtractProvider(EntityProvider):
         max_char_buffer: int = 10000,
         confidence_threshold: float = 0.7,
     ):
-        # langextract expects base URL without /v1 suffix for Ollama-compatible mode
+        # langextract expects base URL without /v1 suffix.
         self._base_url = sglang_base_url.rstrip("/").removesuffix("/v1")
         self._model = sglang_model
         self._extraction_passes = extraction_passes

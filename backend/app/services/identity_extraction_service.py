@@ -2,7 +2,7 @@
 Identity Extraction Service
 
 Business logic for identity document processing with GDPR compliance:
-- Calls langextract-service for actual OCR/extraction
+- Calls intelligence-docs-service for actual OCR/extraction
 - Manages database storage with encryption
 - Handles retention policies and automatic deletion
 - Provides audit logging for all PII access
@@ -49,11 +49,11 @@ class IdentityExtractionService:
 
     def __init__(
         self,
-        langextract_url: Optional[str] = None,
+        intelligence_docs_url: Optional[str] = None,
         api_key: Optional[str] = None,
         default_retention_days: int = 90,
     ):
-        self.langextract_url = langextract_url or os.getenv(
+        self.intelligence_docs_url = intelligence_docs_url or os.getenv(
             "INTELLIGENCE_DOCS_SERVICE_URL",
             "http://intelligence-docs-service:8000"
         )
@@ -103,8 +103,8 @@ class IdentityExtractionService:
         )
 
         try:
-            # Call langextract-service
-            result = await self._call_langextract(
+            # Call intelligence-docs-service.
+            result = await self._call_intelligence_docs(
                 file_bytes=file_bytes,
                 filename=filename,
                 document_type=document_type,
@@ -279,17 +279,17 @@ class IdentityExtractionService:
 
         return len(deleted_rows)
 
-    async def _call_langextract(
+    async def _call_intelligence_docs(
         self,
         file_bytes: bytes,
         filename: str,
         document_type: Optional[str],
         purpose: str,
     ) -> Dict[str, Any]:
-        """Call langextract-service for OCR/extraction"""
+        """Call intelligence-docs-service for OCR/extraction."""
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                f"{self.langextract_url}/identity/extract",
+                f"{self.intelligence_docs_url}/identity/extract",
                 headers={
                     "X-API-Key": self.api_key,
                 },

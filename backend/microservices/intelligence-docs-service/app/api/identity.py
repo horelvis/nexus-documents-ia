@@ -1,8 +1,8 @@
 """
 Identity document extraction endpoints.
 
-Moved from langextract-service. Extracts structured data from DNI, NIE,
-Passport, and Driver's License documents using local OCR (doctr) + MRZ parsing.
+Extracts structured data from DNI, NIE, Passport, and Driver's License
+documents using local OCR (doctr) + MRZ parsing.
 
 GDPR: All processing is local (no cloud APIs). Consent required.
 """

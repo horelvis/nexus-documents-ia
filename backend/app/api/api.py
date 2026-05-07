@@ -5,10 +5,8 @@ API Router configuration with feature flag support.
 Routes are conditionally included based on deployment mode and feature flags.
 See app.core.features for configuration details.
 
-Deployment modes:
-- SAAS: All features enabled (default)
+Deployment mode:
 - ON_PREMISE: Emma-centric, SSO, connectors only
-- CUSTOM: Individual feature control via env vars
 """
 
 from app.api.v1 import (

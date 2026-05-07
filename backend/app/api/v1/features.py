@@ -77,10 +77,8 @@ async def get_deployment_info() -> Dict[str, str]:
     Returns basic deployment information without requiring authentication.
     Useful for login page customization.
     """
-    mode = FeatureFlags.get_deployment_mode()
-
     return {
-        "deployment_mode": mode,
-        "auth_provider": "sso" if mode == "on_premise" else "clerk",
+        "deployment_mode": FeatureFlags.get_deployment_mode(),
+        "auth_provider": "sso",
         "emma_mode": "fullscreen" if FeatureFlags.is_enabled(Feature.EMMA_FULLSCREEN_MODE) else "sidebar",
     }

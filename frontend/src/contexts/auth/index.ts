@@ -1,8 +1,7 @@
 /**
  * Authentication Context Module
  *
- * Provides unified authentication for both SaaS (Clerk) and
- * on-premise (SSO) deployment modes.
+ * Provides unified authentication for the on-premise SSO deployment.
  *
  * Usage:
  *   import { UnifiedAuthProvider, useAuth } from '@/contexts/auth'

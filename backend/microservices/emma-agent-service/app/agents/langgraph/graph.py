@@ -22,7 +22,8 @@ Design Decisions:
 1. Use StateGraph for explicit state management
 2. PostgresSaver checkpointer for conversation continuity, time travel, and HITL.
    Thread-scoped state accumulates across invocations via add_messages reducer.
-   emma_persistence_service remains for UI metadata (titles, archive, pin).
+   The checkpointer is the single source of truth for conversation state —
+   the legacy ``emma_sessions`` shadow table was dropped.
 3. Conditional edges for dynamic routing
 4. Send() fan-out for parallel swarm workers with slim state (only fields
    the worker actually reads, not the full ~30-field state)

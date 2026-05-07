@@ -224,7 +224,6 @@ class LLMProvider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
-    OLLAMA = "ollama"
 
 
 @unique

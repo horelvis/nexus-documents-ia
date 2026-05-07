@@ -315,67 +315,6 @@ class EmmaMessageSchema(BaseModel):
     knowledge_source: Optional[str] = None  # "documents" | "graph" | "general"
 
 
-class EmmaSessionCreate(BaseModel):
-    """Request to create a new Emma session"""
-    title: Optional[str] = None
-    session_id: Optional[str] = None  # If not provided, auto-generated
-
-
-class EmmaSessionUpdate(BaseModel):
-    """Request to update an Emma session"""
-    title: Optional[str] = None
-    is_archived: Optional[bool] = None
-    is_pinned: Optional[bool] = None
-
-
-class EmmaSessionResponse(BaseModel):
-    """Full Emma session with all messages"""
-    id: str
-    session_id: str
-    user_id: str
-    title: Optional[str] = None
-    messages: List[EmmaMessageSchema]
-    message_count: int
-    total_tokens: Optional[int] = None
-    is_archived: bool
-    is_pinned: bool
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    last_message_at: datetime
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class EmmaSessionListItem(BaseModel):
-    """Summary of an Emma session for list views"""
-    id: str
-    session_id: str
-    title: Optional[str] = None
-    message_count: int
-    is_pinned: bool
-    is_archived: bool
-    last_message_at: datetime
-    created_at: datetime
-    # Preview of the first user message (truncated)
-    first_message_preview: Optional[str] = None
-    # Preview of the last assistant message (truncated)
-    last_message_preview: Optional[str] = None
-
-    class Config:
-        from_attributes = True
-
-
-class EmmaSessionListResponse(BaseModel):
-    """Paginated list of Emma sessions"""
-    sessions: List[EmmaSessionListItem]
-    total: int
-    limit: int
-    offset: int
-    has_more: bool
-
-
 class EmmaContinueSessionResponse(BaseModel):
     """Response when continuing a session"""
     success: bool

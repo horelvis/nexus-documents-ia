@@ -34,12 +34,7 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.core.security import verify_api_key
 from app.core.auth_headers import extract_user_roles, extract_user_id
-from app.services.emma_persistence_service import get_emma_persistence_service
 from app.schemas.emma import (
-    EmmaSessionCreate,
-    EmmaSessionListResponse,
-    EmmaSessionResponse,
-    EmmaSessionUpdate,
     EmmaContinueSessionResponse,
 )
 
@@ -300,21 +295,10 @@ async def emma_query(
     # Build context
     thread_id = query.thread_id or query.session_id or str(uuid.uuid4())
 
-    # Extend TTL and restore document context from previous session
-    try:
-        persistence = get_emma_persistence_service()
-        await persistence.touch_session(thread_id)
-        session = await persistence.get_session(thread_id)
-        if session:
-            saved_ctx = (session.get("metadata") or {}).get("document_context")
-            if saved_ctx:
-                ctx = query.context or {}
-                for key in ("document_id", "uploaded_file_ids", "indexed_document_ids"):
-                    if not ctx.get(key) and saved_ctx.get(key):
-                        ctx[key] = saved_ctx[key]
-                query.context = ctx
-    except Exception as e:
-        logger.warning(f"Failed to restore session context for {thread_id}: {e}")
+    # NOTE: previous code restored ``document_context`` from emma_sessions
+    # here — that table is gone. Document context now travels turn-to-turn
+    # via the LangGraph checkpointer's state (configurable + state values),
+    # so explicit restore is no longer needed.
 
     # LangGraph is the only orchestration engine
     from app.agents.langgraph import is_langgraph_enabled, execute_langgraph_query
@@ -568,26 +552,9 @@ async def _generate_langgraph_sse(
                                 "chunk_uri": chunk_uri or None,
                             },
                         })
-        # Session loaded for document context restoration and TTL extension.
-        # Conversation history is NO LONGER loaded here — PostgresSaver
-        # checkpointer restores previous messages automatically from its
-        # checkpoint when graph.astream() is called with the same thread_id.
-        try:
-            persistence = get_emma_persistence_service()
-            # Extend TTL for active session
-            await persistence.touch_session(thread_id)
-            session = await persistence.get_session(thread_id)
-            # Restore document context from previous session into current query
-            if session:
-                saved_ctx = (session.get("metadata") or {}).get("document_context")
-                if saved_ctx:
-                    ctx = query.context or {}
-                    for key in ("document_id", "uploaded_file_ids", "indexed_document_ids"):
-                        if not ctx.get(key) and saved_ctx.get(key):
-                            ctx[key] = saved_ctx[key]
-                    query.context = ctx
-        except Exception as e:
-            logger.warning(f"Failed to load session context for {thread_id}: {e}")
+        # Conversation history + document context come from the LangGraph
+        # checkpointer state when graph.astream() is called with the same
+        # thread_id — no parallel emma_sessions table to consult.
 
         async for event in stream_func(
             query=query.query,
@@ -853,25 +820,8 @@ async def _generate_langgraph_sse(
                     except Exception as e:
                         logger.debug(f"Fact extraction dispatch failed: {e}")
 
-                # Fire-and-forget: save conversation turn for session continuity
-                try:
-                    persistence = get_emma_persistence_service()
-                    doc_ctx = {}
-                    if query.context:
-                        for key in ("document_id", "uploaded_file_ids", "indexed_document_ids"):
-                            if query.context.get(key):
-                                doc_ctx[key] = query.context[key]
-                    asyncio.create_task(persistence.save_message(
-                        session_id=thread_id,
-                        user_id=query.user_id or "",
-                        user_message=query.query,
-                        assistant_response=data.get("answer", ""),
-                        sources=data.get("sources"),
-                        tools_used=data.get("agents_used"),
-                        document_context=doc_ctx or None,
-                    ))
-                except Exception as e:
-                    logger.warning(f"Failed to save conversation: {e}")
+                # The LangGraph checkpointer already persists the turn —
+                # no parallel emma_sessions copy needed.
 
             elif event_type == "error":
                 yield f"event: error\ndata: {_dumps({'error': data.get('error', 'Unknown error')})}\n\n"
@@ -1128,145 +1078,56 @@ async def update_cendoj_status(
 
 
 # =============================================================================
-# Session Persistence Endpoints
+# Session (thread) endpoints — backed by the LangGraph checkpointer tables.
+# The legacy ``emma_sessions`` table was dropped: the chat flow already stores
+# every turn in ``checkpoints`` / ``checkpoint_blobs`` / ``checkpoint_writes``
+# via the AsyncPostgresSaver, so listing/deleting threads queries those
+# tables directly. Thread metadata that lived only in the dropped table
+# (custom title, pinned, archived) is no longer surfaced; reintroduce it as
+# a small ``emma_thread_meta`` table when those features come back.
 # =============================================================================
 
-@router.post("/sessions")
-async def create_session(
-    body: EmmaSessionCreate,
-    user_id: str = Query(..., description="User ID"),
-    _: bool = Depends(verify_api_key),
-):
-    """
-    Create a new empty Emma session.
 
-    Used by the frontend to create a session before the first query,
-    so the sidebar can show it immediately. The session_id returned
-    should be used as thread_id in subsequent /query calls.
-    """
-    persistence = get_emma_persistence_service()
-
-    result = await persistence.create_session(
-        user_id=user_id,
-        session_id=body.session_id,
-        title=body.title,
-    )
-
-    if not result:
-        raise HTTPException(status_code=500, detail="Failed to create session")
-
-    return result
-
-
-@router.get("/sessions", response_model=EmmaSessionListResponse)
+@router.get("/sessions")
 async def list_sessions(
-    user_id: str = Query(..., description="User ID"),
-    include_archived: bool = Query(False, description="Include archived sessions"),
-    limit: int = Query(50, ge=1, le=100, description="Max sessions to return"),
+    limit: int = Query(50, ge=1, le=100, description="Max threads to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     _: bool = Depends(verify_api_key),
 ):
+    """List threads ordered by last activity descending.
+
+    Output schema kept compatible with the previous contract used by the
+    frontend sidebar:
+    ``{sessions: [{session_id, title, message_count, last_message_at,
+    created_at, ...}], total, limit, offset}``.
+
+    The ``user_id`` filter is intentionally omitted — the LangGraph
+    checkpointer does not record an explicit owner column. Per-user
+    filtering is a separate feature gap to address with a dedicated
+    ``emma_thread_meta`` table when needed.
     """
-    List Emma chat sessions for a user.
+    from app.services.thread_repository import list_threads
 
-    Returns paginated list of sessions with previews of first/last messages.
-    Sessions are ordered by:
-    1. Pinned sessions first
-    2. Then by last_message_at (most recent first)
-
-    Use this to build a conversation history sidebar.
-    """
-    persistence = get_emma_persistence_service()
-
-    result = await persistence.get_user_sessions(
-        user_id=user_id,
-        include_archived=include_archived,
-        limit=limit,
-        offset=offset,
-    )
-
-    return EmmaSessionListResponse(**result)
+    return await list_threads(limit=limit, offset=offset)
 
 
-@router.get("/sessions/{session_id}", response_model=EmmaSessionResponse)
+@router.get("/sessions/{session_id}")
 async def get_session(
     session_id: str,
     _: bool = Depends(verify_api_key),
 ):
+    """Return aggregate summary of a single thread.
+
+    Full message reconstruction is served by ``GET /sessions/{id}/history``
+    which uses the LangGraph AsyncPostgresSaver to deserialise messages
+    properly. This endpoint is just the listing-row equivalent.
     """
-    Get a full Emma session with all messages.
+    from app.services.thread_repository import get_thread_summary
 
-    Returns the complete conversation history including:
-    - All messages (user and assistant)
-    - Sources cited in responses
-    - Tools used
-    - Metadata
-
-    Use this when the user opens an old conversation.
-    """
-    persistence = get_emma_persistence_service()
-
-    session = await persistence.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-    return EmmaSessionResponse(**session)
-
-
-@router.post("/sessions/{session_id}/continue")
-async def continue_session(
-    session_id: str,
-    _: bool = Depends(verify_api_key),
-):
-    """
-    Continue an old Emma session.
-
-    Returns SSE stream with session restoration events, matching the
-    same event format used by /query/stream so the SDK can handle
-    both endpoints uniformly.
-
-    Events emitted:
-    - start: Session restoration initiated
-    - complete: Session restored successfully (includes session data)
-    - error: Restoration failed
-    """
-    persistence = get_emma_persistence_service()
-
-    async def _generate_sse():
-        try:
-            # Check if session exists
-            session = await persistence.get_session(session_id)
-            if not session:
-                yield f"event: error\ndata: {json.dumps({'error': f'Session {session_id} not found', 'success': False})}\n\n"
-                return
-
-            yield f"event: start\ndata: {json.dumps({'message': 'Restoring session...', 'session_id': session_id})}\n\n"
-
-            # Check if already in Redis
-            in_redis = await persistence.session_exists_in_redis(session_id)
-
-            if not in_redis:
-                loaded = await persistence.load_session_to_redis(session_id)
-                if not loaded:
-                    yield f"event: error\ndata: {json.dumps({'error': 'Failed to load session to cache', 'success': False})}\n\n"
-                    return
-
-            yield f"event: complete\ndata: {json.dumps({'success': True, 'session_id': session_id, 'message_count': session['message_count'], 'loaded_to_redis': not in_redis, 'message': 'Session restored' if not in_redis else 'Session already active'})}\n\n"
-
-        except Exception as e:
-            logger.error(f"Session continue SSE error: {e}")
-            yield f"event: error\ndata: {json.dumps({'error': str(e), 'success': False})}\n\n"
-
-    return StreamingResponse(
-        _generate_sse(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    summary = await get_thread_summary(session_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail=f"Thread {session_id} not found")
+    return summary
 
 
 @router.api_route("/sessions/{session_id}/history", methods=["GET", "POST"])
@@ -1288,12 +1149,8 @@ async def get_session_history(
     from app.core.checkpointer import get_checkpointer
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 
-    # Sessions created implicitly by the checkpointer may not have an
-    # emma_sessions row yet — the checkpointer itself is keyed by
-    # thread_id only.
-    persistence = get_emma_persistence_service()
-    await persistence.get_session(session_id)
-
+    # The checkpointer is the single source of truth — no parallel
+    # ``emma_sessions`` table to consult.
     checkpointer = await get_checkpointer()
     if checkpointer is None:
         return []
@@ -1362,84 +1219,22 @@ async def get_session_history(
     return snapshots
 
 
-@router.patch("/sessions/{session_id}")
-async def update_session(
-    session_id: str,
-    update: EmmaSessionUpdate,
-    user_id: str = Query(..., description="User ID"),
-    _: bool = Depends(verify_api_key),
-):
-    """
-    Update session properties.
-
-    Allows updating:
-    - title: Custom session title
-    - is_archived: Archive/unarchive session
-    - is_pinned: Pin/unpin session
-    """
-    persistence = get_emma_persistence_service()
-
-    # Verify session exists
-    session = await persistence.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-    # Verify ownership
-    if session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Access denied to this session")
-
-    # Update
-    updated = await persistence.update_session(
-        session_id=session_id,
-        user_id=user_id,
-        title=update.title,
-        is_archived=update.is_archived,
-        is_pinned=update.is_pinned,
-    )
-
-    if not updated:
-        raise HTTPException(status_code=500, detail="Failed to update session")
-
-    return {"success": True, "message": "Session updated"}
-
-
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
-    user_id: str = Query(..., description="User ID"),
     _: bool = Depends(verify_api_key),
 ):
+    """Permanently delete a thread from the checkpointer.
+
+    Removes the rows from ``checkpoints``, ``checkpoint_blobs`` and
+    ``checkpoint_writes`` in a single connection. Cannot be undone.
     """
-    Permanently delete an Emma session.
+    from app.services.thread_repository import delete_thread
 
-    This action:
-    - Removes the session from PostgreSQL
-    - Clears it from Redis if present
-    - Cannot be undone
-
-    Consider archiving instead for recoverable deletion.
-    """
-    persistence = get_emma_persistence_service()
-
-    # Verify session exists
-    session = await persistence.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-
-    # Verify ownership
-    if session["user_id"] != user_id:
-        raise HTTPException(status_code=403, detail="Access denied to this session")
-
-    # Delete
-    deleted = await persistence.delete_session(
-        session_id=session_id,
-        user_id=user_id,
-    )
-
-    if not deleted:
-        raise HTTPException(status_code=500, detail="Failed to delete session")
-
-    return {"success": True, "message": "Session deleted"}
+    removed = await delete_thread(session_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail=f"Thread {session_id} not found")
+    return {"success": True, "message": "Thread deleted"}
 
 
 # =============================================================================
@@ -1635,28 +1430,24 @@ async def get_welcome_message(
     except Exception as e:
         logger.debug(f"Welcome: facts load skipped: {e}")
 
-    # 2. Recent sessions (last 3)
+    # 2. Recent sessions (last 3) — from the LangGraph checkpointer.
+    # Titles/previews from the dropped emma_sessions table are no longer
+    # available; the welcome prompt loses that personalisation hook for
+    # now. When richer titles are needed, deserialise the first human
+    # message from checkpoint_blobs (LangGraph serializer required).
     try:
-        persistence = get_emma_persistence_service()
-        sessions_result = await persistence.get_user_sessions(
-            user_id=user_id,
-            include_archived=False, limit=3, offset=0,
-        )
+        from app.services.thread_repository import list_threads
+
+        sessions_result = await list_threads(limit=3, offset=0)
         sessions = sessions_result.get("sessions", [])
         if sessions:
             session_lines = []
             for s in sessions:
                 title = s.get("title", "")
-                first_msg = s.get("first_message_preview", "")
-                last_msg = s.get("last_message_preview", "")
                 # Build a meaningful description of what the session was about
                 parts = []
                 if title and title.lower() not in ("nueva conversación", "hola", "hola emma"):
                     parts.append(f"Tema: {title}")
-                if first_msg:
-                    parts.append(f"Pregunta: {first_msg}")
-                if last_msg and last_msg != first_msg:
-                    parts.append(f"Última respuesta: {last_msg}")
                 if parts:
                     session_lines.append("- " + " | ".join(parts))
             if session_lines:

@@ -105,7 +105,8 @@ NouxCubeIA On-Premise is designed for organizations that require complete contro
 │     PostgreSQL:          8GB                                                │
 │     Redis:               2GB                                                │
 │     Weaviate:            8GB                                                │
-│     Elasticsearch:       8GB                                                │
+│     FalkorDB:            4GB                                                │
+│     Intelligence Docs:   4GB                                                │
 │     Microservicios:      16GB                                               │
 │     vLLM:                16GB + GPU                                         │
 │     Sistema:             6GB                                                │
@@ -137,7 +138,7 @@ NouxCubeIA On-Premise is designed for organizations that require complete contro
 │  ├─────────────────────┤  ├─────────────────────┤  ├─────────────────────┤  │
 │  │  • Main API         │  │  • vLLM Server      │  │  • PostgreSQL+AGE   │  │
 │  │  • Microservices    │  │  • Embeddings       │  │  • Weaviate         │  │
-│  │  • Background       │  │  • TTS Service      │  │  • Elasticsearch    │  │
+│  │  • Background       │  │  • TTS Service      │  │  • FalkorDB         │  │
 │  │    Worker           │  │  • Reranker         │  │  • Redis Cluster    │  │
 │  │  • KeyCloak         │  │                     │  │  • Backups          │  │
 │  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘  │

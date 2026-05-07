@@ -288,7 +288,22 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 // ── Exported wrapper: wraps Inner in EmmaStreamProvider ──
 
 export function EmmaChat(props: EmmaChatProps) {
-  const [streamThreadId, setStreamThreadId] = useState<string | null>(null)
+  // Initialise from the parent-provided conversationId so opening an old
+  // thread from the sidebar hydrates state via the LangGraph SDK
+  // (fetchStateHistory: true). Without this, the prop was ignored and
+  // the chat always started a fresh thread.
+  const [streamThreadId, setStreamThreadId] = useState<string | null>(
+    props.conversationId ?? null,
+  )
+
+  // Sync external selection → SDK. When the parent flips conversationId
+  // (sidebar click, "New conversation"), reflect it on the stream.
+  useEffect(() => {
+    if ((props.conversationId ?? null) !== streamThreadId) {
+      setStreamThreadId(props.conversationId ?? null)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.conversationId])
 
   return (
     <EmmaStreamProvider

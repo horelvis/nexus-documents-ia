@@ -24,7 +24,6 @@ Supported Providers:
     - hermes/sglang: Hermes format for SGLang with Qwen3
     - openai/gpt-4/gpt-4o: OpenAI's native tool calling
     - anthropic (TODO): Claude's tool use format
-    - ollama (TODO): Ollama's native format
 """
 
 from typing import Optional

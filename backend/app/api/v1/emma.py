@@ -755,32 +755,24 @@ async def emma_welcome(
 
 # ============================================================================
 # Session REST Endpoints (proxy to emma-agent-service /emma/sessions/*)
-# For sidebar, session management. LangGraph protocol is in threads.py.
+# Backed by the LangGraph checkpointer; the legacy emma_sessions table
+# was dropped. Surface kept minimal: list, get, delete. Pin/archive/rename
+# are gone (no metadata table). Continue happens automatically when the
+# LangGraph SDK submits with the same thread_id.
 # ============================================================================
 
 @router.get("/sessions")
 async def emma_sessions_list(
-    include_archived: bool = False,
     limit: int = 50,
     offset: int = 0,
     current_user: UserProfile = Depends(get_current_user_async),
 ):
-    """
-    List Emma chat sessions for the current user.
-
-    Returns paginated sessions ordered by pinned first, then most recent.
-    Used to build the conversation history sidebar.
-    """
+    """List Emma threads ordered by last activity. Used by the sidebar."""
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/sessions",
-                params={
-                    "user_id": current_user.sub,
-                    "include_archived": str(include_archived).lower(),
-                    "limit": limit,
-                    "offset": offset,
-                },
+                params={"limit": limit, "offset": offset},
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:
@@ -798,13 +790,9 @@ async def emma_session_get(
     session_id: str,
     current_user: UserProfile = Depends(get_current_user_async),
 ):
-    """
-    Get a full Emma session with all messages.
-
-    Returns complete conversation history including messages, sources, and metadata.
-    """
+    """Aggregate summary of a single thread (no message reconstruction)."""
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.get(
                 f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
@@ -819,80 +807,20 @@ async def emma_session_get(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/sessions/{session_id}/continue")
-async def emma_session_continue(
-    session_id: str,
-    current_user: UserProfile = Depends(get_current_user_async),
-):
-    """
-    Continue an old Emma session (SSE stream).
-
-    Loads session from cold storage (PostgreSQL) into hot cache (Redis).
-    Returns text/event-stream matching the same format as /query/stream.
-    """
-    try:
-        return await proxy_sse_stream(
-            f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}/continue",
-            body={},
-            timeout=30.0,
-            log_prefix="Session continue",
-        )
-    except Exception as e:
-        logger.error(f"Session continue error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.patch("/sessions/{session_id}")
-async def emma_session_update(
-    session_id: str,
-    request: Request,
-    current_user: UserProfile = Depends(get_current_user_async),
-):
-    """
-    Update session properties (title, archived, pinned).
-    """
-    try:
-        body = await request.json()
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
-            response = await client.patch(
-                f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
-                params={
-                    "user_id": current_user.sub,
-                },
-                json=body,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-API-Key": settings.MICROSERVICES_API_KEY or "",
-                },
-            )
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail=response.text)
-            return response.json()
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Session update error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.delete("/sessions/{session_id}")
 async def emma_session_delete(
     session_id: str,
     current_user: UserProfile = Depends(get_current_user_async),
 ):
-    """
-    Permanently delete an Emma session.
+    """Permanently delete a thread from the LangGraph checkpointer.
 
-    Removes from PostgreSQL and Redis. Cannot be undone.
-    Consider archiving (PATCH with is_archived=true) for recoverable deletion.
+    Removes rows from ``checkpoints``, ``checkpoint_blobs``, and
+    ``checkpoint_writes``. Cannot be undone.
     """
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
             response = await client.delete(
                 f"{EMMA_SERVICE_URL}/emma/sessions/{session_id}",
-                params={
-                    "user_id": current_user.sub,
-                },
                 headers={"X-API-Key": settings.MICROSERVICES_API_KEY or ""},
             )
             if response.status_code != 200:

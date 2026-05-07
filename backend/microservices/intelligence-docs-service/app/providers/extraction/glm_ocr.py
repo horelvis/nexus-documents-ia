@@ -1,7 +1,7 @@
 """GLM-OCR extraction provider — VLM-based document understanding.
 
-Uses GLM-OCR (0.9B params) via OpenAI-compatible API (SGLang/Ollama)
-for scanned PDFs, images, and low-quality documents. Outputs Markdown.
+Uses GLM-OCR (0.9B params) via an OpenAI-compatible SGLang API for scanned
+PDFs, images, and low-quality documents. Outputs Markdown.
 """
 import base64
 import logging

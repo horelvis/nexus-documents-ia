@@ -108,7 +108,8 @@ This directory contains Docker configurations for running the Nexus Document Bac
 │     PostgreSQL + AGE:    8GB RAM                                            │
 │     Redis:               2GB RAM                                            │
 │     Weaviate:            8GB RAM                                            │
-│     Elasticsearch:       8GB RAM                                            │
+│     FalkorDB:            4GB RAM                                            │
+│     Intelligence Docs:   4GB RAM                                            │
 │     vLLM + Embeddings:   16GB RAM + 24GB VRAM                               │
 │     Microservicios:      16GB RAM                                           │
 │     Sistema:             6GB RAM                                            │
@@ -140,7 +141,7 @@ This directory contains Docker configurations for running the Nexus Document Bac
 │  │   ───────────────   │  │   ───────────────   │  │   ───────────────   │  │
 │  │   • Main API        │  │   • vLLM Server     │  │   • PostgreSQL+AGE  │  │
 │  │   • Microservices   │  │   • Embeddings      │  │   • Weaviate        │  │
-│  │   • Background      │  │   • TTS Service     │  │   • Elasticsearch   │  │
+│  │   • Background      │  │   • TTS Service     │  │   • FalkorDB        │  │
 │  │     Worker          │  │                     │  │   • Redis Cluster   │  │
 │  │   • KeyCloak        │  │                     │  │   • Backups         │  │
 │  └─────────────────────┘  └─────────────────────┘  └─────────────────────┘  │
@@ -382,8 +383,8 @@ curl http://localhost:8000/metrics | grep -E "vllm_gpu|vllm_cache"
 | Main API | 8000 | FastAPI main application |
 | Storage Service | 8003 | Google Cloud Storage operations |
 | Weaviate Service | 8007 | Emma AI + Verified Generation (Agent Framework + vLLM + RAG) |
-| Elasticsearch Service | 8008 | Full-text search & document indexing |
-| LangExtract Service | 8009 | Document language extraction |
+| Emma Agent Service | 8009 | LangGraph orchestration and Emma chat |
+| Intelligence Docs Service | 8012 | Text extraction, embeddings, and entity extraction |
 | TTS Service | 8010 | Text-to-Speech (Google TTS / VibeVoice) |
 | Background Worker | 8100 | Celery async task worker (indexing, verification, channels) |
 
@@ -394,7 +395,7 @@ curl http://localhost:8000/metrics | grep -E "vllm_gpu|vllm_cache"
 | PostgreSQL + AGE | 5432 | Relational database + Apache AGE graph extension |
 | Redis | 6379 | Cache, sessions, Celery broker & verified claims cache |
 | Weaviate | 8080 | Vector database for semantic search |
-| Elasticsearch | 9200 | Full-text search engine |
+| FalkorDB | 6380 | Knowledge graph store |
 | vLLM Server | interno | High-throughput GPU inference (Qwen/Qwen3-4B) |
 | Gotenberg | 3000 | Document conversion to PDF |
 | KeyCloak | 8080 | OIDC Identity Provider (on-premise auth) |

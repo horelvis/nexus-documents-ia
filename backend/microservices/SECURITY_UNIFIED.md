@@ -2,7 +2,10 @@
 
 ## Overview
 
-All microservices now use a unified security implementation to avoid conflicts between path parameters and header dependencies in FastAPI. This resolves the `Cannot use 'Header' for path param 'tenant_id'` error.
+All active microservices use a shared internal-auth pattern based on the
+`X-API-Key` header plus optional request context headers. The previous
+tenant-header workaround is historical; the current deployment is
+single-tenant on-premise.
 
 ## Common Pattern
 
@@ -12,72 +15,55 @@ All services now implement these common functions:
 
 ```python
 def get_api_key_from_header(request: Request) -> str
-def get_tenant_id_from_header(request: Request) -> Optional[str]
 def get_user_id_from_header(request: Request) -> Optional[str]
 def validate_api_key(api_key: str = Depends(get_api_key_from_header)) -> bool
 def validate_service_access(...) -> dict
-def validate_tenant_access(tenant_id: str, context: dict) -> str
 ```
 
 ### Key Changes
 
-1. **Using `Request` instead of `Header` dependencies**: Eliminates conflicts with path parameters
-2. **Optional tenant_id in headers**: Allows tenant_id to be in path parameters without conflicts
-3. **Consistent validation patterns**: All services follow the same security validation flow
-4. **Legacy compatibility**: Existing endpoints continue to work
+1. **Use `X-API-Key` for service-to-service auth**.
+2. **Propagate request context explicitly** with headers such as `X-User-ID`, `X-User-Roles`, and `X-Request-ID`.
+3. **Keep tenant identifiers as compatibility scopes only**; they are not a security boundary.
+4. **Validate every internal endpoint at the edge** before doing DB, storage, or model work.
 
 ## Service-Specific Implementation
 
-### LangChain Service (`langchain-service/app/core/security.py`)
-- ✅ **Fully unified implementation**
-- ✅ **All routes updated to use `validate_service_access`**
-- ✅ **Resolves the original FastAPI error**
-
-### Langroid Service (`langroid-service/app/core/security.py`)
-- ✅ **Unified base implementation**
-- ✅ **Maintains existing SecurityService class for agent management**
-- ✅ **Backwards compatible with existing endpoints**
-- ✅ **Legacy functions updated to use new pattern**
-
 ### Storage Service (`storage-service/app/core/security.py`)
 - ✅ **Unified implementation**
-- ✅ **Maintains existing `validate_tenant_access` function**
 - ✅ **Added new `validate_service_access` function**
 - ✅ **Backwards compatible with existing API endpoints**
 
-### Ollama Service (`ollama-service/app/core/security.py`)
-- ✅ **New security module created**
-- ✅ **Unified implementation**
-- ✅ **Optional API key validation (can be disabled)**
-- ✅ **Ready for authentication if needed**
+### Emma Agent Service (`emma-agent-service/app/core/security.py`)
+- ✅ **Validates internal service calls with `X-API-Key`**
+- ✅ **Accepts propagated user context for ACL-aware tool calls**
+
+### Weaviate Service (`weaviate-service/app/core/security.py`)
+- ✅ **Validates internal indexing/search calls with `X-API-Key`**
+- ✅ **Delegates document extraction and embeddings to intelligence-docs-service**
 
 ## Usage Patterns
 
-### For routes with tenant_id in path:
+### For routes with compatibility scope in path:
 ```python
 @app.delete("/documents/{tenant_id}/{doc_id}")
 async def delete_document(
-    tenant_id: str, 
+    scope_id: str,
     doc_id: str,
     security: dict = Depends(validate_service_access)
 ) -> dict:
-    # validate_service_access doesn't require tenant_id in headers
-    # tenant_id comes from path parameter
-    validated_tenant_id = validate_tenant_access(tenant_id, security)
+    # Scope identifiers are compatibility values, not auth boundaries.
     # ... rest of function
 ```
 
-### For routes with tenant_id in headers only:
+### For routes that need user context:
 ```python
 @app.post("/documents/add")
 async def add_document(
     request: AddDocumentRequest,
     security: dict = Depends(validate_service_access)
 ) -> dict:
-    # tenant_id must be in headers (X-Tenant-ID)
-    tenant_id = security.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(status_code=400, detail="Tenant ID required in headers")
+    user_id = security.get("user_id")
     # ... rest of function
 ```
 

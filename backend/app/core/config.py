@@ -32,18 +32,11 @@ class Settings(BaseSettings):
     DB_POOL_DEBUG: bool = os.getenv("DB_POOL_DEBUG", "false").lower() == "true"
 
     # ==========================================================================
-    # DEPLOYMENT MODE: Single Tenant vs Multi-Tenant
+    # DEPLOYMENT MODE: Single-tenant on-premise
     # ==========================================================================
-    # For on-premise deployments: SINGLE_TENANT_MODE=true (recommended)
-    #   - One tenant for the entire organization
-    #   - All users auto-assigned to the single tenant
-    #   - Simpler configuration and management
-    #   - Access control via roles and document ACLs
-    #
-    # For SaaS deployments: SINGLE_TENANT_MODE=false
-    #   - Multiple organizations, each with their own tenant
-    #   - Complete data isolation between tenants
-    #   - Tenant creation on user registration
+    # One organization runs the deployment. The tenant fields below are kept as
+    # compatibility scope identifiers for older storage/signature paths; they
+    # do not enable multi-tenant isolation.
     SINGLE_TENANT_MODE: bool = os.getenv("SINGLE_TENANT_MODE", "true").lower() == "true"
 
     # Default tenant configuration (used when SINGLE_TENANT_MODE=true)
@@ -154,11 +147,6 @@ class Settings(BaseSettings):
         """Generate Redis URL from host and port unless provided via env."""
         return self._REDIS_URL_ENV or f"redis://{self.REDIS_HOST}:{self.REDIS_PORT}"
     
-    # NEW: Elasticsearch for hybrid search and analytics
-    ELASTICSEARCH_HOST: str = os.getenv("ELASTICSEARCH_HOST", "localhost")
-    ELASTICSEARCH_PORT: int = int(os.getenv("ELASTICSEARCH_PORT", "9200"))
-    ELASTICSEARCH_URL: str = f"http://{ELASTICSEARCH_HOST}:{ELASTICSEARCH_PORT}"
-    
     # Google Cloud Storage
     GCS_BUCKET_NAME: str
     GCS_CREDENTIALS: Optional[str] = None
@@ -184,11 +172,11 @@ class Settings(BaseSettings):
     TEXT_EXTRACTION_SERVICE_URL: str = os.getenv("TEXT_EXTRACTION_SERVICE_URL", "http://intelligence-docs-service:8000")
     TEXT_EXTRACTION_DEFAULT_STRATEGY: str = os.getenv("TEXT_EXTRACTION_DEFAULT_STRATEGY", "auto")
 
-    # Elasticsearch for hybrid search (SPECIALIZED SEARCH ENGINE)
-    # NOTE: Elasticsearch service was removed from architecture - Weaviate handles all search
+    # Elasticsearch compatibility toggle.
+    # The service was removed from the active architecture; Weaviate handles
+    # hybrid search. Keep the feature disabled unless a legacy wrapper is
+    # explicitly re-enabled during migration.
     ENABLE_ELASTICSEARCH: bool = os.getenv("ENABLE_ELASTICSEARCH", "false").lower() == "true"
-    ELASTICSEARCH_URL: str = os.getenv("ELASTICSEARCH_URL", "http://elasticsearch:9200")
-    ELASTICSEARCH_SERVICE_URL: str = os.getenv("ELASTICSEARCH_SERVICE_URL", "http://elasticsearch-service:8005")
     
     # CAG Microservice (Contextual Augmented Generation)
     CAG_SERVICE_URL: str = os.getenv("CAG_SERVICE_URL", "http://weaviate-service:8000")
@@ -216,7 +204,6 @@ class Settings(BaseSettings):
     DOCUMENT_FORGE_ENABLED: bool = os.getenv("DOCUMENT_FORGE_ENABLED", "true").lower() == "true"
 
     # LLM / AI providers
-    # NOTE: Ollama was removed; SGLang is the default local provider.
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "sglang").lower()
     SGLANG_BASE_URL: str = os.getenv("SGLANG_BASE_URL", os.getenv("VLLM_BASE_URL", "http://sglang:8000/v1")).rstrip("/")
     SGLANG_MODEL: str = os.getenv("SGLANG_MODEL", os.getenv("VLLM_MODEL", "horelvis/boe-legal-qwen-7b"))
@@ -250,8 +237,8 @@ class Settings(BaseSettings):
         self._allowed_extensions_parsed = [ext.strip() for ext in extensions_str.split(",") if ext.strip()]
         return self._allowed_extensions_parsed
     
-    # Tenants
-    MULTI_TENANT: bool = True
+    # Legacy compatibility scope names. Do not use these for isolation.
+    MULTI_TENANT: bool = False
     DEFAULT_TENANT: str = "default"
 
     # Unified API Key for all microservices (required)

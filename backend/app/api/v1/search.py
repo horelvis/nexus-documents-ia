@@ -162,10 +162,10 @@ async def search_documents(
     """
     Unified search endpoint using the appropriate backend.
 
-    When Elasticsearch is enabled (SAAS mode):
+    When Elasticsearch is enabled through an explicit feature override:
     - Uses ES for hybrid/keyword search with Weaviate fallback
 
-    When Elasticsearch is disabled (ON_PREMISE mode):
+    Default on-premise mode:
     - Uses Weaviate native hybrid search (BM25 + vector)
 
     Search types:

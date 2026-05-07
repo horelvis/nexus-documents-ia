@@ -6,7 +6,7 @@ On-premise single-tenant: flags are deployment-wide.
 
 Features can be controlled via:
 1. Environment variables (FEATURE_<NAME>=true/false)
-2. Default values defined here
+2. On-premise defaults defined here
 
 Usage:
     from app.core.features import Feature, FeatureFlags
@@ -22,8 +22,7 @@ Usage:
 import os
 import logging
 from enum import Enum
-from typing import Optional, Dict, Any
-from functools import lru_cache
+from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -77,65 +76,25 @@ class Feature(Enum):
 
 
 class DeploymentMode(Enum):
-    """Deployment modes that set default feature configurations."""
+    """Supported deployment mode."""
 
-    # Original SaaS mode with all features
-    SAAS = "saas"
-
-    # On-premise Emma-centric mode
     ON_PREMISE = "on_premise"
 
-    # Custom mode (all features controlled individually)
-    CUSTOM = "custom"
 
-
-# Default feature states by deployment mode
-_MODE_DEFAULTS: Dict[DeploymentMode, Dict[Feature, bool]] = {
-    DeploymentMode.SAAS: {
-        # SaaS mode: everything enabled
-        Feature.DIGITAL_SIGNATURES: True,
-        Feature.SITE_PORTAL: True,
-        Feature.DASHBOARD_ANALYTICS: True,
-        Feature.ELASTICSEARCH_SEARCH: False,  # Disabled - replaced by Weaviate + FalkorDB
-        Feature.DOCUMENT_EDITING: True,
-        Feature.DOCUMENT_LIBRARY_UI: True,
-        Feature.EMMA_FULLSCREEN_MODE: False,
-        Feature.SSO_MULTI_PROTOCOL: False,
-        Feature.SHAREPOINT_CONNECTOR: False,
-        Feature.ONEDRIVE_CONNECTOR: False,
-        Feature.GOOGLE_WORKSPACE_CONNECTOR: True,
-        Feature.WEAVIATE_HYBRID_SEARCH: False,
-    },
-    DeploymentMode.ON_PREMISE: {
-        # On-premise mode: Emma-centric, SSO, connectors
-        Feature.DIGITAL_SIGNATURES: False,
-        Feature.SITE_PORTAL: False,
-        Feature.DASHBOARD_ANALYTICS: False,
-        Feature.ELASTICSEARCH_SEARCH: False,
-        Feature.DOCUMENT_EDITING: False,
-        Feature.DOCUMENT_LIBRARY_UI: False,
-        Feature.EMMA_FULLSCREEN_MODE: True,
-        Feature.SSO_MULTI_PROTOCOL: True,
-        Feature.SHAREPOINT_CONNECTOR: True,
-        Feature.ONEDRIVE_CONNECTOR: True,
-        Feature.GOOGLE_WORKSPACE_CONNECTOR: True,
-        Feature.WEAVIATE_HYBRID_SEARCH: True,
-    },
-    DeploymentMode.CUSTOM: {
-        # Custom mode: sensible defaults, override via env
-        Feature.DIGITAL_SIGNATURES: True,
-        Feature.SITE_PORTAL: True,
-        Feature.DASHBOARD_ANALYTICS: True,
-        Feature.ELASTICSEARCH_SEARCH: False,  # Disabled - replaced by Weaviate + FalkorDB
-        Feature.DOCUMENT_EDITING: True,
-        Feature.DOCUMENT_LIBRARY_UI: True,
-        Feature.EMMA_FULLSCREEN_MODE: False,
-        Feature.SSO_MULTI_PROTOCOL: False,
-        Feature.SHAREPOINT_CONNECTOR: False,
-        Feature.ONEDRIVE_CONNECTOR: False,
-        Feature.GOOGLE_WORKSPACE_CONNECTOR: False,
-        Feature.WEAVIATE_HYBRID_SEARCH: False,
-    },
+# Default feature states for the only supported runtime mode.
+_ON_PREMISE_DEFAULTS: Dict[Feature, bool] = {
+    Feature.DIGITAL_SIGNATURES: False,
+    Feature.SITE_PORTAL: False,
+    Feature.DASHBOARD_ANALYTICS: False,
+    Feature.ELASTICSEARCH_SEARCH: False,
+    Feature.DOCUMENT_EDITING: False,
+    Feature.DOCUMENT_LIBRARY_UI: False,
+    Feature.EMMA_FULLSCREEN_MODE: True,
+    Feature.SSO_MULTI_PROTOCOL: True,
+    Feature.SHAREPOINT_CONNECTOR: True,
+    Feature.ONEDRIVE_CONNECTOR: True,
+    Feature.GOOGLE_WORKSPACE_CONNECTOR: True,
+    Feature.WEAVIATE_HYBRID_SEARCH: True,
 }
 
 
@@ -145,25 +104,28 @@ class FeatureFlags:
 
     Priority order (highest to lowest):
     1. Environment variable override
-    2. Deployment mode defaults
+    2. On-premise defaults
     """
 
     @classmethod
     def _get_deployment_mode(cls) -> DeploymentMode:
-        """Get current deployment mode from environment."""
+        """Return the supported deployment mode.
+
+        Unsupported historical values are treated as on-premise to avoid
+        reactivating removed code paths through configuration drift.
+        """
         mode_str = os.getenv("DEPLOYMENT_MODE", "on_premise").lower()
-        try:
-            return DeploymentMode(mode_str)
-        except ValueError:
-            logger.warning(f"Unknown deployment mode '{mode_str}', using ON_PREMISE")
-            return DeploymentMode.ON_PREMISE
+        if mode_str != DeploymentMode.ON_PREMISE.value:
+            logger.warning(
+                "Unsupported DEPLOYMENT_MODE=%r ignored; using on_premise",
+                mode_str,
+            )
+        return DeploymentMode.ON_PREMISE
 
     @classmethod
     def _get_mode_default(cls, feature: Feature) -> bool:
-        """Get default value for feature based on deployment mode."""
-        mode = cls._get_deployment_mode()
-        defaults = _MODE_DEFAULTS.get(mode, _MODE_DEFAULTS[DeploymentMode.CUSTOM])
-        return defaults.get(feature, True)
+        """Get the on-premise default value for a feature."""
+        return _ON_PREMISE_DEFAULTS.get(feature, False)
 
     @classmethod
     def _get_env_override(cls, feature: Feature) -> Optional[bool]:

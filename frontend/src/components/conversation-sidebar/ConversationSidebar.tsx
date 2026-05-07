@@ -54,14 +54,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui'
 import { cn } from '@/lib/utils'
 import { apiClient } from '@/lib/api-client'
 
-/** Backend session shape (from EmmaSessionListItem) */
+/** Thread shape returned by GET /emma/sessions (LangGraph checkpointer). */
 interface SessionItem {
   id: string
   session_id: string
   title?: string | null
   message_count: number
-  is_pinned: boolean
-  is_archived: boolean
   last_message_at: string
   created_at: string
   first_message_preview?: string | null
@@ -101,8 +99,6 @@ export function ConversationSidebar({
   const [conversations, setConversations] = useState<ConversationListItem[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingTitle, setEditingTitle] = useState('')
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null)
 
@@ -127,7 +123,7 @@ export function ConversationSidebar({
           title: s.title || s.first_message_preview || `Conversación ${s.session_id.slice(0, 8)}`,
           preview: s.last_message_preview || '',
           updatedAt: new Date(s.last_message_at || s.created_at),
-          pinned: s.is_pinned,
+          pinned: false,
           messageCount: s.message_count,
         }))
         setConversations(list)
@@ -154,35 +150,10 @@ export function ConversationSidebar({
     }
   }, [isOpen])
 
-  // Handle pin toggle
-  const handleTogglePin = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const conv = conversations.find((c) => c.id === id)
-    if (!conv) return
-    apiClient.patch(`/emma/sessions/${id}`, { is_pinned: !conv.pinned })
-      .then(() => loadConversations())
-  }
-
-  // Handle rename
-  const handleStartRename = (id: string, currentTitle: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    setEditingId(id)
-    setEditingTitle(currentTitle)
-  }
-
-  const handleSaveRename = (id: string) => {
-    if (editingTitle.trim()) {
-      apiClient.patch(`/emma/sessions/${id}`, { title: editingTitle.trim() })
-        .then(() => loadConversations())
-    }
-    setEditingId(null)
-    setEditingTitle('')
-  }
-
-  const handleCancelRename = () => {
-    setEditingId(null)
-    setEditingTitle('')
-  }
+  // Pin / archive / rename were removed alongside the legacy emma_sessions
+  // table. The LangGraph checkpointer stores the conversation, not user
+  // metadata. Reintroduce these features with a small ``emma_thread_meta``
+  // table when needed.
 
   // Handle single delete
   const handleDeleteClick = (id: string, e: React.MouseEvent) => {
@@ -423,29 +394,11 @@ export function ConversationSidebar({
                     <div className="flex flex-col gap-1 min-w-0 flex-1">
                       {/* Title row */}
                       <div className="flex items-start justify-between gap-2">
-                        {editingId === conv.id ? (
-                          <Input
-                            value={editingTitle}
-                            onChange={(e) => setEditingTitle(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveRename(conv.id)
-                              if (e.key === 'Escape') handleCancelRename()
-                            }}
-                            onBlur={() => handleSaveRename(conv.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="h-7 text-sm"
-                            autoFocus
-                          />
-                        ) : (
-                          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                            {conv.pinned && (
-                              <IconPin className="h-3 w-3 text-primary shrink-0" />
-                            )}
-                            <span className="text-sm font-medium truncate">{conv.title}</span>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                          <span className="text-sm font-medium truncate">{conv.title}</span>
+                        </div>
 
-                        {/* Actions dropdown - hidden in selection mode */}
+                        {/* Actions dropdown — only Delete (pin/rename removed). */}
                         {!selectionMode && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
@@ -459,26 +412,6 @@ export function ConversationSidebar({
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-40">
-                              <DropdownMenuItem onClick={(e) => handleTogglePin(conv.id, e)}>
-                                {conv.pinned ? (
-                                  <>
-                                    <IconPinnedOff className="h-4 w-4 mr-2" />
-                                    Desfijar
-                                  </>
-                                ) : (
-                                  <>
-                                    <IconPin className="h-4 w-4 mr-2" />
-                                    Fijar
-                                  </>
-                                )}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={(e) => handleStartRename(conv.id, conv.title, e)}
-                              >
-                                <IconPencil className="h-4 w-4 mr-2" />
-                                Renombrar
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onClick={(e) => handleDeleteClick(conv.id, e)}
                                 className="text-destructive focus:text-destructive"
