@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.async_dependencies import get_async_db, get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.services.async_signature_service import AsyncSignatureService
 from app.schemas.signature import (
     SignatureProviderCreate, SignatureProviderUpdate, SignatureProvider,
@@ -32,7 +32,7 @@ router = APIRouter()
 async def create_signature_provider(
     provider_data: SignatureProviderCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """Crear un proveedor de firma digital (solo administradores del tenant)"""
     
@@ -142,7 +142,7 @@ async def update_signature_provider(
     provider_id: UUID,
     provider_data: SignatureProviderCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """Actualizar un proveedor de firma (solo admin del tenant)"""
     
@@ -179,7 +179,7 @@ async def update_signature_provider(
 async def delete_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """Eliminar un proveedor de firma (solo admin del tenant)"""
     
@@ -210,7 +210,7 @@ async def delete_signature_provider(
 async def set_default_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """Establecer un proveedor como predeterminado (solo admin)"""
     
@@ -241,7 +241,7 @@ async def set_default_signature_provider(
 async def test_signature_provider(
     provider_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """Probar la conexión con un proveedor (solo admin)"""
     

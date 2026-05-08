@@ -9,7 +9,6 @@ from sqlalchemy.sql import Select
 
 from app.db.models import Document, IndexedDocument, User, DocumentView, Tag
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -38,8 +37,6 @@ class QueryOptimizer:
         Solves N+1 problem by using eager loading.
         """
         query = select(Document)
-        if user is not None:
-            query = filter_visible_to_user(query, user)
 
         # Build load options based on what's needed
         load_options = []
@@ -142,8 +139,6 @@ class QueryOptimizer:
         query = select(Document).join(Document.tags).where(
             Tag.name == tag_name
         )
-        if user is not None:
-            query = filter_visible_to_user(query, user)
 
         query = query.options(
             joinedload(Document.creator),
@@ -172,8 +167,6 @@ class QueryOptimizer:
                 Document.filename.ilike(search_pattern)
             )
         )
-        if user is not None:
-            query = filter_visible_to_user(query, user)
 
         query = query.options(
             joinedload(Document.creator),

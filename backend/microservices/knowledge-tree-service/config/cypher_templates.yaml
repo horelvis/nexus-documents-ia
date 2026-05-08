@@ -1,13 +1,13 @@
 # Cypher template registry — reusable multi-hop query patterns.
 # Each template has a Cypher pattern with $-prefixed parameters.
-# Tenant isolation ($user, $collection) is injected automatically.
+# Collection scope ($collection) is injected automatically.
 
 templates:
   entity_relations:
     description: "All direct relationships of an entity"
     hops: 1
     pattern: |
-      MATCH (s:Node {uri: $entity_uri, user: $user})-[r:Rel]->(o)
+      MATCH (s:Node {uri: $entity_uri})-[r:Rel]->(o)
       WHERE ($collection IS NULL OR r.collection = $collection)
       RETURN s.uri AS subject, r.uri AS predicate,
              CASE WHEN o:Node THEN o.uri ELSE o.value END AS object,
@@ -21,8 +21,8 @@ templates:
     description: "Ownership chain: company -> group -> subsidiaries"
     hops: 4
     pattern: |
-      MATCH path = (start:Node {uri: $entity_uri, user: $user})
-        -[:Rel*1..4]->(end:Node {user: $user})
+      MATCH path = (start:Node {uri: $entity_uri})
+        -[:Rel*1..4]->(end:Node)
       WHERE ALL(r IN relationships(path) WHERE
         r.uri IN ['nouxcube://predicate/legal/filial-de',
                    'nouxcube://predicate/legal/parte-de',
@@ -38,8 +38,8 @@ templates:
     description: "People related to an organization with real predicates"
     hops: 3
     pattern: |
-      MATCH (org:Node {uri: $entity_uri, user: $user})
-      MATCH (p:Node {user: $user})-[r:Rel]->(org)
+      MATCH (org:Node {uri: $entity_uri})
+      MATCH (p:Node)-[r:Rel]->(org)
       WHERE (r.uri CONTAINS 'empleado' OR r.uri CONTAINS 'firmante'
         OR r.uri CONTAINS 'representante' OR r.uri CONTAINS 'cargo'
         OR r.uri CONTAINS 'administrador')
@@ -57,15 +57,15 @@ templates:
     description: "Count relations of a type for an entity"
     hops: 1
     pattern: |
-      MATCH (s:Node {uri: $entity_uri, user: $user})-[r:Rel {uri: $predicate_uri}]->(o)
+      MATCH (s:Node {uri: $entity_uri})-[r:Rel {uri: $predicate_uri}]->(o)
       RETURN count(o) AS total
 
   applicable_regulations:
     description: "Laws and regulations applicable to an entity"
     hops: 2
     pattern: |
-      MATCH (entity:Node {uri: $entity_uri, user: $user})
-      MATCH (entity)-[r1:Rel]->(mid:Node {user: $user})-[r2:Rel]->(law:Node {user: $user})
+      MATCH (entity:Node {uri: $entity_uri})
+      MATCH (entity)-[r1:Rel]->(mid:Node)-[r2:Rel]->(law:Node)
       WHERE r2.uri CONTAINS 'regulado' OR r2.uri CONTAINS 'sujeto-a'
       MATCH (law)-[:Rel {uri: 'nouxcube://predicate/core/type'}]->(t:Literal)
       WHERE t.value = 'legislation'

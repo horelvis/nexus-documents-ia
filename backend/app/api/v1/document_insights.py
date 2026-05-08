@@ -6,7 +6,6 @@ from app.schemas.document import DocumentWithMetrics, DocumentBasic
 from app.services.async_document_service import AsyncDocumentService
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
 from app.db.async_database import get_async_db
 from sqlalchemy.ext.asyncio import AsyncSession
 import logging
@@ -26,14 +25,13 @@ async def get_recently_viewed_documents(
         from sqlalchemy import select, func
         from app.db.models import Document, DocumentView
 
-        # Base query with Document and DocumentView joined, ACL-filtered
-        base_query = select(
+        # Base query with Document and DocumentView joined
+        query = select(
             Document,
             func.max(DocumentView.viewed_at).label("last_viewed_at")
         ).join(
             DocumentView, Document.id == DocumentView.document_id
         )
-        query = filter_visible_to_user(base_query, current_user)
 
         # Filter by user if specified
         if user_specific and current_user.sub:

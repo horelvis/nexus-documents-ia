@@ -20,7 +20,7 @@ class ContradictionDetector:
     def __init__(self, client: FalkorDBClient) -> None:
         self._client = client
 
-    async def detect_for_subject(self, subject_uri: str, user: str) -> List[Dict]:
+    async def detect_for_subject(self, subject_uri: str) -> List[Dict]:
         """Find contradictions for a single subject: same predicate, different literal values.
 
         Returns a list of dicts with keys:
@@ -28,9 +28,8 @@ class ContradictionDetector:
         """
         query = (
             "MATCH (s:Node {uri: $uri})-[r1:Rel]->(o1:Literal) "
-            "WHERE r1.user = $user "
             "MATCH (s)-[r2:Rel]->(o2:Literal) "
-            "WHERE r2.uri = r1.uri AND r2.user = $user "
+            "WHERE r2.uri = r1.uri "
             "  AND id(o1) < id(o2) "
             "  AND o1.value <> o2.value "
             "RETURN DISTINCT r1.uri AS predicate, o1.value AS value_a, o2.value AS value_b, "
@@ -38,7 +37,7 @@ class ContradictionDetector:
             "id(r1) AS rel_a_id, id(r2) AS rel_b_id"
         )
         rows = await self._client.execute_cypher(
-            query, params={"uri": subject_uri, "user": user}
+            query, params={"uri": subject_uri}
         )
         return [
             {
@@ -54,7 +53,7 @@ class ContradictionDetector:
         ]
 
     async def detect_and_mark(
-        self, subject_uri: str, user: str
+        self, subject_uri: str
     ) -> int:
         """Detect contradictions and mark edges with metadata properties.
 
@@ -64,7 +63,7 @@ class ContradictionDetector:
 
         Returns the number of contradictions found.
         """
-        contradictions = await self.detect_for_subject(subject_uri, user)
+        contradictions = await self.detect_for_subject(subject_uri)
 
         for c in contradictions:
             try:
@@ -92,7 +91,7 @@ class ContradictionDetector:
 
         return len(contradictions)
 
-    async def apply_confidence_penalty(self, user: str) -> int:
+    async def apply_confidence_penalty(self) -> int:
         """Batch-reduce confidence on all edges marked has_contradiction=true.
 
         Sets confidence = max(confidence - 0.25, 0.10).
@@ -100,7 +99,7 @@ class ContradictionDetector:
         """
         query = (
             "MATCH ()-[r:Rel]->() "
-            "WHERE r.user = $user AND r.has_contradiction = true "
+            "WHERE r.has_contradiction = true "
             "AND r.confidence IS NOT NULL "
             "SET r.confidence = CASE "
             "  WHEN r.confidence - 0.25 < 0.10 THEN 0.10 "
@@ -108,33 +107,33 @@ class ContradictionDetector:
             "END "
             "RETURN count(r) AS updated"
         )
-        rows = await self._client.execute_cypher(query, params={"user": user})
+        rows = await self._client.execute_cypher(query, params={})
         count = rows[0]["updated"] if rows else 0
         if count:
             logger.info("Applied confidence penalty to %d contradicted edges", count)
         return count
 
     async def detect_batch_for_document(
-        self, document_uri: str, user: str, collection: str
+        self, document_uri: str, collection: str
     ) -> int:
-        """Find all entity subjects for tenant, run detect_and_mark for each.
+        """Find all entity subjects, run detect_and_mark for each.
 
         Returns the total number of contradictions found.
         """
         entity_query = (
             "MATCH (s:Node) "
-            "WHERE s.user = $user AND s.uri STARTS WITH 'nouxcube://entity/' "
+            "WHERE s.uri STARTS WITH 'nouxcube://entity/' "
             "RETURN DISTINCT s.uri AS entity_uri"
         )
         rows = await self._client.execute_cypher(
-            entity_query, params={"user": user}
+            entity_query, params={}
         )
 
         total = 0
         for row in rows:
             entity_uri = row["entity_uri"]
             try:
-                count = await self.detect_and_mark(entity_uri, user=user)
+                count = await self.detect_and_mark(entity_uri)
                 total += count
             except Exception:
                 logger.exception(
@@ -142,7 +141,7 @@ class ContradictionDetector:
                 )
 
         logger.info(
-            "detect_batch_for_document: doc=%s user=%s → %d contradiction(s) marked",
-            document_uri, user, total,
+            "detect_batch_for_document: doc=%s → %d contradiction(s) marked",
+            document_uri, total,
         )
         return total

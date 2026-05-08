@@ -15,8 +15,6 @@ from app.services.uri_builder import URIBuilder
 # Constants
 # ---------------------------------------------------------------------------
 
-USER_T1 = "tenant-1"
-USER_T2 = "tenant-2"
 COLLECTION = "col-test"
 
 
@@ -25,7 +23,7 @@ COLLECTION = "col-test"
 # ---------------------------------------------------------------------------
 
 
-async def seed_base_graph(store: TripleStore, user: str, collection: str) -> dict:
+async def seed_base_graph(store: TripleStore, collection: str) -> dict:
     """Seed Juan García + ACME Corp with standard triples.
 
     Returns a dict of useful URIs for assertions.
@@ -37,7 +35,6 @@ async def seed_base_graph(store: TripleStore, user: str, collection: str) -> dic
         predicate_name="type",
         object_value="person",
         object_is_node=False,
-        user=user,
         collection=collection,
         extraction_method="ner",
         source_chunk="chunk-001",
@@ -48,7 +45,6 @@ async def seed_base_graph(store: TripleStore, user: str, collection: str) -> dic
         predicate_name="label",
         object_value="Juan García López",
         object_is_node=False,
-        user=user,
         collection=collection,
         extraction_method="system",
     )
@@ -58,7 +54,6 @@ async def seed_base_graph(store: TripleStore, user: str, collection: str) -> dic
         predicate_name="empleado-de",
         object_value="ACME Corp",
         object_is_node=True,
-        user=user,
         collection=collection,
         extraction_method="llm",
         source_chunk="chunk-002",
@@ -71,7 +66,6 @@ async def seed_base_graph(store: TripleStore, user: str, collection: str) -> dic
         predicate_name="type",
         object_value="organization",
         object_is_node=False,
-        user=user,
         collection=collection,
         extraction_method="ner",
     )
@@ -81,7 +75,6 @@ async def seed_base_graph(store: TripleStore, user: str, collection: str) -> dic
         predicate_name="label",
         object_value="ACME Corp SL",
         object_is_node=False,
-        user=user,
         collection=collection,
         extraction_method="system",
     )
@@ -108,14 +101,13 @@ class TestSPOQueries:
         """Seed base graph before each test in this class."""
         store = TripleStore(falkordb_client)
         self.query = TripleQuery(falkordb_client)
-        self.uris = await seed_base_graph(store, USER_T1, COLLECTION)
+        self.uris = await seed_base_graph(store, COLLECTION)
 
     @pytest.mark.asyncio
     async def test_query_by_subject(self):
         """Juan should have >= 3 triples (type, label, empleado-de)."""
         results = await self.query.by_subject(
             subject_uri=self.uris["juan_uri"],
-            user=USER_T1,
             collection=COLLECTION,
         )
         assert len(results) >= 3
@@ -132,7 +124,6 @@ class TestSPOQueries:
         """core/type predicate should return >= 2 triples (person, organization)."""
         results = await self.query.by_predicate(
             predicate_uri=self.uris["type_pred"],
-            user=USER_T1,
             collection=COLLECTION,
         )
         assert len(results) >= 2
@@ -146,7 +137,6 @@ class TestSPOQueries:
         """Querying literal value 'person' should return Juan."""
         results = await self.query.by_object_value(
             value="person",
-            user=USER_T1,
             collection=COLLECTION,
         )
         assert len(results) >= 1
@@ -165,7 +155,6 @@ class TestSPOQueries:
         results = await self.query.by_spo(
             subject_uri=self.uris["juan_uri"],
             predicate_uri=self.uris["type_pred"],
-            user=USER_T1,
             collection=COLLECTION,
         )
         assert len(results) == 1
@@ -177,7 +166,6 @@ class TestSPOQueries:
         """Juan's 1-hop neighbors should include ACME Corp."""
         results = await self.query.neighbors(
             uri=self.uris["juan_uri"],
-            user=USER_T1,
             max_hops=1,
             limit=50,
         )
@@ -189,7 +177,6 @@ class TestSPOQueries:
         """Inbound query on ACME should return Juan as subject."""
         results = await self.query.by_object_node(
             object_uri=self.uris["acme_uri"],
-            user=USER_T1,
             collection=COLLECTION,
         )
         assert len(results) >= 1
@@ -206,7 +193,6 @@ class TestSPOQueries:
         results = await self.query.by_predicate_object(
             predicate_uri=self.uris["type_pred"],
             object_value="organization",
-            user=USER_T1,
             object_is_node=False,
         )
         assert len(results) >= 1
@@ -219,7 +205,6 @@ class TestSPOQueries:
         results = await self.query.by_predicate_object(
             predicate_uri=self.uris["empleado_pred"],
             object_value=self.uris["acme_uri"],
-            user=USER_T1,
             object_is_node=True,
         )
         assert len(results) >= 1
@@ -232,34 +217,31 @@ class TestSPOQueries:
         spo_results = await self.query.by_spo(
             subject_uri=self.uris["juan_uri"],
             predicate_uri=self.uris["type_pred"],
-            user=USER_T1,
         )
         sp_results = await self.query.by_subject_predicate(
             subject_uri=self.uris["juan_uri"],
             predicate_uri=self.uris["type_pred"],
-            user=USER_T1,
         )
         assert spo_results == sp_results
 
 
 # ---------------------------------------------------------------------------
-# TestTenantContext
+# TestGraphContext
 # ---------------------------------------------------------------------------
 
 
-class TestTenantContext:
+class TestGraphContext:
     """Tests for get_stats and build_context."""
 
     @pytest_asyncio.fixture(autouse=True)
     async def setup(self, falkordb_client):
         store = TripleStore(falkordb_client)
         self.query = TripleQuery(falkordb_client)
-        self.uris = await seed_base_graph(store, USER_T1, COLLECTION)
+        self.uris = await seed_base_graph(store, COLLECTION)
 
         # Add a document node mentioning Juan
         doc_uri = await store.store_document_node(
             document_id="doc-tq-001",
-            user=USER_T1,
             collection=COLLECTION,
             title="Contrato de Trabajo",
             file_path="/docs/contratos/ct001.pdf",
@@ -272,7 +254,6 @@ class TestTenantContext:
             predicate_name="mentioned-in",
             object_value="doc-tq-001",
             object_is_node=False,  # store doc_id as literal for simplicity
-            user=USER_T1,
             collection=COLLECTION,
             extraction_method="ner",
             source_chunk="chunk-003",
@@ -282,7 +263,7 @@ class TestTenantContext:
     @pytest.mark.asyncio
     async def test_get_stats(self):
         """get_stats should report nodes >= 2, literals >= 1, rels >= 1."""
-        stats = await self.query.get_stats(user=USER_T1, collection=COLLECTION)
+        stats = await self.query.get_stats(collection=COLLECTION)
 
         assert isinstance(stats, dict)
         assert "nodes" in stats
@@ -296,7 +277,7 @@ class TestTenantContext:
     @pytest.mark.asyncio
     async def test_build_context(self):
         """build_context should return a non-empty string with expected sections."""
-        context = await self.query.build_context(user=USER_T1, limit=20)
+        context = await self.query.build_context(limit=20)
 
         assert isinstance(context, str)
         assert len(context) > 0
@@ -307,94 +288,3 @@ class TestTenantContext:
         assert "person" in context or "organization" in context
         # Should contain some entity name or URI
         assert "connections" in context
-
-
-# ---------------------------------------------------------------------------
-# TestTenantIsolation
-# ---------------------------------------------------------------------------
-
-
-class TestTenantIsolation:
-    """Tests that queries do not cross tenant boundaries."""
-
-    @pytest_asyncio.fixture(autouse=True)
-    async def setup(self, falkordb_client):
-        store = TripleStore(falkordb_client)
-        self.query = TripleQuery(falkordb_client)
-
-        # Tenant 1: Juan García
-        self.t1_uris = await seed_base_graph(store, USER_T1, COLLECTION)
-
-        # Tenant 2: María Fernández (different entity, same collection name)
-        self.t2_maria_uri = await store.store_triple(
-            subject_name="María Fernández",
-            predicate_ontology="core",
-            predicate_name="type",
-            object_value="person",
-            object_is_node=False,
-            user=USER_T2,
-            collection=COLLECTION,
-            extraction_method="ner",
-        )
-
-    @pytest.mark.asyncio
-    async def test_different_tenants_isolated(self):
-        """Tenant 1 queries should not return tenant 2 data and vice versa."""
-        # T1 by_predicate should see Juan + ACME (core/type results)
-        t1_results = await self.query.by_predicate(
-            predicate_uri=self.t1_uris["type_pred"],
-            user=USER_T1,
-            collection=COLLECTION,
-        )
-        t1_subjects = {r["subject"] for r in t1_results}
-
-        # T1 results must NOT contain María's URI
-        assert self.t2_maria_uri not in t1_subjects
-
-        # T2 by_predicate should only see María
-        t2_results = await self.query.by_predicate(
-            predicate_uri=self.t1_uris["type_pred"],
-            user=USER_T2,
-            collection=COLLECTION,
-        )
-        t2_subjects = {r["subject"] for r in t2_results}
-
-        # T2 results must NOT contain Juan or ACME
-        assert self.t1_uris["juan_uri"] not in t2_subjects
-        assert self.t1_uris["acme_uri"] not in t2_subjects
-
-        # T2 must contain María
-        assert self.t2_maria_uri in t2_subjects
-
-    @pytest.mark.asyncio
-    async def test_by_subject_isolation(self):
-        """by_subject for T2's María should not see Juan's triples."""
-        results = await self.query.by_subject(
-            subject_uri=self.t2_maria_uri,
-            user=USER_T2,
-            collection=COLLECTION,
-        )
-        # All returned triples must have María as subject, not Juan
-        for triple in results:
-            assert triple["subject"] == self.t2_maria_uri
-
-        # Querying Juan's URI under T2 should return nothing
-        results_cross = await self.query.by_subject(
-            subject_uri=self.t1_uris["juan_uri"],
-            user=USER_T2,
-            collection=COLLECTION,
-        )
-        assert len(results_cross) == 0
-
-    @pytest.mark.asyncio
-    async def test_get_stats_isolation(self):
-        """get_stats for each tenant should return only their own counts."""
-        t1_stats = await self.query.get_stats(user=USER_T1, collection=COLLECTION)
-        t2_stats = await self.query.get_stats(user=USER_T2, collection=COLLECTION)
-
-        # T1 has Juan + ACME + literals for both
-        assert t1_stats["nodes"] >= 2
-        # T2 has only María
-        assert t2_stats["nodes"] >= 1
-        # T2 should have fewer nodes than T1
-        assert t2_stats["nodes"] < t1_stats["nodes"]

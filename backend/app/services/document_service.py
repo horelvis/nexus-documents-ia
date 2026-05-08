@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user, EVERYONE_ROLE
 from app.db.models import Document, Tag
 from app.db.database import SessionLocal
 from app.schemas.enums import IndexingStatus
@@ -34,7 +33,6 @@ class DocumentService:
         """
         self.user = user
         self.user_id: Optional[str] = user.sub if user else None
-        self.user_roles: List[str] = list(user.roles) if user else []
 
         # Single-tenant: storage factory still takes a legacy positional
         # bucket-scope string (slated for storage cleanup).
@@ -53,18 +51,12 @@ class DocumentService:
         self.text_extraction_client = TextExtractionClient(storage_scope, self.user_id)
 
     def _check_acl(self, document: Optional[Document]) -> Optional[Document]:
-        """Return the document if the current user is authorized, else 404.
+        """Pass-through: all authenticated users can see all documents.
 
-        Uses the same role-based visibility rules as filter_visible_to_user.
+        Role-based ACL removed. Single-tenant on-premise deployment grants
+        visibility of all documents to all authenticated users.
         """
-        if document is None or self.user is None:
-            return document
-        doc_roles = list(document.roles or [])
-        if EVERYONE_ROLE in doc_roles:
-            return document
-        if any(r in doc_roles for r in (self.user.roles or [])):
-            return document
-        raise HTTPException(status_code=404, detail="Document not found")
+        return document
 
     async def _validate_file(self, file: UploadFile, filename: str) -> tuple[str, bytes, int]:
         """
@@ -124,7 +116,7 @@ class DocumentService:
             file_type=file_ext,
             file_size=file_size,
             created_by=self.user_id,
-            roles=roles or [EVERYONE_ROLE],
+            roles=roles or [],
             indexed=IndexingStatus.PROCESSING
         )
 
@@ -688,9 +680,7 @@ class DocumentService:
         
         try:
             query = db.query(Document)
-            if self.user:
-                query = filter_visible_to_user(query, self.user)
-            
+
             # Aplicar filtros
             if search:
                 search_filter = f"%{search}%"

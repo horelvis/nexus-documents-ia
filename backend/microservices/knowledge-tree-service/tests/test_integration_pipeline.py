@@ -172,7 +172,7 @@ class TestFullPipeline:
             result = await coordinator.extract_document(
                 chunks=CONTRACT_CHUNKS,
                 document_id="contract-integration-001",
-                user="tenant-test",
+
                 collection="legal",
                 title="Contrato TechCorp - Juan García López",
                 file_path="/docs/legal/contract-001.pdf",
@@ -195,7 +195,7 @@ class TestFullPipeline:
         query = TripleQuery(falkordb_client)
 
         # 7a. get_stats: meaningful number of nodes and relationships
-        stats = await query.get_stats(user="tenant-test", collection="legal")
+        stats = await query.get_stats(collection="legal")
         assert stats["nodes"] >= 3, f"Expected >=3 nodes, got {stats['nodes']}"
         assert stats["rels"] >= 5, f"Expected >=5 rels, got {stats['rels']}"
 
@@ -205,7 +205,7 @@ class TestFullPipeline:
         type_triples = await query.by_spo(
             subject_uri=juan_uri,
             predicate_uri=type_pred_uri,
-            user="tenant-test",
+
             collection="legal",
         )
         assert len(type_triples) >= 1, (
@@ -222,7 +222,7 @@ class TestFullPipeline:
         doc_label_triples = await query.by_spo(
             subject_uri=doc_uri,
             predicate_uri=label_pred_uri,
-            user="tenant-test",
+
             collection="legal",
         )
         assert len(doc_label_triples) >= 1, (
@@ -234,7 +234,7 @@ class TestFullPipeline:
         topic_triples = await query.by_spo(
             subject_uri=doc_uri,
             predicate_uri=has_topic_pred_uri,
-            user="tenant-test",
+
             collection="legal",
         )
         assert len(topic_triples) >= 1, (
@@ -248,7 +248,7 @@ class TestFullPipeline:
         )
 
         # 8. Verify context can be built: build_context returns string with content
-        context = await query.build_context(user="tenant-test")
+        context = await query.build_context()
         assert isinstance(context, str)
         assert len(context) > 0, "build_context returned empty string"
         assert "Knowledge Graph Context" in context, (

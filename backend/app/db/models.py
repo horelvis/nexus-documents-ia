@@ -171,13 +171,10 @@ class Document(Base):
     views = relationship("DocumentView", back_populates="document", cascade="all, delete-orphan")
     analyses = relationship("DocumentAnalysis", back_populates="document", cascade="all, delete-orphan")
     
-    roles = Column(ARRAY(String), nullable=False, server_default="{EVERYONE}")
-
     __table_args__ = (
         Index('idx_documents_creator_created', 'created_by', 'created_at'),
         Index('idx_documents_indexed', 'indexed'),
         Index('idx_documents_category', 'category'),
-        Index('idx_documents_roles', 'roles', postgresql_using='gin'),
     )
     
     def increment_metric(self, metric_name: str, session, amount: int = 1):
@@ -1474,8 +1471,6 @@ class Connector(Base):
     indexed_documents = relationship("IndexedDocument", back_populates="connector")
     content_models = relationship("ConnectorContentModel", cascade="all, delete-orphan", passive_deletes=True)
 
-    default_document_roles = Column(ARRAY(String), nullable=False, server_default="{EVERYONE}")
-
     __table_args__ = (
         UniqueConstraint('connector_type', 'name', name='uq_connector_tenant_type_name'),
     )
@@ -1600,17 +1595,11 @@ class IndexedDocument(Base):
     - Document ownership (who can access)
     - Document location (where it came from)
     - Weaviate reference (where it's indexed)
-    
-    Access control (single-tenant role-based ACL):
-    A user can access a document if any of:
-    1. The document's `roles` column contains "EVERYONE"
-    2. The document's `roles` column overlaps the user's KeyCloak roles
-    3. They are the owner (owner_id = user_id)
 
-    Plan 5 (dropped 2026-04-23): the legacy multi-tenant columns
-    (is_tenant_public, shared_with_users, shared_with_groups, acl_user_ids,
-    acl_role_ids) have been removed from the table and the model. The
-    `roles` ARRAY is the sole ACL mechanism.
+    Access control: role-based ACL (`roles` ARRAY) was removed in 2026-05.
+    The only remaining authorization dimension is `is_superuser` on the User
+    model. All documents in the single-tenant deployment are accessible to
+    all authenticated users.
     """
     __tablename__ = "indexed_documents"
     
@@ -1629,7 +1618,7 @@ class IndexedDocument(Base):
     # Ownership
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
 
-    # Access control: role-based ACL lives in `roles` (ARRAY column below).
+    # Access control: role-based ACL (roles ARRAY) was removed in 2026-05.
     # Legacy multi-tenant columns (is_tenant_public, shared_with_users,
     # shared_with_groups) were dropped on 2026-04-23 after the dead
     # JSONBACLProvider was removed — nothing in the runtime reads them.
@@ -1689,14 +1678,11 @@ class IndexedDocument(Base):
     owner = relationship("User", back_populates="indexed_documents")
     indexing_strategy = relationship("ConnectorIndexingStrategy")
     
-    roles = Column(ARRAY(String), nullable=False, server_default="{EVERYONE}")
-
     __table_args__ = (
         UniqueConstraint('connector_id', 'external_id', name='uq_indexed_doc_connector_external'),
         Index('idx_indexed_doc_owner', 'owner_id'),
         Index('idx_indexed_doc_weaviate', 'weaviate_id'),
         Index('idx_indexed_doc_status', 'indexing_status'),
-        Index('idx_indexed_documents_roles', 'roles', postgresql_using='gin'),
     )
 
 

@@ -35,7 +35,6 @@ from sqlalchemy import and_, case, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
 from app.db.models import Document, IndexedDocument
 
 logger = logging.getLogger(__name__)
@@ -200,9 +199,8 @@ class UnifiedDocumentQuery:
         self.source = source
 
     def _apply_doc_acl(self, query):
-        """Apply role-based ACL filter to Document queries when user scoped."""
-        if self.user is not None:
-            return filter_visible_to_user(query, self.user)
+        """Pass-through: all authenticated users can see all documents.
+        Role-based ACL removed; kept as identity function for call-site compatibility."""
         return query
 
     async def count_documents(

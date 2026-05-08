@@ -23,7 +23,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.auth_headers import EVERYONE_ROLE
 from app.services.falkordb_client import FalkorDBClient
 from app.services.uri_builder import URIBuilder
 
@@ -68,7 +67,6 @@ async def find_duplicates(client: FalkorDBClient) -> list:
 async def merge_group(
     client: FalkorDBClient,
     group: dict,
-    user: str,
     collection: str,
 ) -> dict:
     """Merge a duplicate group: keep canonical, re-point relationships."""
@@ -104,9 +102,9 @@ async def merge_group(
         await client.execute_cypher(
             "MATCH (canon:Node {uri: $canon}), (dup:Node {uri: $dup}) "
             "MERGE (canon)-[:Rel {uri: 'nouxcube://predicate/core/same-as', "
-            "user: $user, collection: $collection, extraction_method: 'dedup_script'}]->(dup) "
+            "collection: $collection, extraction_method: 'dedup_script'}]->(dup) "
             "SET dup.merged = true",
-            params={"canon": canonical_uri, "dup": dup_uri, "user": user, "collection": collection},
+            params={"canon": canonical_uri, "dup": dup_uri, "collection": collection},
         )
         stats["same_as_created"] += 1
 
@@ -130,7 +128,7 @@ async def run(apply: bool, output_json: str | None) -> dict:
             if apply:
                 await merge_group(
                     client, group,
-                    user=EVERYONE_ROLE,
+
                     collection="default",
                 )
                 total_stats["merged"] += 1

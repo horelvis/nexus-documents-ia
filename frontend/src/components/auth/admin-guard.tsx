@@ -8,7 +8,9 @@ import { useAuth } from '@/contexts/auth-context'
  * AdminGuard — Redirects non-admin users to home.
  *
  * Usage: wrap admin page content with <AdminGuard>...</AdminGuard>
- * Checks realm_access.roles from the Keycloak JWT for 'admin' or 'realm-admin'.
+ * Reads `isAdmin` from the auth context, which derives from `User.is_superuser`
+ * on the backend response. KeyCloak roles are NOT consulted for admin gating
+ * after the role-based ACL removal (2026-05-04).
  */
 export function AdminGuard({ children }: { children: React.ReactNode }) {
   const { isLoaded, isAuthenticated, isAdmin } = useAuth()

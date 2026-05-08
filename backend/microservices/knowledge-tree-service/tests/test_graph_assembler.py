@@ -28,7 +28,7 @@ class TestGraphAssembler:
         result = await assembler.assemble(
             entity_uri="nouxcube://entity/default/juan",
             report_type="entity_profile",
-            user="test-tenant",
+
         )
 
         assert isinstance(result, AssembledGraph)
@@ -55,7 +55,7 @@ class TestGraphAssembler:
         result = await assembler.assemble(
             entity_uri="nouxcube://entity/default/juan",
             report_type="entity_profile",
-            user="test-tenant",
+
         )
 
         assert len(result.kpis) > 0
@@ -77,7 +77,7 @@ class TestGraphAssembler:
         result = await assembler.assemble(
             entity_uri="nouxcube://entity/default/test",
             report_type="nonexistent_type",
-            user="test-tenant",
+
         )
 
         assert result.report_type == "entity_profile"
@@ -103,7 +103,7 @@ class TestGraphAssembler:
         result = await assembler.assemble(
             entity_uri="nouxcube://entity/default/test",
             report_type="entity_profile",
-            user="test-tenant",
+
         )
 
         assert len(result.sources) > 0
@@ -128,7 +128,7 @@ class TestGraphAssembler:
         result = await assembler.assemble(
             entity_uri="nouxcube://entity/default/test",
             report_type="entity_profile",
-            user="test-tenant",
+
         )
 
         assert len(result.sources) > 0
@@ -161,7 +161,7 @@ class TestGraphAssembler:
         result = await assembler.assemble(
             entity_uri="nouxcube://entity/default/juan",
             report_type="entity_profile",
-            user="test-tenant",
+
         )
 
         all_facts = [f for s in result.sections for f in s.facts]
@@ -190,7 +190,7 @@ class TestGraphAssembler:
         result = await assembler.assemble(
             entity_uri="nouxcube://entity/default/juan",
             report_type="entity_profile",
-            user="test-tenant",
+
         )
 
         all_facts = [f for s in result.sections for f in s.facts]
@@ -216,7 +216,7 @@ class TestGraphAssembler:
         result = await assembler.assemble(
             entity_uri="nouxcube://entity/default/test",
             report_type="entity_profile",
-            user="test-tenant",
+
         )
 
         assert result.trust_summary.min_confidence == 0.5

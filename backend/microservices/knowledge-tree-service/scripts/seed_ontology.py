@@ -140,12 +140,12 @@ PREDICATES: List[Tuple[str, str, str, str, str]] = [
 async def _fetch_existing_predicate_uris(client: FalkorDBClient) -> set:
     """Return the set of predicate URIs already present in the _ontology collection."""
     query = (
-        "MATCH (n:Node {user: $user, collection: $collection}) "
+        "MATCH (n:Node {collection: $collection}) "
         "RETURN n.uri AS uri"
     )
     rows = await client.execute_cypher(
         query,
-        params={"user": ONTOLOGY_USER, "collection": ONTOLOGY_COLLECTION},
+        params={"collection": ONTOLOGY_COLLECTION},
     )
     return {row["uri"] for row in rows if row.get("uri")}
 
@@ -155,12 +155,12 @@ async def _clear_ontology(client: FalkorDBClient) -> None:
     query = (
         "MATCH (n) "
         "WHERE (n:Node OR n:Literal) "
-        "AND n.user = $user AND n.collection = $collection "
+        "AND n.collection = $collection "
         "DETACH DELETE n"
     )
     await client.execute_cypher(
         query,
-        params={"user": ONTOLOGY_USER, "collection": ONTOLOGY_COLLECTION},
+        params={"collection": ONTOLOGY_COLLECTION},
     )
 
 
@@ -194,7 +194,7 @@ async def _seed_predicate(
             subject_uri=pred_uri,
             predicate_uri=pred_uri_onto,
             object_value=value,
-            user=ONTOLOGY_USER,
+
             collection=ONTOLOGY_COLLECTION,
             object_is_node=is_node,
             extraction_method="seed",

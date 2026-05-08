@@ -2,12 +2,11 @@
 TripleStore — Core CRUD layer for TrustGraph on FalkorDB.
 
 Provides atomic operations for Node, Literal, and Rel management.
-All methods are async and operate within user+collection scope for
-multi-tenant isolation.
+All methods are async and operate within collection scope.
 
 Graph model:
   :Node   — named entity or document with a canonical URI
-  :Literal — scalar value (string, date, etc.) deduped by (value, user, collection)
+  :Literal — scalar value (string, date, etc.) deduped by (value, collection)
   :Rel    — edge connecting subject :Node to object :Node or :Literal,
              carrying provenance metadata (predicate URI, extraction method, etc.)
 """
@@ -31,18 +30,18 @@ class TripleStore:
     # Node operations
     # ------------------------------------------------------------------
 
-    async def merge_node(self, uri: str, user: str, collection: str) -> None:
+    async def merge_node(self, uri: str, collection: str) -> None:
         """MERGE a :Node by URI, setting created_at on first creation.
 
         Idempotent — safe to call multiple times with the same URI.
         """
         query = (
-            "MERGE (n:Node {uri: $uri, user: $user, collection: $collection}) "
+            "MERGE (n:Node {uri: $uri, collection: $collection}) "
             "ON CREATE SET n.created_at = timestamp()"
         )
         await self._client.execute_cypher(
             query,
-            params={"uri": uri, "user": user, "collection": collection},
+            params={"uri": uri, "collection": collection},
         )
 
     # ------------------------------------------------------------------
@@ -54,7 +53,6 @@ class TripleStore:
         chunk_uri: str,
         document_uri: str,
         chunk_offset: int,
-        user: str,
         collection: str,
     ) -> None:
         """MERGE a :Chunk node and link it to its parent document.
@@ -67,27 +65,26 @@ class TripleStore:
         chunk→document hierarchy so graph queries can traverse upward from
         any chunk to its document without URI parsing.
 
-        Idempotent — MERGE on (uri, user, collection).
+        Idempotent — MERGE on (uri, collection).
         """
         await self._client.execute_cypher(
-            "MERGE (c:Chunk {uri: $chunk_uri, user: $user, collection: $col}) "
+            "MERGE (c:Chunk {uri: $chunk_uri, collection: $col}) "
             "ON CREATE SET c.created_at = timestamp(), c.offset = $offset "
-            "MERGE (d:Node {uri: $doc_uri, user: $user, collection: $col}) "
+            "MERGE (d:Node {uri: $doc_uri, collection: $col}) "
             "ON CREATE SET d.created_at = timestamp() "
-            "MERGE (c)-[r:Rel {uri: $of_doc_pred, user: $user, collection: $col}]->(d) "
+            "MERGE (c)-[r:Rel {uri: $of_doc_pred, collection: $col}]->(d) "
             "ON CREATE SET r.extraction_method = 'structural', r.confidence = 1.0",
             params={
                 "chunk_uri": chunk_uri,
                 "doc_uri": document_uri,
                 "offset": chunk_offset,
-                "user": user,
                 "col": collection,
                 "of_doc_pred": "nouxcube://predicate/core/of-document",
             },
         )
 
-    async def merge_literal(self, value: str, user: str, collection: str) -> None:
-        """MERGE a :Literal deduped by (value, user, collection).
+    async def merge_literal(self, value: str, collection: str) -> None:
+        """MERGE a :Literal deduped by (value, collection).
 
         Values are stripped of leading/trailing whitespace before storage
         to prevent "Madrid" vs "Madrid " creating separate nodes.
@@ -97,11 +94,11 @@ class TripleStore:
         """
         normalized_value = value.strip() if value else value
         query = (
-            "MERGE (:Literal {value: $value, user: $user, collection: $collection})"
+            "MERGE (:Literal {value: $value, collection: $collection})"
         )
         await self._client.execute_cypher(
             query,
-            params={"value": normalized_value, "user": user, "collection": collection},
+            params={"value": normalized_value, "collection": collection},
         )
 
     # ------------------------------------------------------------------
@@ -113,7 +110,6 @@ class TripleStore:
         subject_uri: str,
         predicate_uri: str,
         object_value: str,
-        user: str,
         collection: str,
         object_is_node: bool,
         extraction_method: str,
@@ -123,7 +119,7 @@ class TripleStore:
     ) -> None:
         """MERGE a :Rel edge from subject :Node to object :Node or :Literal.
 
-        Uses MERGE on (subject, predicate_uri, object, user, collection) to
+        Uses MERGE on (subject, predicate_uri, object, collection) to
         prevent duplicate edges for the same fact. Additional metadata
         (extraction_method, source_chunk, timestamps) is set on first creation.
 
@@ -131,10 +127,9 @@ class TripleStore:
             subject_uri:       URI of the subject :Node.
             predicate_uri:     URI of the predicate (ontology term).
             object_value:      URI if object_is_node=True, literal value otherwise.
-            user:              Tenant/user identifier.
             collection:        Collection scope.
             object_is_node:    True → object is a :Node matched by URI.
-                               False → object is a :Literal matched by (value, user, collection).
+                               False → object is a :Literal matched by (value, collection).
             extraction_method: How this triple was extracted (e.g. "ner", "llm", "regex").
             source_chunk:      Source chunk ID for provenance.
             valid_from:        ISO date string — temporal validity start.
@@ -142,9 +137,9 @@ class TripleStore:
         """
         if object_is_node:
             query = (
-                "MATCH (s:Node {uri: $s_uri, user: $user, collection: $collection}) "
-                "MATCH (o:Node {uri: $o_uri, user: $user, collection: $collection}) "
-                "MERGE (s)-[r:Rel {uri: $p_uri, user: $user, collection: $collection}]->(o) "
+                "MATCH (s:Node {uri: $s_uri, collection: $collection}) "
+                "MATCH (o:Node {uri: $o_uri, collection: $collection}) "
+                "MERGE (s)-[r:Rel {uri: $p_uri, collection: $collection}]->(o) "
                 "ON CREATE SET r.extraction_method = $extraction_method, "
                 "r.source_chunk = $source_chunk, "
                 "r.valid_from = $valid_from, r.valid_until = $valid_until"
@@ -153,7 +148,6 @@ class TripleStore:
                 "s_uri": subject_uri,
                 "o_uri": object_value,
                 "p_uri": predicate_uri,
-                "user": user,
                 "collection": collection,
                 "extraction_method": extraction_method,
                 "source_chunk": source_chunk,
@@ -162,9 +156,9 @@ class TripleStore:
             }
         else:
             query = (
-                "MATCH (s:Node {uri: $s_uri, user: $user, collection: $collection}) "
-                "MATCH (o:Literal {value: $o_val, user: $user, collection: $collection}) "
-                "MERGE (s)-[r:Rel {uri: $p_uri, user: $user, collection: $collection}]->(o) "
+                "MATCH (s:Node {uri: $s_uri, collection: $collection}) "
+                "MATCH (o:Literal {value: $o_val, collection: $collection}) "
+                "MERGE (s)-[r:Rel {uri: $p_uri, collection: $collection}]->(o) "
                 "ON CREATE SET r.extraction_method = $extraction_method, "
                 "r.source_chunk = $source_chunk, "
                 "r.valid_from = $valid_from, r.valid_until = $valid_until"
@@ -173,7 +167,6 @@ class TripleStore:
                 "s_uri": subject_uri,
                 "o_val": object_value,
                 "p_uri": predicate_uri,
-                "user": user,
                 "collection": collection,
                 "extraction_method": extraction_method,
                 "source_chunk": source_chunk,
@@ -194,7 +187,6 @@ class TripleStore:
         predicate_name: str,
         object_value: str,
         object_is_node: bool,
-        user: str,
         collection: str,
         extraction_method: str,
         source_chunk: Optional[str] = None,
@@ -209,7 +201,6 @@ class TripleStore:
             predicate_name:    Predicate term within the ontology.
             object_value:      Entity name if object_is_node=True, scalar value otherwise.
             object_is_node:    Controls whether object is merged as :Node or :Literal.
-            user:              Tenant/user identifier.
             collection:        Collection scope.
             extraction_method: Provenance extraction method.
             source_chunk:      Optional source chunk ID.
@@ -223,16 +214,16 @@ class TripleStore:
         predicate_uri = URIBuilder.predicate(predicate_ontology, predicate_name)
 
         # Merge subject node
-        await self.merge_node(subject_uri, user, collection)
+        await self.merge_node(subject_uri, collection)
 
         # Merge object and resolve value for create_rel
         if object_is_node:
             object_uri = URIBuilder.entity(collection, object_value)
-            await self.merge_node(object_uri, user, collection)
+            await self.merge_node(object_uri, collection)
             rel_object_value = object_uri
         else:
             stripped_value = object_value.strip() if object_value else object_value
-            await self.merge_literal(stripped_value, user, collection)
+            await self.merge_literal(stripped_value, collection)
             rel_object_value = stripped_value
 
         # Create relationship
@@ -240,7 +231,6 @@ class TripleStore:
             subject_uri=subject_uri,
             predicate_uri=predicate_uri,
             object_value=rel_object_value,
-            user=user,
             collection=collection,
             object_is_node=object_is_node,
             extraction_method=extraction_method,
@@ -261,7 +251,7 @@ class TripleStore:
     }
 
     async def batch_store_triples(
-        self, triples: list, user: str, collection: str
+        self, triples: list, collection: str
     ) -> int:
         """Store multiple triples in batched Cypher UNWIND queries.
 
@@ -297,13 +287,13 @@ class TripleStore:
         if node_triples:
             await self._client.execute_cypher(
                 "UNWIND $triples AS t "
-                "MERGE (s:Node {uri: t.s_uri, user: $user, collection: $col}) "
+                "MERGE (s:Node {uri: t.s_uri, collection: $col}) "
                 "ON CREATE SET s.created_at = timestamp() "
-                "MERGE (o:Node {uri: t.o_uri, user: $user, collection: $col}) "
+                "MERGE (o:Node {uri: t.o_uri, collection: $col}) "
                 "ON CREATE SET o.created_at = timestamp() "
-                "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
+                "MERGE (s)-[r:Rel {uri: t.p_uri, collection: $col}]->(o) "
                 "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk, r.confidence = t.confidence",
-                {"triples": node_triples, "user": user, "col": collection},
+                {"triples": node_triples, "col": collection},
             )
             stored += len(node_triples)
 
@@ -312,34 +302,34 @@ class TripleStore:
         if unique_lits:
             await self._client.execute_cypher(
                 "UNWIND $triples AS t "
-                "MERGE (s:Node {uri: t.s_uri, user: $user, collection: $col}) "
+                "MERGE (s:Node {uri: t.s_uri, collection: $col}) "
                 "ON CREATE SET s.created_at = timestamp() "
                 "WITH s, t "
-                "OPTIONAL MATCH (s)-[ex:Rel {uri: t.p_uri, user: $user, collection: $col}]->(:Literal) "
+                "OPTIONAL MATCH (s)-[ex:Rel {uri: t.p_uri, collection: $col}]->(:Literal) "
                 "WITH s, t, ex WHERE ex IS NULL "
-                "MERGE (o:Literal {value: t.o_val, user: $user, collection: $col}) "
-                "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
+                "MERGE (o:Literal {value: t.o_val, collection: $col}) "
+                "MERGE (s)-[r:Rel {uri: t.p_uri, collection: $col}]->(o) "
                 "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk, r.confidence = t.confidence",
-                {"triples": unique_lits, "user": user, "col": collection},
+                {"triples": unique_lits, "col": collection},
             )
             stored += len(unique_lits)
 
         if regular_lits:
             await self._client.execute_cypher(
                 "UNWIND $triples AS t "
-                "MERGE (s:Node {uri: t.s_uri, user: $user, collection: $col}) "
+                "MERGE (s:Node {uri: t.s_uri, collection: $col}) "
                 "ON CREATE SET s.created_at = timestamp() "
-                "MERGE (o:Literal {value: t.o_val, user: $user, collection: $col}) "
-                "MERGE (s)-[r:Rel {uri: t.p_uri, user: $user, collection: $col}]->(o) "
+                "MERGE (o:Literal {value: t.o_val, collection: $col}) "
+                "MERGE (s)-[r:Rel {uri: t.p_uri, collection: $col}]->(o) "
                 "ON CREATE SET r.extraction_method = t.method, r.source_chunk = t.chunk, r.confidence = t.confidence",
-                {"triples": regular_lits, "user": user, "col": collection},
+                {"triples": regular_lits, "col": collection},
             )
             stored += len(regular_lits)
 
         return stored
 
     async def batch_store_provenance(
-        self, records: list, user: str, collection: str
+        self, records: list, collection: str
     ) -> int:
         """Store multiple provenance records in 2 UNWIND queries.
 
@@ -352,13 +342,13 @@ class TripleStore:
         # Query 1: Create extraction nodes + derived-from edges
         await self._client.execute_cypher(
             "UNWIND $records AS r "
-            "MERGE (e:Node {uri: r.extraction_uri, user: $user, collection: $col}) "
+            "MERGE (e:Node {uri: r.extraction_uri, collection: $col}) "
             "ON CREATE SET e.created_at = timestamp() "
             "WITH e, r "
-            "MATCH (d:Node {uri: r.document_uri, user: $user, collection: $col}) "
-            "MERGE (e)-[rel:Rel {uri: r.derived_from_uri, user: $user, collection: $col}]->(d) "
+            "MATCH (d:Node {uri: r.document_uri, collection: $col}) "
+            "MERGE (e)-[rel:Rel {uri: r.derived_from_uri, collection: $col}]->(d) "
             "ON CREATE SET rel.extraction_method = 'system'",
-            {"records": records, "user": user, "col": collection},
+            {"records": records, "col": collection},
         )
 
         # Query 2: Create all literal metadata (5 per record)
@@ -381,11 +371,11 @@ class TripleStore:
         if flat:
             await self._client.execute_cypher(
                 "UNWIND $lits AS l "
-                "MATCH (e:Node {uri: l.e_uri, user: $user, collection: $col}) "
-                "MERGE (lit:Literal {value: l.val, user: $user, collection: $col}) "
-                "MERGE (e)-[r:Rel {uri: l.p_uri, user: $user, collection: $col}]->(lit) "
+                "MATCH (e:Node {uri: l.e_uri, collection: $col}) "
+                "MERGE (lit:Literal {value: l.val, collection: $col}) "
+                "MERGE (e)-[r:Rel {uri: l.p_uri, collection: $col}]->(lit) "
                 "ON CREATE SET r.extraction_method = 'system'",
-                {"lits": flat, "user": user, "col": collection},
+                {"lits": flat, "col": collection},
             )
 
         return len(records)
@@ -393,7 +383,6 @@ class TripleStore:
     async def store_document_node(
         self,
         document_id: str,
-        user: str,
         collection: str,
         title: str,
         file_path: str,
@@ -409,7 +398,6 @@ class TripleStore:
 
         Args:
             document_id:   Unique document identifier.
-            user:          Tenant/user identifier.
             collection:    Collection scope.
             title:         Human-readable document title.
             file_path:     File system path (used to derive folder URI).
@@ -425,32 +413,31 @@ class TripleStore:
         folder_uri = URIBuilder.folder(collection, folder_path)
 
         # Merge the document node itself
-        await self.merge_node(doc_uri, user, collection)
+        await self.merge_node(doc_uri, collection)
 
         # core/type → "document" (Literal)
         await self._store_doc_literal_triple(
-            doc_uri, "core", "type", "document", user, collection
+            doc_uri, "core", "type", "document", collection
         )
 
         # core/label → title (Literal)
         await self._store_doc_literal_triple(
-            doc_uri, "core", "label", title, user, collection
+            doc_uri, "core", "label", title, collection
         )
 
         # core/semantic-type → semantic_type (Literal, optional)
         if semantic_type:
             await self._store_doc_literal_triple(
-                doc_uri, "core", "semantic-type", semantic_type, user, collection
+                doc_uri, "core", "semantic-type", semantic_type, collection
             )
 
         # core/contained-in → folder (Node)
-        await self.merge_node(folder_uri, user, collection)
+        await self.merge_node(folder_uri, collection)
         folder_pred_uri = URIBuilder.predicate("core", "contained-in")
         await self.create_rel(
             subject_uri=doc_uri,
             predicate_uri=folder_pred_uri,
             object_value=folder_uri,
-            user=user,
             collection=collection,
             object_is_node=True,
             extraction_method="system",
@@ -467,17 +454,15 @@ class TripleStore:
         ontology: str,
         predicate_name: str,
         value: str,
-        user: str,
         collection: str,
     ) -> None:
         """Internal helper: merge Literal and create Rel from an existing Node URI."""
-        await self.merge_literal(value, user, collection)
+        await self.merge_literal(value, collection)
         predicate_uri = URIBuilder.predicate(ontology, predicate_name)
         await self.create_rel(
             subject_uri=subject_uri,
             predicate_uri=predicate_uri,
             object_value=value,
-            user=user,
             collection=collection,
             object_is_node=False,
             extraction_method="system",
@@ -490,23 +475,27 @@ class TripleStore:
     # Cleanup operations
     # ------------------------------------------------------------------
 
-    async def clear_collection(self, user: str, collection: str) -> None:
-        """DETACH DELETE all nodes and literals for user+collection scope."""
+    async def clear_collection(self, collection: str) -> None:
+        """DETACH DELETE all nodes and literals for collection scope."""
         query = (
             "MATCH (n) "
             "WHERE (n:Node OR n:Literal) "
-            "AND n.user = $user AND n.collection = $collection "
+            "AND n.collection = $collection "
             "DETACH DELETE n"
         )
         await self._client.execute_cypher(
-            query, params={"user": user, "collection": collection}
+            query, params={"collection": collection}
         )
 
-    async def clear_tenant(self, user: str) -> None:
-        """DETACH DELETE all nodes and literals for a given user/tenant."""
+    async def clear_scope(self) -> None:
+        """DETACH DELETE all nodes and literals in the graph.
+
+        Formerly `clear_tenant`; renamed after tenancy + role-based ACL removal.
+        No longer scoped by user — deletes the entire graph.
+        """
         query = (
             "MATCH (n) "
-            "WHERE (n:Node OR n:Literal) AND n.user = $user "
+            "WHERE (n:Node OR n:Literal) "
             "DETACH DELETE n"
         )
-        await self._client.execute_cypher(query, params={"user": user})
+        await self._client.execute_cypher(query, params={})

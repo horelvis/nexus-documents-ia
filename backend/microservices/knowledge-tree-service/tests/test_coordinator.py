@@ -90,7 +90,7 @@ class TestCoordinator:
         """All 4 extractor mocks are called; triples are stored in the graph."""
         # Pre-create the document node so create_rel can find it
         store = TripleStore(falkordb_client)
-        await store.merge_node(DOC_URI, user="t1", collection="default")
+        await store.merge_node(DOC_URI, collection="default")
 
         coordinator = _make_coordinator(falkordb_client)
 
@@ -115,7 +115,7 @@ class TestCoordinator:
             result = await coordinator.extract_chunk(
                 chunk_text=SAMPLE_CHUNK,
                 document_uri=DOC_URI,
-                user="t1",
+
                 collection="default",
             )
 
@@ -141,7 +141,7 @@ class TestCoordinator:
         """Topic triples with subject='' are linked from document_uri, not a blank entity."""
         store = TripleStore(falkordb_client)
         doc_uri = "nouxcube://document/default/doc-topic-test"
-        await store.merge_node(doc_uri, user="t1", collection="default")
+        await store.merge_node(doc_uri, collection="default")
 
         coordinator = _make_coordinator(falkordb_client)
 
@@ -157,7 +157,7 @@ class TestCoordinator:
             result = await coordinator.extract_chunk(
                 chunk_text=SAMPLE_CHUNK,
                 document_uri=doc_uri,
-                user="t1",
+
                 collection="default",
             )
 
@@ -179,7 +179,7 @@ class TestCoordinator:
     async def test_extractor_exception_counted_in_errors(self, falkordb_client):
         """An extractor that raises an exception is reported in errors, others still run."""
         store = TripleStore(falkordb_client)
-        await store.merge_node(DOC_URI, user="t1", collection="default")
+        await store.merge_node(DOC_URI, collection="default")
 
         coordinator = _make_coordinator(falkordb_client)
 
@@ -195,7 +195,7 @@ class TestCoordinator:
             result = await coordinator.extract_chunk(
                 chunk_text=SAMPLE_CHUNK,
                 document_uri=DOC_URI,
-                user="t1",
+
                 collection="default",
             )
 
@@ -207,7 +207,7 @@ class TestCoordinator:
     async def test_deduplication_removes_duplicate_triples(self, falkordb_client):
         """Identical triples from different extractors are deduplicated."""
         store = TripleStore(falkordb_client)
-        await store.merge_node(DOC_URI, user="t1", collection="default")
+        await store.merge_node(DOC_URI, collection="default")
 
         coordinator = _make_coordinator(falkordb_client)
 
@@ -229,7 +229,7 @@ class TestCoordinator:
             result = await coordinator.extract_chunk(
                 chunk_text=SAMPLE_CHUNK,
                 document_uri=DOC_URI,
-                user="t1",
+
                 collection="default",
             )
 
@@ -244,7 +244,7 @@ class TestCoordinator:
         upgrades it to a Node→Node edge."""
         store = TripleStore(falkordb_client)
         doc_uri = "nouxcube://document/default/doc-entity-linking"
-        await store.merge_node(doc_uri, user="t1", collection="default")
+        await store.merge_node(doc_uri, collection="default")
 
         coordinator = _make_coordinator(falkordb_client)
 
@@ -288,7 +288,7 @@ class TestCoordinator:
             result = await coordinator.extract_chunk(
                 chunk_text=SAMPLE_CHUNK,
                 document_uri=doc_uri,
-                user="t1",
+
                 collection="default",
             )
 
@@ -314,7 +314,7 @@ class TestCoordinator:
         those are always Literal even if the value matches an entity name."""
         store = TripleStore(falkordb_client)
         doc_uri = "nouxcube://document/default/doc-no-upgrade"
-        await store.merge_node(doc_uri, user="t1", collection="default")
+        await store.merge_node(doc_uri, collection="default")
 
         coordinator = _make_coordinator(falkordb_client)
 
@@ -338,7 +338,7 @@ class TestCoordinator:
             result = await coordinator.extract_chunk(
                 chunk_text=SAMPLE_CHUNK,
                 document_uri=doc_uri,
-                user="t1",
+
                 collection="default",
             )
 
@@ -379,7 +379,7 @@ class TestExtractDocument:
             result = await coordinator.extract_document(
                 chunks=chunks,
                 document_id="doc-multi-chunk",
-                user="t1",
+
                 collection="default",
                 title="Test Document",
                 file_path="/docs/test/doc.pdf",
@@ -407,7 +407,7 @@ class TestExtractDocument:
             result = await coordinator.extract_document(
                 chunks=["Some text."],
                 document_id="doc-node-verify",
-                user="t1",
+
                 collection="default",
                 title="Node Verify Doc",
                 file_path="/docs/node-verify.pdf",
@@ -454,7 +454,7 @@ class TestExtractDocument:
             result = await coordinator.extract_document(
                 chunks=["Chunk 1 text.", "Chunk 2 text."],
                 document_id="doc-aggregate",
-                user="t1",
+
                 collection="default",
                 title="Aggregate Test",
                 file_path="/docs/aggregate.pdf",
@@ -498,7 +498,7 @@ class TestBlacklistFiltering:
             result = await coord.extract_chunk(
                 chunk_text=SAMPLE_CHUNK,
                 document_uri=DOC_URI,
-                user="test-user",
+
                 collection="default",
             )
 
@@ -531,7 +531,7 @@ class TestBlacklistFiltering:
             result = await coord.extract_chunk(
                 chunk_text=SAMPLE_CHUNK,
                 document_uri=DOC_URI,
-                user="test-user",
+
                 collection="default",
             )
 

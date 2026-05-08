@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.responses import RedirectResponse
 
 from app.core.config import settings
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.core.auth.base import UserProfile
 
 router = APIRouter()
@@ -80,7 +80,7 @@ async def get_open_api_endpoint(request: Request):
 @router.get("/download-openapi", include_in_schema=False)
 async def download_openapi_spec(
     request: Request,
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Descarga el esquema OpenAPI como archivo JSON (solo admin).

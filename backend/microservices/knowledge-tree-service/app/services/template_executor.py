@@ -3,7 +3,7 @@ TemplateExecutor — load and execute Cypher templates from YAML registry.
 
 Templates are loaded from config/cypher_templates.yaml on first access.
 Each template contains a Cypher pattern with $-prefixed parameters.
-Tenant isolation ($user, $collection) is injected automatically.
+Collection scope ($collection) is injected automatically.
 """
 
 import logging
@@ -63,14 +63,13 @@ class TemplateExecutor:
         tmpl = self.get_template(name)
         return tmpl["pattern"].strip()
 
-    def build_params(self, name: str, user: str, **kwargs) -> Dict[str, Any]:
+    def build_params(self, name: str, **kwargs) -> Dict[str, Any]:
         """Build parameter dict for a template query.
 
-        Injects user, collection (nullable), and query_limit automatically.
+        Injects collection (nullable) and query_limit automatically.
         All extra kwargs are passed through as query parameters.
         """
         params = {
-            "user": user,
             "collection": kwargs.pop("collection", None),
             "query_limit": kwargs.pop("query_limit", _DEFAULT_QUERY_LIMIT),
         }
@@ -81,13 +80,12 @@ class TemplateExecutor:
         self,
         name: str,
         client,
-        user: str,
         **kwargs,
     ) -> Dict[str, Any]:
         """Execute a template and return results with metadata."""
         tmpl = self.get_template(name)
         query = tmpl["pattern"].strip()
-        params = self.build_params(name, user=user, **kwargs)
+        params = self.build_params(name, **kwargs)
 
         rows = await client.execute_cypher(query, params=params)
 

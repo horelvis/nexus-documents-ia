@@ -56,7 +56,6 @@ import logging
 from contextvars import ContextVar
 from typing import Optional, Any, Dict, List
 
-from app.core.auth_headers import EVERYONE_ROLE, allowed_roles
 
 logger = logging.getLogger(__name__)
 
@@ -152,16 +151,14 @@ def get_user_roles() -> Optional[List[str]]:
 
 
 def get_user_roles_or_default() -> List[str]:
-    """Return the user roles folded with the EVERYONE wildcard.
+    """Return the user roles from execution context (informational only after ACL removal).
 
-    If no roles are set in the execution context, returns a list
-    containing only the EVERYONE sentinel so that public documents
-    are still reachable.
+    After role-based ACL removal, all documents are visible to all authenticated
+    users. This function is kept for API compatibility with callers that may
+    still read roles for logging/audit purposes.
     """
     roles = _user_roles_var.get()
-    if roles is None:
-        return [EVERYONE_ROLE]
-    return allowed_roles(roles)
+    return roles or []
 
 
 def get_is_admin() -> bool:

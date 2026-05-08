@@ -10,7 +10,7 @@ import logging
 
 from app.api.async_dependencies import get_current_user_async, get_async_db
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.services.lgpd_deletion_service import lgpd_deletion_service
 from app.db.models import LGPDDeletionAudit
 from app.schemas.user import UserResponse
@@ -200,7 +200,7 @@ async def request_user_deletion(
 async def admin_delete_user(
     user_id: str = Body(..., embed=True),
     reason: Optional[str] = Body(None, embed=True),
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
@@ -236,7 +236,7 @@ async def admin_delete_user(
 
 @router.get("/deletion-history")
 async def get_deletion_history(
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
     db: AsyncSession = Depends(get_async_db)
 ):
     """

@@ -43,7 +43,6 @@ import httpx
 # Allow imports from app when running inside the container
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.core.auth_headers import EVERYONE_ROLE
 from app.core.config import settings
 from app.services.falkordb_client import FalkorDBClient
 from app.services.triple_store import TripleStore
@@ -169,10 +168,10 @@ async def _resolve_duplicate_entities(
     """
     # Fetch all entity node URIs for this scope+collection
     rows = await client.execute_cypher(
-        "MATCH (n:Node {user: $user, collection: $collection}) "
+        "MATCH (n:Node {collection: $collection}) "
         "WHERE n.uri STARTS WITH 'nouxcube://entity/' "
         "RETURN n.uri AS uri",
-        {"user": scope, "collection": collection},
+        {"collection": collection},
     )
 
     if not rows:
@@ -204,32 +203,32 @@ async def _resolve_duplicate_entities(
             try:
                 # Move all outgoing rels from duplicate → canonical
                 await client.execute_cypher(
-                    "MATCH (dup:Node {uri: $dup_uri, user: $user, collection: $col})-[r:Rel]->(o) "
-                    "MATCH (canon:Node {uri: $canon_uri, user: $user, collection: $col}) "
-                    "MERGE (canon)-[r2:Rel {uri: r.uri, user: r.user, collection: r.collection}]->(o) "
+                    "MATCH (dup:Node {uri: $dup_uri, collection: $col})-[r:Rel]->(o) "
+                    "MATCH (canon:Node {uri: $canon_uri, collection: $col}) "
+                    "MERGE (canon)-[r2:Rel {uri: r.uri, collection: r.collection}]->(o) "
                     "ON CREATE SET r2.extraction_method = r.extraction_method, "
                     "r2.source_chunk = r.source_chunk "
                     "DELETE r",
                     {"dup_uri": dup_uri, "canon_uri": canonical,
-                     "user": scope, "col": collection},
+                     "col": collection},
                 )
                 # Move all incoming rels to duplicate → canonical
                 await client.execute_cypher(
-                    "MATCH (s)-[r:Rel]->(dup:Node {uri: $dup_uri, user: $user, collection: $col}) "
-                    "MATCH (canon:Node {uri: $canon_uri, user: $user, collection: $col}) "
-                    "MERGE (s)-[r2:Rel {uri: r.uri, user: r.user, collection: r.collection}]->(canon) "
+                    "MATCH (s)-[r:Rel]->(dup:Node {uri: $dup_uri, collection: $col}) "
+                    "MATCH (canon:Node {uri: $canon_uri, collection: $col}) "
+                    "MERGE (s)-[r2:Rel {uri: r.uri, collection: r.collection}]->(canon) "
                     "ON CREATE SET r2.extraction_method = r.extraction_method, "
                     "r2.source_chunk = r.source_chunk "
                     "DELETE r",
                     {"dup_uri": dup_uri, "canon_uri": canonical,
-                     "user": scope, "col": collection},
+                     "col": collection},
                 )
                 # Delete the orphaned duplicate node
                 await client.execute_cypher(
-                    "MATCH (n:Node {uri: $uri, user: $user, collection: $col}) "
+                    "MATCH (n:Node {uri: $uri, collection: $col}) "
                     "WHERE NOT (n)-[:Rel]-() AND NOT ()-[:Rel]->(n) "
                     "DELETE n",
-                    {"uri": dup_uri, "user": scope, "col": collection},
+                    {"uri": dup_uri, "col": collection},
                 )
                 merged_count += 1
                 logger.info(
@@ -257,14 +256,14 @@ async def _clear_graph(client: FalkorDBClient, scope: str) -> int:
     store = TripleStore(client)
     try:
         rows = await client.execute_cypher(
-            "MATCH (n) WHERE n.user = $user RETURN count(n) AS cnt",
-            {"user": scope},
+            "MATCH (n) RETURN count(n) AS cnt",
+            {},
         )
         count = int(rows[0]["cnt"]) if rows else 0
     except Exception:
         count = 0
 
-    await store.clear_tenant(user=scope)
+    await store.clear_scope()
     return count
 
 
@@ -277,7 +276,7 @@ async def reindex(
 ) -> None:
     t_total = time.monotonic()
 
-    scope = EVERYONE_ROLE
+    scope = "EVERYONE"
 
     print(f"\n{BOLD}TrustGraph Reindexation{RESET}")
     print(f"  scope      : {scope}")
@@ -395,7 +394,7 @@ async def reindex(
                     result = await coordinator.extract_document(
                         chunks=chunks,
                         document_id=doc_id,
-                        user=scope,
+
                         collection=collection,
                         title=title,
                         file_path=file_path,

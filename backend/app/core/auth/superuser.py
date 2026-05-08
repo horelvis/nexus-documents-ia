@@ -1,9 +1,12 @@
 """Superuser-only FastAPI dependency.
 
-Centralizes the `is_superuser` gate used across admin endpoints
+The single surviving authz dimension after the role-based ACL removal.
+Centralizes the ``is_superuser`` gate used across admin endpoints
 (agents catalog, weaviate inspection, prompt management). Replaces
-the per-router `_require_admin` helpers that proliferated after
-commit 940a3460.
+both the per-router ``_require_admin`` helpers and the legacy
+``require_role`` from ``app/core/auth/acl.py``.
+
+Set ``User.is_superuser=True`` via the manual ``PATCH /users/{id}/role`` flow.
 """
 from __future__ import annotations
 

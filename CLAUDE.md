@@ -42,7 +42,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture Overview
 
-**NouxCubeIA** is a **single-tenant intelligent document management system** with microservices architecture and role-based access control (KeyCloak OIDC/SAML + `roles: ARRAY(String)` on documents, `EVERYONE` wildcard).
+**NouxCubeIA** is a **single-tenant intelligent document management system** with microservices architecture. Authentication via KeyCloak OIDC/SAML; authorization is consolidated onto `User.is_superuser` for admin/config endpoints. All authenticated users can read every document in the deployment.
 
 - **Backend**: FastAPI (Python 3.9+), async/await throughout
 - **Frontend**: Next.js 15 App Router, TypeScript, OIDC/SAML auth
@@ -79,7 +79,7 @@ Single-tenant, on-premise only. Multi-tenancy and SaaS mode have been fully remo
 | Feature | Details |
 |---------|---------|
 | Auth | OIDC/SAML (KeyCloak) |
-| ACL | `roles: ARRAY(String)` on IndexedDocument, `EVERYONE` wildcard for public docs |
+| Authorization | `User.is_superuser` boolean — admin gating only; documents are visible to every authenticated user |
 | Documents | `indexed_documents` table |
 | Config | `DEPLOYMENT_MODE=on_premise` |
 
@@ -527,7 +527,7 @@ Then add `"slack"` to the `notification_channels` array in your triggers to rece
 ## Development Guidelines
 
 ### Database Operations
-- Use role-based access: `filter(Document.roles.overlap(user.roles))` (no tenant_id — single-tenant)
+- All authenticated users can access all documents (no role-based or tenant scoping). Admin endpoints use `Depends(require_superuser)` from `app.core.auth.superuser`.
 - Use async sessions: `async with get_async_db() as db:`
 - Create migrations safely: `cd backend && python scripts/create_migration.py -m "description" --autogenerate`
 - Fix multiple heads: `python scripts/create_migration.py --fix-heads`
@@ -540,8 +540,9 @@ Then add `"slack"` to the `notification_channels` array in your triggers to rece
 - Comprehensive Pydantic schema validation
 
 ### Security
-- All endpoints require auth except public ones
-- Role-based authorization for data access (KeyCloak roles, `EVERYONE` wildcard)
+- All endpoints require auth (KeyCloak OIDC/SAML).
+- Admin/config endpoints additionally gate on `User.is_superuser` via `Depends(require_superuser)`.
+- Per-document role filtering was removed 2026-05-04; do not reintroduce `roles.overlap(...)` patterns.
 - Never log secrets (API keys, tokens, passwords)
 - Environment variables for all secrets
 

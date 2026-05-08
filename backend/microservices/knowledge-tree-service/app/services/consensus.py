@@ -28,20 +28,19 @@ class ConsensusScorer:
     async def compute_for_subject(
         self,
         subject_uri: str,
-        user: str,
     ) -> List[Dict[str, Any]]:
         """Count independent sources per (subject, predicate) pair.
 
         Returns list of dicts with predicate, source_count, consensus_score.
         """
         query = (
-            "MATCH (s:Node {uri: $uri, user: $user})-[r:Rel]->(o) "
+            "MATCH (s:Node {uri: $uri})-[r:Rel]->(o) "
             "WHERE r.source_chunk IS NOT NULL "
             "WITH r.uri AS predicate, count(DISTINCT r.source_chunk) AS source_count "
             "RETURN predicate, source_count"
         )
         rows = await self._client.execute_cypher(
-            query, params={"uri": subject_uri, "user": user}
+            query, params={"uri": subject_uri}
         )
 
         results = []
@@ -58,26 +57,24 @@ class ConsensusScorer:
     async def compute_and_store(
         self,
         subject_uri: str,
-        user: str,
     ) -> int:
         """Compute consensus and SET consensus_count on edges.
 
         Returns number of predicates updated.
         """
-        results = await self.compute_for_subject(subject_uri, user)
+        results = await self.compute_for_subject(subject_uri)
         if not results:
             return 0
 
         for item in results:
             update_query = (
-                "MATCH (s:Node {uri: $uri, user: $user})-[r:Rel {uri: $predicate}]->(o) "
+                "MATCH (s:Node {uri: $uri})-[r:Rel {uri: $predicate}]->(o) "
                 "SET r.consensus_count = $count"
             )
             await self._client.execute_cypher(
                 update_query,
                 params={
                     "uri": subject_uri,
-                    "user": user,
                     "predicate": item["predicate"],
                     "count": item["source_count"],
                 },

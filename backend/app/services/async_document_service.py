@@ -17,7 +17,6 @@ from sqlalchemy.orm import selectinload, joinedload
 
 from app.core.config import settings
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user, EVERYONE_ROLE
 from app.db.models import Document, IndexedDocument, Tag, DocumentView, FolderMarker
 from app.db.async_database import AsyncSessionLocal
 from app.schemas.enums import IndexingStatus
@@ -40,7 +39,6 @@ class AsyncDocumentService:
         """
         self.user = user
         self.user_id: Optional[str] = user.sub if user else None
-        self.user_roles: List[str] = list(user.roles) if user else []
         self.storage_service = None
         self.collection_name: Optional[str] = None  # Weaviate collection name
         self._initialized = False
@@ -66,7 +64,6 @@ class AsyncDocumentService:
         }
         headers = {
             "X-API-Key": settings.MICROSERVICES_API_KEY,
-            "X-User-Roles": ",".join(self.user_roles),
         }
 
         try:
@@ -187,7 +184,6 @@ class AsyncDocumentService:
         headers = {
             "Content-Type": "application/json",
             "X-API-Key": self.microservices_api_key,
-            "X-User-Roles": ",".join(self.user_roles),
         }
 
         payload = {
@@ -260,7 +256,6 @@ class AsyncDocumentService:
         headers = {
             "Content-Type": "application/json",
             "X-API-Key": self.microservices_api_key,
-            "X-User-Roles": ",".join(self.user_roles),
         }
 
         payload = {
@@ -378,29 +373,13 @@ class AsyncDocumentService:
                 if document_ids is not None:
                     weaviate_filters["document_ids"] = [str(doc_id) for doc_id in document_ids]
 
-                # Build user context for ACL filtering
-                user_role_ids = []
-                is_admin = False
-                if self.user_id:
-                    try:
-                        from app.db.models import User
-                        user_result = await db.execute(
-                            select(User).options(selectinload(User.roles)).filter(User.id == uuid.UUID(self.user_id))
-                        )
-                        user = user_result.scalars().first()
-                        if user:
-                            user_role_ids = [str(role.id) for role in user.roles] if user.roles else []
-                            is_admin = user.is_admin
-                    except Exception as ctx_exc:
-                        logger.warning(f"Could not build user context for ACL filtering: {ctx_exc}")
-
-                # Call Weaviate hybrid search
+                # Call Weaviate hybrid search (all authenticated users see all documents)
                 search_result = await self._call_weaviate_search(
                     query=search,
                     limit=per_page * 2,  # Get more results to account for filtering
                     user_id=self.user_id,
-                    user_role_ids=user_role_ids,
-                    is_admin=is_admin,
+                    user_role_ids=[],
+                    is_admin=False,
                     filters=weaviate_filters,
                     search_type="hybrid",
                 )
@@ -450,24 +429,11 @@ class AsyncDocumentService:
             # SQL search when no search term or Weaviate fails
             logger.info("Using SQL-based document search (Document + IndexedDocument)")
 
-            # Role-based ACL filters (applied via clauses below).
-            # Document: use shared helper.
-            # IndexedDocument: inline role overlap clause (helper is Document-only).
+            # All authenticated users see all documents (role-based ACL removed).
             base_filters = []
-            if self.user:
-                from app.core.auth.acl import build_role_filter_clause
-                base_filters.append(build_role_filter_clause(self.user))
+            indexed_base_filters = []
 
-            indexed_base_filters = [IndexedDocument.roles.contains([EVERYONE_ROLE])]
-            if self.user_roles:
-                indexed_base_filters = [
-                    or_(
-                        IndexedDocument.roles.contains([EVERYONE_ROLE]),
-                        IndexedDocument.roles.overlap(list(self.user_roles)),
-                    )
-                ]
-
-            # ACL: Filter by accessible document IDs
+            # Filter by accessible document IDs
             if document_ids is not None:
                 base_filters.append(Document.id.in_(document_ids))
                 indexed_base_filters.append(IndexedDocument.id.in_(document_ids))
@@ -534,9 +500,6 @@ class AsyncDocumentService:
                         .where(Document.folder_path != "/")
                         .group_by(Document.folder_path)
                     )
-                if self.user:
-                    subfolder_query = filter_visible_to_user(subfolder_query, self.user)
-
                 # === IndexedDocument table subfolders ===
                 if current_folder:
                     indexed_subfolder_query = (
@@ -597,13 +560,10 @@ class AsyncDocumentService:
                         child_path = f"{current_folder}/{immediate_child}" if current_folder else f"/{immediate_child}"
 
                         # Count documents in this subfolder (recursively) from BOTH tables
-                        # Document table count (ACL filtered)
                         doc_count_query = (
                             select(func.count(Document.id))
                             .where(Document.folder_path.startswith(child_path))
                         )
-                        if self.user:
-                            doc_count_query = filter_visible_to_user(doc_count_query, self.user)
                         if document_ids is not None:
                             doc_count_query = doc_count_query.where(Document.id.in_(document_ids))
                         doc_count_result = await db.execute(doc_count_query)
@@ -973,7 +933,7 @@ class AsyncDocumentService:
                 mime_type=file.content_type,
                 category=category,
                 document_metadata=document_metadata if document_metadata else None,
-                roles=roles or [EVERYONE_ROLE],
+                roles=roles or [],
                 created_by=self.user_id,
                 indexed=IndexingStatus.PROCESSING,  # Set initial status
                 auto_classified=False,  # Manual upload is never auto-classified
@@ -1187,14 +1147,12 @@ class AsyncDocumentService:
 
         Note: This method only searches the Document table (SaaS uploads).
         For connector documents, use get_indexed_document() or get_any_document().
+        All authenticated users can see all documents (role-based ACL removed).
         """
         stmt = select(Document).filter(Document.id == doc_id).options(
             selectinload(Document.tags),
             selectinload(Document.creator)
         )
-        if self.user:
-            stmt = filter_visible_to_user(stmt, self.user)
-
         result = await db.execute(stmt)
         doc = result.scalar_one_or_none()
 
@@ -1204,18 +1162,9 @@ class AsyncDocumentService:
         return doc
 
     async def get_indexed_document(self, db: AsyncSession, doc_id: str) -> IndexedDocument:
-        """Get single document by ID from IndexedDocument table (connector documents)."""
+        """Get single document by ID from IndexedDocument table (connector documents).
+        All authenticated users can see all documents (role-based ACL removed)."""
         stmt = select(IndexedDocument).filter(IndexedDocument.id == uuid.UUID(doc_id))
-        if self.user_roles:
-            stmt = stmt.filter(
-                or_(
-                    IndexedDocument.roles.contains([EVERYONE_ROLE]),
-                    IndexedDocument.roles.overlap(list(self.user_roles)),
-                )
-            )
-        else:
-            stmt = stmt.filter(IndexedDocument.roles.contains([EVERYONE_ROLE]))
-
         result = await db.execute(stmt)
         doc = result.scalar_one_or_none()
 
@@ -1233,14 +1182,11 @@ class AsyncDocumentService:
         Returns:
             Dict with unified document format including 'source' field ('upload' or 'connector')
         """
-        # First try Document table
+        # First try Document table (all authenticated users see all documents)
         doc_stmt = select(Document).filter(Document.id == doc_id).options(
             selectinload(Document.tags),
             selectinload(Document.creator)
         )
-        if self.user:
-            doc_stmt = filter_visible_to_user(doc_stmt, self.user)
-
         doc_result = await db.execute(doc_stmt)
         doc = doc_result.scalar_one_or_none()
 
@@ -1254,16 +1200,6 @@ class AsyncDocumentService:
             indexed_stmt = select(IndexedDocument).filter(
                 IndexedDocument.id == uuid.UUID(doc_id)
             )
-            if self.user_roles:
-                indexed_stmt = indexed_stmt.filter(
-                    or_(
-                        IndexedDocument.roles.contains([EVERYONE_ROLE]),
-                        IndexedDocument.roles.overlap(list(self.user_roles)),
-                    )
-                )
-            else:
-                indexed_stmt = indexed_stmt.filter(IndexedDocument.roles.contains([EVERYONE_ROLE]))
-
             indexed_result = await db.execute(indexed_stmt)
             indexed_doc = indexed_result.scalar_one_or_none()
 
@@ -1541,11 +1477,8 @@ class AsyncDocumentService:
     async def add_tag(self, db: AsyncSession, doc_id: str, tag_name: str) -> Dict[str, Any]:
         """Add a tag to a document"""
         try:
-            # Get document (ACL-filtered)
+            # Get document
             stmt = select(Document).filter(Document.id == doc_id).options(selectinload(Document.tags))
-            if self.user:
-                stmt = filter_visible_to_user(stmt, self.user)
-
             result = await db.execute(stmt)
             document = result.scalar_one_or_none()
 
@@ -1584,11 +1517,8 @@ class AsyncDocumentService:
     async def remove_tag(self, db: AsyncSession, doc_id: str, tag_name: str) -> Dict[str, Any]:
         """Remove a tag from a document"""
         try:
-            # Get document (ACL-filtered)
+            # Get document
             stmt = select(Document).filter(Document.id == doc_id).options(selectinload(Document.tags))
-            if self.user:
-                stmt = filter_visible_to_user(stmt, self.user)
-            
             result = await db.execute(stmt)
             document = result.scalar_one_or_none()
             
@@ -1643,31 +1573,20 @@ class AsyncDocumentService:
         """
         try:
             async with AsyncSessionLocal() as db:
-                # Check if document exists in Document table (ACL-filtered)
-                doc_stmt = select(Document).filter(Document.id == document_id)
-                if self.user:
-                    doc_stmt = filter_visible_to_user(doc_stmt, self.user)
-                doc_result = await db.execute(doc_stmt)
+                # Check if document exists in Document table
+                doc_result = await db.execute(
+                    select(Document).filter(Document.id == document_id)
+                )
                 document = doc_result.scalar_one_or_none()
 
                 # If not found, check IndexedDocument table
                 if not document:
                     try:
-                        indexed_stmt = select(IndexedDocument).filter(
-                            IndexedDocument.id == uuid.UUID(document_id)
+                        indexed_result = await db.execute(
+                            select(IndexedDocument).filter(
+                                IndexedDocument.id == uuid.UUID(document_id)
+                            )
                         )
-                        if self.user_roles:
-                            indexed_stmt = indexed_stmt.filter(
-                                or_(
-                                    IndexedDocument.roles.contains([EVERYONE_ROLE]),
-                                    IndexedDocument.roles.overlap(list(self.user_roles)),
-                                )
-                            )
-                        else:
-                            indexed_stmt = indexed_stmt.filter(
-                                IndexedDocument.roles.contains([EVERYONE_ROLE])
-                            )
-                        indexed_result = await db.execute(indexed_stmt)
                         indexed_doc = indexed_result.scalar_one_or_none()
 
                         if not indexed_doc:
@@ -1708,15 +1627,13 @@ class AsyncDocumentService:
         """Get recently viewed documents for the user or tenant"""
         try:
             async with AsyncSessionLocal() as db:
-                # Base query with Document and DocumentView joined (ACL-filtered)
+                # Base query with Document and DocumentView joined
                 query = select(
                     Document,
                     func.max(DocumentView.viewed_at).label("last_viewed_at")
                 ).join(
                     DocumentView, Document.id == DocumentView.document_id
                 )
-                if self.user:
-                    query = filter_visible_to_user(query, self.user)
 
                 # Filter by user if specified
                 if user_specific and self.user_id:

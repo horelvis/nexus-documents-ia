@@ -66,7 +66,6 @@ class ExtractionCoordinator:
         self,
         chunk_text: str,
         document_uri: str,
-        user: str,
         collection: str,
         chunk_offset: int = 0,
         model_name: str = "Qwen3.5-9B",
@@ -79,7 +78,6 @@ class ExtractionCoordinator:
         Args:
             chunk_text:    Raw text of the chunk.
             document_uri:  URI of the parent document :Node.
-            user:          Tenant/user identifier.
             collection:    Collection scope.
             chunk_offset:  Character offset of this chunk within the document.
             model_name:    LLM model used for provenance metadata.
@@ -228,7 +226,6 @@ class ExtractionCoordinator:
                 chunk_uri=chunk_uri,
                 document_uri=document_uri,
                 chunk_offset=chunk_offset,
-                user=user,
                 collection=collection,
             )
         except Exception as exc:
@@ -305,7 +302,7 @@ class ExtractionCoordinator:
         triples_created = 0
         try:
             triples_created = await self._store.batch_store_triples(
-                batch_triples, user=user, collection=collection
+                batch_triples, collection=collection
             )
         except Exception as exc:
             # Pipeline-critical: batch_store failure means NO triples are
@@ -336,7 +333,6 @@ class ExtractionCoordinator:
         self,
         chunks: List[str],
         document_id: str,
-        user: str,
         collection: str,
         title: str,
         file_path: str,
@@ -359,7 +355,6 @@ class ExtractionCoordinator:
         try:
             document_uri = await self._store.store_document_node(
                 document_id=document_id,
-                user=user,
                 collection=collection,
                 title=title,
                 file_path=file_path,
@@ -380,7 +375,6 @@ class ExtractionCoordinator:
                 return await self.extract_chunk(
                     chunk_text=text,
                     document_uri=document_uri,
-                    user=user,
                     collection=collection,
                     chunk_offset=offset,
                 )
@@ -413,7 +407,6 @@ class ExtractionCoordinator:
             await self._provenance.batch_record_extractions(
                 document_uri=document_uri,
                 chunks_metadata=provenance_metadata,
-                user=user,
                 collection=collection,
             )
         except Exception as exc:
@@ -427,9 +420,7 @@ class ExtractionCoordinator:
 
         async def _detect_subject(subject_uri: str) -> int:
             async with contra_sem:
-                return await detector.detect_and_mark(
-                    subject_uri=subject_uri, user=user
-                )
+                return await detector.detect_and_mark(subject_uri=subject_uri)
 
         contra_tasks = [_detect_subject(uri) for uri in all_subject_uris]
         contra_results = await asyncio.gather(*contra_tasks, return_exceptions=True)
@@ -445,7 +436,7 @@ class ExtractionCoordinator:
 
         # Step 3b: Apply confidence penalty to contradicted edges
         try:
-            await detector.apply_confidence_penalty(user=user)
+            await detector.apply_confidence_penalty()
         except Exception as exc:
             errors.append(f"confidence_penalty: {exc}")
             logger.warning("Confidence penalty failed: %s", exc)
@@ -456,9 +447,7 @@ class ExtractionCoordinator:
 
         async def _score_subject(subject_uri: str) -> int:
             async with consensus_sem:
-                return await consensus_scorer.compute_and_store(
-                    subject_uri=subject_uri, user=user
-                )
+                return await consensus_scorer.compute_and_store(subject_uri=subject_uri)
 
         consensus_tasks = [_score_subject(uri) for uri in all_subject_uris]
         consensus_results = await asyncio.gather(*consensus_tasks, return_exceptions=True)
@@ -489,7 +478,6 @@ class ExtractionCoordinator:
 
             resolver = EntityResolver(self._store._client)
             resolver_summaries = await resolver.resolve_all_supported(
-                user=user,
                 collection=collection,
             )
         except Exception as exc:
@@ -558,7 +546,6 @@ class ExtractionCoordinator:
         ):
             asyncio.create_task(
                 _safe_populate_embeddings(
-                    scope=user,
                     collection=collection,
                     subset_uris=tuple(all_subject_uris),
                 )
@@ -579,7 +566,6 @@ class ExtractionCoordinator:
 
 
 async def _safe_populate_embeddings(
-    scope: str,
     collection: str,
     subset_uris: tuple,
 ) -> None:
@@ -589,7 +575,7 @@ async def _safe_populate_embeddings(
     try:
         from app.services.entity_embedding import populate_entity_embeddings_subset
         upserted = await populate_entity_embeddings_subset(
-            scope=scope, collection=collection, subset_uris=subset_uris,
+            scope=collection, collection=collection, subset_uris=subset_uris,
         )
         logger.info("Auto entity embedding refreshed %d entities", upserted)
     except Exception as exc:

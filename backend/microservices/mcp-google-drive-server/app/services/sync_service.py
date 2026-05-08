@@ -67,8 +67,7 @@ async def run_sync_job(
         row = await conn.fetchrow(
             """
             SELECT id, name, config, is_active, sync_enabled,
-                   last_health_check, created_by_id, connector_type,
-                   default_document_roles
+                   last_health_check, created_by_id, connector_type
             FROM connectors WHERE id = $1
             """,
             UUID(connector_id),
@@ -105,9 +104,6 @@ async def run_sync_job(
             else:
                 return {"success": False, "error": "No owner found for documents"}
 
-        # Default roles for ingested documents — from connector config, or EVERYONE
-        default_roles = list(row["default_document_roles"] or ["EVERYONE"])
-
         # Create Drive service
         drive = DriveService(access_token, config)
 
@@ -138,7 +134,6 @@ async def run_sync_job(
                         file=file,
                         connector_id=UUID(connector_id),
                         owner_id=owner_id,
-                        default_roles=default_roles,
                         stats=stats,
                         full_sync=full_sync,
                     )
@@ -199,7 +194,6 @@ async def _process_drive_file(
     file,
     connector_id: UUID,
     owner_id: UUID,
-    default_roles: List[str],
     stats: Dict[str, Any],
     full_sync: bool = False,
 ) -> None:
@@ -302,7 +296,7 @@ async def _process_drive_file(
             external_path, owner_id, title,
             None, mime_type, file_extension, size_bytes,
             file.created_at, file.modified_at, "pending",
-            default_roles,
+            ["EVERYONE"],  # vestigial field — physically removed in Commit 5
         )
         stats["items_new"] += 1
 

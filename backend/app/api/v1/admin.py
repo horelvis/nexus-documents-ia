@@ -10,7 +10,7 @@ import logging
 import os
 
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.db.async_database import get_async_db
 from app.db.models import User, Document, DocumentMetrics, DocumentView, IndexedDocument
 from sqlalchemy import text
@@ -26,7 +26,7 @@ async def list_users(
     skip: int = 0,
     limit: int = 100,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Lista todos los usuarios del sistema (solo administradores).
@@ -46,7 +46,7 @@ async def list_users(
 async def get_user(
     user_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Obtiene información detallada de un usuario (solo administradores).
@@ -65,7 +65,7 @@ async def update_user(
     user_id: UUID,
     user_in: UserUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Actualiza un usuario existente (solo administradores).
@@ -103,7 +103,7 @@ async def update_user(
 async def delete_user(
     user_id: UUID,
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Elimina un usuario (solo administradores).
@@ -133,7 +133,7 @@ async def list_all_documents(
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Lista todos los documentos del sistema (solo administradores).
@@ -150,7 +150,7 @@ async def list_all_documents(
 @router.get("/stats", response_model=dict)
 async def get_system_stats(
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Obtiene estadísticas generales del sistema (solo administradores).
@@ -255,7 +255,7 @@ async def get_system_stats(
 async def get_document_activity_stats(
     time_period_days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """Obtiene estadísticas de actividad de documentos para el panel de administrador"""
     try:
@@ -311,7 +311,7 @@ async def get_document_activity_stats(
 async def delete_all_documents(
     confirm: bool = Body(..., embed=True),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Elimina todos los documentos del tenant actual (solo administradores).
@@ -448,7 +448,7 @@ async def delete_all_documents(
 async def retry_failed_indexing(
     confirm: bool = Body(..., embed=True),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Reintentar indexado de todos los documentos fallidos del tenant (solo administradores).
@@ -516,7 +516,7 @@ async def retry_failed_indexing(
 @router.post("/clear-vector-db", response_model=dict)
 async def clear_vector_database(
     confirm: bool = Body(..., embed=True),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Limpia la base de datos vectorial del tenant actual (solo administradores).
@@ -584,7 +584,7 @@ async def run_maintenance(
     clean_orphaned_files: bool = Body(True),
     rebuild_search_index: bool = Body(False),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserProfile = Depends(require_role("ADMIN"))
+    current_user: UserProfile = Depends(require_superuser)
 ):
     """
     Ejecuta operaciones de mantenimiento en el sistema (solo administradores).

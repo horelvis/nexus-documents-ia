@@ -58,7 +58,6 @@ class GraphAssembler:
     async def _resolve_labels(
         self,
         uris: set,
-        user: str,
     ) -> dict:
         """Batch-resolve Node URIs to human-readable labels via core/label lookup.
 
@@ -72,13 +71,12 @@ class GraphAssembler:
         try:
             query = """
                 UNWIND $uris AS target_uri
-                MATCH (n:Node {uri: target_uri, user: $user})
+                MATCH (n:Node {uri: target_uri})
                       -[:Rel {uri: 'nouxcube://predicate/core/label'}]->(l:Literal)
                 RETURN n.uri AS uri, l.value AS label
             """
             rows = await self._client.execute_cypher(query, params={
                 "uris": list(uris),
-                "user": user,
             })
             for row in rows:
                 label_map[row["uri"]] = row["label"]
@@ -96,7 +94,6 @@ class GraphAssembler:
         self,
         entity_uri: str,
         report_type: str,
-        user: str,
         collection: Optional[str] = None,
     ) -> AssembledGraph:
         """Assemble graph data for a report.
@@ -104,7 +101,6 @@ class GraphAssembler:
         Args:
             entity_uri: Main entity URI for the report.
             report_type: Template name (entity_profile, compliance_report, contract_summary).
-            user: Tenant identifier.
             collection: Optional collection scope.
 
         Returns:
@@ -126,7 +122,6 @@ class GraphAssembler:
             label_result = await self._executor.execute(
                 name="entity_relations",
                 client=self._client,
-                user=user,
                 collection=collection,
                 entity_uri=entity_uri,
                 query_limit=5,
@@ -157,7 +152,6 @@ class GraphAssembler:
                     result = await self._executor.execute(
                         name=tmpl_name,
                         client=self._client,
-                        user=user,
                         collection=collection,
                         entity_uri=entity_uri,
                         query_limit=100,
@@ -213,7 +207,7 @@ class GraphAssembler:
             if f.object_type == "node" and f.object.startswith("nouxcube://")
         }
         all_uris_to_resolve = node_uris | all_sources
-        label_map = await self._resolve_labels(all_uris_to_resolve, user)
+        label_map = await self._resolve_labels(all_uris_to_resolve)
         for fact in all_facts:
             if fact.object_type == "node" and fact.object in label_map:
                 fact.object = label_map[fact.object]

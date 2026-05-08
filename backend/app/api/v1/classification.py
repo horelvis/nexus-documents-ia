@@ -296,15 +296,12 @@ async def classify_existing_document(
     """
     from uuid import UUID
     from app.db.models import Document
-    from app.core.auth.acl import filter_visible_to_user
     from app.services.folder_service import FolderService
 
-    # Get document
-    query = filter_visible_to_user(
-        select(Document).where(Document.id == UUID(document_id)),
-        current_user,
+    # Get document (all authenticated users can see all documents)
+    result = await db.execute(
+        select(Document).where(Document.id == UUID(document_id))
     )
-    result = await db.execute(query)
     document = result.scalar_one_or_none()
 
     if not document:

@@ -29,7 +29,6 @@ from sqlalchemy.orm import selectinload
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import filter_visible_to_user
 from app.db.async_database import get_async_db
 from app.db.models import (
     User, Document, IndexedDocument,
@@ -676,11 +675,9 @@ async def add_source(
     word_count = 0
 
     if source_data.document_id:
-        doc_query = filter_visible_to_user(
-            select(Document).where(Document.id == source_data.document_id),
-            current_user,
+        doc_result = await db.execute(
+            select(Document).where(Document.id == source_data.document_id)
         )
-        doc_result = await db.execute(doc_query)
         document = doc_result.scalar_one_or_none()
 
         if not document:

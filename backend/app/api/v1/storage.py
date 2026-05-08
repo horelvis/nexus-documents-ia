@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 
 from app.api.async_dependencies import get_current_user_async
 from app.core.auth.base import UserProfile
-from app.core.auth.acl import require_role
+from app.core.auth.superuser import require_superuser
 from app.services.async_storage_service import AsyncStorageService
 
 router = APIRouter()
@@ -49,7 +49,7 @@ async def delete_file(
 
 @router.get("/buckets", response_model=List[str])
 async def list_buckets(
-    current_user: UserProfile = Depends(require_role("ADMIN")),
+    current_user: UserProfile = Depends(require_superuser),
 ):
     """
     Lista todos los buckets disponibles (solo administradores).

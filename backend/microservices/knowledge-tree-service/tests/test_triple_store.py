@@ -29,7 +29,7 @@ class TestMergeNode:
         """merge_node creates a :Node that can be matched by URI."""
         store = _make_store(falkordb_client)
         uri = URIBuilder.entity("col1", "Juan García")
-        await store.merge_node(uri, user="u1", collection="col1")
+        await store.merge_node(uri, collection="col1")
 
         rows = await falkordb_client.execute_cypher(
             "MATCH (n:Node {uri: $uri}) RETURN n",
@@ -42,12 +42,12 @@ class TestMergeNode:
         """Two merges with the same URI produce exactly one :Node."""
         store = _make_store(falkordb_client)
         uri = URIBuilder.entity("col1", "ACME SA")
-        await store.merge_node(uri, user="u1", collection="col1")
-        await store.merge_node(uri, user="u1", collection="col1")
+        await store.merge_node(uri, collection="col1")
+        await store.merge_node(uri, collection="col1")
 
         rows = await falkordb_client.execute_cypher(
-            "MATCH (n:Node {uri: $uri, user: $user, collection: $col}) RETURN count(n) AS cnt",
-            params={"uri": uri, "user": "u1", "col": "col1"},
+            "MATCH (n:Node {uri: $uri, collection: $col}) RETURN count(n) AS cnt",
+            params={"uri": uri, "col": "col1"},
         )
         assert rows[0]["cnt"] == 1
 
@@ -61,37 +61,37 @@ class TestMergeLiteral:
     async def test_creates_literal(self, falkordb_client):
         """merge_literal creates a :Literal node in the graph."""
         store = _make_store(falkordb_client)
-        await store.merge_literal("person", user="u1", collection="col1")
+        await store.merge_literal("person", collection="col1")
 
         rows = await falkordb_client.execute_cypher(
-            "MATCH (l:Literal {value: $val, user: $user, collection: $col}) RETURN l",
-            params={"val": "person", "user": "u1", "col": "col1"},
+            "MATCH (l:Literal {value: $val, collection: $col}) RETURN l",
+            params={"val": "person", "col": "col1"},
         )
         assert len(rows) == 1
 
     @pytest.mark.asyncio
     async def test_dedup_same_value(self, falkordb_client):
-        """Two merges with identical (value, user, collection) produce one :Literal."""
+        """Two merges with identical (value, collection) produce one :Literal."""
         store = _make_store(falkordb_client)
-        await store.merge_literal("document", user="u1", collection="col1")
-        await store.merge_literal("document", user="u1", collection="col1")
+        await store.merge_literal("document", collection="col1")
+        await store.merge_literal("document", collection="col1")
 
         rows = await falkordb_client.execute_cypher(
-            "MATCH (l:Literal {value: $val, user: $user, collection: $col}) RETURN count(l) AS cnt",
-            params={"val": "document", "user": "u1", "col": "col1"},
+            "MATCH (l:Literal {value: $val, collection: $col}) RETURN count(l) AS cnt",
+            params={"val": "document", "col": "col1"},
         )
         assert rows[0]["cnt"] == 1
 
     @pytest.mark.asyncio
-    async def test_different_tenants_separate(self, falkordb_client):
-        """Same value for different users produces two separate :Literal nodes."""
+    async def test_different_collections_separate(self, falkordb_client):
+        """Same value for different collections produces two separate :Literal nodes."""
         store = _make_store(falkordb_client)
-        await store.merge_literal("contrato", user="u1", collection="col1")
-        await store.merge_literal("contrato", user="u2", collection="col1")
+        await store.merge_literal("contrato", collection="col1")
+        await store.merge_literal("contrato", collection="col2")
 
         rows = await falkordb_client.execute_cypher(
-            "MATCH (l:Literal {value: $val, collection: $col}) RETURN count(l) AS cnt",
-            params={"val": "contrato", "col": "col1"},
+            "MATCH (l:Literal {value: $val}) RETURN count(l) AS cnt",
+            params={"val": "contrato"},
         )
         assert rows[0]["cnt"] == 2
 
@@ -105,19 +105,18 @@ class TestCreateRel:
     async def test_creates_relationship_node_to_literal(self, falkordb_client):
         """create_rel connects a :Node to a :Literal via a :Rel edge."""
         store = _make_store(falkordb_client)
-        user, col = "u1", "col1"
+        col = "col1"
 
         subject_uri = URIBuilder.entity(col, "Juan")
         predicate_uri = URIBuilder.predicate("core", "type")
         literal_val = "person"
 
-        await store.merge_node(subject_uri, user=user, collection=col)
-        await store.merge_literal(literal_val, user=user, collection=col)
+        await store.merge_node(subject_uri, collection=col)
+        await store.merge_literal(literal_val, collection=col)
         await store.create_rel(
             subject_uri=subject_uri,
             predicate_uri=predicate_uri,
             object_value=literal_val,
-            user=user,
             collection=col,
             object_is_node=False,
             extraction_method="ner",
@@ -134,19 +133,18 @@ class TestCreateRel:
     async def test_rel_to_node(self, falkordb_client):
         """create_rel connects a :Node to another :Node, preserving extraction metadata."""
         store = _make_store(falkordb_client)
-        user, col = "u1", "col1"
+        col = "col1"
 
         subject_uri = URIBuilder.entity(col, "Juan")
         object_uri = URIBuilder.entity(col, "ACME SA")
         predicate_uri = URIBuilder.predicate("legal", "empleado-de")
 
-        await store.merge_node(subject_uri, user=user, collection=col)
-        await store.merge_node(object_uri, user=user, collection=col)
+        await store.merge_node(subject_uri, collection=col)
+        await store.merge_node(object_uri, collection=col)
         await store.create_rel(
             subject_uri=subject_uri,
             predicate_uri=predicate_uri,
             object_value=object_uri,
-            user=user,
             collection=col,
             object_is_node=True,
             extraction_method="llm",
@@ -172,7 +170,7 @@ class TestStoreTriple:
     async def test_store_entity_type_triple(self, falkordb_client):
         """store_triple creates (Juan)-[:Rel core/type]->(Literal 'person')."""
         store = _make_store(falkordb_client)
-        user, col = "u1", "col1"
+        col = "col1"
 
         subject_uri = await store.store_triple(
             subject_name="Juan García",
@@ -180,7 +178,6 @@ class TestStoreTriple:
             predicate_name="type",
             object_value="person",
             object_is_node=False,
-            user=user,
             collection=col,
             extraction_method="ner",
             source_chunk="chunk-001",
@@ -201,7 +198,7 @@ class TestStoreTriple:
     async def test_store_entity_to_entity_triple(self, falkordb_client):
         """store_triple creates (Juan)-[:Rel legal/empleado-de]->(ACME) as Node→Node."""
         store = _make_store(falkordb_client)
-        user, col = "u1", "col1"
+        col = "col1"
 
         subject_uri = await store.store_triple(
             subject_name="Juan",
@@ -209,7 +206,6 @@ class TestStoreTriple:
             predicate_name="empleado-de",
             object_value="ACME SA",
             object_is_node=True,
-            user=user,
             collection=col,
             extraction_method="llm",
             source_chunk="chunk-007",
@@ -250,11 +246,10 @@ class TestStoreDocumentNode:
     async def test_creates_document_with_metadata(self, falkordb_client):
         """store_document_node creates doc :Node with core/type, core/label triples."""
         store = _make_store(falkordb_client)
-        user, col = "u1", "col1"
+        col = "col1"
 
         doc_uri = await store.store_document_node(
             document_id="doc-001",
-            user=user,
             collection=col,
             title="Contrato de Trabajo",
             file_path="/docs/contratos/ct001.pdf",
@@ -289,11 +284,10 @@ class TestStoreDocumentNode:
     async def test_document_contained_in_folder(self, falkordb_client):
         """store_document_node creates a contained-in edge to a folder :Node."""
         store = _make_store(falkordb_client)
-        user, col = "u1", "col1"
+        col = "col1"
 
         doc_uri = await store.store_document_node(
             document_id="doc-002",
-            user=user,
             collection=col,
             title="Nómina Enero",
             file_path="/docs/nominas/nom001.pdf",
@@ -316,19 +310,19 @@ class TestStoreDocumentNode:
 class TestClearOperations:
     @pytest.mark.asyncio
     async def test_clear_collection(self, falkordb_client):
-        """clear_collection removes all nodes/literals for a given user+collection."""
+        """clear_collection removes all nodes/literals for a given collection."""
         store = _make_store(falkordb_client)
-        user, col = "u1", "col1"
+        col = "col1"
 
-        await store.merge_node(URIBuilder.entity(col, "Entity A"), user=user, collection=col)
-        await store.merge_literal("some value", user=user, collection=col)
+        await store.merge_node(URIBuilder.entity(col, "Entity A"), collection=col)
+        await store.merge_literal("some value", collection=col)
 
-        await store.clear_collection(user=user, collection=col)
+        await store.clear_collection(collection=col)
 
         rows = await falkordb_client.execute_cypher(
-            "MATCH (n) WHERE (n:Node OR n:Literal) AND n.user = $user AND n.collection = $col "
+            "MATCH (n) WHERE (n:Node OR n:Literal) AND n.collection = $col "
             "RETURN count(n) AS cnt",
-            params={"user": user, "col": col},
+            params={"col": col},
         )
         assert rows[0]["cnt"] == 0
 
@@ -336,44 +330,33 @@ class TestClearOperations:
     async def test_clear_collection_isolates_other_collections(self, falkordb_client):
         """clear_collection does not affect nodes in other collections."""
         store = _make_store(falkordb_client)
-        user = "u1"
 
-        await store.merge_node(URIBuilder.entity("col1", "Entity A"), user=user, collection="col1")
-        await store.merge_node(URIBuilder.entity("col2", "Entity B"), user=user, collection="col2")
+        await store.merge_node(URIBuilder.entity("col1", "Entity A"), collection="col1")
+        await store.merge_node(URIBuilder.entity("col2", "Entity B"), collection="col2")
 
-        await store.clear_collection(user=user, collection="col1")
+        await store.clear_collection(collection="col1")
 
         rows = await falkordb_client.execute_cypher(
-            "MATCH (n:Node {user: $user, collection: $col}) RETURN count(n) AS cnt",
-            params={"user": user, "col": "col2"},
+            "MATCH (n:Node {collection: $col}) RETURN count(n) AS cnt",
+            params={"col": "col2"},
         )
         assert rows[0]["cnt"] == 1
 
     @pytest.mark.asyncio
-    async def test_clear_tenant(self, falkordb_client):
-        """clear_tenant removes all nodes across all collections for a user."""
+    async def test_clear_scope(self, falkordb_client):
+        """clear_scope removes all nodes across all collections."""
         store = _make_store(falkordb_client)
-        user = "u1"
 
-        await store.merge_node(URIBuilder.entity("col1", "Entity A"), user=user, collection="col1")
-        await store.merge_node(URIBuilder.entity("col2", "Entity B"), user=user, collection="col2")
-        # Another tenant — should NOT be deleted
-        await store.merge_node(URIBuilder.entity("col1", "Entity C"), user="u2", collection="col1")
+        await store.merge_node(URIBuilder.entity("col1", "Entity A"), collection="col1")
+        await store.merge_node(URIBuilder.entity("col2", "Entity B"), collection="col2")
 
-        await store.clear_tenant(user=user)
+        await store.clear_scope()
 
         rows = await falkordb_client.execute_cypher(
-            "MATCH (n) WHERE (n:Node OR n:Literal) AND n.user = $user RETURN count(n) AS cnt",
-            params={"user": user},
+            "MATCH (n) WHERE (n:Node OR n:Literal) RETURN count(n) AS cnt",
+            params={},
         )
         assert rows[0]["cnt"] == 0
-
-        # u2 node must survive
-        rows = await falkordb_client.execute_cypher(
-            "MATCH (n:Node {user: $user}) RETURN count(n) AS cnt",
-            params={"user": "u2"},
-        )
-        assert rows[0]["cnt"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -387,20 +370,19 @@ class TestProvenance:
         store = _make_store(falkordb_client)
         prov = ProvenanceService(store)
         doc_uri = URIBuilder.document("default", "doc-1")
-        await store.merge_node(uri=doc_uri, user="t1", collection="default")
+        await store.merge_node(uri=doc_uri, collection="default")
         ext_uri = await prov.record_extraction(
             document_uri=doc_uri,
             extraction_method="llm_relationships",
             model_name="Qwen3.5-9B",
             chunk_text="Juan García trabaja en ACME Corp desde 2020.",
             chunk_offset=1500,
-            user="t1",
             collection="default",
         )
         assert ext_uri.startswith("nouxcube://extraction/")
         # Verify provenance triples
         result = await falkordb_client.execute_cypher(
-            "MATCH (e:Node {uri: $uri})-[r:Rel]->(o) WHERE r.user = 't1' "
+            "MATCH (e:Node {uri: $uri})-[r:Rel]->(o) "
             "RETURN r.uri AS pred, CASE WHEN o:Node THEN o.uri ELSE o.value END AS obj",
             {"uri": ext_uri},
         )
@@ -438,7 +420,7 @@ class TestBatchStoreTriples:
                 "chunk": "chunk-001",
             },
         ]
-        await store.batch_store_triples(triples, user="u1", collection="col")
+        await store.batch_store_triples(triples, collection="col")
 
         rows = await falkordb_client.execute_cypher(
             "MATCH (s:Node {uri: $s})-[r:Rel]->(o:Node {uri: $o}) RETURN r.uri AS p",
@@ -455,5 +437,5 @@ class TestBatchStoreTriples:
     @pytest.mark.asyncio
     async def test_batch_empty_list(self, falkordb_client):
         store = _make_store(falkordb_client)
-        result = await store.batch_store_triples([], user="u1", collection="col")
+        result = await store.batch_store_triples([], collection="col")
         assert result == 0
