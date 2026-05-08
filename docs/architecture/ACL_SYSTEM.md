@@ -1,10 +1,12 @@
-# ACL System — REMOVED (2026-05-04)
+# ACL System — REMOVED (2026-05-08)
 
 > **Status:** This document describes a system that **no longer exists**. It is preserved as historical reference.
+>
+> Timeline: spec drafted 2026-05-04; implementation pushed 2026-05-06 (PR #2); merged to `development` as `dc718acd` on 2026-05-08.
 
 ## What changed
 
-The role-based access control (ACL) system documented previously was removed across the entire stack on 2026-05-04. After the removal:
+The role-based access control (ACL) system documented previously was removed across the entire stack in PR #2 (merged 2026-05-08). After the removal:
 
 - **Authentication** continues to ride on KeyCloak (OIDC/SAML).
 - **Authorization** is consolidated onto a single boolean: `User.is_superuser`. Admin and configuration endpoints gate on `Depends(require_superuser)` from `app.core.auth.superuser`.

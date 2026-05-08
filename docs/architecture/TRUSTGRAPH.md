@@ -60,10 +60,14 @@ Everything is represented with 3 label types and 1 edge type:
 
 | Label | Purpose | Key Properties |
 |-------|---------|----------------|
-| `:Node` | Named entities, documents, folders, concepts | `uri`, `user` (ACL scope property; currently always `EVERYONE` per role-isolation deferral — see ACL_SYSTEM.md), `collection`, `created_at` |
-| `:Literal` | Scalar values (dates, amounts, descriptions) | `value`, `user`, `collection` |
-| `:Rel` | ALL semantic relationships | `uri` (predicate), `user`, `collection`, `extraction_method`, `source_chunk`, `valid_from`, `valid_until` |
-| `:CollectionMetadata` | Lifecycle sentinel per collection | `user`, `collection`, `created_at`, `source_type` |
+| `:Node` | Named entities, documents, folders, concepts | `uri`, `collection`, `created_at` |
+| `:Literal` | Scalar values (dates, amounts, descriptions) | `value`, `collection` |
+| `:Rel` | ALL semantic relationships | `uri` (predicate), `collection`, `extraction_method`, `source_chunk`, `valid_from`, `valid_until` |
+| `:CollectionMetadata` | Lifecycle sentinel per collection | `collection`, `created_at`, `source_type` |
+
+The `user` property (always `'EVERYONE'`) was dropped 2026-05-08 along with role-based ACL — see
+[ACL_SYSTEM.md](ACL_SYSTEM.md). Any leftover `user` properties on existing nodes/rels are removed by
+`backend/scripts/kts_remove_user_property.py` during the post-merge runbook.
 
 ### URI Scheme
 

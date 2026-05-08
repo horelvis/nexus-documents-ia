@@ -17,12 +17,13 @@ events. Services communicate over an internal Docker bridge network (`backend-ne
 and Redis Streams. TLS termination for browser-facing endpoints is handled by an nginx reverse proxy
 (`tls-proxy`).
 
-The only **security boundary** is role-based access control. Every authenticated request carries a
-KeyCloak-issued JWT. The backend extracts the user's group memberships, maps them to canonical role
-identifiers via `backend/app/config/role_mapping.yaml`, and enforces visibility through
-`filter_visible_to_user()` in `backend/app/core/auth/acl.py`. Documents tagged `EVERYONE` are visible
-to all authenticated users; all others require the caller to hold a matching role. There is no
-`tenant_id`, no per-organization database schema, and no multi-tenancy middleware.
+The only **security boundary** is authentication. Every request carries a KeyCloak-issued JWT
+validated through `AuthProviderFactory.verify_token()`; once authenticated, all users can read every
+document in the deployment. Admin/config endpoints additionally gate on `User.is_superuser` via
+`Depends(require_superuser)` from `backend/app/core/auth/superuser.py`. Per-document role-based ACL
+(`roles: ARRAY(String)` + `EVERYONE` wildcard + `filter_visible_to_user()`) was removed 2026-05-08;
+see [ACL_SYSTEM.md](ACL_SYSTEM.md). There is no `tenant_id`, no per-organization database schema, and
+no multi-tenancy middleware.
 
 ---
 
@@ -175,8 +176,8 @@ User (browser)
   │  POST /api/v1/emma/query/stream  (SSE, JWT in Authorization header)
   ▼
 Main API (api :8000)
-  │  Validate JWT; extract user_id + roles
-  │  Proxy → emma-agent-service  (X-User-Id, X-User-Roles, X-API-Key headers)
+  │  Validate JWT; extract user_id (roles preserved as informational metadata only)
+  │  Proxy → emma-agent-service  (X-User-Id, X-API-Key headers)
   ▼
 emma-agent-service (:8009)
   │  LangGraph StateGraph:
@@ -223,11 +224,11 @@ backend/
 │   ├── api/v1/                         # REST endpoints (one file per domain)
 │   ├── core/
 │   │   ├── auth/
-│   │   │   ├── acl.py                  # filter_visible_to_user(), EVERYONE wildcard
+│   │   │   ├── superuser.py            # require_superuser() — admin gate (replaced acl.py 2026-05-08)
 │   │   │   └── keycloak.py             # OIDC JWT validation + group extraction
 │   │   └── config.py
 │   ├── config/
-│   │   └── role_mapping.yaml           # KeyCloak group → canonical role (ADMIN, LEGAL, ...)
+│   │   └── role_mapping.yaml           # KeyCloak group → informational role label (ADMIN, LEGAL, ...) — no longer enforced
 │   ├── db/                             # SQLAlchemy models
 │   ├── schemas/                        # Pydantic request/response models
 │   └── services/                       # Business logic
@@ -286,8 +287,10 @@ Most service-to-service calls are synchronous HTTP with a shared API key header:
 ```
 X-API-Key: <MICROSERVICES_API_KEY>   # Internal service auth
 X-User-Id: <uuid>                    # Propagated from authenticated request
-X-User-Roles: LEGAL,ADMIN            # Comma-separated canonical roles
 ```
+
+`X-User-Roles` was removed 2026-05-08 along with role-based ACL — microservices no longer scope
+queries by user role; all authenticated users see everything.
 
 The `MICROSERVICES_API_KEY` secret is set once in `backend/docker/.env` and injected into every
 service via `env_file`. Services that receive requests from other services validate this header
@@ -464,7 +467,8 @@ exist in code or configuration.
 | **Sectors** | 2026-03-31 | `ACTIVE_SECTOR` env var selecting from per-deployment RAG configs (legal, medical, financial). Now a single unified config in `sectors/config.py` with all 14 entity patterns merged. `get_active_sector_config()` always returns the same config. |
 | **SIL / SLM Router** | 2026-04-22 (docs deleted) | A TOON-based query planning layer that sat in front of the ReAct agent. Replaced entirely by the LangGraph `classify` node + FastEmbed intent router. |
 | **PublicKnowledge collection** | 2026-04-22 | Separate Weaviate collection for BOE (Spanish Official Gazette) corpus. BOE legal knowledge now lives in TrustGraph (FalkorDB) as triples rather than as a parallel vector collection. |
-| **ACLProviderFactory / JSONBACLProvider** | 2026-04-21 | Legacy ACL abstraction that toggled between tenant-scoped and flat filters. Active ACL is now the direct `filter_visible_to_user()` function in `backend/app/core/auth/acl.py`. |
+| **ACLProviderFactory / JSONBACLProvider** | 2026-04-21 | Legacy ACL abstraction that toggled between tenant-scoped and flat filters. Was replaced briefly by direct `filter_visible_to_user()` in `backend/app/core/auth/acl.py` — itself removed 2026-05-08 (see next row). |
+| **Role-based ACL** | 2026-05-08 (PR #2, merge `dc718acd`) | `roles: ARRAY(String)` on Document/IndexedDocument, `EVERYONE` wildcard, `default_document_roles` on Connector, `filter_visible_to_user()` in `backend/app/core/auth/acl.py`, the entire `acl.py` module, `EVERYONE_ROLE` + `allowed_roles()` helpers in 8 microservice `auth_headers.py` copies, `_roles_filter()` in weaviate-service, `_graph_scope()` + `user` Cypher property in knowledge-tree-service, `roles` property in 6 Weaviate collections, frontend `document-acl.service.ts` + "User Access" tab in ShareDocumentDialog. Authorization now consolidated onto `User.is_superuser` via `Depends(require_superuser)` from `backend/app/core/auth/superuser.py`. All authenticated users read every document. |
 | **textextract-service** | Pre-2026 | Standalone text extraction service. Functionality merged into `intelligence-docs-service`. |
 | **langextract-service** | Pre-2026 | Standalone entity extraction service. Functionality merged into `intelligence-docs-service` as `LangExtractProvider`. |
 | **presentation-service** | Pre-2026 | Directory no longer exists. Presentation generation now handled by `document-forge-service`. |
@@ -473,7 +477,7 @@ exist in code or configuration.
 
 ## Related Documentation
 
-- [`docs/architecture/ACL_SYSTEM.md`](ACL_SYSTEM.md) — Role-based ACL in depth
+- [`docs/architecture/ACL_SYSTEM.md`](ACL_SYSTEM.md) — Authorization model (deprecation notice for the legacy role-based ACL + current `is_superuser` gate)
 - [`docs/architecture/TRUSTGRAPH.md`](TRUSTGRAPH.md) — TrustGraph triple store and graph_rag pipeline
 - [`docs/architecture/EMMA_AI.md`](EMMA_AI.md) — LangGraph ReAct agent internals
 - [`docs/architecture/EMMA_REACTIVE.md`](EMMA_REACTIVE.md) — Event-driven reactive system

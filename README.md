@@ -247,7 +247,7 @@ docker compose logs ngrok | grep "url="
 - **Authentication**: OIDC/SAML with KeyCloak, Azure AD, Okta
 - **Encryption**: At rest and in transit
 - **Audit**: Comprehensive logging of all operations
-- **RBAC**: Fine-grained role-based access control via `roles: ARRAY(String)` on documents, with `EVERYONE` wildcard for public docs
+- **Authorization**: All authenticated users read every document. Admin endpoints gate on `User.is_superuser` via `Depends(require_superuser)`. Per-document role-based ACL was removed 2026-05-08 (see [ACL_SYSTEM.md](docs/architecture/ACL_SYSTEM.md))
 - **Air-Gapped**: Works without internet connectivity
 
 ---

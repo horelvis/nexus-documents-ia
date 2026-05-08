@@ -205,24 +205,26 @@ Users authorize via OAuth2 (three-legged flow). The MCP server exchanges the aut
 ---
 
 
-## Connector ACL — `default_document_roles`
+## Connector visibility
 
-Every connector carries a `default_document_roles: ARRAY(String)` field (PostgreSQL). When the connector syncs a document, these roles are copied into the document's `roles` field, which drives the `filter_visible_to_user()` ACL query (see [ACL_SYSTEM.md](../architecture/ACL_SYSTEM.md)).
+Connectors no longer carry a per-connector role tag. The `default_document_roles` field on the
+`Connector` model and the `roles` field on synced documents were dropped 2026-05-08 along with
+role-based ACL (PR #2, merge `dc718acd`). Every authenticated user can read every document the
+connector ingests; admin endpoints gate on `User.is_superuser` instead. See
+[ACL_SYSTEM.md](../architecture/ACL_SYSTEM.md) for the current authorization model.
 
-- **Default**: `["EVERYONE"]` — document visible to any authenticated user.
-- **Typical values**: `["LEGAL"]`, `["HR", "FINANCE"]`, `["EVERYONE"]`, etc.
-- Role IDs must match canonical roles from `backend/app/config/role_mapping.yaml`.
-
-Example — create a connector that tags its docs as `LEGAL` by default:
 ```json
 POST /api/v1/connectors
 {
   "name": "Alfresco Legal",
   "connector_type": "alfresco",
-  "config": { ... },
-  "default_document_roles": ["LEGAL"]
+  "config": { ... }
 }
 ```
+
+> **Strict drop**: Pydantic models reject the legacy `roles` and `default_document_roles` fields with
+> `422 Unprocessable Entity` (the schemas use `extra='forbid'`). Clients still sending those fields
+> need to be updated.
 
 ---
 
