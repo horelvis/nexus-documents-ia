@@ -3,50 +3,14 @@
 /**
  * Universal Authentication Guard
  *
- * Protects routes requiring authentication. Works with both:
- * - Clerk authentication (SaaS mode)
- * - SSO authentication (on-premise mode)
- *
- * Uses the unified auth context which automatically selects
- * the appropriate auth provider based on deployment mode.
+ * Protects routes requiring on-premise SSO authentication.
  */
 
 import { useRouter, usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { InitialLoader } from '@/components/ui/unified-loader'
-import { useFeature, Feature, useDeploymentMode, DeploymentMode } from '@/lib/features'
-import { useUserContext } from '@/contexts/user-context'
 
 import type { AuthGuardProps } from '@/lib/types'
-
-/**
- * AuthGuard for Clerk-based authentication (SaaS mode).
- */
-function ClerkAuthGuard({ children, fallback }: AuthGuardProps) {
-  const {
-    isClerkLoaded,
-    isSignedIn,
-    onboarding: { loading: onboardingLoading },
-    userLoading,
-  } = useUserContext()
-  const router = useRouter()
-
-  useEffect(() => {
-    if (isClerkLoaded && !isSignedIn) {
-      router.push('/auth/sign-in')
-    }
-  }, [isClerkLoaded, isSignedIn, router])
-
-  if (!isClerkLoaded || userLoading || onboardingLoading) {
-    return fallback || <InitialLoader />
-  }
-
-  if (!isSignedIn) {
-    return fallback || null
-  }
-
-  return <>{children}</>
-}
 
 /**
  * AuthGuard for SSO-based authentication (on-premise mode).
@@ -128,18 +92,12 @@ function SSOAuthGuard({ children, fallback }: AuthGuardProps) {
 /**
  * Universal AuthGuard component.
  *
- * Automatically selects the appropriate auth guard based on deployment mode:
- * - SaaS mode with Clerk enabled → ClerkAuthGuard
- * - On-premise mode or Clerk disabled → SSOAuthGuard
- *
  * Usage:
  *   <AuthGuard>
  *     <ProtectedContent />
  *   </AuthGuard>
  */
 export function AuthGuard({ children, fallback }: AuthGuardProps) {
-  const deploymentMode = useDeploymentMode()
-  const useClerk = useFeature(Feature.CLERK_AUTH)
   const [isHydrated, setIsHydrated] = useState(false)
 
   // Wait for hydration to prevent mismatch
@@ -152,11 +110,5 @@ export function AuthGuard({ children, fallback }: AuthGuardProps) {
     return fallback || <InitialLoader />
   }
 
-  // In SaaS mode with Clerk enabled, use Clerk guard
-  if (deploymentMode === DeploymentMode.SAAS && useClerk) {
-    return <ClerkAuthGuard fallback={fallback}>{children}</ClerkAuthGuard>
-  }
-
-  // In on-premise mode or when Clerk is disabled, use SSO guard
   return <SSOAuthGuard fallback={fallback}>{children}</SSOAuthGuard>
 }

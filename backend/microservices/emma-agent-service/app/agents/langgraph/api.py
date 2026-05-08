@@ -185,6 +185,7 @@ async def stream_react_query(
     conversation_history: Optional[List[Dict[str, Any]]] = None,
     context: Optional[Dict[str, Any]] = None,
     enable_thinking: Optional[bool] = None,
+    agent_slug: Optional[str] = None,
 ) -> AsyncGenerator[Dict[str, Any], None]:
     """Stream a ReAct agent query execution.
 
@@ -267,6 +268,7 @@ async def stream_react_query(
             conversation_history=langchain_history,
             request_context=hydrated_context,
             enable_thinking=enable_thinking,
+            agent_slug=agent_slug,
         )
 
         from .graph import get_react_graph

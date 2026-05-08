@@ -36,13 +36,19 @@ __all__ = [
 
 
 def _user_to_profile(user: User) -> UserProfile:
-    """Build a UserProfile DTO from the SQLAlchemy User row."""
+    """Build a UserProfile DTO from the SQLAlchemy User row.
+
+    Sync legacy path: Clerk SaaS mode does not carry KeyCloak roles, so
+    the profile gets ``roles=['ADMIN']`` if ``is_superuser``, else ``[]``.
+    The real role mapping happens in the async path through SSO groups.
+    """
+    roles = ["ADMIN"] if user.is_superuser else []
     return UserProfile(
         sub=str(user.id),
         email=user.email,
         name=user.full_name,
-        roles=[],
-        is_superuser=user.is_superuser,
+        roles=roles,
+        is_superuser=bool(user.is_superuser),
     )
 
 

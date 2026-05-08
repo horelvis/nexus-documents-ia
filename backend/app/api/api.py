@@ -5,10 +5,8 @@ API Router configuration with feature flag support.
 Routes are conditionally included based on deployment mode and feature flags.
 See app.core.features for configuration details.
 
-Deployment modes:
-- SAAS: All features enabled (default)
+Deployment mode:
 - ON_PREMISE: Emma-centric, SSO, connectors only
-- CUSTOM: Individual feature control via env vars
 """
 
 from app.api.v1 import (
@@ -46,8 +44,8 @@ api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])
 api_router.include_router(google_drive.router)
 
-# AI Agents (always enabled - core Emma functionality)
-api_router.include_router(agents.router, prefix="/agents", tags=["agents"])
+# Admin-curated agents catalog (reads open, writes superuser-gated)
+api_router.include_router(agents.router)
 
 # Emma AI Assistant - dedicated endpoints (replaces /weaviate/emma/*)
 api_router.include_router(emma.router, prefix="/emma", tags=["emma"])

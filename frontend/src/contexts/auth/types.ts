@@ -1,8 +1,7 @@
 /**
  * Authentication Types
  *
- * Shared types for the unified authentication system
- * that supports both Clerk (SaaS) and SSO (on-premise) modes.
+ * Shared types for the on-premise SSO authentication system.
  */
 
 import type { BackendUser, SubscriptionInfo, UserPermissions, OnboardingStatus } from '@/lib/types'
@@ -51,7 +50,7 @@ export interface AuthState {
 
 /**
  * Unified auth context value.
- * Same interface whether using Clerk or SSO.
+ * Shared interface for SSO-backed auth state.
  */
 export interface UnifiedAuthContextType {
   // Auth state

@@ -78,10 +78,6 @@ class Settings(BaseSettings):
     chat_temperature: float = float(os.getenv("CHAT_TEMPERATURE", "0.6"))
     chat_max_tokens: int = int(os.getenv("CHAT_MAX_TOKENS", "16384"))
 
-    # Ollama configuration (LEGACY)
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
-    ollama_model: str = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "llama3.2:latest"))
-
     # OpenAI configuration (FALLBACK)
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

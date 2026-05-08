@@ -42,13 +42,15 @@ export default function EmmaPage() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [conversationMessages, setConversationMessages] = useState<EmmaMessage[]>([])
 
-  // Load active conversation messages
+  // Load active conversation. The chat now hydrates messages from the
+  // LangGraph checkpointer via the SDK (EmmaChat reads ``conversationId``
+  // and remounts the StreamProvider with the new threadId), so we only
+  // need to expose the id; we no longer pre-load anything from the
+  // legacy localStorage service. ``conversationMessages`` stays empty
+  // — the SDK's ``stream.messages`` is the source of truth.
   const loadConversation = useCallback((id: string) => {
-    const conversation = conversationService.get(id)
-    if (conversation) {
-      setConversationMessages(conversation.messages)
-      setActiveConversationId(id)
-    }
+    setConversationMessages([])
+    setActiveConversationId(id)
   }, [])
 
   // Create new conversation
@@ -168,6 +170,11 @@ export default function EmmaPage() {
         {/* Main Content Area - Emma Chat */}
         <div className="flex-1 min-h-0 overflow-hidden">
           <EmmaChat
+            // Remount the whole chat (including the LangGraph SDK provider)
+            // when the active conversation changes. This guarantees a clean
+            // ``stream.messages`` and resets local input/attachment state
+            // — important for "Nueva consulta" and for switching threads.
+            key={activeConversationId ?? 'new-thread'}
             className="h-full"
             messages={conversationMessages}
             onMessagesChange={handleMessagesChange}

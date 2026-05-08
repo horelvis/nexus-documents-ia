@@ -84,7 +84,7 @@ async def _init_entity_providers():
             if not settings.langextract_enabled:
                 logger.info("LangExtract provider disabled via config")
                 continue
-            # Use OpenAI-compatible API instead of langextract's Ollama API.
+            # Use the OpenAI-compatible SGLang API for LangExtract.
             # This gives us control over chat_template_kwargs (disable thinking).
             base_url = settings.sglang_base_url.rstrip("/").removesuffix("/v1")
             provider = OpenAINerProvider(

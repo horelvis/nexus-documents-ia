@@ -27,7 +27,7 @@ export enum Feature {
   DOCUMENT_EDITING = 'document_editing',
   DOCUMENT_LIBRARY_UI = 'document_library_ui',
   STRIPE_BILLING = 'stripe_billing',
-  CLERK_AUTH = 'clerk_auth',
+  CLERK_AUTH = 'clerk_auth', // compatibility flag; on-premise default is false
 
   // Modules to ENABLE for on-premise
   EMMA_FULLSCREEN_MODE = 'emma_fullscreen_mode',
@@ -39,12 +39,10 @@ export enum Feature {
 }
 
 /**
- * Deployment modes matching backend DeploymentMode enum.
+ * Deployment modes matching the backend. Only ON_PREMISE is supported at runtime.
  */
 export enum DeploymentMode {
-  SAAS = 'saas',
   ON_PREMISE = 'on_premise',
-  CUSTOM = 'custom',
 }
 
 /**
@@ -147,14 +145,6 @@ export async function getDeploymentMode(): Promise<string> {
 export async function isOnPremiseMode(): Promise<boolean> {
   const mode = await getDeploymentMode()
   return mode === DeploymentMode.ON_PREMISE
-}
-
-/**
- * Check if running in SaaS mode.
- */
-export async function isSaaSMode(): Promise<boolean> {
-  const mode = await getDeploymentMode()
-  return mode === DeploymentMode.SAAS
 }
 
 /**

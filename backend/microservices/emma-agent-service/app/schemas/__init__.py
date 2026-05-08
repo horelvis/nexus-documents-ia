@@ -9,9 +9,6 @@ from .emma import (
     VisualizationRequest,
     Suggestion,
     ToolInfo,
-    EmmaSessionResponse,
-    EmmaSessionListItem,
-    EmmaSessionListResponse,
     EmmaMessageSchema,
     EmmaMessageSource,
 )
@@ -25,9 +22,6 @@ __all__ = [
     "VisualizationRequest",
     "Suggestion",
     "ToolInfo",
-    "EmmaSessionResponse",
-    "EmmaSessionListItem",
-    "EmmaSessionListResponse",
     "EmmaMessageSchema",
     "EmmaMessageSource",
 ]

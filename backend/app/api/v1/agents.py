@@ -1,537 +1,169 @@
-"""
-API endpoints for CrewAI Agent management
-"""
-import logging
-from typing import Dict, Any, Optional
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-import json
-import httpx
+"""REST endpoints for the admin-curated agents catalog.
 
-from app.api.async_dependencies import get_current_active_user_async
+Reads (list/get) are open to every authenticated user.
+Writes (create/update/delete/duplicate) require ``is_superuser=True``.
+"""
+from __future__ import annotations
+
+import logging
+import uuid
+from typing import Optional
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.async_dependencies import get_current_user_async
+from app.api.auth_helpers import get_user_or_internal
 from app.core.auth.base import UserProfile
+from app.core.auth.superuser import require_superuser
 from app.core.config import settings
+from app.db.async_database import get_async_db
+from app.schemas.agent import AgentCreate, AgentResponse, AgentUpdate
+from app.services.agent_service import AgentService
+from app.services.langfuse.persona import LangfusePersonaAdapter
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
 
-# =====================================
-# PYDANTIC MODELS
-# =====================================
+router = APIRouter(prefix="/agents", tags=["agents"])
 
-class CreateAgentRequest(BaseModel):
-    name: str
-    role: str
-    goal: str
-    backstory: str
-    tools: Optional[list] = []
-    configuration: Optional[Dict[str, Any]] = None
 
-class ChatRequest(BaseModel):
-    message: str
-    conversation_id: Optional[str] = None
-    context: Optional[Dict[str, Any]] = None
+def _service(db: AsyncSession = Depends(get_async_db)) -> AgentService:
+    return AgentService(db=db, langfuse=LangfusePersonaAdapter())
 
-class ExecuteTaskRequest(BaseModel):
-    task_description: str
-    expected_output: str
-    agent_roles: Optional[list] = []
-    context: Optional[Dict[str, Any]] = None
 
-# =====================================
-# CREWAI SERVICE INTEGRATION
-# =====================================
+@router.get("", response_model=list[AgentResponse])
+async def list_agents(
+    active: Optional[bool] = None,
+    slug: Optional[str] = None,
+    order_by: Optional[str] = "name",
+    _user: UserProfile = Depends(get_user_or_internal),
+    svc: AgentService = Depends(_service),
+) -> list[AgentResponse]:
+    if slug is not None:
+        agent = await svc.get_by_slug(slug)
+        return [AgentResponse.model_validate(agent)] if agent else []
+    rows = await svc.list(active_only=bool(active), order_by=order_by or "name")
+    return [AgentResponse.model_validate(a) for a in rows]
 
-@router.get("/health")
-async def check_crewai_health():
-    """Check connectivity with CrewAI CAG service"""
-    try:
-        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.CAG_SERVICE_URL}/health", headers=headers)
-            response.raise_for_status()
-            health_data = response.json()
-            
-        return {
-            "status": "healthy",
-            "crewai_service": health_data,
-            "integration": "working"
-        }
-    except Exception as e:
-        logger.error(f"CrewAI health check failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"CrewAI service unavailable: {str(e)}"
-        )
 
-@router.get("/status")
-async def get_crewai_status():
-    """Get CrewAI service health status"""
-    try:
-        # Check CAG service health
-        cag_health = {"status": "unknown"}
-        try:
-            headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(f"{settings.CAG_SERVICE_URL}/health", headers=headers)
-                if response.status_code == 200:
-                    cag_health = response.json()
-        except Exception as e:
-            logger.warning(f"CAG health check failed: {e}")
-        
-        # Determine overall status
-        overall_status = "operational"
-        if cag_health.get("status") != "healthy":
-            overall_status = "degraded"
-        
-        return {
-            "service": "crewai_agents",
-            "cag_health": cag_health,
-            "status": overall_status,
-            "agents_available": cag_health.get("agents_count", 0),
-            "crews_running": cag_health.get("crews_running", 0),
-            "system_resources": cag_health.get("system_resources", {
-                "cpu_percent": 0,
-                "memory_percent": 0,
-                "disk_percent": 0
-            })
-        }
-    except Exception as e:
-        logger.error(f"Error getting service status: {str(e)}")
-        return {
-            "service": "crewai_agents", 
-            "status": "degraded",
-            "error": str(e),
-            "cag_health": {"status": "unknown"}
-        }
+@router.get("/{agent_id}", response_model=AgentResponse)
+async def get_agent(
+    agent_id: uuid.UUID,
+    _user: UserProfile = Depends(get_user_or_internal),
+    svc: AgentService = Depends(_service),
+) -> AgentResponse:
+    return AgentResponse.model_validate(await svc.get(agent_id))
 
-# =====================================
-# AGENT TYPES AND LISTING
-# =====================================
 
-@router.get("/types")
-async def list_agent_types():
-    """List available CrewAI agent types from REAL CAG service - NO HARDCODE"""
-    try:
-        # Obtener datos REALES del nuevo endpoint de agentes
-        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
-        async with httpx.AsyncClient() as client:
-            # Usar el endpoint REAL que expone los agentes de CrewAI
-            response = await client.get(
-                f"{settings.CAG_SERVICE_URL}/api/v1/cag/agents/available",
-                headers=headers,
-            )
-            response.raise_for_status()
-            agents_data = response.json()
-            
-            # Devolver los datos REALES directamente del servicio CrewAI
-            return agents_data
-        
-    except Exception as e:
-        logger.error(f"Error fetching REAL agent types from CrewAI: {str(e)}")
-        return {
-            "available_types": {},
-            "total": 0,
-            "error": f"Failed to fetch REAL agents from CrewAI: {str(e)}"
-        }
+@router.post("", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
+async def create_agent(
+    payload: AgentCreate,
+    admin: UserProfile = Depends(require_superuser),
+    svc: AgentService = Depends(_service),
+) -> AgentResponse:
+    agent = await svc.create(payload, owner_id=uuid.UUID(admin.sub))
+    return AgentResponse.model_validate(agent)
 
-@router.get("/list")
-async def list_available_agents(
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """List available CrewAI agents"""
-    try:
-        agent_types_response = await list_agent_types()
-        available_types = agent_types_response.get("available_types", {})
 
-        for agent_key, agent_info in available_types.items():
-            agent_info.update({
-                "status": "active",  # CrewAI agents are always ready
-                "is_enabled": True,
-                "last_activity": None,
-                "execution_count": 0,
-                "average_response_time": 0
-            })
+@router.put("/{agent_id}", response_model=AgentResponse)
+async def update_agent(
+    agent_id: uuid.UUID,
+    payload: AgentUpdate,
+    _admin: UserProfile = Depends(require_superuser),
+    svc: AgentService = Depends(_service),
+) -> AgentResponse:
+    return AgentResponse.model_validate(await svc.update(agent_id, payload))
 
-        return {
-            "available_types": available_types,
-            "total": len(available_types),
-            "service": "crewai"
-        }
 
-    except Exception as e:
-        logger.error(f"Error listing agents: {str(e)}")
-        return {
-            "available_types": {},
-            "total": 0,
-            "error": str(e)
-        }
-
-# =====================================
-# AGENT CREATION AND MANAGEMENT  
-# =====================================
-
-@router.post("/create")
-async def create_custom_agent(
-    request: CreateAgentRequest,
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """Create a custom CrewAI agent configuration"""
-    try:
-        # For now, CrewAI agents are pre-defined and managed by the service
-        # This endpoint could be used to create custom agent configurations
-        # that get passed to the CrewAI service
-        
-        custom_agent_config = {
-            "name": request.name,
-            "role": request.role,
-            "goal": request.goal,
-            "backstory": request.backstory,
-            "tools": request.tools,
-            "created_by": str(current_user.sub),
-            "created_at": datetime.utcnow().isoformat(),
-            "configuration": request.configuration or {}
-        }
-
-        return {
-            "agent_id": f"custom_{request.name.lower().replace(' ', '_')}",
-            "configuration": custom_agent_config,
-            "status": "created",
-            "message": "Custom agent configuration created. Will be available in next CrewAI deployment."
-        }
-        
-    except Exception as e:
-        logger.error(f"Error creating custom agent: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to create custom agent: {str(e)}"
-        )
-
-@router.delete("/{agent_id}")
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_agent(
-    agent_id: str,
-    current_user: UserProfile = Depends(get_current_active_user_async),
+    agent_id: uuid.UUID,
+    _admin: UserProfile = Depends(require_superuser),
+    svc: AgentService = Depends(_service),
 ):
-    """Delete/disable agent configuration"""
+    await svc.delete(agent_id)
+
+
+@router.post(
+    "/{agent_id}/duplicate",
+    response_model=AgentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_agent(
+    agent_id: uuid.UUID,
+    admin: UserProfile = Depends(require_superuser),
+    svc: AgentService = Depends(_service),
+) -> AgentResponse:
+    dup = await svc.duplicate(agent_id, owner_id=uuid.UUID(admin.sub))
+    return AgentResponse.model_validate(dup)
+
+
+@router.post(
+    "/{agent_id}/usage",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    include_in_schema=False,
+)
+async def increment_agent_usage(
+    agent_id: uuid.UUID,
+    _user: UserProfile = Depends(get_user_or_internal),
+    svc: AgentService = Depends(_service),
+):
+    """Internal: emma-agent-service bumps usage_count after invoke_agent."""
+    await svc.increment_usage(agent_id)
+
+
+@router.get("/{agent_id}/metrics", response_model=dict)
+async def get_metrics(
+    agent_id: uuid.UUID,
+    _user: UserProfile = Depends(get_user_or_internal),
+    svc: AgentService = Depends(_service),
+) -> dict:
+    """Light metrics: usage_count from DB. Latency / last_used reserved for follow-up."""
+    agent = await svc.get(agent_id)
+    return {
+        "usage_count": agent.usage_count,
+        "last_used_at": None,
+        "avg_latency_ms": None,
+    }
+
+
+class GeneratePromptBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(default="", max_length=2000)
+    semantic_types: list[str] = Field(default_factory=list)
+    current_instructions: str = Field(default="", max_length=20000)
+
+
+@router.post("/_helpers/generate-prompt", response_model=dict)
+async def generate_prompt_helper(
+    payload: GeneratePromptBody,
+    _admin: UserProfile = Depends(require_superuser),
+) -> dict:
+    """Generate or improve an agent system prompt via the chat LLM.
+
+    Proxies to emma-agent-service, which holds the LLM client. Admin-only
+    so we don't leak generation cycles to anonymous callers.
+    """
+    base_url = getattr(settings, "EMMA_SERVICE_URL", "").rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=503, detail="EMMA_SERVICE_URL not configured")
+    api_key = getattr(settings, "MICROSERVICES_API_KEY", "")
+
     try:
-        # For standard CrewAI agents, they can't be deleted, only disabled
-        if not agent_id.startswith("custom_"):
-            return {
-                "status": "disabled",
-                "agent_id": agent_id,
-                "message": "Standard CrewAI agents cannot be deleted, only disabled"
-            }
-        
-        # For custom agents, remove the configuration
-        return {
-            "status": "deleted",
-            "agent_id": agent_id,
-            "message": "Custom agent configuration removed"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error deleting agent {agent_id}: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to delete agent: {str(e)}"
-        )
-
-# =====================================
-# AGENT INTERACTION
-# =====================================
-
-@router.post("/chat")
-async def chat_with_agents(
-    request: ChatRequest,
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """Chat using CrewAI agents"""
-    async def event_stream():
-        try:
-            async with httpx.AsyncClient() as client:
-                # Use CAG service for chat with CrewAI agents
-                query_request = {
-                    "query": request.message,
-                    "user_id": str(current_user.sub),
-                    "context": request.context or {},
-                    "conversation_id": request.conversation_id
-                }
-
-                headers = {
-                    "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-User-ID": str(current_user.sub)
-                }
-                
-                # Use streaming CAG endpoint
-                async with client.stream(
-                    "POST",
-                    f"{settings.CAG_SERVICE_URL}/api/v1/cag/query/stream",
-                    json=query_request,
-                    headers=headers,
-                    timeout=60.0
-                ) as response:
-                    response.raise_for_status()
-                    
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                            if data_str == "[DONE]":
-                                yield "data: [DONE]\\n\\n"
-                                break
-                            
-                            try:
-                                event = json.loads(data_str)
-                                
-                                # Transform CAG events for chat
-                                if event["type"] == "result":
-                                    response_event = {
-                                        "type": "message",
-                                        "content": event["content"].get("answer", ""),
-                                        "agent": event["content"].get("agent_used", "unknown"),
-                                        "quality_score": event["content"].get("quality_score", 0),
-                                        "execution_time": event["content"].get("execution_time", 0)
-                                    }
-                                    yield f"data: {json.dumps(response_event)}\\n\\n"
-                                else:
-                                    # Pass through other events (progress, error)
-                                    yield f"data: {json.dumps(event)}\\n\\n"
-                                    
-                            except json.JSONDecodeError:
-                                logger.warning(f"Failed to parse SSE data: {data_str}")
-                            
-        except Exception as e:
-            logger.error(f"Error in chat: {str(e)}")
-            error_response = {"type": "error", "content": str(e)}
-            yield f"data: {json.dumps(error_response)}\\n\\n"
-    
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache", 
-            "Connection": "keep-alive",
-        }
-    )
-
-@router.post("/{agent_id}/chat")
-async def chat_with_specific_agent(
-    agent_id: str,
-    request: ChatRequest,
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """Chat with a specific CrewAI agent"""
-    # Add agent preference to context
-    request.context = request.context or {}
-    request.context["preferred_agent"] = agent_id
-    request.context["agent_id"] = agent_id
-    
-    return await chat_with_agents(request, current_user)
-
-@router.post("/{agent_id}/execute")
-async def execute_agent_task(
-    agent_id: str,
-    request: ExecuteTaskRequest,
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """Execute a task with CrewAI agents"""
-    async def event_stream():
-        try:
-            async with httpx.AsyncClient() as client:
-                # Create a crew task for execution
-                task_request = {
-                    "task_description": request.task_description,
-                    "expected_output": request.expected_output,
-                    "agent_roles": request.agent_roles or [agent_id],
-                    "user_id": str(current_user.sub),
-                    "context": request.context or {}
-                }
-
-                headers = {
-                    "X-API-Key": settings.MICROSERVICES_API_KEY,
-                    "X-User-ID": str(current_user.sub)
-                }
-                
-                # Use CAG service to execute the task
-                async with client.stream(
-                    "POST",
-                    f"{settings.CAG_SERVICE_URL}/api/v1/cag/execute/stream",
-                    json=task_request,
-                    headers=headers,
-                    timeout=120.0
-                ) as response:
-                    response.raise_for_status()
-                    
-                    async for line in response.aiter_lines():
-                        if line.startswith("data: "):
-                            data_str = line[6:]
-                            if data_str == "[DONE]":
-                                yield "data: [DONE]\\n\\n"
-                                break
-                                
-                            try:
-                                event = json.loads(data_str)
-                                yield f"data: {json.dumps(event)}\\n\\n"
-                            except json.JSONDecodeError:
-                                logger.warning(f"Failed to parse SSE data: {data_str}")
-                            
-        except Exception as e:
-            logger.error(f"Error executing task: {str(e)}")
-            error_response = {"type": "error", "content": str(e)}
-            yield f"data: {json.dumps(error_response)}\\n\\n"
-    
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
-    )
-
-# =====================================
-# ANALYTICS AND MONITORING
-# =====================================
-
-@router.get("/statistics")
-async def get_agent_statistics(
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """Get CrewAI agent usage statistics"""
-    try:
-        # In a full implementation, this would query actual usage data
-        # For now, return mock data that represents what would be tracked
-        
-        return {
-            "enabled_agents": 6,  # Number of CrewAI agents available
-            "total_executions": 0,  # Would track actual executions
-            "executions_last_24h": 0,
-            "success_rate": 0,
-            "avg_execution_time_ms": 0,
-            "total_tokens_used": 0,
-            "active_crews": 0,
-            "agent_performance": {
-                "virtual_assistant": {"executions": 0, "avg_time": 0, "success_rate": 0},
-                "search_specialist": {"executions": 0, "avg_time": 0, "success_rate": 0},
-                "document_analyst": {"executions": 0, "avg_time": 0, "success_rate": 0},
-                "compliance_expert": {"executions": 0, "avg_time": 0, "success_rate": 0},
-                "communication_specialist": {"executions": 0, "avg_time": 0, "success_rate": 0},
-                "workflow_coordinator": {"executions": 0, "avg_time": 0, "success_rate": 0}
-            },
-            "generated_at": datetime.utcnow().isoformat(),
-            "service": "crewai"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error fetching agent statistics: {str(e)}")
-        return {
-            "error": str(e),
-            "generated_at": datetime.utcnow().isoformat()
-        }
-
-@router.get("/activity")
-async def get_agent_activity(
-    limit: int = Query(10, ge=1, le=100),
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """Get recent CrewAI agent activity"""
-    try:
-        # In a full implementation, this would track actual agent executions
-        # For now, return empty activity as no tracking is implemented yet
-        
-        return {
-            "activities": [],
-            "total": 0,
-            "has_more": False,
-            "service": "crewai",
-            "message": "Activity tracking for CrewAI agents will be implemented in future versions"
-        }
-
-    except Exception as e:
-        logger.error(f"Error fetching agent activity: {str(e)}")
-        return {
-            "activities": [],
-            "total": 0,
-            "error": str(e)
-        }
-
-@router.get("/{agent_id}/stats")
-async def get_specific_agent_stats(
-    agent_id: str,
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """Get statistics for a specific CrewAI agent"""
-    try:
-        return {
-            "agent_id": agent_id,
-            "tasks_completed": 0,
-            "avg_response_time": 0.0,
-            "success_rate": 0.0,
-            "total_executions": 0,
-            "last_24h_executions": 0,
-            "error_count": 0,
-            "status": "active",
-            "service": "crewai",
-            "message": "Individual agent statistics tracking will be implemented in future versions"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error fetching stats for agent {agent_id}: {str(e)}")
-        return {
-            "agent_id": agent_id,
-            "error": str(e)
-        }
-
-# =====================================
-# TESTING AND DIAGNOSTICS
-# =====================================
-
-@router.post("/test")
-async def test_crewai_integration(
-    current_user: UserProfile = Depends(get_current_active_user_async),
-):
-    """Test CrewAI integration with a simple query"""
-    try:
-        # Test health check first
-        headers = {"X-API-Key": settings.MICROSERVICES_API_KEY}
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{settings.CAG_SERVICE_URL}/health", headers=headers)
-            response.raise_for_status()
-            
-        # Test simple query execution
-        async with httpx.AsyncClient() as client:
-            test_request = {
-                "query": "Hello, this is a test of the CrewAI integration",
-                "user_id": str(current_user.sub),
-                "context": {"test": True}
-            }
-
-            headers = {
-                "X-API-Key": settings.MICROSERVICES_API_KEY,
-                "X-User-ID": str(current_user.sub)
-            }
-            
-            response = await client.post(
-                f"{settings.CAG_SERVICE_URL}/api/v1/cag/query",
-                json=test_request,
-                headers=headers,
-                timeout=30.0
+        async with httpx.AsyncClient(timeout=60.0) as c:
+            r = await c.post(
+                f"{base_url}/internal/agents/helpers/generate-prompt",
+                headers={"X-API-Key": api_key, "Content-Type": "application/json"},
+                json=payload.model_dump(),
             )
-            response.raise_for_status()
-            result = response.json()
-            
-        return {
-            "status": "success",
-            "message": "CrewAI integration test completed successfully",
-            "test_result": result,
-            "service": "crewai",
-            "agents_available": True
-        }
-        
-    except Exception as e:
-        logger.error(f"CrewAI test failed: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"CrewAI integration test failed: {str(e)}"
-        )
+    except httpx.RequestError as exc:
+        logger.error("generate-prompt proxy unreachable: %s", exc)
+        raise HTTPException(status_code=502, detail=f"emma unreachable: {exc}") from exc
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=r.status_code, detail=r.text)
+    return r.json()

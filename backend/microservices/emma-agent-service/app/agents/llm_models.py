@@ -39,7 +39,7 @@ def get_planner_model() -> ChatOpenAI:
         _planner_model = ChatOpenAI(
             base_url=settings.llm_base_url,
             model=settings.llm_model,
-            api_key=settings.llm_api_key,
+            api_key=settings.llm_api_key or "not-needed",
             temperature=settings.planner_temperature,
             max_tokens=settings.planner_max_tokens,
             extra_body={
@@ -66,7 +66,7 @@ def get_chat_model() -> ChatOpenAI:
         _chat_model = ChatOpenAI(
             base_url=settings.llm_base_url,
             model=settings.llm_model,
-            api_key=settings.llm_api_key,
+            api_key=settings.llm_api_key or "not-needed",
             temperature=settings.chat_temperature,
             max_tokens=settings.chat_max_tokens,
             extra_body={

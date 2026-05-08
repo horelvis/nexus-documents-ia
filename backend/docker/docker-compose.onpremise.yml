@@ -75,6 +75,15 @@ services:
       DEFAULT_VECTORIZER_MODULE: 'none'
       ENABLE_MODULES: ''
       CLUSTER_HOSTNAME: 'node1'
+      # Single-node Raft: tells weaviate not to wait for peers and binds
+      # the advertise address to its container hostname. Avoids
+      # "Failed to get final advertise address: No private IP address found"
+      # on hosts where docker bridges aren't auto-detected.
+      RAFT_BOOTSTRAP_EXPECT: '1'
+      RAFT_JOIN: 'node1'
+      CLUSTER_GOSSIP_BIND_PORT: '7946'
+      CLUSTER_DATA_BIND_PORT: '7947'
+    hostname: node1
     networks:
       - backend-network
     volumes:
@@ -220,7 +229,7 @@ services:
   # =============================================================================
   # Intelligence Docs Service — Unified extraction + embedding + NER
   # =============================================================================
-  # Replaces textextract-service + langextract-service + embedding code in weaviate-service.
+  # Consolidates text extraction, entity extraction, OCR, and embeddings.
   # Provider registry with automatic fallback. On-premise first, cloud opt-in.
   intelligence-docs-service:
     build:
@@ -298,11 +307,9 @@ services:
     profiles:
       - docling
 
-  # textextract-service: REMOVED — replaced by intelligence-docs-service.
   # Text extraction now uses Docling/GLM-OCR providers inside intelligence-docs-service.
-  # langextract-service: REMOVED — consolidated into intelligence-docs-service.
-  # Entity extraction (LangExtract few-shot + regex guardrail) now runs inside
-  # intelligence-docs-service via LangExtractProvider + SpanishIdValidator.
+  # Entity extraction uses LangExtract few-shot prompts plus regex guardrails via
+  # LangExtractProvider + SpanishIdValidator.
 
   # =============================================================================
   # Weaviate Service - RAG Pipeline

@@ -46,8 +46,6 @@ class ValidatedGenerator:
     """
 
     def __init__(self):
-        self._ollama_url = settings.ollama_base_url
-        self._model_name = settings.ollama_model
         self._provider = settings.llm_provider
         self._openai_api_key = settings.openai_api_key
         self._openai_base_url = settings.openai_base_url
@@ -212,8 +210,7 @@ class ValidatedGenerator:
     ) -> str:
         """Call the LLM and return the response"""
         try:
-            # Priority: SGLang (primary) > OpenAI (fallback)
-            # Note: Ollama is DEPRECATED - use SGLang for local inference
+            # Priority: SGLang (primary) > OpenAI-compatible fallback.
             if self._sglang_enabled:
                 return await self._call_sglang(system_prompt, user_prompt, temperature, max_tokens)
             elif self._provider == "openai" and self._openai_api_key:
@@ -224,42 +221,6 @@ class ValidatedGenerator:
                 return await self._call_sglang(system_prompt, user_prompt, temperature, max_tokens)
         except Exception as e:
             logger.error(f"❌ LLM call failed: {e}")
-            raise
-
-    async def _call_ollama(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        temperature: float,
-        max_tokens: int,
-    ) -> str:
-        """Call Ollama API"""
-        try:
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                response = await client.post(
-                    f"{self._ollama_url}/api/chat",
-                    json={
-                        "model": self._model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "stream": False,
-                        "options": {
-                            "temperature": temperature,
-                            "num_predict": max_tokens,
-                        },
-                    },
-                )
-
-                if response.status_code == 200:
-                    data = response.json()
-                    return data.get("message", {}).get("content", "")
-                else:
-                    raise Exception(f"Ollama returned {response.status_code}: {response.text}")
-
-        except Exception as e:
-            logger.error(f"❌ Ollama call failed: {e}")
             raise
 
     async def _call_openai(
@@ -341,50 +302,9 @@ class ValidatedGenerator:
         max_tokens: int,
     ) -> AsyncGenerator[str, None]:
         """Call LLM with streaming response"""
-        # SGLang is the primary/default streaming provider
-        # Note: Ollama is DEPRECATED - use SGLang for local inference
+        # SGLang is the primary/default streaming provider.
         async for chunk in self._call_sglang_stream(system_prompt, user_prompt, temperature, max_tokens):
             yield chunk
-
-    async def _call_ollama_stream(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        temperature: float,
-        max_tokens: int,
-    ) -> AsyncGenerator[str, None]:
-        """Call Ollama with streaming response"""
-        try:
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self._ollama_url}/api/chat",
-                    json={
-                        "model": self._model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "stream": True,
-                        "options": {
-                            "temperature": temperature,
-                            "num_predict": max_tokens,
-                        },
-                    },
-                ) as response:
-                    import json
-                    async for line in response.aiter_lines():
-                        if line:
-                            try:
-                                data = json.loads(line)
-                                content = data.get("message", {}).get("content", "")
-                                if content:
-                                    yield content
-                            except json.JSONDecodeError:
-                                continue
-        except Exception as e:
-            logger.error(f"❌ Ollama streaming call failed: {e}")
-            yield f"Error: {str(e)}"
 
     async def _call_sglang_stream(
         self,

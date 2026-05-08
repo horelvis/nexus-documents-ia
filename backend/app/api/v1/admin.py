@@ -38,7 +38,7 @@ async def list_users(
     return users
 
 
-# NOTE: POST /admin/users removed - users are created via Clerk + JIT provisioning
+# NOTE: POST /admin/users removed - users are created through SSO provisioning.
 # Admin can only view, update, and deactivate users
 
 
@@ -249,26 +249,6 @@ async def get_system_stats(
             "total_mb": round(storage_size / (1024 * 1024), 2)
         }
     }
-
-
-@router.post("/init-ollama-model", response_model=dict)
-async def initialize_ollama_model(
-    model_name: str = Body(..., embed=True),
-    current_user: UserProfile = Depends(require_superuser),
-):
-    """
-    DEPRECATED: Ollama microservice was removed in favor of SGLang.
-
-    SGLang loads the model at process startup (via container args/env),
-    so there is no runtime "pull model" API equivalent.
-    """
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            "Ollama was removed. Configure SGLang via SGLANG_MODEL/SGLANG_BASE_URL "
-            "and restart the SGLang service to load a model."
-        ),
-    )
 
 
 @router.get("/stats/document-activity", response_model=Dict[str, Any])

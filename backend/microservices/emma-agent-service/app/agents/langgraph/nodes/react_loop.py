@@ -101,6 +101,35 @@ async def _build_system_message(state: ReActState) -> SystemMessage:
     prompt = prompt.replace("{tools_description}", tools_desc)
     prompt = prompt.replace("{current_date}", date.today().isoformat())
 
+    # Inject the admin-curated agents catalog so the LLM knows which slugs
+    # are valid targets for invoke_agent. Uses a 60s Redis cache to avoid
+    # hammering the Main API on every request. If the Langfuse prompt
+    # contains a placeholder, replace it; otherwise append the block.
+    agents_block = await _build_active_agents_block()
+    if "{{ available_agents_block }}" in prompt:
+        prompt = prompt.replace("{{ available_agents_block }}", agents_block)
+    elif "{available_agents_block}" in prompt:
+        prompt = prompt.replace("{available_agents_block}", agents_block)
+    else:
+        prompt += (
+            "\n\n<available_agents>\n"
+            f"{agents_block}\n"
+            "</available_agents>\n"
+            "Si el usuario menciona @<slug>, usa invoke_agent(agent_slug=<slug>, ...). "
+            "En otro caso, responde como Emma general sin invocar agentes."
+        )
+
+    # If the user explicitly invoked @<slug>, force the agent to call
+    # invoke_agent exactly once with that slug.
+    requested_slug = state.get("agent_slug")
+    if requested_slug:
+        prompt += (
+            f"\n\n## INVOCACIÓN DE AGENTE FORZADA"
+            f"\nEl usuario mencionó @{requested_slug}. DEBES llamar a "
+            f"invoke_agent(agent_slug='{requested_slug}', question=<la pregunta>) "
+            f"como tu PRIMERA acción. No uses otros tools antes."
+        )
+
     # Forward classify intent to system prompt
     intent = (state.get("metadata") or {}).get("classify_intent", "")
     if intent and intent not in ("conversational", "identity"):
@@ -1169,3 +1198,60 @@ def _humanize_tool_result(name: str, args: Dict[str, Any], result) -> str:
         return f"Informe generado: {entity}" if entity else "Informe de conocimiento generado"
 
     return "Paso completado"
+
+
+# ---------------------------------------------------------------------------
+# Admin-curated agents catalog injection
+# ---------------------------------------------------------------------------
+
+_AGENTS_BLOCK_CACHE_KEY = "emma_react:active_agents_block"
+_AGENTS_BLOCK_TTL = 60
+
+
+async def _build_active_agents_block(limit: int = 50) -> str:
+    """Render the active agents catalog as the ``<available_agents>`` block.
+
+    Cache 60s in Redis to avoid hitting the Main API on every request.
+    Falls back to "(no agents currently active)" if the catalog is empty
+    or unreachable.
+    """
+    redis_client = None
+    try:
+        from app.core.redis_client import get_redis  # type: ignore
+        redis_client = get_redis()
+    except Exception:
+        redis_client = None
+
+    if redis_client is not None:
+        try:
+            cached = await redis_client.get(_AGENTS_BLOCK_CACHE_KEY)
+            if cached:
+                return cached if isinstance(cached, str) else cached.decode("utf-8")
+        except Exception:
+            pass
+
+    try:
+        from app.services.main_api_client import MainAPIClient
+        rows = await MainAPIClient().list_active_agents(limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(f"Failed to load active agents catalog: {exc}")
+        return "(no agents currently active)"
+
+    if not rows:
+        block = "(no agents currently active)"
+    else:
+        lines = []
+        for row in rows:
+            slug = row.get("slug", "?")
+            description = (row.get("description") or "").strip()
+            if len(description) > 80:
+                description = description[:77] + "..."
+            lines.append(f"- {slug}: {description}" if description else f"- {slug}")
+        block = "\n".join(lines)
+
+    if redis_client is not None:
+        try:
+            await redis_client.set(_AGENTS_BLOCK_CACHE_KEY, block, ex=_AGENTS_BLOCK_TTL)
+        except Exception:
+            pass
+    return block

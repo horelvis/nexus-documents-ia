@@ -253,7 +253,7 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 | `graph_rag` | Knowledge graph retrieval with 8-stage pipeline (entity → BFS → guided expansion → scoring → provenance) |
 | `get_document_content` | Read full document by ID |
 | `structural_query` | Count, list, filter via FalkorDB TrustGraph |
-| `analyze_domain` | Specialist domain analysis |
+| `invoke_agent` | Delegate to a specialist from the admin-curated agents catalog (replaces `analyze_domain`) |
 | `web_search` | Internet search (Tavily primary, DuckDuckGo fallback) |
 | `search_jurisprudence` | CENDOJ jurisprudence search |
 | `list_sources` | Discover available data sources |
@@ -265,6 +265,34 @@ Entity Extraction (regex ~3ms) → Scope Detection (rules) → Filter Enrichment
 | `predictive_analysis` | Predictive analysis sub-graph |
 | `generate_knowledge_report` | Generate structured reports with KPIs and verified citations from knowledge graph |
 | `terminate` | Signal completion with response |
+
+### Agents Catalog (admin-curated)
+
+> **Full docs**: [`docs/architecture/AGENTS.md`](docs/architecture/AGENTS.md)
+
+Admin-curated specialist agents replace the legacy hardcoded
+`analyze_domain` list. Each agent has identity (name/slug/icon/color),
+persona (Langfuse prompt + style/language modifiers), data scope
+(7 filter dimensions), and runtime params (model_role, temperature).
+
+Invocation: end users type `@<slug>` in the Emma chat. The
+@-mention menu (`entity-search-menu.tsx`) renders the active catalog
+under a "🤖 Asistentes" section. The selected slug travels through
+`useStreamSubmit` → ReActState.agent_slug → classify_node short-circuit
+→ react_loop forced-invocation directive → `invoke_agent` tool call.
+The bubble shows a 🤖 chip when the response came from a non-default
+agent.
+
+Source of truth:
+- DB row in `agents` table (admin-only writes via `/api/v1/agents/`).
+- Langfuse `agent_<slug>_persona` prompt (label `production`), pushed
+  on every CRUD write via `emma-agent-service /internal/prompts/push-persona`.
+- Disaster recovery: `python backend/scripts/sync_agents_to_langfuse.py`.
+
+Seed: `python backend/scripts/seed_default_agents.py` inserts
+`emma_general` (is_seed=True, is_active=True) + 3 starters
+(contabilidad, ventas, legal — is_active=False, admin reviews
+before publishing).
 
 ### Prompt Management System
 

@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     database_url: str = os.getenv("DATABASE_URL", "")
     # MICROSERVICES_API_KEY is required - no hardcoded fallback
     microservices_api_key: str = os.getenv("MICROSERVICES_API_KEY", "")
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
 
     # Weaviate Service (for verification tasks)

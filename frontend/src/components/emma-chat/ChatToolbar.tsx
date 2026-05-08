@@ -10,39 +10,21 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { History } from 'lucide-react'
 
 interface ChatToolbarProps {
   deepReasoning: boolean
   onDeepReasoningChange: (value: boolean) => void
-  showThreadHistory: boolean
-  onToggleThreadHistory: () => void
   isLoading: boolean
 }
 
 export function ChatToolbar({
   deepReasoning,
   onDeepReasoningChange,
-  showThreadHistory,
-  onToggleThreadHistory,
   isLoading,
 }: ChatToolbarProps) {
   return (
     <TooltipProvider>
       <div className="flex items-center justify-end gap-2 mb-3">
-        <button
-          onClick={onToggleThreadHistory}
-          className={cn(
-            'mr-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors',
-            showThreadHistory
-              ? 'bg-primary/10 text-primary'
-              : 'text-muted-foreground hover:text-foreground',
-          )}
-        >
-          <History className="h-3.5 w-3.5" />
-          Historial
-        </button>
-
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="flex items-center gap-2">

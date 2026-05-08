@@ -5,6 +5,8 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { IconUser, IconBuilding, IconMail, IconRobot, IconLoader2 } from "@tabler/icons-react"
 import { cn } from "@/lib/utils"
 import { useEntityService } from "@/lib/services/entity.service"
+import { agentsService } from "@/lib/services/agents.service"
+import type { Agent } from "@/lib/types/agent"
 
 interface Entity {
   id: string
@@ -38,9 +40,29 @@ export function EntitySearchMenu({
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [recentEntities, setRecentEntities] = useState<Entity[]>([])
   const [loadingRecent, setLoadingRecent] = useState(false)
+  const [agents, setAgents] = useState<Agent[]>([])
   const popoverRef = useRef<HTMLDivElement>(null)
   const entityService = useEntityService()
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Load active agents catalog once on mount (cached client-side for the
+  // lifetime of this component instance).
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const r = await agentsService.list({ active: true, order_by: 'usage_count' })
+      if (!cancelled && r.data) setAgents(r.data)
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  const filteredAgents = useMemo(() => {
+    const q = (searchQuery || '').toLowerCase()
+    if (!q) return agents
+    return agents.filter(
+      (a) => a.slug.includes(q) || a.name.toLowerCase().includes(q),
+    )
+  }, [agents, searchQuery])
 
   // Load recent entities when opened with empty query
   useEffect(() => {
@@ -240,6 +262,35 @@ export function EntitySearchMenu({
                 }
               </CommandEmpty>
             ) : (
+              <>
+              {filteredAgents.length > 0 && (
+                <CommandGroup heading="🤖 Asistentes">
+                  {filteredAgents.map((agent) => (
+                    <CommandItem
+                      key={`agent-${agent.slug}`}
+                      onSelect={() => {
+                        onSelect({
+                          id: agent.slug,
+                          name: agent.name,
+                          email: '',
+                          type: 'agent',
+                          role: agent.description ?? undefined,
+                        } as Entity)
+                        onClose()
+                      }}
+                      className="cursor-pointer"
+                    >
+                      <IconRobot className="mr-2 h-4 w-4" />
+                      <div className="flex-1">
+                        <div className="font-medium">@{agent.slug}</div>
+                        {agent.description && (
+                          <div className="text-xs text-muted-foreground line-clamp-1">{agent.description}</div>
+                        )}
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              )}
               <CommandGroup heading={searchQuery ? 'Suggested Entities' : 'Recent Entities'}>
                 {displayEntities.map((entity, index) => {
                   const Icon = entity.type === 'organization' ? IconBuilding :
@@ -276,6 +327,7 @@ export function EntitySearchMenu({
                   )
                 })}
               </CommandGroup>
+              </>
             )}
           </CommandList>
         </Command>

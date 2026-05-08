@@ -1,12 +1,12 @@
 """
 Authentication Provider Factory.
 
-Manages provider instances based on deployment mode.
+Manages the on-premise authentication provider instance.
 
 Single-tenant deployment: there is one auth provider configured via env
-vars (OIDC for on-premise, Clerk for the deprecated SaaS mode). The
-previous multi-tenant `get_for_tenant()` and the `TenantAuthConfig`
-table-backed loader were removed during the multi-tenancy refactor.
+vars. The previous multi-tenant `get_for_tenant()`, SaaS/Clerk default
+path, and `TenantAuthConfig` table-backed loader were removed during the
+multi-tenancy refactor.
 
 Usage:
     from app.core.auth.factory import AuthProviderFactory
@@ -17,7 +17,6 @@ Usage:
 import logging
 from typing import Dict, Type, Optional, Any
 
-from app.core.features import Feature, FeatureFlags, is_on_premise_mode
 from app.core.auth.base import (
     AuthProvider,
     AuthProviderType,
@@ -56,7 +55,7 @@ class AuthProviderFactory:
     @classmethod
     async def get_default(cls) -> AuthProvider:
         """
-        Get the default authentication provider based on deployment mode.
+        Get the default on-premise authentication provider.
 
         Returns:
             Default AuthProvider instance
@@ -64,15 +63,9 @@ class AuthProviderFactory:
         if cls._default_instance:
             return cls._default_instance
 
-        # Determine provider type based on deployment mode
-        if is_on_premise_mode():
-            # On-premise defaults to OIDC (most common enterprise SSO)
-            provider_type = AuthProviderType.OIDC
-            config = cls._get_default_oidc_config()
-        else:
-            # SaaS mode uses Clerk
-            provider_type = AuthProviderType.CLERK
-            config = cls._get_default_clerk_config()
+        # On-premise defaults to OIDC (most common enterprise SSO).
+        provider_type = AuthProviderType.OIDC
+        config = cls._get_default_oidc_config()
 
         cls._default_instance = await cls._create_provider(provider_type, config)
         logger.info(f"Created default {provider_type.value} provider")
@@ -106,17 +99,6 @@ class AuthProviderFactory:
         await provider.initialize()
 
         return provider
-
-    @classmethod
-    def _get_default_clerk_config(cls) -> Dict[str, Any]:
-        """Get default Clerk configuration from environment."""
-        from app.core.config import settings
-
-        return {
-            "provider": "clerk",
-            "secret_key": settings.CLERK_SECRET_KEY,
-            "publishable_key": getattr(settings, "CLERK_PUBLISHABLE_KEY", None),
-        }
 
     @classmethod
     def _get_default_oidc_config(cls) -> Dict[str, Any]:

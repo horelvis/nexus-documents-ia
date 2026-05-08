@@ -24,7 +24,6 @@ from app.db.models import (
     SignatureRequest, SignatureRequestSigner, SignatureEvent, SignatureContact,
     GoogleDriveToken,
 )
-from app.db.agent_models import AgentExecution, AgentExecutionLog, AgentDefinition
 from app.services.async_storage_service import AsyncStorageService
 from app.services.elasticsearch_client import elasticsearch_client
 from app.services.weaviate_client import weaviate_client
@@ -273,18 +272,6 @@ class LGPDDeletionService:
         )
         deleted_count += tokens_result.rowcount or 0
         await db.flush()
-
-        # Delete agent executions and logs
-        await db.execute(
-            delete(AgentExecutionLog).where(
-                AgentExecutionLog.execution_id.in_(
-                    select(AgentExecution.id).where(AgentExecution.user_id == user.id)
-                )
-            )
-        )
-        await db.execute(
-            delete(AgentExecution).where(AgentExecution.user_id == user.id)
-        )
 
         return deleted_count
 

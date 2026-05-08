@@ -21,7 +21,6 @@ import { FullscreenDocumentViewer } from './FullscreenDocumentViewer'
 import { EmmaStreamProvider, useEmmaStream } from './EmmaStreamProvider'
 import { BranchSwitcher } from './messages/BranchSwitcher'
 import { CommandBar } from './messages/CommandBar'
-import { ThreadHistory } from './ThreadHistory'
 
 // Extracted hooks
 import { useMessageConverter } from './hooks/useMessageConverter'
@@ -47,7 +46,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 
   // ── Local state ──
   const [deepReasoning, setDeepReasoning] = useState(false)
-  const [showThreadHistory, setShowThreadHistory] = useState(false)
   const [fullscreenDoc, setFullscreenDoc] = useState<DocumentInfo | null>(null)
   const [artifactsPanelOpen, setArtifactsPanelOpen] = useState(false)
   const [activeArtifactTab, setActiveArtifactTab] = useState<string | null>(null)
@@ -180,19 +178,62 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
   }, [initialQuery, user?.id, allMessages.length, submit])
 
   // ── Render ──
+  // ``stream.isThreadLoading`` is true while the SDK is fetching the
+  // initial thread state from ``GET /api/threads/<id>/history`` after
+  // the user opens an old conversation. The fetch can take ~1–2s
+  // depending on checkpoint size; without a loader the chat looks
+  // frozen on the welcome screen.
+  const isHydrating = stream.isThreadLoading && !hasMessages
+
   return (
     <div className={cn('flex h-full', className)}>
-      {/* Thread History sidebar */}
-      {showThreadHistory && (
-        <ThreadHistory
-          currentThreadId={null}
-          onSelectThread={() => {}}
-        />
-      )}
-
       {/* Chat area */}
       <div className="flex flex-1 flex-col min-w-0">
-        {hasMessages ? (
+        {isHydrating ? (
+          <div className="flex-1 overflow-hidden min-h-0">
+            <div
+              className="max-w-3xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-6 space-y-6"
+              aria-busy="true"
+              aria-label="Cargando conversación"
+            >
+              {/* User bubble — aligned right */}
+              <div className="flex justify-end">
+                <div className="max-w-[70%] space-y-2">
+                  <div className="h-3.5 bg-primary/15 rounded-md animate-pulse w-48" />
+                  <div className="h-3.5 bg-primary/15 rounded-md animate-pulse w-32" />
+                </div>
+              </div>
+
+              {/* AI bubble — aligned left, longer */}
+              <div className="flex justify-start gap-3">
+                <div className="h-7 w-7 rounded-full bg-muted animate-pulse shrink-0" />
+                <div className="flex-1 max-w-[80%] space-y-2">
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-3/4" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-full" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-5/6" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-2/3" />
+                </div>
+              </div>
+
+              {/* User bubble — short */}
+              <div className="flex justify-end">
+                <div className="max-w-[70%] space-y-2">
+                  <div className="h-3.5 bg-primary/15 rounded-md animate-pulse w-40" />
+                </div>
+              </div>
+
+              {/* AI bubble — second */}
+              <div className="flex justify-start gap-3">
+                <div className="h-7 w-7 rounded-full bg-muted animate-pulse shrink-0" />
+                <div className="flex-1 max-w-[80%] space-y-2">
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-full" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-4/5" />
+                  <div className="h-3.5 bg-muted rounded-md animate-pulse w-3/5" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : hasMessages ? (
           <div className="flex-1 overflow-hidden min-h-0">
             <EmmaRenderChat
               messages={allMessages}
@@ -254,8 +295,6 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
             <ChatToolbar
               deepReasoning={deepReasoning}
               onDeepReasoningChange={setDeepReasoning}
-              showThreadHistory={showThreadHistory}
-              onToggleThreadHistory={() => setShowThreadHistory(prev => !prev)}
               isLoading={displayIsLoading}
             />
 
@@ -300,7 +339,15 @@ function EmmaChatInner({ className, initialQuery }: EmmaChatProps) {
 // ── Exported wrapper: wraps Inner in EmmaStreamProvider ──
 
 export function EmmaChat(props: EmmaChatProps) {
-  const [streamThreadId, setStreamThreadId] = useState<string | null>(null)
+  // The parent (``app/page.tsx``) keys this component on
+  // ``activeConversationId``, so a thread switch (sidebar click, "Nueva
+  // consulta") unmounts and remounts the whole tree — both the SDK
+  // provider and EmmaChatInner's local state. We just have to track
+  // ``onThreadId`` for the case where a fresh thread (no prop) gets
+  // a server-assigned id on the first submit.
+  const [streamThreadId, setStreamThreadId] = useState<string | null>(
+    props.conversationId ?? null,
+  )
 
   return (
     <EmmaStreamProvider

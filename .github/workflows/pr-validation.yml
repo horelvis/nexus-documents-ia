@@ -143,16 +143,6 @@ jobs:
           QUERY_DEFAULTS_LIMIT: 25
           AUTHENTICATION_ANONYMOUS_ACCESS_ENABLED: 'true'
 
-      elasticsearch:
-        image: elasticsearch:8.11.0
-        env:
-          discovery.type: single-node
-          xpack.security.enabled: 'false'
-          "ES_JAVA_OPTS": "-Xms512m -Xmx512m"
-        ports:
-          - 9200:9200
-          - 9300:9300
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -174,8 +164,7 @@ jobs:
         for i in {1..30}; do
           if pg_isready -h localhost -p 5432 -U test_user && \
              redis-cli -h localhost -p 6379 ping | grep -q PONG && \
-             curl -s http://localhost:8080/v1/meta > /dev/null && \
-             curl -s http://localhost:9200/_cluster/health > /dev/null; then
+             curl -s http://localhost:8080/v1/meta > /dev/null; then
             echo "✅ All services ready"
             break
           fi
@@ -194,7 +183,6 @@ jobs:
         SECRET_KEY: test-secret-key
         CLERK_SECRET_KEY: test-clerk-secret
         WEAVIATE_URL: http://localhost:8080
-        ELASTICSEARCH_URL: http://localhost:9200
         TESTING: true
       run: |
         python3 test_validation_simple.py

@@ -60,7 +60,6 @@ class HermesAdapter(ToolCallAdapter):
     Used with:
     - SGLang with --tool-call-parser hermes
     - Qwen3 models (native Hermes support)
-    - Some Ollama models
 
     The adapter handles both raw Hermes XML format and SGLang's
     OpenAI-compatible parsed format.

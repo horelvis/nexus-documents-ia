@@ -43,10 +43,6 @@ class Settings(BaseSettings):
     sglang_enable_thinking: bool = os.getenv("SGLANG_ENABLE_THINKING", os.getenv("VLLM_ENABLE_THINKING", "true")).lower() == "true"
     sglang_thinking_budget: int = int(os.getenv("SGLANG_THINKING_BUDGET", os.getenv("VLLM_THINKING_BUDGET", "4096")))  # Increased for complex reasoning
 
-    # Ollama configuration (LEGACY - use SGLang instead)
-    ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://genai-ollama:11434")
-    ollama_model: str = os.getenv("OLLAMA_MODEL", os.getenv("LLM_MODEL", "llama3.2:latest"))
-
     # OpenAI configuration (FALLBACK)
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_model: str = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
