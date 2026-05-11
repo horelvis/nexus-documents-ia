@@ -461,6 +461,23 @@ class ExtractionCoordinator:
             else:
                 total_consensus += result
 
+        # Step 3c.5: Normalize unique-per-entity predicates. FalkorDB's
+        # MERGE on relationships does not dedup across separate transactions,
+        # so per-chunk extraction batches leave duplicate (s, p, o) edges for
+        # core/type, core/label, core/definition. Cross-extractor disagreement
+        # also stacks (e.g. one chunk types Horelvis as person, another as
+        # organization). This pass runs AFTER consensus scoring (which needs
+        # raw counts) and BEFORE entity resolution (which expects clean state).
+        normalize_summary: Dict[str, int] = {}
+        try:
+            normalize_summary = await self._store.normalize_unique_predicates_for_subjects(
+                subject_uris=list(all_subject_uris),
+                collection=collection,
+            )
+        except Exception as exc:
+            errors.append(f"normalize_unique_predicates: {exc}")
+            logger.warning("Normalize unique predicates failed: %s", exc)
+
         # Step 3d: Entity resolution — merge duplicate :Nodes emitted under
         # slightly different labels by the 4 extractors. Runs per-document
         # over the full collection scope so cross-document duplicates
@@ -520,7 +537,8 @@ class ExtractionCoordinator:
         logger.info(
             "Document %s extraction complete: %d triples, %d parse_failures, "
             "%d empty_responses, %d validation_failures, %d contradictions, "
-            "%d consensus_predicates, person_clusters_merged=%d nodes_removed=%d, %dms",
+            "%d consensus_predicates, normalize=%s, "
+            "person_clusters_merged=%d nodes_removed=%d, %dms",
             document_id,
             total_triples,
             total_parse_failures,
@@ -528,6 +546,7 @@ class ExtractionCoordinator:
             total_validation,
             contradictions_found,
             total_consensus,
+            normalize_summary,
             resolver_total_merged,
             resolver_total_removed,
             elapsed_ms,

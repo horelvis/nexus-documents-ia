@@ -328,6 +328,104 @@ class TripleStore:
 
         return stored
 
+    async def normalize_unique_predicates_for_subjects(
+        self,
+        subject_uris: list,
+        collection: str,
+    ) -> dict:
+        """Post-extraction cleanup for predicates that should be unique per entity.
+
+        FalkorDB's `MERGE (s)-[:Rel {uri, collection}]->(o)` does not dedup
+        across separate transactions, so per-chunk extraction batches leave
+        duplicate `(s, p, o)` edges. Cross-extractor disagreement (e.g. one
+        chunk says `type=person`, another says `type=organization`) also
+        stacks both edges on the same node.
+
+        This runs once per document after all chunks land and:
+          - `core/type`: majority-vote on object value, then dedup so each
+            subject has exactly one type edge.
+          - `core/definition`: keep the single highest-confidence edge.
+          - `core/label`: keep every **distinct** label value (aliases are
+            legitimate) but dedup `(s, p, value)` repeats so each variant
+            appears once.
+
+        Returns a dict with per-predicate deletion counts (for logs).
+        """
+        if not subject_uris:
+            return {"type_minority_drops": 0, "type_dups": 0,
+                    "label_dups": 0, "definition_drops": 0}
+
+        TYPE_PRED = "nouxcube://predicate/core/type"
+        LABEL_PRED = "nouxcube://predicate/core/label"
+        DEFN_PRED = "nouxcube://predicate/core/definition"
+
+        deleted = {"type_minority_drops": 0, "type_dups": 0,
+                   "label_dups": 0, "definition_drops": 0}
+
+        # ── 1. core/type majority vote (uses pre-dedup counts) ────────────
+        rows = await self._client.execute_cypher(
+            "MATCH (s:Node)-[r:Rel {uri: $pred, collection: $col}]->(t:Literal) "
+            "WHERE s.uri IN $uris AND s.collection = $col "
+            "RETURN s.uri AS subj, t.value AS type_val, count(r) AS cnt",
+            params={"pred": TYPE_PRED, "col": collection, "uris": subject_uris},
+        )
+        # Group by subject → pick majority type value (ties broken by alphabetical
+        # for determinism)
+        from collections import defaultdict
+        counts_by_subj: dict = defaultdict(dict)
+        for row in rows or []:
+            counts_by_subj[row["subj"]][row["type_val"]] = row["cnt"]
+
+        for subj, type_counts in counts_by_subj.items():
+            dominant = max(type_counts.items(), key=lambda kv: (kv[1], -ord(kv[0][0]) if kv[0] else 0))[0]
+            losers = [t for t in type_counts if t != dominant]
+            if losers:
+                del_rows = await self._client.execute_cypher(
+                    "MATCH (s:Node {uri: $subj, collection: $col})"
+                    "-[r:Rel {uri: $pred, collection: $col}]->(t:Literal) "
+                    "WHERE t.value IN $losers "
+                    "WITH r, count(r) AS _c "
+                    "DELETE r "
+                    "RETURN _c AS n",
+                    params={"subj": subj, "col": collection, "pred": TYPE_PRED, "losers": losers},
+                )
+                if del_rows:
+                    deleted["type_minority_drops"] += int(del_rows[0].get("n", 0) or 0)
+
+        # ── 2. Dedup (s, p, o) repeats across unique predicates ──────────
+        for pred_uri, key in [(TYPE_PRED, "type_dups"),
+                              (LABEL_PRED, "label_dups")]:
+            dedup_rows = await self._client.execute_cypher(
+                "MATCH (s:Node)-[r:Rel {uri: $pred, collection: $col}]->(o:Literal) "
+                "WHERE s.uri IN $uris AND s.collection = $col "
+                "WITH s, o, collect(r) AS rels "
+                "WHERE size(rels) > 1 "
+                "UNWIND rels[1..] AS dup "
+                "DELETE dup "
+                "RETURN count(dup) AS n",
+                params={"pred": pred_uri, "col": collection, "uris": subject_uris},
+            )
+            if dedup_rows:
+                deleted[key] += int(dedup_rows[0].get("n", 0) or 0)
+
+        # ── 3. core/definition: keep single highest-confidence per subject ──
+        defn_rows = await self._client.execute_cypher(
+            "MATCH (s:Node)-[r:Rel {uri: $pred, collection: $col}]->(o:Literal) "
+            "WHERE s.uri IN $uris AND s.collection = $col "
+            "WITH s, r, r.confidence AS conf "
+            "ORDER BY conf DESC "
+            "WITH s, collect(r) AS rels "
+            "WHERE size(rels) > 1 "
+            "UNWIND rels[1..] AS dup "
+            "DELETE dup "
+            "RETURN count(dup) AS n",
+            params={"pred": DEFN_PRED, "col": collection, "uris": subject_uris},
+        )
+        if defn_rows:
+            deleted["definition_drops"] += int(defn_rows[0].get("n", 0) or 0)
+
+        return deleted
+
     async def batch_store_provenance(
         self, records: list, collection: str
     ) -> int:
