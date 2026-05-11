@@ -80,13 +80,134 @@ alone would probably be enough.
 
 ---
 
-## 3. How NouxCube's KG works (in 3 minutes)
+## 3. TrustGraph: the foundation NouxCube builds on
 
-NouxCube uses the **TrustGraph** model — an RDF-style triple store
-implemented on top of FalkorDB. The model has only three labels and one
-edge type, but it carries rich metadata.
+The KG layer of NouxCube is not a custom design. It is an implementation
+of [**TrustGraph**](https://trustgraph.ai/) — an open-source framework
+(Apache 2.0, [github.com/trustgraph-ai/trustgraph](https://github.com/trustgraph-ai/trustgraph))
+for building agentic knowledge graphs from unstructured documents.
 
-### 3.1. The triple model
+Understanding what TrustGraph is — and what it forces our architecture
+to look like — is the single most important thing in this folder. Every
+other piece of the system (RAG pipeline, agent tools, scoring formulas,
+extraction prompts) is downstream of these design choices.
+
+### 3.1. What TrustGraph defines
+
+TrustGraph is not a database. It is a **model + pipeline shape** with
+five load-bearing properties:
+
+1. **A schema-light triple model.** Three labels (`:Node`, `:Literal`,
+   `:Rel`) and one edge type. The *semantic* type of every relationship
+   lives in the `uri` property on the edge, not in its label. Adding a
+   new relationship type means writing a new predicate URI in the
+   ontology — no migration, no new label, no new index.
+
+2. **An ontology-driven predicate vocabulary.** Relationships are typed
+   by URIs from a curated namespace (`legal/empleado-de`,
+   `medical/diagnosticado-con`, `core/has-topic`, etc.). The
+   `relationships` extractor resolves freeform LLM output to canonical
+   ontology predicates at extraction time using semantic search against
+   the embedded ontology. Without this, every document invents new
+   relationship names (`works_at`, `is_employed_by`, `empleo`,
+   `trabaja_en`) and the graph becomes unqueryable.
+
+3. **A multi-extractor LLM pipeline.** Each chunk is processed by
+   several specialist extractors in parallel (definitions,
+   relationships, objects/NER, topics). Cross-extractor agreement
+   becomes a free consensus signal, and specialisation reduces
+   per-prompt hallucination.
+
+4. **Provenance as a first-class sub-graph.** Every fact is born with a
+   chain of PROV-O edges back to its source chunk, model, timestamp,
+   and extraction method. Provenance is queryable, not metadata.
+
+5. **Contradictions as first-class facts.** When two sources disagree
+   on the same subject + predicate, the system materialises a
+   contradiction `:Node` with edges to both conflicting values, rather
+   than silently deduplicating.
+
+### 3.2. What NouxCube kept, changed, and replaced
+
+NouxCube adopted the **model** and the **pipeline shape** wholesale.
+Where TrustGraph's reference implementation depends on infrastructure
+we did not already have, we swapped in our own stack:
+
+| Layer | TrustGraph reference | NouxCube uses | Why we swapped |
+|-------|----------------------|---------------|----------------|
+| Triple store | Neo4j / compatible | **FalkorDB** | Already in our stack, Apache 2.0, lower memory, Redis-backed (fits on-premise) |
+| Message bus | Apache Pulsar | **Celery** | Already deployed for Emma Reactive; one less service to operate |
+| LLM layer | Multi-provider | **SGLang + Qwen3.5-9B** | Single on-premise GPU; dual-phase PLANNER/CHAT split |
+| Embeddings | Qdrant | **Weaviate + BGE-M3** | Already in our RAG pipeline; one less vector store |
+| Prompt config | ConfigService | **Langfuse** | Single source of truth for all 91 prompts in the project |
+| Trust scoring | None — TrustGraph treats provenance + contradictions as sufficient | **Composite 5-signal edge scoring** (semantic + confidence + authority + consensus + recency) | Document IA needs ranked retrieval, not just retrieved facts |
+
+This is not a fork. The model is canonical TrustGraph; the
+infrastructure adapters are ours. Upstream changes to the TrustGraph
+model are tracked; upstream changes to its Pulsar/Neo4j wiring are
+not, because we do not use them.
+
+### 3.3. Why TrustGraph is load-bearing, not decorative
+
+Two specific properties of the TrustGraph model carry the rest of the
+architecture. If we swapped the model, both would have to be
+re-engineered from scratch:
+
+**Provenance, trust, and contradictions are composable because the
+model is uniform.** Every fact, every chunk reference, every authority
+weight, every contradiction is the same `(:Node)-[:Rel]->(:Node|:Literal)`
+shape. A generic Cypher pattern can ask "all edges of type X" without
+knowing the rest of the graph. If we had picked a property-graph with
+typed labels (`(:Person)-[:WORKS_AT]->(:Company)`), the provenance
+sub-graph would need separate edge types (`:HAS_SOURCE_CHUNK`,
+`:DERIVED_FROM_EXTRACTION`), the trust scoring would have to be
+implemented per-relationship-type, and the `graph_rag` 8-stage pipeline
+could not be written as a generic predicate walker. The whole
+retrieval layer would have to be re-built per vertical.
+
+**The ontology-driven predicate vocabulary is what keeps the LLM
+pipeline tractable.** With it, four parallel extractors processing
+hundreds of chunks converge on the canonical `legal/empleado-de`
+predicate before reaching the graph — so two documents that mention
+the same employment relationship end up MERGEd into the same edge.
+Without it, the graph becomes write-only: every document adds new
+predicate variants, and no query can ever find them all.
+
+**In practical terms**: changing the KG model is a six-month rewrite.
+Tuning anything else (extractors, prompts, scoring weights, extraction
+order) is a same-day change. That asymmetry is intentional, and it
+matches TrustGraph's design assumptions. When in doubt about whether
+to change something — if the change touches the triple model itself,
+reconsider; if it touches the layers built on top, go ahead.
+
+### 3.4. How TrustGraph plugs into the rest of NouxCube
+
+The TrustGraph implementation lives in `knowledge-tree-service` (port
+8011). It exposes:
+
+- **`POST /extract/triples`** — fed by `weaviate-service` after each
+  document is indexed. This is the only entry point for KG writes.
+- **`POST /triples/query`** — used by `graph_rag` and
+  `structural_query` for KG reads. Eight SPO query patterns plus
+  `build_context()` for LLM prompts.
+- **`POST /graph/assemble`** — used by `generate_knowledge_report` for
+  template-driven structured reports (KPIs, sources, trust scores).
+
+The agent (`emma-agent-service`) does not talk to FalkorDB directly;
+it calls KTS via HTTP. This isolation means we can swap FalkorDB for
+another triple store without touching the agent code — as long as the
+new store implements the same TrustGraph shape.
+
+For the schema, indexes, extractors, ontology layout, and reindex
+script see [`TRUSTGRAPH.md`](TRUSTGRAPH.md). For how retrieval consumes
+the KG see [`RAG_PIPELINE.md`](RAG_PIPELINE.md) Part 4
+(`graph_rag` 8-stage pipeline).
+
+---
+
+## 4. How the triple model actually looks
+
+### 4.1. The triple model
 
 ```
 (:Node)─[:Rel {uri: predicate}]─→(:Node)     ← entity-to-entity
@@ -106,7 +227,7 @@ special-cased edge types in Cypher, only different `uri` values. That
 makes provenance, contradictions, and trust scoring easy to bolt on
 without changing the schema.
 
-### 3.2. The mini-ontology
+### 4.2. The mini-ontology
 
 The `uri` on each `:Rel` comes from a curated ontology of **72
 predicates** in 6 namespaces:
@@ -130,7 +251,7 @@ This is what keeps the ontology from drifting. Without it, every doc
 would invent its own variant of the same predicate and the graph would
 become unqueryable.
 
-### 3.3. The 4-extractor pipeline
+### 4.3. The 4-extractor pipeline
 
 Each chunk is processed by **4 LLM extractors in parallel** via
 `asyncio.gather` in `ExtractionCoordinator`:
@@ -182,7 +303,7 @@ After parallel extraction, the coordinator:
 The full pipeline takes ~300 ms per chunk on a 9B model with 4 GPU
 extractors running in parallel. A 10-chunk document lands in ~3 seconds.
 
-### 3.4. Provenance is non-negotiable
+### 4.4. Provenance is non-negotiable
 
 Every triple in the graph can answer the question **"how do you know
 this?"**. The answer is a chain of edges:
@@ -201,7 +322,7 @@ the right page.
 
 ---
 
-## 4. KG vs a "normal" property graph
+## 5. KG vs a "normal" property graph
 
 Most teams that consider a KG default to a property-graph schema in
 Neo4j (or FalkorDB) with native types like `(:Person)-[:WORKS_AT]->(:Company)`.
@@ -249,7 +370,7 @@ ontology model has been measurably easier to evolve.
 
 ---
 
-## 5. What the KG brings to RAG — three concrete scenarios
+## 6. What the KG brings to RAG — three concrete scenarios
 
 This section answers the third part of "why a KG": **what does it give
 the RAG agent that vector search alone cannot?**
@@ -382,7 +503,7 @@ chain". Combined, they do both.
 
 ---
 
-## 6. The five trust signals (composite scoring)
+## 7. The five trust signals (composite scoring)
 
 When `graph_rag` ranks edges in its 8-stage pipeline, it does **not**
 use raw vector similarity. It blends five signals into a composite
@@ -411,7 +532,7 @@ hybrid search.)
 
 ---
 
-## 7. Where the KG plugs into the RAG pipeline
+## 8. Where the KG plugs into the RAG pipeline
 
 ```
 ┌─ Indexing ────────────────────────────────────────────────────┐
@@ -460,7 +581,7 @@ For full retrieval detail see [`RAG_PIPELINE.md`](RAG_PIPELINE.md).
 
 ---
 
-## 8. Design decisions worth knowing about
+## 9. Design decisions worth knowing about
 
 These decisions surprise newcomers. Each has a reason; if you are about
 to argue against one, read this section first.
@@ -480,7 +601,7 @@ to argue against one, read this section first.
 
 ---
 
-## 9. Glossary
+## 10. Glossary
 
 These terms are used everywhere; learn them before reading the reference docs.
 
@@ -498,11 +619,11 @@ These terms are used everywhere; learn them before reading the reference docs.
 | **`graph_rag`** | The 8-stage retrieval tool that queries the KG. See `RAG_PIPELINE.md` Part 4. |
 | **`smart_search`** | The hybrid retrieval tool that blends Weaviate hybrid search with optional graph expansion. |
 | **`structural_query`** | The Cypher-style tool used for counts, lists, and aggregates over the KG. |
-| **TrustGraph** | The open-source RDF-style triple model NouxCube adopted (Apache 2.0). See [trustgraph.ai](https://trustgraph.ai). |
+| **TrustGraph** | The open-source framework whose model and pipeline shape NouxCube adopted (Apache 2.0, [trustgraph.ai](https://trustgraph.ai)). The triple schema, ontology-driven predicates, multi-extractor pipeline, PROV-O provenance, and contradiction-as-fact are TrustGraph's design — not NouxCube's. See §3 for what we kept, changed, and replaced. |
 
 ---
 
-## 10. Where to go from here
+## 11. Where to go from here
 
 After reading this primer:
 
@@ -523,7 +644,7 @@ After reading this primer:
 
 ---
 
-## 11. Known gaps and open questions
+## 12. Known gaps and open questions
 
 This section is honest about where the KG falls short today. Update it
 as state changes.
