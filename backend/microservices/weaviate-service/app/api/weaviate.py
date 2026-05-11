@@ -807,7 +807,6 @@ async def index_from_connector(
             title=request.filename,
             document_type=doc_type,
             content=result.extracted_text[:2000] if result.chunks else (result.extracted_text or ""),
-            roles=doc_roles,
             owner_user_id=request.owner_id,
             external_id=request.metadata.get("external_id", "") if request.metadata else "",
             source_type="connector",
