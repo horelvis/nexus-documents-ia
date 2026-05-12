@@ -275,6 +275,60 @@ class KnowledgeTreeClient(BaseHTTPClient):
         """LEGACY memory bank list. See store_memory note."""
         return []
 
+    # ─── Trace persistence (Pieza C of the Provenance DAG) ───────────
+
+    async def persist_trace(
+        self,
+        trace_data: Dict[str, Any],
+        collection: str = "default",
+    ) -> Dict[str, Any]:
+        """POST a reasoning trace to KTS for permanent FalkorDB storage.
+
+        Designed to be called fire-and-forget alongside the existing
+        Redis 24h-TTL write at the SSE `complete` event. Returns the
+        endpoint response on success, or a shape with `success=False`
+        on failure — caller is responsible for ignoring the failure
+        case so it never affects the user-facing Emma response.
+        """
+        payload = {"trace_data": trace_data, "collection": collection}
+        try:
+            return await self.post_json(
+                "/traces/persist",
+                json=payload,
+                headers=self._headers(),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"persist_trace failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def get_trace(
+        self,
+        thread_id: str,
+        message_index: int,
+        collection: str = "default",
+    ) -> Optional[Dict[str, Any]]:
+        """GET the persisted trace from KTS — fallback when Redis missed.
+
+        Returns the FalkorDB-reconstructed trace payload (same shape as
+        the Redis blob, with a `source: "falkordb"` marker) or None if
+        no trace exists for the (thread_id, message_index) tuple.
+        """
+        path = f"/traces/{thread_id}/{message_index}"
+        params = {"collection": collection}
+        try:
+            return await self.get_json(
+                path,
+                headers=self._headers(),
+                params=params,
+            )
+        except Exception as e:  # noqa: BLE001
+            # 404 → None (no trace persisted); any other → log + None.
+            msg = str(e)
+            if "404" in msg or "Not Found" in msg:
+                return None
+            logger.warning(f"get_trace failed: {e}")
+            return None
+
 
 _knowledge_tree_client: Optional[KnowledgeTreeClient] = None
 

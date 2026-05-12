@@ -86,3 +86,43 @@ async def persist_trace(request: PersistTraceRequest) -> PersistTraceResponse:
         ) from exc
 
     return PersistTraceResponse(ok=True, trace_uri=trace_uri)
+
+
+@router.get("/{thread_id}/{message_index}")
+async def get_trace(
+    thread_id: str,
+    message_index: int,
+    collection: str = "default",
+) -> Dict[str, Any]:
+    """Reconstruct a reasoning-trace payload from the FalkorDB :Trace subgraph.
+
+    Designed as a transparent fallback for emma-agent-service when the
+    Redis 24h-TTL trace has expired. Returns the same shape as the Redis
+    payload so callers don't need conditional logic for the data source
+    (the response includes a `source: "falkordb"` marker for telemetry).
+
+    Returns 404 if no :Trace exists for that (thread_id, message_index).
+    """
+    store = TripleStore(falkordb_client)
+    try:
+        payload = await store.get_trace(
+            thread_id=thread_id,
+            message_index=int(message_index),
+            collection=collection,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("get_trace failed: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="trace retrieval failed",
+        ) from exc
+
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"No :Trace found for thread_id={thread_id} "
+                f"message_index={message_index} collection={collection}"
+            ),
+        )
+    return payload

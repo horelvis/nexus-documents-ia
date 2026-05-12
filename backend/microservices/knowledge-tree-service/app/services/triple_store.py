@@ -795,6 +795,144 @@ class TripleStore:
 
         return trace_uri
 
+    async def get_trace(
+        self,
+        thread_id: str,
+        message_index: int,
+        collection: str,
+    ) -> Optional[dict]:
+        """Reconstruct a reasoning-trace payload from the :Trace subgraph.
+
+        Returns the same shape as the Redis payload written by emma.py
+        at the SSE `complete` event, so callers can use it as a transparent
+        fallback when the 24h Redis TTL has expired.
+
+        evidence_graph.edges is returned empty in this MVP — the touched-
+        entity and cited-chunk nodes alone are sufficient for the
+        reasoning-modal display, and cross-entity edges can always be
+        re-derived from the regular knowledge graph if the UI needs them.
+
+        Returns None if no :Trace node exists for that (thread_id, msg_index).
+        """
+        trace_uri = f"nouxcube://trace/{collection}/{thread_id}/{message_index}"
+
+        HAS_STEP_PRED       = "nouxcube://predicate/trace/has-step"
+        USED_TOOL_PRED      = "nouxcube://predicate/trace/used-tool"
+        TOUCHED_ENTITY_PRED = "nouxcube://predicate/trace/touched-entity"
+        CITED_CHUNK_PRED    = "nouxcube://predicate/trace/cited-chunk"
+        LABEL_PRED          = "nouxcube://predicate/core/label"
+
+        # 1. Trace node scalar properties
+        trace_rows = await self._client.execute_cypher(
+            "MATCH (t:Trace {uri: $uri, collection: $col}) "
+            "RETURN t.thread_id AS tid, t.msg_index AS idx, "
+            "       t.total_execution_ms AS exec_ms, "
+            "       t.sources_cited AS cited, t.answer AS answer, "
+            "       t.created_at AS created_at",
+            params={"uri": trace_uri, "col": collection},
+        )
+        if not trace_rows:
+            return None
+        row = trace_rows[0]
+
+        # 2. Timeline steps in order
+        step_rows = await self._client.execute_cypher(
+            "MATCH (t:Trace {uri: $uri, collection: $col})"
+            "-[:Rel {uri: $pred, collection: $col}]->(st:TraceStep) "
+            "RETURN st.step_idx AS idx, st.type AS type, "
+            "       st.content AS content, st.timestamp_ms AS ts_ms, "
+            "       st.source AS source "
+            "ORDER BY st.step_idx",
+            params={"uri": trace_uri, "col": collection,
+                    "pred": HAS_STEP_PRED},
+        )
+        timeline = [
+            {
+                "type": s.get("type"),
+                "content": s.get("content"),
+                "timestamp_ms": s.get("ts_ms"),
+                "source": s.get("source"),
+            }
+            for s in (step_rows or [])
+        ]
+
+        # 3. Tools used
+        tool_rows = await self._client.execute_cypher(
+            "MATCH (t:Trace {uri: $uri, collection: $col})"
+            "-[:Rel {uri: $pred, collection: $col}]->(lit:Literal) "
+            "RETURN lit.value AS tool",
+            params={"uri": trace_uri, "col": collection,
+                    "pred": USED_TOOL_PRED},
+        )
+        tools_used = [r.get("tool") for r in (tool_rows or []) if r.get("tool")]
+
+        # 4. Touched entities (+ their primary label if available)
+        entity_rows = await self._client.execute_cypher(
+            "MATCH (t:Trace {uri: $uri, collection: $col})"
+            "-[:Rel {uri: $pred, collection: $col}]->(e:Node) "
+            "OPTIONAL MATCH (e)-[:Rel {uri: $label_pred, collection: $col}]"
+            "->(lab:Literal) "
+            "WITH e, collect(lab.value)[0] AS label "
+            "RETURN e.uri AS uri, label",
+            params={"uri": trace_uri, "col": collection,
+                    "pred": TOUCHED_ENTITY_PRED,
+                    "label_pred": LABEL_PRED},
+        )
+
+        # 5. Cited chunks
+        chunk_rows = await self._client.execute_cypher(
+            "MATCH (t:Trace {uri: $uri, collection: $col})"
+            "-[:Rel {uri: $pred, collection: $col}]->(c:Chunk) "
+            "RETURN c.uri AS uri, c.offset AS offset",
+            params={"uri": trace_uri, "col": collection,
+                    "pred": CITED_CHUNK_PRED},
+        )
+
+        evidence_nodes: list = []
+        for er in entity_rows or []:
+            uri = er.get("uri")
+            if not uri:
+                continue
+            evidence_nodes.append({
+                "id": uri,
+                "type": "entity",
+                "label": er.get("label") or uri,
+                "properties": {"uri": uri},
+            })
+        for cr in chunk_rows or []:
+            uri = cr.get("uri")
+            if not uri:
+                continue
+            offset = cr.get("offset")
+            label = (
+                f"Chunk @ offset {offset}"
+                if offset is not None
+                else "Chunk"
+            )
+            evidence_nodes.append({
+                "id": uri,
+                "type": "chunk",
+                "label": label,
+                "properties": {"chunk_offset": offset},
+            })
+
+        return {
+            "message_id": f"{row.get('tid')}:{row.get('idx')}",
+            "thread_id": row.get("tid"),
+            "message_index": row.get("idx"),
+            "timeline": timeline,
+            "tools_used": tools_used,
+            "total_execution_ms": int(row.get("exec_ms") or 0),
+            "sources_cited": int(row.get("cited") or 0),
+            "evidence_graph": {
+                "nodes": evidence_nodes,
+                # MVP: cross-entity edges not persisted (re-derivable from KG).
+                "edges": [],
+            },
+            "answer": row.get("answer") or "",
+            "source": "falkordb",
+        }
+
     # ------------------------------------------------------------------
     # Cleanup operations
     # ------------------------------------------------------------------

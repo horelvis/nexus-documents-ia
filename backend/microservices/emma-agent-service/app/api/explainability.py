@@ -146,11 +146,37 @@ async def get_reasoning_trace(
                 "total_execution_ms": trace.get("total_execution_ms", 0),
                 "tools_used": trace.get("tools_used", []),
                 "sources_cited": trace.get("sources_cited", 0),
+                "source": "redis",
             }
     except Exception as e:
         logger.warning(f"Failed to read reasoning trace from Redis: {e}")
 
-    # Fallback: empty structure
+    # Redis miss or expired (24h TTL) — try FalkorDB :Trace fallback
+    # (Pieza C of the TrustGraph Provenance DAG). The KTS endpoint
+    # reconstructs the same payload shape from the persistent graph.
+    try:
+        from app.clients.knowledge_tree_client import get_knowledge_tree_client
+        kt_client = get_knowledge_tree_client()
+        fb_trace = await kt_client.get_trace(
+            thread_id=thread_id,
+            message_index=message_index,
+            collection="default",
+        )
+        if fb_trace:
+            return {
+                "message_id": fb_trace.get("message_id", f"{thread_id}:{message_index}"),
+                "thread_id": thread_id,
+                "timeline": fb_trace.get("timeline", []),
+                "evidence_graph": fb_trace.get("evidence_graph") or {"nodes": [], "edges": []},
+                "total_execution_ms": fb_trace.get("total_execution_ms", 0),
+                "tools_used": fb_trace.get("tools_used", []),
+                "sources_cited": fb_trace.get("sources_cited", 0),
+                "source": "falkordb",
+            }
+    except Exception as e:
+        logger.warning(f"Failed to read reasoning trace from FalkorDB fallback: {e}")
+
+    # Both Redis and FalkorDB missed — return empty structure
     return {
         "message_id": f"{thread_id}:{message_index}",
         "thread_id": thread_id,
@@ -159,4 +185,5 @@ async def get_reasoning_trace(
         "total_execution_ms": 0,
         "tools_used": [],
         "sources_cited": 0,
+        "source": "empty",
     }

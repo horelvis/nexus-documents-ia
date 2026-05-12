@@ -778,6 +778,7 @@ async def _generate_langgraph_sse(
                             "tools_used": data.get("agents_used", []),
                             "total_execution_ms": data.get("latency_ms", 0),
                             "sources_cited": len(data.get("sources", [])),
+                            "answer": data.get("answer", ""),
                             "evidence_graph": {
                                 "nodes": list(evidence_nodes.values()),
                                 "edges": evidence_edges,
@@ -789,6 +790,26 @@ async def _generate_langgraph_sse(
                         await r.close()
                     except Exception as e:
                         logger.warning(f"Failed to persist reasoning trace: {e}")
+
+                    # Mirror into FalkorDB for permanent retention (Pieza C).
+                    # Fire-and-forget — any KTS error MUST NOT affect the
+                    # user-visible Emma response. Caller swallows the
+                    # exception inside the helper itself.
+                    try:
+                        from app.clients.knowledge_tree_client import (
+                            get_knowledge_tree_client,
+                        )
+                        kt_client = get_knowledge_tree_client()
+                        asyncio.create_task(
+                            kt_client.persist_trace(
+                                trace_data=trace_data,
+                                collection="default",
+                            )
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to schedule trace persist to KTS: {e}"
+                        )
 
                 # Normal completion — final result
                 suggestions = _generate_contextual_suggestions(
