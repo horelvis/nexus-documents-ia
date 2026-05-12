@@ -33,3 +33,56 @@ generic:
   - "disposicion"
   - "clausula"
   - "anexo"
+
+# Invoice / billing concepts that leak from layout text in facturas, nominas
+# and recibos. These are field labels, not entities.
+billing_concepts:
+  - "total a pagar"
+  - "total"
+  - "subtotal"
+  - "importe"
+  - "importe total"
+  - "importe neto"
+  - "base imponible"
+  - "iva"
+  - "iva incluido"
+  - "cuota"
+  - "cuotas mensuales"
+  - "cuota mensual"
+  - "plan precio"
+  - "precio"
+  - "recibo"
+  - "factura"
+  - "vencimiento"
+  - "fecha vencimiento"
+  - "descuento"
+  - "concepto"
+  - "forma de pago"
+  - "numero de factura"
+  - "n factura"
+
+# UI / template labels that come from the visual layout of source documents
+# (Docling sometimes promotes section headers and pill text into entity
+# candidates).
+ui_labels:
+  - "de un vistazo"
+  - "resumen"
+  - "detalles"
+  - "detalle"
+  - "informacion"
+  - "mas informacion"
+  - "ver mas"
+  - "ver detalle"
+
+# Street markers that appear ALONE (without an actual street name). Matching
+# is whole-string, so "calle mayor" still passes through — only the bare
+# token is blocked.
+place_markers_alone:
+  - "calle"
+  - "avenida"
+  - "plaza"
+  - "pasaje"
+  - "carretera"
+  - "camino"
+  - "via"
+  - "paseo"

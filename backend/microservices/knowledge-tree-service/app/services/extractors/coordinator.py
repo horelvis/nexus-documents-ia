@@ -478,6 +478,23 @@ class ExtractionCoordinator:
             errors.append(f"normalize_unique_predicates: {exc}")
             logger.warning("Normalize unique predicates failed: %s", exc)
 
+        # Step 3c.6: Backstop default core/type for untyped nodes. The 4
+        # extractors sometimes emit subjects with no type triple (address
+        # tokens, billing concepts, license-plate fragments). Untyped nodes
+        # are invisible to the type-scoped EntityResolver and accumulate as
+        # orphans. This assigns core/type → "other" so the resolver can
+        # at least see them; "other" is explicitly skipped by the resolver
+        # so it doesn't trigger accidental clustering.
+        untyped_backfilled = 0
+        try:
+            untyped_backfilled = await self._store.assign_default_type_to_untyped_nodes(
+                subject_uris=list(all_subject_uris),
+                collection=collection,
+            )
+        except Exception as exc:
+            errors.append(f"untyped_backstop: {exc}")
+            logger.warning("Untyped node backstop failed: %s", exc)
+
         # Step 3d: Entity resolution — merge duplicate :Nodes emitted under
         # slightly different labels by the 4 extractors. Runs per-document
         # over the full collection scope so cross-document duplicates
@@ -537,7 +554,7 @@ class ExtractionCoordinator:
         logger.info(
             "Document %s extraction complete: %d triples, %d parse_failures, "
             "%d empty_responses, %d validation_failures, %d contradictions, "
-            "%d consensus_predicates, normalize=%s, "
+            "%d consensus_predicates, normalize=%s, untyped_backfilled=%d, "
             "person_clusters_merged=%d nodes_removed=%d, %dms",
             document_id,
             total_triples,
@@ -547,6 +564,7 @@ class ExtractionCoordinator:
             contradictions_found,
             total_consensus,
             normalize_summary,
+            untyped_backfilled,
             resolver_total_merged,
             resolver_total_removed,
             elapsed_ms,

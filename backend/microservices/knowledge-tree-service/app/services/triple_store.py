@@ -426,6 +426,64 @@ class TripleStore:
 
         return deleted
 
+    async def assign_default_type_to_untyped_nodes(
+        self,
+        subject_uris: list,
+        collection: str,
+        default_type: str = "other",
+    ) -> int:
+        """Backstop: ensure every :Node has at least one core/type edge.
+
+        The 4 LLM extractors occasionally emit subjects with no `core/type`
+        triple — fragments like address tokens, billing concepts, or
+        license-plate substrings get linked through relationships but
+        never typed. Untyped nodes are invisible to `EntityResolver`
+        (which is type-scoped over person/organization/place) and look
+        like orphans in the graph.
+
+        This pass runs AFTER `normalize_unique_predicates_for_subjects`
+        and BEFORE `EntityResolver`, assigning `core/type → "other"` to
+        any node missing a type. "other" is the explicit "no algorithm
+        for me" bucket that the resolver already skips, so the backstop
+        makes orphans visible without triggering accidental clustering.
+
+        Uses `extraction_method='system'` and a moderate confidence
+        (0.50) so a real extractor evidence in a future doc — when
+        someone IS typed as person/org — can still take precedence via
+        the normalize majority-vote pass.
+        """
+        if not subject_uris:
+            return 0
+
+        TYPE_PRED = "nouxcube://predicate/core/type"
+        ENTITY_PREFIX = "nouxcube://entity/"
+
+        # Guard against backfilling non-entity :Node records (PROV-O
+        # extraction nodes, document nodes, folder nodes — these all share
+        # the :Node label but legitimately have no core/type).
+        rows = await self._client.execute_cypher(
+            "MATCH (s:Node) "
+            "WHERE s.uri IN $uris AND s.collection = $col "
+            "  AND s.uri STARTS WITH $entity_prefix "
+            "OPTIONAL MATCH (s)-[t:Rel {uri: $pred, collection: $col}]->(:Literal) "
+            "WITH s, count(t) AS type_count "
+            "WHERE type_count = 0 "
+            "MERGE (lit:Literal {value: $default, collection: $col}) "
+            "MERGE (s)-[r:Rel {uri: $pred, collection: $col}]->(lit) "
+            "ON CREATE SET r.extraction_method = 'system', r.confidence = 0.50 "
+            "RETURN count(s) AS n",
+            params={
+                "uris": subject_uris,
+                "col": collection,
+                "pred": TYPE_PRED,
+                "default": default_type,
+                "entity_prefix": ENTITY_PREFIX,
+            },
+        )
+        if rows:
+            return int(rows[0].get("n", 0) or 0)
+        return 0
+
     async def batch_store_provenance(
         self, records: list, collection: str
     ) -> int:
