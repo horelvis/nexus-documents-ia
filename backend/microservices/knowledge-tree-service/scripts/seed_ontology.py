@@ -35,7 +35,6 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-ONTOLOGY_USER = "_system"
 ONTOLOGY_COLLECTION = "_ontology"
 
 GREEN = "\033[92m"
@@ -132,6 +131,17 @@ PREDICATES: List[Tuple[str, str, str, str, str]] = [
     ("prov", "timestamp",      "ISO 8601 timestamp when the triple was extracted",               "triple",       "literal"),
     ("prov", "chunk-text",     "Raw text of the source chunk that yielded this triple",          "triple",       "literal"),
     ("prov", "chunk-offset",   "Character offset of the source chunk within the document",       "triple",       "literal"),
+
+    # ── Trace (~4) ─────────────────────────────────────────────────────────────
+    # Reasoning-trace provenance (Pieza C of the TrustGraph Provenance DAG):
+    # a :Trace node represents a single Emma response, with its timeline as
+    # :TraceStep nodes and edges to the entities and chunks visited during
+    # ReAct execution. Different scope from prov/* — these are at the
+    # response/conversation level, prov/* is at the extraction-triple level.
+    ("trace", "has-step",       "Trace node links to its timeline TraceStep nodes",            "trace", "trace-step"),
+    ("trace", "used-tool",      "Tool invoked by the agent during a reasoning trace",          "trace", "literal"),
+    ("trace", "touched-entity", "Entity visited or referenced during a reasoning trace",       "trace", "entity"),
+    ("trace", "cited-chunk",    "Source chunk cited by the agent during a reasoning trace",    "trace", "chunk"),
 ]
 
 
@@ -176,7 +186,7 @@ async def _seed_predicate(
     pred_uri = URIBuilder.predicate(sector, name)
 
     # Ensure the predicate node itself exists in the ontology collection
-    await store.merge_node(pred_uri, ONTOLOGY_USER, ONTOLOGY_COLLECTION)
+    await store.merge_node(pred_uri, ONTOLOGY_COLLECTION)
 
     # 5 triples: label, description, domain, range, sector
     triples = [
@@ -188,7 +198,7 @@ async def _seed_predicate(
     ]
 
     for pred_ontology, pred_name, value, is_node in triples:
-        await store.merge_literal(value, ONTOLOGY_USER, ONTOLOGY_COLLECTION)
+        await store.merge_literal(value, ONTOLOGY_COLLECTION)
         pred_uri_onto = URIBuilder.predicate(pred_ontology, pred_name)
         await store.create_rel(
             subject_uri=pred_uri,

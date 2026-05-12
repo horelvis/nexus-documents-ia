@@ -628,6 +628,174 @@ class TripleStore:
         )
 
     # ------------------------------------------------------------------
+    # Trace persistence (Pieza C of the TrustGraph Provenance DAG)
+    # ------------------------------------------------------------------
+
+    async def persist_trace(self, trace_data: dict, collection: str) -> str:
+        """Persist a reasoning trace + linkage to the existing entity/chunk graph.
+
+        Mirrors the Redis trace payload (timeline + evidence_graph + metadata)
+        into a :Trace node family in FalkorDB. The trace lives IN the graph
+        alongside the entities it references — touched entities and cited
+        chunks become real edges to existing :Node and :Chunk records (no
+        re-creation), NOT JSON blobs. This makes cross-trace queries like
+        "every trace that touched entity X" or "average latency when
+        graph_rag was invoked" first-class Cypher instead of post-hoc JSON
+        parsing.
+
+        Schema:
+          (:Trace {uri, thread_id, msg_index, created_at,
+                   total_execution_ms, sources_cited, answer})
+            -[:Rel uri='trace/has-step']->       (:TraceStep)
+            -[:Rel uri='trace/used-tool']->      (:Literal value=tool_name)
+            -[:Rel uri='trace/touched-entity']-> (:Node)    -- existing
+            -[:Rel uri='trace/cited-chunk']->    (:Chunk)   -- existing (Pieza B)
+
+        Args:
+            trace_data: must include thread_id and message_index. Optional:
+                total_execution_ms, sources_cited, tools_used (list[str]),
+                answer (str), timeline (list of step dicts), evidence_graph
+                ({nodes, edges} where node.type ∈ {entity, chunk, ...}).
+            collection: graph collection scope.
+
+        Returns:
+            The :Trace node URI.
+
+        Raises:
+            ValueError: trace_data missing required keys.
+        """
+        thread_id = trace_data.get("thread_id")
+        msg_index = trace_data.get("message_index")
+        if not thread_id or msg_index is None:
+            raise ValueError(
+                "trace_data must include thread_id and message_index"
+            )
+
+        trace_uri = (
+            f"nouxcube://trace/{collection}/{thread_id}/{msg_index}"
+        )
+
+        HAS_STEP_PRED       = "nouxcube://predicate/trace/has-step"
+        USED_TOOL_PRED      = "nouxcube://predicate/trace/used-tool"
+        TOUCHED_ENTITY_PRED = "nouxcube://predicate/trace/touched-entity"
+        CITED_CHUNK_PRED    = "nouxcube://predicate/trace/cited-chunk"
+
+        # ── 1. Trace node ─────────────────────────────────────────────
+        await self._client.execute_cypher(
+            "MERGE (t:Trace {uri: $uri, collection: $col}) "
+            "ON CREATE SET t.created_at = timestamp() "
+            "SET t.thread_id = $tid, t.msg_index = $idx, "
+            "    t.total_execution_ms = $exec_ms, "
+            "    t.sources_cited = $cited, "
+            "    t.answer = $answer",
+            params={
+                "uri": trace_uri, "col": collection,
+                "tid": str(thread_id), "idx": int(msg_index),
+                "exec_ms": int(trace_data.get("total_execution_ms") or 0),
+                "cited": int(trace_data.get("sources_cited") or 0),
+                # Truncate at 2000 chars; full answer lives in checkpointer.
+                "answer": (str(trace_data.get("answer") or ""))[:2000],
+            },
+        )
+
+        # ── 2. Tools used → :Literal edges (queryable for aggregation) ─
+        tools = [
+            str(tool).strip()
+            for tool in (trace_data.get("tools_used") or [])
+            if tool and str(tool).strip()
+        ]
+        if tools:
+            await self._client.execute_cypher(
+                "MATCH (t:Trace {uri: $trace_uri, collection: $col}) "
+                "UNWIND $tools AS tool_name "
+                "MERGE (lit:Literal {value: tool_name, collection: $col}) "
+                "MERGE (t)-[r:Rel {uri: $pred, collection: $col}]->(lit)",
+                params={
+                    "trace_uri": trace_uri, "col": collection,
+                    "tools": tools, "pred": USED_TOOL_PRED,
+                },
+            )
+
+        # ── 3. Timeline → :TraceStep nodes ────────────────────────────
+        timeline = trace_data.get("timeline") or []
+        steps: list = []
+        for i, step in enumerate(timeline):
+            if not isinstance(step, dict):
+                continue
+            steps.append({
+                "step_uri": f"{trace_uri}/step/{i}",
+                "idx": i,
+                "type": str(step.get("type") or "unknown"),
+                # Truncate large content (LLM thoughts can be huge).
+                "content": (str(step.get("content") or ""))[:4000],
+                "ts_ms": int(step.get("timestamp_ms") or 0),
+                "source": str(step.get("source") or ""),
+            })
+        if steps:
+            await self._client.execute_cypher(
+                "MATCH (t:Trace {uri: $trace_uri, collection: $col}) "
+                "UNWIND $steps AS s "
+                "MERGE (st:TraceStep {uri: s.step_uri, collection: $col}) "
+                "ON CREATE SET st.created_at = timestamp() "
+                "SET st.step_idx = s.idx, st.type = s.type, "
+                "    st.content = s.content, st.timestamp_ms = s.ts_ms, "
+                "    st.source = s.source "
+                "MERGE (t)-[r:Rel {uri: $pred, collection: $col}]->(st) "
+                "ON CREATE SET r.step_idx = s.idx",
+                params={
+                    "trace_uri": trace_uri, "col": collection,
+                    "steps": steps, "pred": HAS_STEP_PRED,
+                },
+            )
+
+        # ── 4. Touched entities → edges to EXISTING :Node (MATCH) ─────
+        # MATCH (not MERGE) avoids creating ghost entity nodes if the
+        # trace references a URI that's not in the graph (e.g. the
+        # entity was deleted, or the trace came from a different
+        # collection). Edges are dropped silently in that case.
+        ev = trace_data.get("evidence_graph") or {}
+        nodes = ev.get("nodes") or []
+        entity_uris = [
+            n.get("id") for n in nodes
+            if isinstance(n, dict)
+               and n.get("type") == "entity"
+               and isinstance(n.get("id"), str)
+               and n["id"].startswith("nouxcube://entity/")
+        ]
+        if entity_uris:
+            await self._client.execute_cypher(
+                "MATCH (t:Trace {uri: $trace_uri, collection: $col}) "
+                "UNWIND $uris AS ent_uri "
+                "MATCH (e:Node {uri: ent_uri, collection: $col}) "
+                "MERGE (t)-[r:Rel {uri: $pred, collection: $col}]->(e)",
+                params={
+                    "trace_uri": trace_uri, "col": collection,
+                    "uris": entity_uris, "pred": TOUCHED_ENTITY_PRED,
+                },
+            )
+
+        # ── 5. Cited chunks → edges to EXISTING :Chunk (MATCH) ────────
+        chunk_uris = [
+            n.get("id") for n in nodes
+            if isinstance(n, dict)
+               and n.get("type") == "chunk"
+               and isinstance(n.get("id"), str)
+        ]
+        if chunk_uris:
+            await self._client.execute_cypher(
+                "MATCH (t:Trace {uri: $trace_uri, collection: $col}) "
+                "UNWIND $uris AS ch_uri "
+                "MATCH (c:Chunk {uri: ch_uri, collection: $col}) "
+                "MERGE (t)-[r:Rel {uri: $pred, collection: $col}]->(c)",
+                params={
+                    "trace_uri": trace_uri, "col": collection,
+                    "uris": chunk_uris, "pred": CITED_CHUNK_PRED,
+                },
+            )
+
+        return trace_uri
+
+    # ------------------------------------------------------------------
     # Cleanup operations
     # ------------------------------------------------------------------
 

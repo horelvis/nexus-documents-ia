@@ -29,10 +29,12 @@ app = FastAPI(
 from app.api.triples import router as triples_router
 from app.api.extract import router as extract_router
 from app.api.reports import router as reports_router
+from app.api.traces import router as traces_router
 
 app.include_router(triples_router)
 app.include_router(extract_router)
 app.include_router(reports_router)
+app.include_router(traces_router)
 
 
 @app.get("/health")
