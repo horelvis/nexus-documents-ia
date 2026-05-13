@@ -264,14 +264,6 @@ class Settings(BaseSettings):
         "GOOGLE_OAUTH_SCOPES",
         "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/documents"
     )
-    GOOGLE_OAUTH_SUCCESS_REDIRECT_URL: str = os.getenv(
-        "GOOGLE_OAUTH_SUCCESS_REDIRECT_URL",
-        "http://localhost:3000/integrations/google-drive/success"
-    )
-    GOOGLE_OAUTH_ERROR_REDIRECT_URL: str = os.getenv(
-        "GOOGLE_OAUTH_ERROR_REDIRECT_URL",
-        "http://localhost:3000/integrations/google-drive/error"
-    )
     # Credentials Encryption Key (Fernet - 32 bytes base64 URL-safe)
     # Used for: OAuth tokens, database credentials, API keys
     # Generate with: python -c "import secrets,base64;print(base64.urlsafe_b64encode(secrets.token_bytes(32)).decode())"

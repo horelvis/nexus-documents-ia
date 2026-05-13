@@ -1,8 +1,8 @@
 """
 Service for managing encrypted credentials for Information Channels.
 
-Uses Fernet symmetric encryption (same pattern as GoogleDriveTokenService)
-to securely store OAuth tokens and database credentials.
+Uses Fernet symmetric encryption to securely store OAuth tokens and
+database credentials.
 """
 from __future__ import annotations
 

@@ -13,7 +13,7 @@ from app.api.v1 import (
     document_insights, documents, document_categorization, auth, admin,
     agents, webhooks, search, users, entities,
     weaviate, lgpd, analysis_queue, channels,
-    internal_template_edit_sessions, internal_google_drive_tokens, google_drive,
+    internal_template_edit_sessions,
     folders, classification, emma,
 )
 from fastapi import APIRouter
@@ -42,7 +42,6 @@ api_router.include_router(documents.router, prefix="/documents", tags=["document
 api_router.include_router(document_categorization.router, prefix="/categorization", tags=["categorization"])
 api_router.include_router(search.router, prefix="/search", tags=["search"])
 api_router.include_router(document_insights.router, prefix="/document-insights", tags=["document-insights"])
-api_router.include_router(google_drive.router)
 
 # Admin-curated agents catalog (reads open, writes superuser-gated)
 api_router.include_router(agents.router)
@@ -73,11 +72,6 @@ internal_router.include_router(
     internal_template_edit_sessions.router,
     prefix="/template-edit-sessions",
     tags=["internal-template-edit-sessions"],
-)
-internal_router.include_router(
-    internal_google_drive_tokens.router,
-    prefix="/google-drive-tokens",
-    tags=["internal-google-drive-tokens"],
 )
 
 # Internal connectors API for SIL reindex service

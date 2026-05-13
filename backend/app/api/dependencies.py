@@ -2,8 +2,8 @@
 DEPRECATED: Legacy sync dependencies module.
 
 This module is maintained for backward compatibility with sync services
-(GoogleDriveTokenService, template_edit_session_service). New code should
-use `app.api.async_dependencies` instead.
+(template_edit_session_service). New code should use
+`app.api.async_dependencies` instead.
 
 After the multi-tenancy removal refactor (Plan 2), `get_current_user`
 returns a `UserProfile` (a request-scoped immutable DTO carrying sub,

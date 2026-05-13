@@ -22,7 +22,6 @@ from app.db.models import (
     User, UserImage, Document, DocumentView,
     LGPDDeletionAudit, document_tags, Tag,
     SignatureRequest, SignatureRequestSigner, SignatureEvent, SignatureContact,
-    GoogleDriveToken,
 )
 from app.services.async_storage_service import AsyncStorageService
 from app.services.elasticsearch_client import elasticsearch_client
@@ -265,13 +264,6 @@ class LGPDDeletionService:
         await db.execute(
             delete(SignatureContact).where(SignatureContact.created_by == user.id)
         )
-
-        # Delete Google Drive tokens bound to the user
-        tokens_result = await db.execute(
-            delete(GoogleDriveToken).where(GoogleDriveToken.user_id == user.id)
-        )
-        deleted_count += tokens_result.rowcount or 0
-        await db.flush()
 
         return deleted_count
 

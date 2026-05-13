@@ -269,26 +269,6 @@ class DocumentView(Base):
 
 
 
-class GoogleDriveToken(Base):
-    """OAuth tokens per user for Google Drive/Docs integration."""
-    __tablename__ = "google_drive_tokens"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, unique=True, index=True)
-    google_user_id = Column(String, nullable=False)
-    google_email = Column(String, nullable=False)
-    scopes = Column(JSONB, default=list)
-    access_token_encrypted = Column(LargeBinary, nullable=False)
-    refresh_token_encrypted = Column(LargeBinary, nullable=True)
-    token_expiry = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    user = relationship("User")
-
-
-
-
 class Tag(Base):
     __tablename__ = "tags"
     
@@ -729,8 +709,8 @@ class ChannelCredential(Base):
     """
     Encrypted credentials for channel authentication.
 
-    Uses Fernet symmetric encryption (same pattern as GoogleDriveToken).
-    Supports OAuth tokens (Gmail, Drive) and database credentials.
+    Uses Fernet symmetric encryption. Supports OAuth tokens (Gmail,
+    Drive) and database credentials.
     """
     __tablename__ = "channel_credentials"
 
