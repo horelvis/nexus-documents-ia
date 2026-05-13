@@ -446,6 +446,14 @@ async def run_stream(
         enable_thinking = configurable.get("deep_reasoning") or input_data.get("enable_thinking")
         context = input_data.get("context", {})
 
+        # Admin-curated agent invocation: the frontend places the slug in the
+        # input payload (see useStreamSubmit.ts). classify_node short-circuits
+        # on it to emit agent_metadata SSE and the react_loop forces a single
+        # invoke_agent call. Without this propagation the slug is lost and the
+        # @<slug> mention only takes effect through the LLM heuristically
+        # noticing it in the user text (which is unreliable on 9B models).
+        agent_slug = input_data.get("agent_slug")
+
         from app.agents.langgraph.api import stream_react_query
 
         emma_generator = stream_react_query(
@@ -454,6 +462,7 @@ async def run_stream(
             thread_id=thread_id,
             context=context,
             enable_thinking=enable_thinking,
+            agent_slug=agent_slug,
         )
 
     # Wrap with the LangGraph protocol translator (prior_messages for multi-turn)
