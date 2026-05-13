@@ -15,7 +15,7 @@ from math import ceil
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -228,7 +228,7 @@ async def get_connector_oauth_url(
             raise HTTPException(status_code=500, detail="Connector not properly configured")
 
         scopes = "offline_access openid profile User.Read Files.Read.All Sites.Read.All"
-        redirect_uri = f"{settings.API_BASE_URL}/api/v1/user-sync/oauth/callback"
+        redirect_uri = f"{settings.FRONTEND_URL}/onboarding/oauth/callback"
 
         auth_url = (
             f"https://login.microsoftonline.com/{ms_tenant}/oauth2/v2.0/authorize"
@@ -248,7 +248,7 @@ async def get_connector_oauth_url(
             raise HTTPException(status_code=500, detail="Connector not properly configured")
 
         scopes = "openid email profile https://www.googleapis.com/auth/drive.readonly"
-        redirect_uri = f"{settings.API_BASE_URL}/api/v1/user-sync/oauth/callback"
+        redirect_uri = f"{settings.FRONTEND_URL}/onboarding/oauth/callback"
 
         auth_url = (
             f"https://accounts.google.com/o/oauth2/v2/auth"
@@ -277,27 +277,42 @@ async def get_connector_oauth_url(
 
 @router.get("/oauth/callback")
 async def oauth_callback(
+    request: Request,
     code: str = Query(...),
     state: str = Query(...),
     error: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
-    OAuth callback endpoint for connector authorization.
+    OAuth callback for connector (user-sync) authorization.
 
-    Called by identity providers after user authorizes.
-    Exchanges code for tokens and stores them.
+    Canonical caller is the frontend page at /onboarding/oauth/callback,
+    which fetches this endpoint with Accept: application/json and renders
+    the UI itself — keeping the backend host:port out of the browser
+    address bar. Direct browser redirects fall back to RedirectResponse
+    for cutover-period safety.
     """
+    from fastapi.responses import JSONResponse
+
+    wants_json = "application/json" in (request.headers.get("accept") or "")
+
     state_data = _connector_oauth_states.pop(state, None)
 
     if error:
         logger.error(f"OAuth error: {error}")
+        if wants_json:
+            return JSONResponse({"ok": False, "error": error}, status_code=400)
         return RedirectResponse(
             f"{settings.FRONTEND_URL}/auth/oauth-error?error={error}"
         )
 
     if not state_data:
         logger.error(f"Invalid OAuth state: {state}")
+        if wants_json:
+            return JSONResponse(
+                {"ok": False, "error": "invalid_state"},
+                status_code=400,
+            )
         return RedirectResponse(
             f"{settings.FRONTEND_URL}/auth/oauth-error?error=invalid_state"
         )
@@ -317,7 +332,7 @@ async def oauth_callback(
             raise ValueError("Connector not found")
 
         config = connector.config or {}
-        redirect_uri = f"{settings.API_BASE_URL}/api/v1/user-sync/oauth/callback"
+        redirect_uri = f"{settings.FRONTEND_URL}/onboarding/oauth/callback"
 
         # Exchange code for tokens based on provider
         import httpx
@@ -401,13 +416,24 @@ async def oauth_callback(
 
         logger.info(f"OAuth successful for user {user_id} on connector {connector_id}")
 
-        # Redirect to frontend success page
+        if wants_json:
+            return JSONResponse({
+                "ok": True,
+                "connector_id": str(connector_id),
+                "connector_type": connector_type,
+            })
+
         return RedirectResponse(
             f"{settings.FRONTEND_URL}/onboarding/oauth-success?connector_id={connector_id}"
         )
 
     except Exception as e:
         logger.exception(f"OAuth callback error: {e}")
+        if wants_json:
+            return JSONResponse(
+                {"ok": False, "error": "token_exchange_failed", "detail": str(e)},
+                status_code=500,
+            )
         return RedirectResponse(
             f"{settings.FRONTEND_URL}/auth/oauth-error?error=token_exchange_failed"
         )
