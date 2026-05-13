@@ -7,12 +7,14 @@ import { IconCheck, IconX, IconLoader2 } from '@tabler/icons-react'
 /**
  * OAuth Callback Page
  *
- * Microsoft (and other HTTPS-requiring providers) redirect here after authorization.
- * This page:
+ * Receives the OAuth provider's redirect (Google, Microsoft) and:
  * 1. Extracts code/state/error from URL query params
- * 2. Forwards them to the backend API for token exchange
- * 3. Shows success/error UI
+ * 2. Forwards them to the backend with Accept: application/json
+ * 3. Renders success/error UI from the JSON response
  * 4. Notifies the opener window via postMessage and auto-closes
+ *
+ * This page must own the visible URL so the backend host:port is never
+ * exposed in the browser address bar.
  */
 export default function OAuthCallbackPage() {
   return (
@@ -57,14 +59,19 @@ function OAuthCallbackContent() {
     const exchangeCode = async () => {
       try {
         const params = new URLSearchParams({ code, state })
-        const response = await fetch(`/api/v1/connectors/oauth/callback?${params}`)
-        const html = await response.text()
+        const response = await fetch(`/api/v1/connectors/oauth/callback?${params}`, {
+          headers: { 'Accept': 'application/json' },
+        })
 
-        if (response.ok) {
-          // Extract email from the HTML response if present
-          const emailMatch = html.match(/oauth-success.*?email['":\s]*['"]([^'"]+)['"]/)
-          const extractedEmail = emailMatch?.[1] || ''
+        let payload: { ok?: boolean; email?: string; error?: string } = {}
+        try {
+          payload = await response.json()
+        } catch {
+          payload = { ok: false, error: 'invalid_response' }
+        }
 
+        if (response.ok && payload.ok) {
+          const extractedEmail = payload.email || ''
           setStatus('success')
           setEmail(extractedEmail)
           setMessage('Autorización exitosa')
@@ -77,10 +84,11 @@ function OAuthCallbackContent() {
             try { window.close() } catch {}
           }, 1500)
         } else {
+          const errMsg = payload.error || 'Error al intercambiar el código de autorización'
           setStatus('error')
-          setMessage('Error al intercambiar el código de autorización')
+          setMessage(errMsg)
           if (window.opener) {
-            window.opener.postMessage({ type: 'oauth-error', error: 'Token exchange failed' }, '*')
+            window.opener.postMessage({ type: 'oauth-error', error: errMsg }, '*')
           }
         }
       } catch (err: any) {

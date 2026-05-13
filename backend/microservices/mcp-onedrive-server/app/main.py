@@ -164,9 +164,14 @@ async def run_http(host: str = "0.0.0.0", port: int = 8000):
     async def oauth_callback(request: Request):
         """GET /oauth/callback?code=X&state=Y → Exchange code, save tokens.
 
-        Returns an HTML page that auto-closes the popup window after authorization.
+        Content negotiation: returns JSON when Accept: application/json,
+        otherwise an HTML page that auto-closes the popup. The JSON variant
+        is the canonical path (frontend-driven flow); HTML is kept for
+        legacy direct-from-Microsoft redirects during cutover.
         """
         from starlette.responses import HTMLResponse
+
+        wants_json = "application/json" in (request.headers.get("accept") or "")
 
         code = request.query_params.get("code")
         state = request.query_params.get("state")
@@ -175,6 +180,11 @@ async def run_http(host: str = "0.0.0.0", port: int = 8000):
 
         if error:
             display_error = error_description or error
+            if wants_json:
+                return JSONResponse(
+                    {"ok": False, "error": display_error},
+                    status_code=400,
+                )
             html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Error de Autorización</title>
 <style>body{{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}}
@@ -188,6 +198,11 @@ button:hover{{background:#27272a}}</style></head>
             return HTMLResponse(html, status_code=400)
 
         if not code or not state:
+            if wants_json:
+                return JSONResponse(
+                    {"ok": False, "error": "missing_params"},
+                    status_code=400,
+                )
             html = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Error</title>
 <style>body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}
@@ -201,6 +216,12 @@ button:hover{background:#27272a}</style></head>
         try:
             result = await oauth_service.handle_callback(code, state)
             email = result.get("microsoft_email", "")
+            if wants_json:
+                return JSONResponse({
+                    "ok": True,
+                    "email": email,
+                    "connector_id": result.get("connector_id"),
+                })
             html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Autorización Exitosa</title>
 <style>body{{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}}
@@ -217,6 +238,8 @@ setTimeout(function(){{try{{window.close()}}catch(e){{}}}},1500)
             return HTMLResponse(html)
         except Exception as e:
             logger.error(f"OAuth callback failed: {e}")
+            if wants_json:
+                return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
             html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Error</title>
 <style>body{{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fafafa}}

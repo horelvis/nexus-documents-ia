@@ -10,7 +10,7 @@ from typing import Optional, List
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import delete, func, select, Integer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1443,6 +1443,7 @@ async def oauth_authorize(
 
 @router.get("/oauth/callback")
 async def oauth_callback_proxy(
+    request: Request,
     code: str = Query(None),
     state: str = Query(None),
     error: str = Query(None),
@@ -1451,13 +1452,20 @@ async def oauth_callback_proxy(
     """
     Proxy OAuth callback to the appropriate MCP service.
 
-    The OAuth provider redirects the browser here after authorization.
-    We determine which MCP service to forward to by parsing the connector_id
-    from the state parameter (format: "connector_id:<ignored>") and looking
-    up the connector type in the database.
+    Content negotiation: the canonical caller is the frontend page at
+    /connectors/oauth/callback, which fetches this endpoint with
+    Accept: application/json and renders the UI itself — keeping the
+    backend URL out of the browser address bar. Direct browser redirects
+    from OAuth providers still receive the HTML fallback during cutover.
+
+    The MCP service is resolved from the state parameter (format
+    "connector_id:<ignored>") via the connector_type lookup.
     """
+    from starlette.responses import HTMLResponse, JSONResponse
+
+    wants_json = "application/json" in (request.headers.get("accept") or "")
+
     try:
-        # Determine MCP destination from state → connector_id → connector_type
         mcp_url = MCP_GOOGLE_DRIVE_URL  # default fallback
         if state and ":" in state:
             connector_id_str = state.split(":", 1)[0]
@@ -1479,21 +1487,31 @@ async def oauth_callback_proxy(
         if error:
             params["error"] = error
 
+        forward_headers = {"Accept": "application/json"} if wants_json else {}
+
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"{mcp_url}/oauth/callback",
                 params=params,
+                headers=forward_headers,
                 follow_redirects=False,
             )
 
-        from starlette.responses import HTMLResponse
+        if wants_json:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"ok": False, "error": "mcp_returned_non_json"}
+            return JSONResponse(content=payload, status_code=response.status_code)
+
         return HTMLResponse(
             content=response.text,
             status_code=response.status_code,
         )
     except Exception as e:
         logger.error(f"OAuth callback proxy failed: {e}")
-        from starlette.responses import HTMLResponse
+        if wants_json:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
         return HTMLResponse(
             content=f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Error</title>
