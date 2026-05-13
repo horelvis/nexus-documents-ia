@@ -17,7 +17,9 @@ from app.services.ontology_registry import get_namespace
 
 logger = logging.getLogger(__name__)
 
-_SEMANTIC_THRESHOLD = 0.80
+# BGE-M3 cosine: good semantic matches sit in 0.47-0.73, non-relation phrases
+# top out around 0.43, raw noise around 0.30. 0.55 separates signal from noise.
+_SEMANTIC_THRESHOLD = 0.55
 
 _WEAVIATE_URL = os.environ.get("WEAVIATE_SERVICE_URL", "http://weaviate-service:8000")
 _INTELLIGENCE_URL = os.environ.get("INTELLIGENCE_DOCS_SERVICE_URL", "http://intelligence-docs-service:8000")
