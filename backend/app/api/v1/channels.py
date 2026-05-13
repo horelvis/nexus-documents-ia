@@ -14,7 +14,7 @@ from math import ceil
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
@@ -282,41 +282,47 @@ async def get_oauth_url(
 
 @router.get("/oauth/callback")
 async def oauth_callback(
+    request: Request,
     code: str = Query(...),
     state: str = Query(...),
     error: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_async_db),
 ):
     """
-    OAuth callback endpoint for Google authorization.
+    OAuth callback for Google channel authorization.
 
-    This is called by Google after user authorizes. It:
-    1. Exchanges the authorization code for tokens
-    2. Stores encrypted credentials
-    3. Redirects to frontend success/error page
+    Canonical caller is the frontend page at /integrations/channels/callback
+    which fetches this endpoint with Accept: application/json and renders
+    the UI itself — keeping the backend host:port out of the browser address
+    bar. Direct browser redirects fall back to RedirectResponse for
+    cutover-period safety.
     """
-    # Validate state first
-    state_data = _oauth_states.pop(state, None)
+    from fastapi.responses import JSONResponse
 
+    wants_json = "application/json" in (request.headers.get("accept") or "")
+
+    state_data = _oauth_states.pop(state, None)
     error_base_url = settings.CHANNEL_OAUTH_ERROR_REDIRECT_URL
 
-    # Check for errors from Google
     if error:
         logger.error(f"OAuth error from Google: {error}")
+        if wants_json:
+            return JSONResponse({"ok": False, "error": error}, status_code=400)
         return RedirectResponse(f"{error_base_url}?error={error}")
 
-    # Validate state was found
     if not state_data:
         logger.error(f"Invalid OAuth state: {state}")
-        return RedirectResponse(
-            f"{settings.CHANNEL_OAUTH_ERROR_REDIRECT_URL}?error=invalid_state"
-        )
+        if wants_json:
+            return JSONResponse(
+                {"ok": False, "error": "invalid_state"},
+                status_code=400,
+            )
+        return RedirectResponse(f"{error_base_url}?error=invalid_state")
 
     channel_id = UUID(state_data["channel_id"])
     user_id = UUID(state_data["user_id"])
 
     try:
-        # Get channel to determine scopes
         service = _get_channel_service(db)
         channel = await service.get_channel(
             channel_id=channel_id,
@@ -326,13 +332,11 @@ async def oauth_callback(
         if not channel:
             raise ValueError("Channel not found")
 
-        # Determine scopes
         if channel.channel_type == "gmail":
             scopes = settings.gmail_oauth_scopes_list
         else:
             scopes = settings.google_oauth_scopes_list
 
-        # Exchange code for tokens
         client_config = {
             "web": {
                 "client_id": settings.GOOGLE_OAUTH_CLIENT_ID,
@@ -347,7 +351,6 @@ async def oauth_callback(
         flow.fetch_token(code=code)
         credentials = flow.credentials
 
-        # Fetch user info
         userinfo_response = requests.get(
             "https://openidconnect.googleapis.com/v1/userinfo",
             headers={"Authorization": f"Bearer {credentials.token}"},
@@ -356,7 +359,6 @@ async def oauth_callback(
         userinfo_response.raise_for_status()
         userinfo = userinfo_response.json()
 
-        # Store credentials
         credential_service = _get_credential_service(db)
         await credential_service.store_oauth_credentials(
             channel_id=channel_id,
@@ -365,14 +367,26 @@ async def oauth_callback(
             scopes=scopes,
         )
 
-        logger.info(f"OAuth successful for channel {channel_id}, email: {userinfo.get('email')}")
+        email = userinfo.get("email", "")
+        logger.info(f"OAuth successful for channel {channel_id}, email: {email}")
 
-        # Redirect to success page with channel_id
+        if wants_json:
+            return JSONResponse({
+                "ok": True,
+                "email": email,
+                "channel_id": str(channel_id),
+            })
+
         success_url = settings.CHANNEL_OAUTH_SUCCESS_REDIRECT_URL
         return RedirectResponse(f"{success_url}?channel_id={channel_id}")
 
     except Exception as e:
         logger.exception(f"OAuth callback error: {e}")
+        if wants_json:
+            return JSONResponse(
+                {"ok": False, "error": "token_exchange_failed", "detail": str(e)},
+                status_code=500,
+            )
         return RedirectResponse(f"{error_base_url}?error=token_exchange_failed")
 
 
