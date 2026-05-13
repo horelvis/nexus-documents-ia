@@ -164,7 +164,11 @@ Each contradiction becomes a first-class `:Node` (`nouxcube://contradiction/{uui
 
 ## Mini-Ontology
 
-72 predicates seeded via `scripts/seed_ontology.py`, stored in `_ontology` collection, user=`_system`:
+The ontology is the curated vocabulary of relationship types that the LLM extractors converge on. It is the difference between a queryable graph and a write-only blob — see [§3.1.2 of the architecture primer](README.md#31-what-trustgraph-defines) for why it carries the rest of the system.
+
+### Predicate catalog
+
+76 predicates seeded via `scripts/seed_ontology.py` into FalkorDB collection `_ontology` (user=`_system`):
 
 | Namespace | Count | Examples |
 |-----------|-------|---------|
@@ -174,6 +178,83 @@ Each contradiction becomes a first-class `:Node` (`nouxcube://contradiction/{uui
 | `medical/` | 12 | `diagnosticado-con`, `prescrito-por`, `tratado-en`, `alergia-a`, `medicacion`, `antecedente`, `resultado-de`, `derivado-a` |
 | `documental/` | 10 | `autor-de`, `revisado-por`, `aprobado-por`, `version-de`, `fecha-creacion`, `destinatario-de`, `clasificado-como`, `referencia`, `adjunto-a` |
 | `prov/` | 6 | `derived-from`, `method`, `model`, `timestamp`, `chunk-text`, `chunk-offset` |
+| `trace/` | 4 | `has-step`, `used-tool`, `touched-entity`, `cited-chunk` (reasoning trace DAG, see [provenance/trace doc](../../backend/microservices/knowledge-tree-service/scripts/example_trace_queries.cypher)) |
+
+### Two-layer storage
+
+The ontology is stored twice, for two different access patterns:
+
+| Layer | Where | What it stores | Used for |
+|-------|-------|----------------|----------|
+| **Structural** | FalkorDB `_ontology` collection (Cypher) | Predicate as `:Node` with description, domain_type, range_type | Predicate existence checks, exact lookup, reindex bootstrap |
+| **Semantic** | Weaviate `OntologyTerms` collection (BGE-M3, 1024-dim) | Predicate name + description embedded as vector | Fuzzy resolution of freeform LLM output to canonical predicates |
+
+The `prov/*` namespace is intentionally excluded from the semantic layer (`SKIP_NAMESPACES = {"prov"}` in `seed_ontology_terms.py`) — provenance predicates are emitted by the system, never by LLM extraction, so they never need semantic resolution. That leaves **70 of the 76 predicates** embedded in `OntologyTerms`.
+
+### Semantic predicate resolution
+
+The `relationships` extractor is the only path that touches the semantic layer. When it emits a triple like `(Juan, trabaja_para, TechCorp)`, the predicate `trabaja_para` is freeform LLM output — it must be normalized before it reaches the graph, otherwise every document invents new variants (`works_at`, `is_employed_by`, `empleo`, `trabaja_en`).
+
+`OntologySearch.resolve_predicate()` in `knowledge-tree-service/app/services/ontology_search.py` implements the resolution chain:
+
+1. **Exact match.** `ontology_registry.get_namespace(predicate)` returns the canonical namespace if `predicate` matches a registered name directly. Free, no network. This is the common path when the LLM produces output already in canonical form (which it does most of the time, because the extraction prompt includes the predicate list).
+2. **Vector search.** If no exact match, the predicate text is embedded via `intelligence-docs-service /embed` (BGE-M3, `task=retrieval.query`) and searched against `OntologyTerms` via `weaviate-service /weaviate/trustgraph/ontology-terms/search`. The top match wins if its cosine similarity is above `_SEMANTIC_THRESHOLD` (0.55).
+3. **None.** No match. The triple is dropped from the relationships pass and the LLM-produced predicate is discarded.
+
+The score returned by `weaviate-service` is `1.0 − distance`, which is cosine similarity for vectors normalised by Weaviate's default cosine metric.
+
+### Score calibration (BGE-M3 cosine)
+
+Cosine similarity in this embedding space distributes as follows on real ontology lookups:
+
+| Range | Meaning |
+|-------|---------|
+| 0.65 – 0.95 | High-confidence semantic match (e.g. `empleado de` → `legal/empleado-de` at 0.65, `paciente con diagnostico` → `medical/diagnosticado-con` at 0.73) |
+| 0.55 – 0.65 | Mid-confidence — legitimate synonym matches with adjacent vocabulary |
+| 0.45 – 0.55 | Ambiguous — may match a related but incorrect predicate; rejection is the safe default |
+| 0.30 – 0.45 | Non-relation phrases ("el lunes pasado", "cinco metros cuadrados") top out around 0.43 |
+| < 0.30 | Noise floor |
+
+The `0.55` threshold is the precision/recall trade-off chosen here: it accepts confident matches and rejects the ambiguous band where wrong neighbours win as often as right ones. Lowering to `0.50` would capture more lexical-distance synonyms (e.g. `trabaja para` at 0.47) but starts admitting some non-relation phrases.
+
+### Setup
+
+Both layers must be seeded after a fresh deployment. They are independent — failing to seed either one degrades silently:
+
+```bash
+# 1. Structural layer (FalkorDB)
+docker compose exec knowledge-tree-service python scripts/seed_ontology.py
+
+# 2. Semantic layer (Weaviate; requires intelligence-docs-service up for BGE-M3 embedding)
+docker compose exec knowledge-tree-service python scripts/seed_ontology_terms.py
+```
+
+### Verification
+
+```bash
+# FalkorDB _ontology row count (should be 76):
+docker compose exec knowledge-tree-service python -c "
+import asyncio
+from app.services.falkor_client import FalkorDBClient
+async def main():
+    c = FalkorDBClient()
+    r = await c.execute_query('MATCH (n:Node {collection: \"_ontology\"}) RETURN count(n) AS c')
+    print(r)
+asyncio.run(main())
+"
+
+# Weaviate OntologyTerms object count (should be 70):
+curl -s -X POST http://localhost:8080/v1/graphql \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "{ Aggregate { OntologyTerms { meta { count } } } }"}'
+```
+
+### Failure modes
+
+Two failure modes share the same observable symptom: `resolve_predicate()` returns `None` for every input, the `relationships` extractor stops producing canonical predicates, and the graph slowly fills with raw LLM predicate variants. They mask each other — fixing only one keeps the symptom visible — so rule both out before suspecting the extractor:
+
+1. **`OntologyTerms` not seeded**: vector search returns `[]`. Confirm with the GraphQL Aggregate query above; the collection schema may exist independently of the data, so a successful schema fetch does *not* prove the collection is populated. Re-run `seed_ontology_terms.py`.
+2. **Threshold too high for the embedding distribution**: vector search returns results but all below `_SEMANTIC_THRESHOLD`. Recalibrate against the cosine ranges above. The threshold lives in `ontology_search.py`; there is no env override by design (calibration is data-dependent and should be code-reviewed, not toggled at runtime).
 
 ## API Endpoints (knowledge-tree-service, port 8011)
 
@@ -246,7 +327,7 @@ docker compose exec knowledge-tree-service \
 **Pipeline**:
 1. Clear existing graph for tenant (unless `--skip-clear`)
 2. Re-create indexes (bootstrap schema)
-3. Seed mini-ontology (72 predicates)
+3. Seed mini-ontology (76 predicates — see [Mini-Ontology](#mini-ontology))
 4. Fetch document list from weaviate-service
 5. For each document: get chunks → run 4 extractors in parallel → store triples → provenance → contradictions
 
@@ -259,10 +340,10 @@ docker compose exec knowledge-tree-service \
 ## Setup After Deployment
 
 ```bash
-# 1. Seed ontology (72 predicates into FalkorDB)
+# 1. Seed ontology structural layer (76 predicates into FalkorDB)
 docker compose exec knowledge-tree-service python scripts/seed_ontology.py
 
-# 2. Seed OntologyTerms into Weaviate (semantic predicate resolution — Ontology RAG Phase 3a)
+# 2. Seed ontology semantic layer (70 of those embedded into Weaviate OntologyTerms — prov/* is system-only and excluded)
 docker compose exec knowledge-tree-service python scripts/seed_ontology_terms.py
 
 # 3. Seed Langfuse extraction prompts (4 prompts)
@@ -323,8 +404,10 @@ Authority weight triples (14 document types seeded in `_authority` collection, r
 | `knowledge-tree-service/app/api/triples.py` | REST endpoints: query, stats, context, clear |
 | `knowledge-tree-service/app/api/extract.py` | REST endpoint: trigger extraction |
 | `knowledge-tree-service/app/schemas/triples.py` | 13 Pydantic models |
-| `knowledge-tree-service/scripts/seed_ontology.py` | Seed 72 predicates into FalkorDB `_ontology` collection |
-| `knowledge-tree-service/scripts/seed_ontology_terms.py` | Seeds OntologyTerms Weaviate collection with predicate embeddings for semantic predicate resolution (Ontology RAG Phase 3a) |
+| `knowledge-tree-service/app/services/ontology_search.py` | `OntologySearch.resolve_predicate()` — exact-match → vector-search → threshold gate (see [Mini-Ontology](#mini-ontology)) |
+| `knowledge-tree-service/app/services/ontology_registry.py` | In-process exact-match registry (namespace lookup, no network) |
+| `knowledge-tree-service/scripts/seed_ontology.py` | Seed 76 predicates into FalkorDB `_ontology` collection (structural layer) |
+| `knowledge-tree-service/scripts/seed_ontology_terms.py` | Seed 70 of those into Weaviate `OntologyTerms` with BGE-M3 embeddings (semantic layer; `prov/*` excluded) |
 | `knowledge-tree-service/scripts/seed_langfuse_extraction_prompts.py` | Seed 4 Langfuse prompts |
 | `knowledge-tree-service/scripts/reindex_trustgraph.py` | Full graph rebuild |
 | `knowledge-tree-service/config/graphs/trustgraph_schema.cypher` | FalkorDB indexes |

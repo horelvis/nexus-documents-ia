@@ -105,12 +105,18 @@ five load-bearing properties:
 
 2. **An ontology-driven predicate vocabulary.** Relationships are typed
    by URIs from a curated namespace (`legal/empleado-de`,
-   `medical/diagnosticado-con`, `core/has-topic`, etc.). The
+   `medical/diagnosticado-con`, `core/has-topic`, etc.). The ontology
+   is stored twice: structurally in FalkorDB (`_ontology` collection,
+   for existence checks and exact lookup) and semantically in Weaviate
+   (`OntologyTerms`, BGE-M3 embeddings, for fuzzy resolution). The
    `relationships` extractor resolves freeform LLM output to canonical
-   ontology predicates at extraction time using semantic search against
-   the embedded ontology. Without this, every document invents new
+   predicates at extraction time using vector search against the
+   embedded ontology. Without this, every document invents new
    relationship names (`works_at`, `is_employed_by`, `empleo`,
-   `trabaja_en`) and the graph becomes unqueryable.
+   `trabaja_en`) and the graph becomes unqueryable. See
+   [`TRUSTGRAPH.md` § Mini-Ontology](TRUSTGRAPH.md#mini-ontology) for
+   the predicate catalog, resolution flow, score calibration, and
+   failure modes.
 
 3. **A multi-extractor LLM pipeline.** Each chunk is processed by
    several specialist extractors in parallel (definitions,

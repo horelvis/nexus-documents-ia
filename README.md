@@ -27,7 +27,7 @@
 | Feature | Description |
 |---------|-------------|
 | **Emma AI Assistant** | Intelligent assistant with LangGraph ReAct agent (16 tools) + Swarm parallel execution |
-| **TrustGraph Knowledge Expert** | RDF-style knowledge graph (FalkorDB) with 72-predicate ontology, semantic retrieval, authority scoring, and report generation with verified citations |
+| **TrustGraph Knowledge Expert** | RDF-style knowledge graph (FalkorDB) with 76-predicate dual-layer ontology (structural in FalkorDB + semantic in Weaviate `OntologyTerms` for fuzzy predicate resolution), authority scoring, and report generation with verified citations |
 | **Emma Reactive** | Event-driven proactive AI — triggers, notifications, multi-channel (Telegram, WhatsApp, Slack, Email) |
 | **SmartSearch** | Unified multi-store search (Weaviate + TrustGraph knowledge graph + semantic index) |
 | **Multimodal RAG Pipeline** | 7-layer retrieval with hybrid search, cross-encoder reranking, and verified generation |
